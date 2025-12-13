@@ -166,6 +166,30 @@ func GetAllChannels(c *gin.Context) {
 	return
 }
 
+func buildFetchModelsHeaders(channel *model.Channel, key string) (http.Header, error) {
+	var headers http.Header
+	switch channel.Type {
+	case constant.ChannelTypeAnthropic:
+		headers = GetClaudeAuthHeader(key)
+	default:
+		headers = GetAuthHeader(key)
+	}
+
+	headerOverride := channel.GetHeaderOverride()
+	for k, v := range headerOverride {
+		str, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("invalid header override for key %s", k)
+		}
+		if strings.Contains(str, "{api_key}") {
+			str = strings.ReplaceAll(str, "{api_key}", key)
+		}
+		headers.Set(k, str)
+	}
+
+	return headers, nil
+}
+
 func FetchUpstreamModels(c *gin.Context) {
 	id, err := strconv.Atoi(c.Param("id"))
 	if err != nil {
@@ -224,7 +248,7 @@ func FetchUpstreamModels(c *gin.Context) {
 	}
 	key = strings.TrimSpace(key)
 
-	headers, err := buildFetchModelsHeaders(c, channel, key)
+	headers, err := buildFetchModelsHeaders(channel, key)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -259,70 +283,6 @@ func FetchUpstreamModels(c *gin.Context) {
 		"message": "",
 		"data":    ids,
 	})
-}
-
-func buildFetchModelsHeaders(c *gin.Context, channel *model.Channel, key string) (http.Header, error) {
-	var headers http.Header
-	switch channel.Type {
-	case constant.ChannelTypeAnthropic:
-		headers = GetClaudeAuthHeader(key)
-	default:
-		headers = GetAuthHeader(key)
-	}
-
-	headerOverride := channel.GetHeaderOverride()
-	if len(headerOverride) == 0 {
-		return headers, nil
-	}
-
-	_, isOps := headerOverride["operations"]
-	if !isOps {
-		for k, v := range headerOverride {
-			strVal, ok := v.(string)
-			if !ok {
-				return nil, fmt.Errorf("header override value for %s is not string", k)
-			}
-			if strings.Contains(strVal, "{api_key}") {
-				strVal = strings.ReplaceAll(strVal, "{api_key}", key)
-			}
-			headers.Set(k, strVal)
-		}
-		return headers, nil
-	}
-
-	baseHeader := make(map[string]interface{})
-	for k, values := range headers {
-		if len(values) == 0 {
-			continue
-		}
-		baseHeader[k] = strings.Join(values, ",")
-	}
-
-	baseJSON, err := common.Marshal(baseHeader)
-	if err != nil {
-		return nil, err
-	}
-
-	overrideCtx := relaycommon.BuildOverrideContext(&relaycommon.RelayInfo{
-		ChannelMeta: &relaycommon.ChannelMeta{
-			ApiKey: key,
-		},
-	}, nil, c.Request.Header)
-	resultJSON, err := relaycommon.ApplyParamOverride(baseJSON, headerOverride, overrideCtx)
-	if err != nil {
-		return nil, err
-	}
-
-	var newHeaders map[string]interface{}
-	if err := common.Unmarshal(resultJSON, &newHeaders); err != nil {
-		return nil, err
-	}
-
-	finalHeaders := http.Header{}
-	for k, v := range newHeaders {
-		finalHeaders.Set(k, fmt.Sprintf("%v", v))
-	}
-	return finalHeaders, nil
 }
 
 func FixChannelsAbilities(c *gin.Context) {
