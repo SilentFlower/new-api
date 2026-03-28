@@ -109,44 +109,54 @@ func increaseQuotaData(userId int, username string, modelName string, tokenName 
 	}
 }
 
-// GetQuotaDataByUsername 按用户名查询配额数据，支持按 tokenName 过滤
-func GetQuotaDataByUsername(username string, startTime int64, endTime int64, tokenName string) (quotaData []*QuotaData, err error) {
+// getQuotaDataFromLogs 从 logs 表按 tokenName 聚合查询配额数据
+// logs 表保留了完整的 token_name 历史记录，可查询历史数据
+func getQuotaDataFromLogs(startTime int64, endTime int64, tokenName string, userFilter string, userFilterValue interface{}) ([]*QuotaData, error) {
 	var quotaDatas []*QuotaData
-	tx := DB.Table("quota_data").Where("username = ? and created_at >= ? and created_at <= ?", username, startTime, endTime)
-	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
+	tx := DB.Table("logs").
+		Select("model_name, token_name, sum(quota) as quota, count(*) as count, sum(prompt_tokens + completion_tokens) as token_used, (created_at - created_at % 3600) as created_at").
+		Where("type = ? and created_at >= ? and created_at <= ?", LogTypeConsume, startTime, endTime).
+		Where("token_name = ?", tokenName)
+	if userFilter != "" {
+		tx = tx.Where(userFilter, userFilterValue)
 	}
-	err = tx.Find(&quotaDatas).Error
+	err := tx.Group("model_name, token_name, (created_at - created_at % 3600)").Find(&quotaDatas).Error
+	return quotaDatas, err
+}
+
+// GetQuotaDataByUsername 按用户名查询配额数据，支持按 tokenName 过滤
+// 当指定 tokenName 时从 logs 表查询以支持历史数据
+func GetQuotaDataByUsername(username string, startTime int64, endTime int64, tokenName string) (quotaData []*QuotaData, err error) {
+	if tokenName != "" {
+		return getQuotaDataFromLogs(startTime, endTime, tokenName, "username = ?", username)
+	}
+	var quotaDatas []*QuotaData
+	err = DB.Table("quota_data").Where("username = ? and created_at >= ? and created_at <= ?", username, startTime, endTime).Find(&quotaDatas).Error
 	return quotaDatas, err
 }
 
 // GetQuotaDataByUserId 按用户ID查询配额数据，支持按 tokenName 过滤
+// 当指定 tokenName 时从 logs 表查询以支持历史数据
 func GetQuotaDataByUserId(userId int, startTime int64, endTime int64, tokenName string) (quotaData []*QuotaData, err error) {
-	var quotaDatas []*QuotaData
-	tx := DB.Table("quota_data").Where("user_id = ? and created_at >= ? and created_at <= ?", userId, startTime, endTime)
 	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
+		return getQuotaDataFromLogs(startTime, endTime, tokenName, "user_id = ?", userId)
 	}
-	err = tx.Find(&quotaDatas).Error
+	var quotaDatas []*QuotaData
+	err = DB.Table("quota_data").Where("user_id = ? and created_at >= ? and created_at <= ?", userId, startTime, endTime).Find(&quotaDatas).Error
 	return quotaDatas, err
 }
 
 // GetAllQuotaDates 查询所有配额数据，支持按用户名和 tokenName 过滤
-// 当指定了 username 时，返回该用户的详细数据（不聚合）
+// 当指定 tokenName 时从 logs 表查询以支持历史数据
 // 当未指定 username 时，按 model_name + created_at 聚合统计
-// @param startTime 起始时间戳
-// @param endTime 结束时间戳
-// @param username 用户名过滤（可选）
-// @param tokenName API Key 名称过滤（可选）
 func GetAllQuotaDates(startTime int64, endTime int64, username string, tokenName string) (quotaData []*QuotaData, err error) {
 	if username != "" {
 		return GetQuotaDataByUsername(username, startTime, endTime, tokenName)
 	}
-	var quotaDatas []*QuotaData
-	tx := DB.Table("quota_data").Select("model_name, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, created_at").Where("created_at >= ? and created_at <= ?", startTime, endTime)
 	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
+		return getQuotaDataFromLogs(startTime, endTime, tokenName, "", nil)
 	}
-	err = tx.Group("model_name, created_at").Find(&quotaDatas).Error
+	var quotaDatas []*QuotaData
+	err = DB.Table("quota_data").Select("model_name, sum(count) as count, sum(quota) as quota, sum(token_used) as token_used, created_at").Where("created_at >= ? and created_at <= ?", startTime, endTime).Group("model_name, created_at").Find(&quotaDatas).Error
 	return quotaDatas, err
 }
