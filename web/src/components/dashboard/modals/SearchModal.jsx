@@ -42,7 +42,7 @@ const SearchModal = ({
     <Component {...FORM_FIELD_PROPS} {...props} />
   );
 
-  const { start_timestamp, end_timestamp, username } = inputs;
+  const { start_timestamp, end_timestamp, username, token_name } = inputs;
 
   return (
     <Modal
@@ -95,6 +95,15 @@ const SearchModal = ({
             name: 'username',
             onChange: (value) => handleInputChange(value, 'username'),
           })}
+
+        {createFormField(Form.Input, {
+          field: 'token_name',
+          label: t('令牌名称'),
+          value: token_name,
+          placeholder: t('可选值'),
+          name: 'token_name',
+          onChange: (value) => handleInputChange(value, 'token_name'),
+        })}
       </Form>
     </Modal>
   );
