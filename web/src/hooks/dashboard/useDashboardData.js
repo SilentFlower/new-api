@@ -52,6 +52,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [dataExportDefaultTime, setDataExportDefaultTime] =
     useState(getDefaultTime());
 
+  // ========== 令牌选项 ==========
+  const [tokenOptions, setTokenOptions] = useState([]);
+
   // ========== 数据状态 ==========
   const [quotaData, setQuotaData] = useState([]);
   const [consumeQuota, setConsumeQuota] = useState(0);
@@ -147,9 +150,27 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   }, []);
 
-  const showSearchModal = useCallback(() => {
-    setSearchModalVisible(true);
+  // 加载令牌列表用于下拉选择
+  const loadTokenOptions = useCallback(async () => {
+    try {
+      const res = await API.get('/api/token/?p=0&size=100');
+      const { success, data } = res.data;
+      if (success && data) {
+        const tokens = data.map((token) => ({
+          value: token.name,
+          label: token.name,
+        }));
+        setTokenOptions(tokens);
+      }
+    } catch (err) {
+      console.error('Failed to load token options:', err);
+    }
   }, []);
+
+  const showSearchModal = useCallback(() => {
+    loadTokenOptions();
+    setSearchModalVisible(true);
+  }, [loadTokenOptions]);
 
   const handleCloseModal = useCallback(() => {
     setSearchModalVisible(false);
@@ -264,6 +285,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     // 输入状态
     inputs,
     dataExportDefaultTime,
+    tokenOptions,
 
     // 数据状态
     quotaData,

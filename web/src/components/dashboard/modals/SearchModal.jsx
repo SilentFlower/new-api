@@ -29,6 +29,7 @@ const SearchModal = ({
   inputs,
   dataExportDefaultTime,
   timeOptions,
+  tokenOptions,
   handleInputChange,
   t,
 }) => {
@@ -96,13 +97,16 @@ const SearchModal = ({
             onChange: (value) => handleInputChange(value, 'username'),
           })}
 
-        {createFormField(Form.Input, {
+        {createFormField(Form.Select, {
           field: 'token_name',
           label: t('令牌名称'),
-          value: token_name,
+          value: token_name || undefined,
           placeholder: t('可选值'),
           name: 'token_name',
-          onChange: (value) => handleInputChange(value, 'token_name'),
+          optionList: tokenOptions,
+          filter: true,
+          showClear: true,
+          onChange: (value) => handleInputChange(value || '', 'token_name'),
         })}
       </Form>
     </Modal>

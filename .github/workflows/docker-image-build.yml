@@ -35,7 +35,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: Determine build version
+      - name: Determine build version and branch tag
         id: version
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
@@ -43,7 +43,19 @@ jobs:
           echo "$VERSION" > VERSION
           echo "value=$VERSION" >> $GITHUB_OUTPUT
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Publishing version: $VERSION for ${{ matrix.arch }}"
+
+          # 根据分支名生成 latest tag
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          if [ "$BRANCH_NAME" = "build" ]; then
+            LATEST_TAG="build-latest"
+          else
+            # 将分支名中的 / 替换为 -，如 feature/dashboard-enhancement -> feature-dashboard-enhancement
+            SANITIZED=$(echo "$BRANCH_NAME" | sed 's|/|-|g')
+            LATEST_TAG="${SANITIZED}-latest"
+          fi
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+          echo "Publishing version: $VERSION ($LATEST_TAG) for ${{ matrix.arch }}"
 
       - name: Normalize GHCR repository
         run: echo "GHCR_REPOSITORY=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
@@ -74,7 +86,7 @@ jobs:
           push: true
           tags: |
             ghcr.io/${{ env.GHCR_REPOSITORY }}:${{ steps.version.outputs.value }}-${{ matrix.arch }}
-            ghcr.io/${{ env.GHCR_REPOSITORY }}:build-latest-${{ matrix.arch }}
+            ghcr.io/${{ env.GHCR_REPOSITORY }}:${{ env.LATEST_TAG }}-${{ matrix.arch }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -86,6 +98,7 @@ jobs:
           echo "### Docker Image Digest (${{ matrix.arch }})" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "ghcr.io/${{ env.GHCR_REPOSITORY }}:${{ steps.version.outputs.value }}-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/${{ env.GHCR_REPOSITORY }}:${{ env.LATEST_TAG }}-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
           echo "${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
@@ -105,13 +118,23 @@ jobs:
       - name: Normalize GHCR repository
         run: echo "GHCR_REPOSITORY=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
-      - name: Determine build version
+      - name: Determine build version and branch tag
         id: version
         run: |
           SHORT_SHA=$(git rev-parse --short HEAD)
           VERSION="build-${SHORT_SHA}"
           echo "value=$VERSION" >> $GITHUB_OUTPUT
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          if [ "$BRANCH_NAME" = "build" ]; then
+            LATEST_TAG="build-latest"
+          else
+            SANITIZED=$(echo "$BRANCH_NAME" | sed 's|/|-|g')
+            LATEST_TAG="${SANITIZED}-latest"
+          fi
+          echo "latest_tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
 
       - name: Log in to GHCR
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -127,12 +150,12 @@ jobs:
             ghcr.io/${GHCR_REPOSITORY}:${VERSION}-amd64 \
             ghcr.io/${GHCR_REPOSITORY}:${VERSION}-arm64
 
-      - name: Create & push manifest (GHCR - build-latest)
+      - name: Create & push manifest (GHCR - branch latest)
         run: |
           docker buildx imagetools create \
-            -t ghcr.io/${GHCR_REPOSITORY}:build-latest \
-            ghcr.io/${GHCR_REPOSITORY}:build-latest-amd64 \
-            ghcr.io/${GHCR_REPOSITORY}:build-latest-arm64
+            -t ghcr.io/${GHCR_REPOSITORY}:${LATEST_TAG} \
+            ghcr.io/${GHCR_REPOSITORY}:${LATEST_TAG}-amd64 \
+            ghcr.io/${GHCR_REPOSITORY}:${LATEST_TAG}-arm64
 
       - name: Output manifest digest
         run: |
