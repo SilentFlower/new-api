@@ -52,6 +52,7 @@ const SearchModal = ({
       onOk={handleSearchConfirm}
       onCancel={handleCloseModal}
       closeOnEsc={true}
+      keepDOM={true}
       size={isMobile ? 'full-width' : 'small'}
       centered
     >

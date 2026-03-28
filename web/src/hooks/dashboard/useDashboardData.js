@@ -153,10 +153,10 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   // 加载令牌列表用于下拉选择
   const loadTokenOptions = useCallback(async () => {
     try {
-      const res = await API.get('/api/token/?p=0&size=100');
+      const res = await API.get('/api/token/?p=1&size=100');
       const { success, data } = res.data;
-      if (success && data) {
-        const tokens = data.map((token) => ({
+      if (success && data && data.items) {
+        const tokens = data.items.map((token) => ({
           value: token.name,
           label: token.name,
         }));
