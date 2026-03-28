@@ -50,3 +50,52 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: GitHub CI: build 分支 Docker 镜像构建工作流
+
+**Date**: 2026-03-28
+**Task**: GitHub CI: build 分支 Docker 镜像构建工作流
+**Branch**: `build`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+## 完成内容
+
+创建 `.github/workflows/docker-image-build.yml`，为 `build` 分支提供专用的 Docker 镜像 CI 流水线。
+
+| 配置项 | 值 |
+|--------|-----|
+| 触发条件 | `build` 分支 push + `workflow_dispatch` |
+| 架构 | amd64 (ubuntu-latest) + arm64 (ubuntu-24.04-arm) |
+| Registry | 仅 GHCR |
+| Tag 策略 | `build-{sha}` + `build-latest` |
+| 签名 | 无 cosign |
+
+**基于 `docker-image-alpha.yml` 模板**，保持 Action 版本 pin、Runner 配置、Cache 策略完全一致。
+
+**新增文件**:
+- `.github/workflows/docker-image-build.yml`
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `f3d67f6a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
