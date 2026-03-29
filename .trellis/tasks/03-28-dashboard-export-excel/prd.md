@@ -10,7 +10,7 @@
 
 ## 前置依赖
 
-- **任务 1**（`03-28-dashboard-apikey-search`）：`quota_data` 表需要先增加 `token_name` 字段，否则无法按 API Key 维度导出。本任务应在任务 1 完成后进行。
+- 无。三个 Sheet 均从 `logs` 表查询，`logs` 表一直有 `token_name` 字段。
 
 ## Requirements
 
@@ -24,7 +24,7 @@
 2. **Excel 内容结构**：
 
    **Sheet 1：汇总统计（按 API Key）**
-   - 数据来源：`quota_data` 表，按 `token_name` 分组聚合
+   - 数据来源：`logs` 表（`type = 2`），按 `token_name` 分组聚合
 
    | 列 | 说明 |
    |---|------|
@@ -35,7 +35,7 @@
    | 请求额度 | 该 key 的总 quota |
 
    **Sheet 2：模型明细（按 API Key + Model）**
-   - 数据来源：`quota_data` 表，按 `token_name + model_name` 分组聚合
+   - 数据来源：`logs` 表（`type = 2`），按 `token_name + model_name` 分组聚合
 
    | 列 | 说明 |
    |---|------|
@@ -112,6 +112,6 @@
 - 后端文件：新增 controller 方法 + model 查询方法
 - 前端文件：`DashboardHeader.jsx`（加导出按钮）、`useDashboardData.js`（加导出方法）
 - 路由文件：`router/api-router.go`（加导出路由）
-- Sheet 1/2 数据来源：`quota_data` 表（依赖任务 1 的 `token_name` 字段）
-- Sheet 3 数据来源：`logs` 表（`type = 2`），已有 `token_name` 字段，不依赖任务 1
-- 日志查询需注意：`logs` 表数据量大，查询需带时间范围索引
+- **三个 Sheet 数据均来源于 `logs` 表（`type = 2`）**，`logs` 表一直有 `token_name` 字段，历史数据完整
+- 不使用 `quota_data` 表，因为该表的 `token_name` 字段是后加的，历史记录为空
+- 日志查询需注意：`logs` 表数据量大，查询需带时间范围索引，聚合查询使用 `LOG_DB`

@@ -19,12 +19,15 @@ For commercial licensing, please contact support@quantumnous.com
 
 import React from 'react';
 import { Button } from '@douyinfe/semi-ui';
-import { RefreshCw, Search } from 'lucide-react';
+import { Download, RefreshCw, Search } from 'lucide-react';
 
 const DashboardHeader = ({
   getGreeting,
   greetingVisible,
   showSearchModal,
+  onExport,
+  exportLoading,
+  isAdminUser,
   refresh,
   loading,
   t,
@@ -46,6 +49,15 @@ const DashboardHeader = ({
           onClick={showSearchModal}
           className={`bg-green-500 hover:bg-green-600 ${ICON_BUTTON_CLASS}`}
         />
+        {isAdminUser && (
+          <Button
+            type='tertiary'
+            icon={<Download size={16} />}
+            onClick={onExport}
+            loading={exportLoading}
+            className={`bg-orange-500 hover:bg-orange-600 ${ICON_BUTTON_CLASS}`}
+          />
+        )}
         <Button
           type='tertiary'
           icon={<RefreshCw size={16} />}
