@@ -229,3 +229,63 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: 公共 API Key 日志查看页面
+
+**Date**: 2026-03-29
+**Task**: 公共 API Key 日志查看页面
+**Branch**: `feature/dashboard-enhancement`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+## 功能概述
+
+新增公共页面 `/log`，用户无需登录，输入 API Key 即可查看使用日志和数据看板。
+
+| 模块 | 变更说明 |
+|------|----------|
+| 后端 Model | 新增 `GetTokenLogStat`、`GetTokenModelStats`、`GetTokenQuotaData`、`GetLogsByTokenId`、`formatTokenPublicLogs` |
+| 后端 Controller | 新增 `GetLogByKeyPaged`、`GetLogStatByKey`、`GetLogChartDataByKey` |
+| 后端 Router | 注册 `/api/log/token`（升级）、`/api/log/token/stat`、`/api/log/token/data` |
+| 前端页面 | 新建 `web/src/pages/LogViewer/index.jsx` — API Key 输入、统计卡片、图表、日志表格 |
+| 前端路由 | `/log` 公共路由（不包裹 PrivateRoute） |
+| 前端布局 | `PageLayout.jsx` — `/log` 隐藏 header/footer/sidebar |
+
+## 关键设计决策
+
+- **安全模型**：复用 `TokenAuthReadOnly` 中间件，所有查询限定 `token_id`，敏感字段脱敏
+- **频率限制**：从 CriticalRateLimit(20次/20分钟) 改为 GlobalAPIRateLimit(180次/3分钟)
+- **全局时间选择器**：今天/7天/30天/自定义，统计卡片+图表+日志表格联动
+- **无管理员开关**：默认启用
+
+## 修复的问题
+
+- RPM/TPM Scan 使用独立变量避免覆盖统计结果
+- `formatTokenPublicLogs` 处理空 `Other` 字段的 nil map
+- 429 Too Many Requests — 频率限制过严
+- 顶部导航栏在公共页面不应显示
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `d7b5f364` | (see git log) |
+| `09aa2b21` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
