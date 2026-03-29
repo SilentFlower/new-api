@@ -295,7 +295,7 @@ func SetApiRouter(router *gin.Engine) {
 		dataRoute.GET("/self", middleware.UserAuth(), controller.GetUserQuotaDates)
 		dataRoute.GET("/export", middleware.AdminAuth(), controller.ExportQuotaDataExcel)
 
-		logRoute.Use(middleware.CORS(), middleware.CriticalRateLimit())
+		logRoute.Use(middleware.CORS(), middleware.GlobalAPIRateLimit())
 		{
 			logRoute.GET("/token", middleware.TokenAuthReadOnly(), controller.GetLogByKeyPaged)
 			logRoute.GET("/token/stat", middleware.TokenAuthReadOnly(), controller.GetLogStatByKey)

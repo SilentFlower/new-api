@@ -40,6 +40,9 @@ import {
   Typography,
   Toast,
   Spin,
+  DatePicker,
+  RadioGroup,
+  Radio,
 } from '@douyinfe/semi-ui';
 import {
   IconSearch,
@@ -50,8 +53,9 @@ import {
   IconStopwatchStroked,
   IconSend,
   IconTypograph,
+  IconRefresh,
 } from '@douyinfe/semi-icons';
-import { PieChart, Activity, Zap, Gauge, KeyRound } from 'lucide-react';
+import { PieChart, Activity, Zap, Gauge, KeyRound, CalendarClock } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
 import { VChart } from '@visactor/react-vchart';
@@ -93,7 +97,6 @@ import {
   CARD_PROPS,
   TIME_OPTIONS,
 } from '../../constants/dashboard.constants';
-import { DATE_RANGE_PRESETS } from '../../constants/console.constants';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { getLogsColumns } from '../../components/table/usage-logs/UsageLogsColumnDefs';
 import CardTable from '../../components/common/ui/CardTable';
@@ -164,11 +167,9 @@ const LogViewer = () => {
   const [showParamOverrideModal, setShowParamOverrideModal] = useState(false);
   const [paramOverrideTarget, setParamOverrideTarget] = useState(null);
 
-  // ========== 时间范围状态 ==========
-  const [timeRange, setTimeRange] = useState([
-    timestamp2string(getTodayStartTimestamp()),
-    timestamp2string(new Date().getTime() / 1000 + 3600),
-  ]);
+  // ========== 全局时间范围状态 ==========
+  const [timePreset, setTimePreset] = useState('today');
+  const [customDateRange, setCustomDateRange] = useState(null);
 
   // ========== 图表规格状态 ==========
   const [specPie, setSpecPie] = useState({
@@ -276,6 +277,43 @@ const LogViewer = () => {
     }),
     [COLUMN_KEYS],
   );
+
+  // ========== 全局时间范围计算 ==========
+  const getGlobalTimeRange = useCallback(() => {
+    const now = Math.floor(Date.now() / 1000);
+    if (timePreset === 'custom' && customDateRange && customDateRange.length === 2) {
+      return {
+        startTs: Math.floor(new Date(customDateRange[0]).getTime() / 1000),
+        endTs: Math.floor(new Date(customDateRange[1]).getTime() / 1000),
+      };
+    }
+    const presetMap = {
+      today: getTodayStartTimestamp(),
+      '7d': now - 7 * 86400,
+      '30d': now - 30 * 86400,
+    };
+    return {
+      startTs: Math.floor(presetMap[timePreset] || presetMap.today),
+      endTs: now,
+    };
+  }, [timePreset, customDateRange]);
+
+  // ========== 时间范围显示文本 ==========
+  const timeRangeLabel = useMemo(() => {
+    const labels = {
+      today: t('今天'),
+      '7d': t('最近 7 天'),
+      '30d': t('最近 30 天'),
+    };
+    if (timePreset === 'custom' && customDateRange && customDateRange.length === 2) {
+      const fmt = (d) => {
+        const dt = new Date(d);
+        return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+      };
+      return `${fmt(customDateRange[0])} ~ ${fmt(customDateRange[1])}`;
+    }
+    return labels[timePreset] || labels.today;
+  }, [timePreset, customDateRange, t]);
 
   // ========== 初始化图表主题 ==========
   useEffect(() => {
@@ -588,26 +626,16 @@ const LogViewer = () => {
   // ========== 获取表单过滤值 ==========
   const getFormValues = useCallback(() => {
     const formValues = formApi ? formApi.getValues() : {};
-    let start_timestamp = timeRange[0];
-    let end_timestamp = timeRange[1];
-
-    if (
-      formValues.dateRange &&
-      Array.isArray(formValues.dateRange) &&
-      formValues.dateRange.length === 2
-    ) {
-      start_timestamp = formValues.dateRange[0];
-      end_timestamp = formValues.dateRange[1];
-    }
+    const { startTs, endTs } = getGlobalTimeRange();
 
     return {
       model_name: formValues.model_name || '',
       request_id: formValues.request_id || '',
-      start_timestamp,
-      end_timestamp,
+      startTs,
+      endTs,
       logType: formValues.logType ? parseInt(formValues.logType) : 0,
     };
-  }, [formApi, timeRange]);
+  }, [formApi, getGlobalTimeRange]);
 
   // ========== API Key 验证 ==========
   const handleAuth = useCallback(async () => {
@@ -770,17 +798,15 @@ const LogViewer = () => {
         const {
           model_name,
           request_id,
-          start_timestamp,
-          end_timestamp,
+          startTs,
+          endTs,
           logType: formLogType,
         } = getFormValues();
         const currentLogType =
           customLogType !== null ? customLogType : formLogType;
-        const localStartTimestamp = Date.parse(start_timestamp) / 1000;
-        const localEndTimestamp = Date.parse(end_timestamp) / 1000;
 
         const url = encodeURI(
-          `/api/log/token?p=${page}&page_size=${size}&type=${currentLogType}&model_name=${model_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&request_id=${request_id}`,
+          `/api/log/token?p=${page}&page_size=${size}&type=${currentLogType}&model_name=${model_name}&start_timestamp=${startTs}&end_timestamp=${endTs}&request_id=${request_id}`,
         );
         const res = await tokenAPI.current.get(url);
         if (res.data.success) {
@@ -799,29 +825,30 @@ const LogViewer = () => {
     [getFormValues, formatLogs],
   );
 
+  // ========== 全量刷新（统计 + 图表 + 日志）==========
+  const refreshAll = useCallback(async () => {
+    const { startTs, endTs } = getGlobalTimeRange();
+    setActivePage(1);
+    await Promise.all([
+      loadStat(startTs, endTs),
+      loadChartData(startTs, endTs),
+      loadLogs(1, pageSize),
+    ]);
+  }, [getGlobalTimeRange, loadStat, loadChartData, loadLogs, pageSize]);
+
   // ========== 初始化数据加载（认证成功后）==========
   useEffect(() => {
     if (authenticated) {
-      const now = new Date();
-      const startTs = Math.floor(getTodayStartTimestamp());
-      const endTs = Math.floor(now.getTime() / 1000 + 3600);
-      loadChartData(startTs, endTs);
-      loadLogs(1, pageSize);
+      refreshAll();
     }
   }, [authenticated]);
 
-  // ========== 刷新/搜索 ==========
-  const handleRefresh = useCallback(async () => {
-    const { start_timestamp, end_timestamp } = getFormValues();
-    const localStartTimestamp = Date.parse(start_timestamp) / 1000;
-    const localEndTimestamp = Date.parse(end_timestamp) / 1000;
-    setActivePage(1);
-    await Promise.all([
-      loadStat(localStartTimestamp, localEndTimestamp),
-      loadChartData(localStartTimestamp, localEndTimestamp),
-      loadLogs(1, pageSize),
-    ]);
-  }, [getFormValues, loadStat, loadChartData, loadLogs, pageSize]);
+  // ========== 时间范围变更时刷新 ==========
+  useEffect(() => {
+    if (authenticated) {
+      refreshAll();
+    }
+  }, [timePreset, customDateRange]);
 
   // ========== 分页 ==========
   const handlePageChange = useCallback(
@@ -912,7 +939,7 @@ const LogViewer = () => {
   // ========== 未认证界面 ==========
   if (!authenticated) {
     return (
-      <div className='mt-[60px] px-2'>
+      <div className='px-4 py-4'>
         <div className='max-w-lg mx-auto mt-20'>
           <Card
             {...CARD_PROPS}
@@ -959,7 +986,7 @@ const LogViewer = () => {
 
   // ========== 已认证界面 ==========
   return (
-    <div className='mt-[60px] px-2'>
+    <div className='px-4 py-4'>
       {/* 参数覆盖弹窗 */}
       <ParamOverrideModal
         showParamOverrideModal={showParamOverrideModal}
@@ -968,29 +995,72 @@ const LogViewer = () => {
         t={t}
       />
 
-      {/* 顶部：API Key 信息和操作 */}
-      <div className='mb-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2'>
-        <div className='flex items-center gap-2'>
-          <KeyRound size={18} />
-          <Typography.Title heading={5} style={{ margin: 0 }}>
-            {t('API Key 日志查看器')}
-          </Typography.Title>
+      {/* 顶部：标题 + 全局时间选择器 + 操作 */}
+      <div className='mb-4 flex flex-col gap-3'>
+        <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2'>
+          <div className='flex items-center gap-2'>
+            <KeyRound size={18} />
+            <Typography.Title heading={5} style={{ margin: 0 }}>
+              {t('API Key 日志查看器')}
+            </Typography.Title>
+          </div>
+          <Button
+            type='tertiary'
+            size='small'
+            onClick={() => {
+              setAuthenticated(false);
+              setApiKey('');
+              setStat(null);
+              setLogs([]);
+              setModelStats([]);
+              setQuotaData([]);
+              tokenAPI.current = null;
+            }}
+          >
+            {t('切换 Key')}
+          </Button>
         </div>
-        <Button
-          type='tertiary'
-          size='small'
-          onClick={() => {
-            setAuthenticated(false);
-            setApiKey('');
-            setStat(null);
-            setLogs([]);
-            setModelStats([]);
-            setQuotaData([]);
-            tokenAPI.current = null;
-          }}
-        >
-          {t('切换 Key')}
-        </Button>
+        {/* 全局时间范围选择器 */}
+        <div className='flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 bg-[var(--semi-color-fill-0)] rounded-xl'>
+          <div className='flex items-center gap-2 text-sm text-[var(--semi-color-text-2)]'>
+            <CalendarClock size={16} />
+            <span>{t('数据范围')}</span>
+          </div>
+          <RadioGroup
+            type='button'
+            buttonSize='small'
+            value={timePreset}
+            onChange={(e) => {
+              setTimePreset(e.target.value);
+              if (e.target.value !== 'custom') {
+                setCustomDateRange(null);
+              }
+            }}
+          >
+            <Radio value='today'>{t('今天')}</Radio>
+            <Radio value='7d'>{t('7 天')}</Radio>
+            <Radio value='30d'>{t('30 天')}</Radio>
+            <Radio value='custom'>{t('自定义')}</Radio>
+          </RadioGroup>
+          {timePreset === 'custom' && (
+            <DatePicker
+              type='dateTimeRange'
+              value={customDateRange}
+              onChange={(value) => setCustomDateRange(value)}
+              placeholder={[t('开始时间'), t('结束时间')]}
+              size='small'
+              density='compact'
+              style={{ width: 360 }}
+            />
+          )}
+          <Button
+            icon={<IconRefresh />}
+            type='tertiary'
+            size='small'
+            onClick={refreshAll}
+            loading={statLoading || chartLoading || logLoading}
+          />
+        </div>
       </div>
 
       {/* 统计卡片 */}
@@ -1087,33 +1157,16 @@ const LogViewer = () => {
             initValues={{
               model_name: '',
               request_id: '',
-              dateRange: timeRange,
               logType: '0',
             }}
             getFormApi={(api) => setFormApi(api)}
-            onSubmit={handleRefresh}
+            onSubmit={refreshAll}
             allowEmpty={true}
             autoComplete='off'
             layout='vertical'
           >
             <div className='flex flex-col gap-2 mb-4'>
-              <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-2'>
-                <div className='col-span-1 lg:col-span-2'>
-                  <Form.DatePicker
-                    field='dateRange'
-                    className='w-full'
-                    type='dateTimeRange'
-                    placeholder={[t('开始时间'), t('结束时间')]}
-                    showClear
-                    pure
-                    size='small'
-                    presets={DATE_RANGE_PRESETS.map((preset) => ({
-                      text: t(preset.text),
-                      start: preset.start(),
-                      end: preset.end(),
-                    }))}
-                  />
-                </div>
+              <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2'>
                 <Form.Input
                   field='model_name'
                   prefix={<IconSearch />}
@@ -1140,7 +1193,7 @@ const LogViewer = () => {
                     showClear
                     pure
                     onChange={() => {
-                      setTimeout(() => handleRefresh(), 0);
+                      setTimeout(() => refreshAll(), 0);
                     }}
                     size='small'
                   >
@@ -1172,7 +1225,7 @@ const LogViewer = () => {
                     onClick={() => {
                       if (formApi) {
                         formApi.reset();
-                        setTimeout(() => handleRefresh(), 100);
+                        setTimeout(() => refreshAll(), 100);
                       }
                     }}
                     size='small'
