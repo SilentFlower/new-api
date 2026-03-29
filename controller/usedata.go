@@ -155,7 +155,7 @@ func ExportQuotaDataExcel(c *gin.Context) {
 	// ========== Sheet 3：请求日志 ==========
 	sheet3Name := "请求日志"
 	f.NewSheet(sheet3Name)
-	sheet3Headers := []string{"时间", "用户名", "API Key", "模型", "提示 Tokens", "完成 Tokens", "额度消耗", "耗时(s)", "是否流式", "渠道 ID", "请求 ID"}
+	sheet3Headers := []string{"时间", "API Key", "模型", "提示 Tokens", "完成 Tokens", "额度消耗", "耗时(s)", "是否流式", "渠道 ID", "请求 ID"}
 	for i, header := range sheet3Headers {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		f.SetCellValue(sheet3Name, cell, header)
@@ -169,16 +169,15 @@ func ExportQuotaDataExcel(c *gin.Context) {
 			isStreamStr = "是"
 		}
 		f.SetCellValue(sheet3Name, cellName(1, row), timeStr)
-		f.SetCellValue(sheet3Name, cellName(2, row), logItem.Username)
-		f.SetCellValue(sheet3Name, cellName(3, row), logItem.TokenName)
-		f.SetCellValue(sheet3Name, cellName(4, row), logItem.ModelName)
-		f.SetCellValue(sheet3Name, cellName(5, row), logItem.PromptTokens)
-		f.SetCellValue(sheet3Name, cellName(6, row), logItem.CompletionTokens)
-		f.SetCellValue(sheet3Name, cellName(7, row), formatQuotaValue(logItem.Quota))
-		f.SetCellValue(sheet3Name, cellName(8, row), logItem.UseTime)
-		f.SetCellValue(sheet3Name, cellName(9, row), isStreamStr)
-		f.SetCellValue(sheet3Name, cellName(10, row), logItem.ChannelId)
-		f.SetCellValue(sheet3Name, cellName(11, row), logItem.RequestId)
+		f.SetCellValue(sheet3Name, cellName(2, row), logItem.TokenName)
+		f.SetCellValue(sheet3Name, cellName(3, row), logItem.ModelName)
+		f.SetCellValue(sheet3Name, cellName(4, row), logItem.PromptTokens)
+		f.SetCellValue(sheet3Name, cellName(5, row), logItem.CompletionTokens)
+		f.SetCellValue(sheet3Name, cellName(6, row), formatQuotaValue(logItem.Quota))
+		f.SetCellValue(sheet3Name, cellName(7, row), logItem.UseTime)
+		f.SetCellValue(sheet3Name, cellName(8, row), isStreamStr)
+		f.SetCellValue(sheet3Name, cellName(9, row), logItem.ChannelId)
+		f.SetCellValue(sheet3Name, cellName(10, row), logItem.RequestId)
 	}
 
 	// 生成文件名，包含时间范围
