@@ -25,8 +25,7 @@ const DashboardHeader = ({
   getGreeting,
   greetingVisible,
   showSearchModal,
-  onExport,
-  exportLoading,
+  showExportModal,
   isAdminUser,
   refresh,
   loading,
@@ -53,8 +52,7 @@ const DashboardHeader = ({
           <Button
             type='tertiary'
             icon={<Download size={16} />}
-            onClick={onExport}
-            loading={exportLoading}
+            onClick={showExportModal}
             className={`bg-orange-500 hover:bg-orange-600 ${ICON_BUTTON_CLASS}`}
           />
         )}

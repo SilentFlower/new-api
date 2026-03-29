@@ -42,8 +42,6 @@ func GetAllQuotaDates(c *gin.Context) {
 func ExportQuotaDataExcel(c *gin.Context) {
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
-	username := c.Query("username")
-	tokenName := c.Query("token_name")
 
 	// 校验必填参数
 	if startTimestamp == 0 || endTimestamp == 0 {
@@ -52,21 +50,21 @@ func ExportQuotaDataExcel(c *gin.Context) {
 	}
 
 	// 查询 Sheet 1 数据：按 API Key 汇总（从 logs 表聚合）
-	summaryData, err := model.GetLogSummaryByKey(startTimestamp, endTimestamp, username, tokenName)
+	summaryData, err := model.GetLogSummaryByKey(startTimestamp, endTimestamp, "", "")
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	// 查询 Sheet 2 数据：按 API Key + 模型明细（从 logs 表聚合）
-	detailData, err := model.GetLogDetailByKeyModel(startTimestamp, endTimestamp, username, tokenName)
+	detailData, err := model.GetLogDetailByKeyModel(startTimestamp, endTimestamp, "", "")
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	// 查询 Sheet 3 数据：请求日志明细
-	logs, err := model.GetLogsForExport(startTimestamp, endTimestamp, username, tokenName)
+	logs, err := model.GetLogsForExport(startTimestamp, endTimestamp, "", "")
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -80,7 +78,7 @@ func ExportQuotaDataExcel(c *gin.Context) {
 	sheet1Name := "汇总统计"
 	// 默认 Sheet 名为 "Sheet1"，重命名为汇总统计
 	f.SetSheetName("Sheet1", sheet1Name)
-	sheet1Headers := []string{"API Key 名称", "所属用户", "请求次数", "请求 Token 数", "请求额度"}
+	sheet1Headers := []string{"API Key 名称", "请求次数", "请求 Token 数", "请求额度"}
 	for i, header := range sheet1Headers {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		f.SetCellValue(sheet1Name, cell, header)
@@ -88,28 +86,70 @@ func ExportQuotaDataExcel(c *gin.Context) {
 	for rowIdx, item := range summaryData {
 		row := rowIdx + 2 // 从第2行开始写数据
 		f.SetCellValue(sheet1Name, cellName(1, row), item.TokenName)
-		f.SetCellValue(sheet1Name, cellName(2, row), item.Username)
-		f.SetCellValue(sheet1Name, cellName(3, row), item.Count)
-		f.SetCellValue(sheet1Name, cellName(4, row), item.TokenUsed)
-		f.SetCellValue(sheet1Name, cellName(5, row), formatQuotaValue(item.Quota))
+		f.SetCellValue(sheet1Name, cellName(2, row), item.Count)
+		f.SetCellValue(sheet1Name, cellName(3, row), item.TokenUsed)
+		f.SetCellValue(sheet1Name, cellName(4, row), formatQuotaValue(item.Quota))
 	}
 
-	// ========== Sheet 2：模型明细 ==========
+	// ========== Sheet 2：模型明细（按 Key 分组） ==========
 	sheet2Name := "模型明细"
 	f.NewSheet(sheet2Name)
-	sheet2Headers := []string{"API Key 名称", "所属用户", "模型名称", "请求次数", "请求 Token 数", "请求额度"}
-	for i, header := range sheet2Headers {
-		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
-		f.SetCellValue(sheet2Name, cell, header)
+	sheet2Headers := []string{"模型名称", "请求次数", "请求 Token 数", "请求额度"}
+
+	// 按 token_name 分组
+	keyGroups := make(map[string][]*model.LogDetailByKeyModel)
+	var keyOrder []string
+	for _, item := range detailData {
+		if _, exists := keyGroups[item.TokenName]; !exists {
+			keyOrder = append(keyOrder, item.TokenName)
+		}
+		keyGroups[item.TokenName] = append(keyGroups[item.TokenName], item)
 	}
-	for rowIdx, item := range detailData {
-		row := rowIdx + 2
-		f.SetCellValue(sheet2Name, cellName(1, row), item.TokenName)
-		f.SetCellValue(sheet2Name, cellName(2, row), item.Username)
-		f.SetCellValue(sheet2Name, cellName(3, row), item.ModelName)
-		f.SetCellValue(sheet2Name, cellName(4, row), item.Count)
-		f.SetCellValue(sheet2Name, cellName(5, row), item.TokenUsed)
-		f.SetCellValue(sheet2Name, cellName(6, row), formatQuotaValue(item.Quota))
+
+	// 创建加粗样式用于分组标题和小计行
+	boldStyle, _ := f.NewStyle(&excelize.Style{
+		Font: &excelize.Font{Bold: true},
+	})
+
+	row := 1
+	for _, keyName := range keyOrder {
+		items := keyGroups[keyName]
+
+		// 分组标题行：API Key 名称
+		f.SetCellValue(sheet2Name, cellName(1, row), "API Key: "+keyName)
+		f.SetCellStyle(sheet2Name, cellName(1, row), cellName(1, row), boldStyle)
+		row++
+
+		// 表头行
+		for i, header := range sheet2Headers {
+			f.SetCellValue(sheet2Name, cellName(i+1, row), header)
+			f.SetCellStyle(sheet2Name, cellName(i+1, row), cellName(i+1, row), boldStyle)
+		}
+		row++
+
+		// 数据行 + 累计小计
+		var totalCount, totalTokenUsed, totalQuota int
+		for _, item := range items {
+			f.SetCellValue(sheet2Name, cellName(1, row), item.ModelName)
+			f.SetCellValue(sheet2Name, cellName(2, row), item.Count)
+			f.SetCellValue(sheet2Name, cellName(3, row), item.TokenUsed)
+			f.SetCellValue(sheet2Name, cellName(4, row), formatQuotaValue(item.Quota))
+			totalCount += item.Count
+			totalTokenUsed += item.TokenUsed
+			totalQuota += item.Quota
+			row++
+		}
+
+		// 小计行
+		f.SetCellValue(sheet2Name, cellName(1, row), "小计")
+		f.SetCellValue(sheet2Name, cellName(2, row), totalCount)
+		f.SetCellValue(sheet2Name, cellName(3, row), totalTokenUsed)
+		f.SetCellValue(sheet2Name, cellName(4, row), formatQuotaValue(totalQuota))
+		f.SetCellStyle(sheet2Name, cellName(1, row), cellName(4, row), boldStyle)
+		row++
+
+		// 空行分隔
+		row++
 	}
 
 	// ========== Sheet 3：请求日志 ==========
