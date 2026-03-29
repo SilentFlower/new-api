@@ -167,3 +167,65 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: 数据看板导出 Excel 报表
+
+**Date**: 2026-03-29
+**Task**: 数据看板导出 Excel 报表
+**Branch**: `feature/dashboard-enhancement`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+## 功能概述
+实现数据看板导出 Excel 报表功能，管理员可通过弹窗选择时间范围后导出包含三个 Sheet 的 Excel 文件。
+
+## 变更内容
+
+| 模块 | 变更 |
+|------|------|
+| 后端 Model | 新增 `GetLogSummaryByKey`、`GetLogDetailByKeyModel`、`GetLogsForExport` 三个 logs 表聚合查询方法 |
+| 后端 Controller | 新增 `ExportQuotaDataExcel`，生成 3-Sheet Excel（excelize 库） |
+| 后端 Router | `GET /api/data/export` + AdminAuth |
+| 前端 Modal | 新建 `ExportModal.jsx`，时间选择弹窗 |
+| 前端 Header | 导出按钮（仅管理员可见，Download 图标） |
+| 前端 Hook | `exportExcel` 方法 + blob 下载 + loading 状态 |
+| 依赖 | 新增 `github.com/xuri/excelize/v2` |
+| i18n | 7 个语言文件新增"导出失败"、"导出报表"翻译 |
+
+## Excel 结构
+- **Sheet 1 汇总统计**：按 API Key 聚合（请求次数、Token数、额度）
+- **Sheet 2 模型明细**：按 Key 分组，每组列出模型明细 + 小计行
+- **Sheet 3 请求日志**：逐条日志明细（时间、Key、模型、Tokens、额度等）
+
+## 关键决策
+- 三个 Sheet 数据均从 `logs` 表查询（而非 `quota_data`），因为 `quota_data.token_name` 是后加字段，历史数据不完整
+- 日志导出设 10 万行上限防 OOM
+- 导出弹窗独立于搜索弹窗，仅选择起止时间
+- 所有 Sheet 移除"所属用户"列（同一用户不同 Key 场景）
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8adbf2fc` | (see git log) |
+| `337270fc` | (see git log) |
+| `51d28926` | (see git log) |
+| `d937581d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
