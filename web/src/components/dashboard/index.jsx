@@ -144,6 +144,9 @@ const Dashboard = () => {
         getGreeting={dashboardData.getGreeting}
         greetingVisible={dashboardData.greetingVisible}
         showSearchModal={dashboardData.showSearchModal}
+        onExport={dashboardData.exportExcel}
+        exportLoading={dashboardData.exportLoading}
+        isAdminUser={dashboardData.isAdminUser}
         refresh={handleRefresh}
         loading={dashboardData.loading}
         t={dashboardData.t}

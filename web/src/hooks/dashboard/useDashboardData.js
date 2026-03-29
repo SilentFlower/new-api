@@ -34,6 +34,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   // ========== 基础状态 ==========
   const [loading, setLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const [greetingVisible, setGreetingVisible] = useState(false);
   const [searchModalVisible, setSearchModalVisible] = useState(false);
   const showLoading = useMinimumLoadingTime(loading);
@@ -261,6 +262,62 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     [refresh],
   );
 
+  // ========== 导出 Excel ==========
+  const exportExcel = useCallback(async () => {
+    setExportLoading(true);
+    try {
+      const { start_timestamp, end_timestamp, username, token_name } = inputs;
+      let localStartTimestamp = Date.parse(start_timestamp) / 1000;
+      let localEndTimestamp = Date.parse(end_timestamp) / 1000;
+
+      const res = await API.get('/api/data/export', {
+        params: {
+          start_timestamp: localStartTimestamp,
+          end_timestamp: localEndTimestamp,
+          username: username || '',
+          token_name: token_name || '',
+        },
+        responseType: 'blob',
+        disableDuplicate: true,
+      });
+
+      // 检查响应是否为 JSON 错误（Content-Type 为 application/json 说明返回了错误）
+      const contentType = res.headers['content-type'] || '';
+      if (contentType.includes('application/json')) {
+        const text = await res.data.text();
+        const errorData = JSON.parse(text);
+        showError(errorData.message || t('导出失败'));
+        return;
+      }
+
+      // 从 Content-Disposition 中提取文件名，或使用默认文件名
+      const disposition = res.headers['content-disposition'] || '';
+      let fileName = `数据报表.xlsx`;
+      const filenameMatch = disposition.match(/filename\*?=(?:UTF-8'')?(.+)/i);
+      if (filenameMatch) {
+        fileName = decodeURIComponent(filenameMatch[1]);
+      }
+
+      // 创建 Blob URL 并触发下载
+      const blob = new Blob([res.data], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Export failed:', err);
+      showError(t('导出失败'));
+    } finally {
+      setExportLoading(false);
+    }
+  }, [inputs, t]);
+
   // ========== Effects ==========
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -279,6 +336,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   return {
     // 基础状态
     loading: showLoading,
+    exportLoading,
     greetingVisible,
     searchModalVisible,
 
@@ -332,6 +390,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     handleInputChange,
     showSearchModal,
     handleCloseModal,
+    exportExcel,
     loadQuotaData,
     loadUptimeData,
     getUserData,
