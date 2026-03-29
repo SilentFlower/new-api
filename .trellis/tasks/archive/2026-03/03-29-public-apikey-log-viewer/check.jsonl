@@ -1,0 +1,5 @@
+{"file": ".claude/commands/trellis/finish-work.md", "reason": "Finish work checklist"}
+{"file": ".claude/commands/trellis/check.md", "reason": "Code quality check spec"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查代码质量"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "检查错误处理"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "检查数据库兼容性"}

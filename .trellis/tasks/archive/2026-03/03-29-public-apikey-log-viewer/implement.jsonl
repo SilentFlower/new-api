@@ -1,0 +1,6 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "代码质量规范"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "API错误处理规范"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "数据库兼容性规范"}
