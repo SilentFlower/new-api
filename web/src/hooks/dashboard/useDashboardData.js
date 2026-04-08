@@ -34,6 +34,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   // ========== 基础状态 ==========
   const [loading, setLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportModalVisible, setExportModalVisible] = useState(false);
   const [greetingVisible, setGreetingVisible] = useState(false);
   const [searchModalVisible, setSearchModalVisible] = useState(false);
   const showLoading = useMinimumLoadingTime(loading);
@@ -51,6 +53,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   const [dataExportDefaultTime, setDataExportDefaultTime] =
     useState(getDefaultTime());
+
+  // ========== 令牌选项 ==========
+  const [tokenOptions, setTokenOptions] = useState([]);
 
   // ========== 数据状态 ==========
   const [quotaData, setQuotaData] = useState([]);
@@ -147,9 +152,27 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     setInputs((inputs) => ({ ...inputs, [name]: value }));
   }, []);
 
-  const showSearchModal = useCallback(() => {
-    setSearchModalVisible(true);
+  // 加载令牌列表用于下拉选择
+  const loadTokenOptions = useCallback(async () => {
+    try {
+      const res = await API.get('/api/token/?p=1&size=100');
+      const { success, data } = res.data;
+      if (success && data && data.items) {
+        const tokens = data.items.map((token) => ({
+          value: token.name,
+          label: token.name,
+        }));
+        setTokenOptions(tokens);
+      }
+    } catch (err) {
+      console.error('Failed to load token options:', err);
+    }
   }, []);
+
+  const showSearchModal = useCallback(() => {
+    loadTokenOptions();
+    setSearchModalVisible(true);
+  }, [loadTokenOptions]);
 
   const handleCloseModal = useCallback(() => {
     setSearchModalVisible(false);
@@ -160,14 +183,14 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     setLoading(true);
     try {
       let url = '';
-      const { start_timestamp, end_timestamp, username } = inputs;
+      const { start_timestamp, end_timestamp, username, token_name } = inputs;
       let localStartTimestamp = Date.parse(start_timestamp) / 1000;
       let localEndTimestamp = Date.parse(end_timestamp) / 1000;
 
       if (isAdminUser) {
-        url = `/api/data/?username=${username}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${dataExportDefaultTime}`;
+        url = `/api/data/?username=${username}&token_name=${token_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${dataExportDefaultTime}`;
       } else {
-        url = `/api/data/self/?start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${dataExportDefaultTime}`;
+        url = `/api/data/self/?token_name=${token_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${dataExportDefaultTime}`;
       }
 
       const res = await API.get(url);
@@ -261,6 +284,73 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     [refresh],
   );
 
+  // ========== 导出 Excel ==========
+  const showExportModal = useCallback(() => {
+    setExportModalVisible(true);
+  }, []);
+
+  const closeExportModal = useCallback(() => {
+    setExportModalVisible(false);
+  }, []);
+
+  const exportExcel = useCallback(
+    async (startTime, endTime) => {
+      setExportLoading(true);
+      try {
+        let localStartTimestamp = Date.parse(startTime) / 1000;
+        let localEndTimestamp = Date.parse(endTime) / 1000;
+
+        const res = await API.get('/api/data/export', {
+          params: {
+            start_timestamp: localStartTimestamp,
+            end_timestamp: localEndTimestamp,
+          },
+          responseType: 'blob',
+          disableDuplicate: true,
+        });
+
+        // 检查响应是否为 JSON 错误（Content-Type 为 application/json 说明返回了错误）
+        const contentType = res.headers['content-type'] || '';
+        if (contentType.includes('application/json')) {
+          const text = await res.data.text();
+          const errorData = JSON.parse(text);
+          showError(errorData.message || t('导出失败'));
+          return;
+        }
+
+        // 从 Content-Disposition 中提取文件名，或使用默认文件名
+        const disposition = res.headers['content-disposition'] || '';
+        let fileName = `数据报表.xlsx`;
+        const filenameMatch = disposition.match(
+          /filename\*?=(?:UTF-8'')?(.+)/i,
+        );
+        if (filenameMatch) {
+          fileName = decodeURIComponent(filenameMatch[1]);
+        }
+
+        // 创建 Blob URL 并触发下载
+        const blob = new Blob([res.data], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error('Export failed:', err);
+        showError(t('导出失败'));
+      } finally {
+        setExportLoading(false);
+        setExportModalVisible(false);
+      }
+    },
+    [t],
+  );
+
   // ========== Effects ==========
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -279,12 +369,15 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   return {
     // 基础状态
     loading: showLoading,
+    exportLoading,
+    exportModalVisible,
     greetingVisible,
     searchModalVisible,
 
     // 输入状态
     inputs,
     dataExportDefaultTime,
+    tokenOptions,
 
     // 数据状态
     quotaData,
@@ -331,6 +424,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     handleInputChange,
     showSearchModal,
     handleCloseModal,
+    showExportModal,
+    closeExportModal,
+    exportExcel,
     loadQuotaData,
     loadUserQuotaData,
     loadUptimeData,

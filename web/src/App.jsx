@@ -55,6 +55,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const About = lazy(() => import('./pages/About'));
 const UserAgreement = lazy(() => import('./pages/UserAgreement'));
 const PrivacyPolicy = lazy(() => import('./pages/PrivacyPolicy'));
+const LogViewer = lazy(() => import('./pages/LogViewer'));
 
 function DynamicOAuth2Callback() {
   const { provider } = useParams();
@@ -332,6 +333,14 @@ function App() {
                 <Pricing />
               </Suspense>
             )
+          }
+        />
+        <Route
+          path='/log'
+          element={
+            <Suspense fallback={<Loading></Loading>} key={location.pathname}>
+              <LogViewer />
+            </Suspense>
           }
         />
         <Route

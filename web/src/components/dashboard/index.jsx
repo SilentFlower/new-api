@@ -30,6 +30,7 @@ import AnnouncementsPanel from './AnnouncementsPanel';
 import FaqPanel from './FaqPanel';
 import UptimePanel from './UptimePanel';
 import SearchModal from './modals/SearchModal';
+import ExportModal from './modals/ExportModal';
 
 import { useDashboardData } from '../../hooks/dashboard/useDashboardData';
 import { useDashboardStats } from '../../hooks/dashboard/useDashboardStats';
@@ -156,6 +157,8 @@ const Dashboard = () => {
         getGreeting={dashboardData.getGreeting}
         greetingVisible={dashboardData.greetingVisible}
         showSearchModal={dashboardData.showSearchModal}
+        showExportModal={dashboardData.showExportModal}
+        isAdminUser={dashboardData.isAdminUser}
         refresh={handleRefresh}
         loading={dashboardData.loading}
         t={dashboardData.t}
@@ -170,9 +173,21 @@ const Dashboard = () => {
         inputs={dashboardData.inputs}
         dataExportDefaultTime={dashboardData.dataExportDefaultTime}
         timeOptions={dashboardData.timeOptions}
+        tokenOptions={dashboardData.tokenOptions}
         handleInputChange={dashboardData.handleInputChange}
         t={dashboardData.t}
       />
+
+      {dashboardData.isAdminUser && (
+        <ExportModal
+          visible={dashboardData.exportModalVisible}
+          onConfirm={dashboardData.exportExcel}
+          onCancel={dashboardData.closeExportModal}
+          loading={dashboardData.exportLoading}
+          isMobile={dashboardData.isMobile}
+          t={dashboardData.t}
+        />
+      )}
 
       <StatsCards
         groupedStatsData={groupedStatsData}

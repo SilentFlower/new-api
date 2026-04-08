@@ -1,0 +1,5 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "涉及数据库表结构修改和迁移，需兼容三种数据库"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "代码质量规范，JSON操作需用common包"}

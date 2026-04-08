@@ -29,6 +29,7 @@ const SearchModal = ({
   inputs,
   dataExportDefaultTime,
   timeOptions,
+  tokenOptions,
   handleInputChange,
   t,
 }) => {
@@ -42,7 +43,7 @@ const SearchModal = ({
     <Component {...FORM_FIELD_PROPS} {...props} />
   );
 
-  const { start_timestamp, end_timestamp, username } = inputs;
+  const { start_timestamp, end_timestamp, username, token_name } = inputs;
 
   return (
     <Modal
@@ -51,6 +52,7 @@ const SearchModal = ({
       onOk={handleSearchConfirm}
       onCancel={handleCloseModal}
       closeOnEsc={true}
+      keepDOM={true}
       size={isMobile ? 'full-width' : 'small'}
       centered
     >
@@ -95,6 +97,18 @@ const SearchModal = ({
             name: 'username',
             onChange: (value) => handleInputChange(value, 'username'),
           })}
+
+        {createFormField(Form.Select, {
+          field: 'token_name',
+          label: t('令牌名称'),
+          value: token_name || undefined,
+          placeholder: t('可选值'),
+          name: 'token_name',
+          optionList: tokenOptions,
+          filter: true,
+          showClear: true,
+          onChange: (value) => handleInputChange(value || '', 'token_name'),
+        })}
       </Form>
     </Modal>
   );

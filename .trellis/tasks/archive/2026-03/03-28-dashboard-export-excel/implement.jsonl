@@ -1,0 +1,14 @@
+{"file": ".trellis/workflow.md", "reason": "Project workflow and conventions"}
+{"file": ".trellis/spec/backend/index.md", "reason": "Backend development guide"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "Frontend development guide"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "导出查询需兼容 SQLite/MySQL/PostgreSQL"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "管理 API 错误响应格式"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "代码质量标准和禁止模式"}
+{"file": "controller/usedata.go", "reason": "现有控制器模式参考"}
+{"file": "model/usedata.go", "reason": "quota_data 查询模式参考"}
+{"file": "model/log.go", "reason": "logs 表查询模式参考"}
+{"file": "router/api-router.go", "reason": "路由定义位置"}
+{"file": "web/src/components/dashboard/DashboardHeader.jsx", "reason": "前端导出按钮添加位置"}
+{"file": "web/src/hooks/dashboard/useDashboardData.js", "reason": "前端数据hook添加导出方法"}
+{"file": "web/src/components/dashboard/index.jsx", "reason": "Dashboard 主组件传 props"}
+{"file": "web/src/helpers/api.js", "reason": "axios 实例参考"}
