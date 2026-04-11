@@ -31,6 +31,7 @@ const SearchModal = ({
   timeOptions,
   tokenOptions,
   handleInputChange,
+  handleTokenSelect,
   t,
 }) => {
   const formRef = useRef();
@@ -44,6 +45,13 @@ const SearchModal = ({
   );
 
   const { start_timestamp, end_timestamp, username, token_name } = inputs;
+
+  // 管理员模式下，根据 token_name + username 匹配下拉选中值
+  const selectedTokenValue = isAdminUser && token_name
+    ? tokenOptions.find(
+        (opt) => opt.value === `${token_name}\0${username}`,
+      )?.value || undefined
+    : token_name || undefined;
 
   return (
     <Modal
@@ -101,13 +109,13 @@ const SearchModal = ({
         {createFormField(Form.Select, {
           field: 'token_name',
           label: t('令牌名称'),
-          value: token_name || undefined,
+          value: selectedTokenValue,
           placeholder: t('可选值'),
           name: 'token_name',
           optionList: tokenOptions,
           filter: true,
           showClear: true,
-          onChange: (value) => handleInputChange(value || '', 'token_name'),
+          onChange: (value) => handleTokenSelect(value || ''),
         })}
       </Form>
     </Modal>

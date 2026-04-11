@@ -1037,3 +1037,20 @@ func RootUserExists() bool {
 	}
 	return true
 }
+
+// SystemStats 系统级统计数据，用于管理员数据看板
+type SystemStats struct {
+	Quota        int `json:"quota" gorm:"column:quota"`
+	UsedQuota    int `json:"used_quota" gorm:"column:used_quota"`
+	RequestCount int `json:"request_count" gorm:"column:request_count"`
+}
+
+// GetSystemStats 获取系统级统计数据（所有用户汇总）
+// 管理员专用，用于数据看板展示全局概览
+func GetSystemStats() (*SystemStats, error) {
+	var stats SystemStats
+	err := DB.Model(&User{}).
+		Select("COALESCE(SUM(quota), 0) as quota, COALESCE(SUM(used_quota), 0) as used_quota, COALESCE(SUM(request_count), 0) as request_count").
+		Scan(&stats).Error
+	return &stats, err
+}

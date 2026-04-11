@@ -155,7 +155,7 @@ func ExportQuotaDataExcel(c *gin.Context) {
 	// ========== Sheet 3：请求日志 ==========
 	sheet3Name := "请求日志"
 	f.NewSheet(sheet3Name)
-	sheet3Headers := []string{"时间", "API Key", "模型", "提示 Tokens", "完成 Tokens", "额度消耗", "耗时(s)", "是否流式", "渠道 ID", "请求 ID"}
+	sheet3Headers := []string{"时间", "API Key", "模型", "输入 Tokens", "输出 Tokens", "额度消耗", "耗时(s)", "是否流式", "渠道 ID", "请求 ID"}
 	for i, header := range sheet3Headers {
 		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
 		f.SetCellValue(sheet3Name, cell, header)
@@ -168,10 +168,21 @@ func ExportQuotaDataExcel(c *gin.Context) {
 		if logItem.IsStream {
 			isStreamStr = "是"
 		}
+		// 解析 Other JSON 获取缓存 token 数，计入输入 Tokens
+		inputTokens := logItem.PromptTokens
+		if logItem.Other != "" {
+			if otherMap, err := common.StrToMap(logItem.Other); err == nil {
+				if cacheTokens, ok := otherMap["cache_tokens"]; ok {
+					if ct, ok := cacheTokens.(float64); ok {
+						inputTokens += int(ct)
+					}
+				}
+			}
+		}
 		f.SetCellValue(sheet3Name, cellName(1, row), timeStr)
 		f.SetCellValue(sheet3Name, cellName(2, row), logItem.TokenName)
 		f.SetCellValue(sheet3Name, cellName(3, row), logItem.ModelName)
-		f.SetCellValue(sheet3Name, cellName(4, row), logItem.PromptTokens)
+		f.SetCellValue(sheet3Name, cellName(4, row), inputTokens)
 		f.SetCellValue(sheet3Name, cellName(5, row), logItem.CompletionTokens)
 		f.SetCellValue(sheet3Name, cellName(6, row), formatQuotaValue(logItem.Quota))
 		f.SetCellValue(sheet3Name, cellName(7, row), logItem.UseTime)
@@ -179,6 +190,31 @@ func ExportQuotaDataExcel(c *gin.Context) {
 		f.SetCellValue(sheet3Name, cellName(9, row), logItem.ChannelId)
 		f.SetCellValue(sheet3Name, cellName(10, row), logItem.RequestId)
 	}
+
+	// ========== 设置列宽 ==========
+	// Sheet 1：汇总统计 — API Key 名称, 请求次数, 请求 Token 数, 请求额度
+	f.SetColWidth(sheet1Name, "A", "A", 30) // API Key 名称
+	f.SetColWidth(sheet1Name, "B", "B", 12) // 请求次数
+	f.SetColWidth(sheet1Name, "C", "C", 16) // 请求 Token 数
+	f.SetColWidth(sheet1Name, "D", "D", 14) // 请求额度
+
+	// Sheet 2：模型明细 — 模型名称, 请求次数, 请求 Token 数, 请求额度
+	f.SetColWidth(sheet2Name, "A", "A", 30) // 模型名称 / API Key 分组标题
+	f.SetColWidth(sheet2Name, "B", "B", 12) // 请求次数
+	f.SetColWidth(sheet2Name, "C", "C", 16) // 请求 Token 数
+	f.SetColWidth(sheet2Name, "D", "D", 14) // 请求额度
+
+	// Sheet 3：请求日志 — 时间, API Key, 模型, 输入 Tokens, 输出 Tokens, 额度消耗, 耗时(s), 是否流式, 渠道 ID, 请求 ID
+	f.SetColWidth(sheet3Name, "A", "A", 20) // 时间
+	f.SetColWidth(sheet3Name, "B", "B", 24) // API Key
+	f.SetColWidth(sheet3Name, "C", "C", 28) // 模型
+	f.SetColWidth(sheet3Name, "D", "D", 14) // 输入 Tokens
+	f.SetColWidth(sheet3Name, "E", "E", 14) // 输出 Tokens
+	f.SetColWidth(sheet3Name, "F", "F", 12) // 额度消耗
+	f.SetColWidth(sheet3Name, "G", "G", 10) // 耗时(s)
+	f.SetColWidth(sheet3Name, "H", "H", 10) // 是否流式
+	f.SetColWidth(sheet3Name, "I", "I", 10) // 渠道 ID
+	f.SetColWidth(sheet3Name, "J", "J", 38) // 请求 ID
 
 	// 生成文件名，包含时间范围
 	startDate := time.Unix(startTimestamp, 0).Format("20060102")
@@ -207,6 +243,36 @@ func cellName(col, row int) string {
 // quota 存储的是内部单位值，需要除以 QuotaPerUnit 转换
 func formatQuotaValue(quota int) float64 {
 	return float64(quota) / common.QuotaPerUnit
+}
+
+// GetAllTokenNames 获取所有令牌名称列表（管理员接口）
+// 用于数据看板搜索条件中的令牌下拉选择，返回去重后的令牌名称及其所属用户名
+func GetAllTokenNames(c *gin.Context) {
+	options, err := model.GetAllTokenNames()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    options,
+	})
+}
+
+// GetSystemStats 获取系统级统计数据（管理员接口）
+// 返回所有用户的余额、消耗额度、请求次数汇总，用于管理员数据看板
+func GetSystemStats(c *gin.Context) {
+	stats, err := model.GetSystemStats()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    stats,
+	})
 }
 
 // GetUserQuotaDates 获取当前用户的配额统计数据（用户端接口）

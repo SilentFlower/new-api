@@ -489,3 +489,22 @@ func GetTokenKeysByIds(ids []int, userId int) ([]Token, error) {
 		Find(&tokens).Error
 	return tokens, err
 }
+
+// TokenNameOption 令牌名称选项，用于管理员数据看板下拉列表
+type TokenNameOption struct {
+	Name     string `json:"name"`
+	Username string `json:"username"`
+}
+
+// GetAllTokenNames 获取所有令牌名称（去重），附带用户名
+// 管理员专用，用于数据看板搜索条件的令牌下拉列表
+func GetAllTokenNames() ([]*TokenNameOption, error) {
+	var options []*TokenNameOption
+	err := DB.Table("tokens").
+		Select("DISTINCT tokens.name, COALESCE(users.username, '') as username").
+		Joins("LEFT JOIN users ON tokens.user_id = users.id").
+		Where("tokens.deleted_at IS NULL").
+		Order("tokens.name").
+		Find(&options).Error
+	return options, err
+}

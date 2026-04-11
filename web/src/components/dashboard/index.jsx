@@ -84,6 +84,7 @@ const Dashboard = () => {
     dashboardData.performanceMetrics,
     dashboardData.navigate,
     dashboardData.t,
+    dashboardData.systemStats,
   );
 
   // ========== 数据处理 ==========
@@ -175,6 +176,7 @@ const Dashboard = () => {
         timeOptions={dashboardData.timeOptions}
         tokenOptions={dashboardData.tokenOptions}
         handleInputChange={dashboardData.handleInputChange}
+        handleTokenSelect={dashboardData.handleTokenSelect}
         t={dashboardData.t}
       />
 

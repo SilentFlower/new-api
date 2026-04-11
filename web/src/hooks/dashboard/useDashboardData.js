@@ -86,6 +86,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [uptimeLoading, setUptimeLoading] = useState(false);
   const [activeUptimeTab, setActiveUptimeTab] = useState('');
 
+  // ========== 系统级统计（管理员专用） ==========
+  const [systemStats, setSystemStats] = useState(null);
+
   // ========== 常量 ==========
   const now = new Date();
   const isAdminUser = isAdmin();
@@ -155,19 +158,51 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   // 加载令牌列表用于下拉选择
   const loadTokenOptions = useCallback(async () => {
     try {
-      const res = await API.get('/api/token/?p=1&size=100');
-      const { success, data } = res.data;
-      if (success && data && data.items) {
-        const tokens = data.items.map((token) => ({
-          value: token.name,
-          label: token.name,
-        }));
-        setTokenOptions(tokens);
+      let tokens = [];
+      if (isAdminUser) {
+        // 管理员：获取所有用户的令牌名称，附带用户名以区分同名令牌
+        const res = await API.get('/api/data/token-names');
+        const { success, data } = res.data;
+        if (success && data) {
+          // 使用 "name\0username" 作为唯一 value，避免同名令牌冲突
+          tokens = data.map((item) => ({
+            value: `${item.name}\0${item.username}`,
+            label: item.username ? `${item.name} (${item.username})` : item.name,
+          }));
+        }
+      } else {
+        // 普通用户：只获取自己的令牌
+        const res = await API.get('/api/token/?p=1&size=100');
+        const { success, data } = res.data;
+        if (success && data && data.items) {
+          tokens = data.items.map((token) => ({
+            value: token.name,
+            label: token.name,
+          }));
+        }
       }
+      setTokenOptions(tokens);
     } catch (err) {
       console.error('Failed to load token options:', err);
     }
-  }, []);
+  }, [isAdminUser]);
+
+  // 管理员选择令牌时联动设置 username，确保同名令牌能区分
+  const handleTokenSelect = useCallback(
+    (value) => {
+      if (!value) {
+        setInputs((prev) => ({ ...prev, token_name: '', username: '' }));
+        return;
+      }
+      if (isAdminUser && value.includes('\0')) {
+        const [tokenName, username] = value.split('\0');
+        setInputs((prev) => ({ ...prev, token_name: tokenName, username }));
+      } else {
+        setInputs((prev) => ({ ...prev, token_name: value }));
+      }
+    },
+    [isAdminUser],
+  );
 
   const showSearchModal = useCallback(() => {
     loadTokenOptions();
@@ -177,6 +212,20 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const handleCloseModal = useCallback(() => {
     setSearchModalVisible(false);
   }, []);
+
+  // 加载系统级统计数据（管理员专用）
+  const loadSystemStats = useCallback(async () => {
+    if (!isAdminUser) return;
+    try {
+      const res = await API.get('/api/data/system-stats');
+      const { success, data } = res.data;
+      if (success && data) {
+        setSystemStats(data);
+      }
+    } catch (err) {
+      console.error('Failed to load system stats:', err);
+    }
+  }, [isAdminUser]);
 
   // ========== API 调用函数 ==========
   const loadQuotaData = useCallback(async () => {
@@ -270,8 +319,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const refresh = useCallback(async () => {
     const data = await loadQuotaData();
     await loadUptimeData();
+    loadSystemStats();
     return data;
-  }, [loadQuotaData, loadUptimeData]);
+  }, [loadQuotaData, loadUptimeData, loadSystemStats]);
 
   const handleSearchConfirm = useCallback(
     async (updateChartDataCallback) => {
@@ -362,9 +412,10 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   useEffect(() => {
     if (!initialized.current) {
       getUserData();
+      loadSystemStats();
       initialized.current = true;
     }
-  }, [getUserData]);
+  }, [getUserData, loadSystemStats]);
 
   return {
     // 基础状态
@@ -408,6 +459,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     activeUptimeTab,
     setActiveUptimeTab,
 
+    // 系统级统计（管理员）
+    systemStats,
+
     // 计算值
     timeOptions,
     performanceMetrics,
@@ -422,6 +476,7 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
     // 函数
     handleInputChange,
+    handleTokenSelect,
     showSearchModal,
     handleCloseModal,
     showExportModal,
