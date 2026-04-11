@@ -229,3 +229,58 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: Excel导出优化与管理员数据看板增强
+
+**Date**: 2026-04-11
+**Task**: Excel导出优化与管理员数据看板增强
+**Branch**: `dashboard-echance-2`
+
+### Summary
+
+(Add summary)
+
+### Main Changes
+
+## 完成内容
+
+| 功能 | 描述 |
+|------|------|
+| Excel 列宽 | 三个 Sheet 设置合理列宽，内容不再截断 |
+| Excel 列名 | "提示/完成 Tokens" → "输入/输出 Tokens" |
+| Excel 缓存标注 | 输入 Tokens 列标注缓存读/写信息，避免 GPT 模型双算 |
+| 导出默认时间 | 30 天 → 7 天 |
+| 管理员令牌下拉 | 新增 `/api/data/token-names`，下拉显示所有用户令牌并联动 username 过滤 |
+| 管理员全局统计 | 新增 `/api/data/system-stats`，看板卡片展示系统级余额/消耗/请求次数 |
+
+**修改文件**:
+- `controller/usedata.go` — Excel 导出逻辑 + 2 个新 API handler
+- `model/token.go` — GetAllTokenNames 查询
+- `model/user.go` — GetSystemStats 查询
+- `router/api-router.go` — 注册新路由
+- `web/src/hooks/dashboard/useDashboardData.js` — 令牌加载/系统统计/令牌选择联动
+- `web/src/hooks/dashboard/useDashboardStats.jsx` — 管理员使用系统统计数据
+- `web/src/components/dashboard/index.jsx` — 传递 systemStats 和 handleTokenSelect
+- `web/src/components/dashboard/modals/SearchModal.jsx` — 令牌下拉联动 username
+- `web/src/components/dashboard/modals/ExportModal.jsx` — 默认时间改为 7 天
+
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `162a8c73` | (see git log) |
+| `7bc6fae1` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
