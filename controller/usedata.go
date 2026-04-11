@@ -168,21 +168,31 @@ func ExportQuotaDataExcel(c *gin.Context) {
 		if logItem.IsStream {
 			isStreamStr = "是"
 		}
-		// 解析 Other JSON 获取缓存 token 数，计入输入 Tokens
-		inputTokens := logItem.PromptTokens
+		// 解析 Other JSON 获取缓存信息，对齐日志表展示方式
+		inputDisplay := fmt.Sprintf("%d", logItem.PromptTokens)
 		if logItem.Other != "" {
 			if otherMap, err := common.StrToMap(logItem.Other); err == nil {
-				if cacheTokens, ok := otherMap["cache_tokens"]; ok {
-					if ct, ok := cacheTokens.(float64); ok {
-						inputTokens += int(ct)
-					}
+				cacheRead := getOtherInt(otherMap, "cache_tokens")
+				// 缓存写入：优先使用分时段值之和，回退到总值
+				cacheWrite5m := getOtherInt(otherMap, "cache_creation_tokens_5m")
+				cacheWrite1h := getOtherInt(otherMap, "cache_creation_tokens_1h")
+				cacheWrite := cacheWrite5m + cacheWrite1h
+				if cacheWrite == 0 {
+					cacheWrite = getOtherInt(otherMap, "cache_creation_tokens")
+				}
+				if cacheRead > 0 && cacheWrite > 0 {
+					inputDisplay = fmt.Sprintf("%d (缓存读 %d · 写 %d)", logItem.PromptTokens, cacheRead, cacheWrite)
+				} else if cacheRead > 0 {
+					inputDisplay = fmt.Sprintf("%d (缓存读 %d)", logItem.PromptTokens, cacheRead)
+				} else if cacheWrite > 0 {
+					inputDisplay = fmt.Sprintf("%d (缓存写 %d)", logItem.PromptTokens, cacheWrite)
 				}
 			}
 		}
 		f.SetCellValue(sheet3Name, cellName(1, row), timeStr)
 		f.SetCellValue(sheet3Name, cellName(2, row), logItem.TokenName)
 		f.SetCellValue(sheet3Name, cellName(3, row), logItem.ModelName)
-		f.SetCellValue(sheet3Name, cellName(4, row), inputTokens)
+		f.SetCellValue(sheet3Name, cellName(4, row), inputDisplay)
 		f.SetCellValue(sheet3Name, cellName(5, row), logItem.CompletionTokens)
 		f.SetCellValue(sheet3Name, cellName(6, row), formatQuotaValue(logItem.Quota))
 		f.SetCellValue(sheet3Name, cellName(7, row), logItem.UseTime)
@@ -237,6 +247,16 @@ func ExportQuotaDataExcel(c *gin.Context) {
 func cellName(col, row int) string {
 	name, _ := excelize.CoordinatesToCellName(col, row)
 	return name
+}
+
+// getOtherInt 从 Other JSON map 中安全提取整数值
+func getOtherInt(m map[string]interface{}, key string) int {
+	if v, ok := m[key]; ok {
+		if f, ok := v.(float64); ok {
+			return int(f)
+		}
+	}
+	return 0
 }
 
 // formatQuotaValue 将 quota 原始值转换为美元单位

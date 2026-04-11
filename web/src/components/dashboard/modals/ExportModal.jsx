@@ -31,10 +31,10 @@ const ExportModal = ({
 }) => {
   const formRef = useRef();
 
-  // 默认起始时间：30天前，结束时间：当前时间+1小时
+  // 默认起始时间：7天前，结束时间：当前时间+1小时
   const now = new Date();
   const [startTime, setStartTime] = useState(
-    timestamp2string(now.getTime() / 1000 - 86400 * 30),
+    timestamp2string(now.getTime() / 1000 - 86400 * 7),
   );
   const [endTime, setEndTime] = useState(
     timestamp2string(now.getTime() / 1000 + 3600),
