@@ -1,0 +1,4 @@
+interface:
+  display_name: "Sub2API 账号 JSON 补全"
+  short_description: "按模板批量补全 sub2api 账号导出 JSON 字段"
+  default_prompt: "使用 $sub2api-account-json-fix 按模板批量补全当前目录里的 sub2api 账号导出 JSON。"

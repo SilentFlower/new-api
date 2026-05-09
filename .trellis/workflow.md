@@ -153,6 +153,13 @@ Phase 3: Finish  → distill lessons + wrap-up
 No active task. **A Direct answer** — pure Q&A / explanation / lookup / chat; no file writes + one-line answer + repo reads ≤ 2 files → AI judges, no override needed.
 **B Create a task** — any implementation / code change / build / refactor work. Entry sequence: (1) `python3 ./.trellis/scripts/task.py create "<title>"` to create the task (status=planning, breadcrumb switches to [workflow-state:planning] for brainstorm + jsonl phase guidance) → (2) load `trellis-brainstorm` skill to discuss requirements with the user and iterate on prd.md → (3) once prd is done and jsonl is curated, run `task.py start <task-dir>` to enter [workflow-state:in_progress] for the implementation skeleton. **"It looks small" is NOT grounds for downgrading B to A or C**.
 **C Inline change** (per-turn only, escape hatch for B) — the user's CURRENT message MUST contain one of: "skip trellis" / "no task" / "just do it" / "don't create a task" / "跳过 trellis" / "别走流程" / "小修一下" / "直接改" / "先别建任务" → briefly acknowledge ("ok, skipping trellis flow this turn"), then inline. **Without seeing one of these phrases you must NOT inline on your own**; do not invent an override the user never said.
+<!-- BEGIN skill-garden workflow-state no-task-gate v0.5 -->
+FINAL NO-TASK GUARD (skill-garden):
+Creating/resuming a task ≠ permission to implement inline.
+After PRD ready and task started, next impl action = `trellis-route(implement)`.
+Don't infer opt-out from "small/urgent/unclear" — opt-out requires an explicit phrase in the current message (see C below).
+<!-- END skill-garden workflow-state no-task-gate v0.5 -->
+
 [/workflow-state:no_task]
 
 ### Phase 1: Plan
@@ -169,6 +176,13 @@ No active task. **A Direct answer** — pure Q&A / explanation / lookup / chat; 
 Load the `trellis-brainstorm` skill and iterate on prd.md with the user.
 Phase 1.3 (required, once): before `task.py start`, you MUST curate `implement.jsonl` and `check.jsonl` — list the spec / research files sub-agents need so they get the right context injected. You may skip only if the jsonl already has agent-curated entries (the seed `_example` row alone doesn't count).
 Then run `task.py start <task-dir>` to flip status to in_progress.
+<!-- BEGIN skill-garden workflow-state planning-handoff v0.5 -->
+FINAL PLANNING GUARD (skill-garden):
+Planning is not implementation permission.
+Complete prd.md + context first.
+After in_progress, next action = `trellis-route(implement)`, not direct edits.
+<!-- END skill-garden workflow-state planning-handoff v0.5 -->
+
 [/workflow-state:planning]
 
 <!-- Per-turn breadcrumb: shown throughout Phase 1 when codex.dispatch_mode=inline.
@@ -200,6 +214,15 @@ Then run `task.py start <task-dir>` to flip status to in_progress.
 **Sub-agent self-exemption**: if you are already running as `trellis-implement`, implement directly from the loaded task context and do NOT spawn another `trellis-implement`; if you are already running as `trellis-check`, review/fix directly and do NOT spawn another `trellis-check`. The default dispatch rule applies to the main session only.
 **Sub-agent dispatch protocol (all platforms, all sub-agents)**: When you spawn `trellis-implement` / `trellis-check` / `trellis-research`, your dispatch prompt **MUST** start with one line: `Active task: <task path from \`task.py current\`>`. No exceptions. On class-2 platforms (codex / copilot / gemini / qoder) the sub-agent depends on this line because there is no hook to inject task context. On class-1 platforms (claude / cursor / opencode / kiro / codebuddy / droid) the line is normally redundant — the hook injects context directly — but it serves as a critical fallback when the hook fails (Windows + Claude Code PreToolUse silent skip, `--continue` resume, fork distribution, hooks disabled, etc.). For `trellis-research`, the line tells the sub-agent which `{task_dir}/research/` to write into.
 **Inline override** (per-turn only, escape hatch for sub-agent dispatch): the user's CURRENT message MUST explicitly contain one of: "do it inline" / "no sub-agent" / "你直接改" / "别派 sub-agent" / "main session 写就行" / "不用 sub-agent". **Without seeing one of these phrases you must NOT inline on your own**; do not invent an override the user never said.
+<!-- BEGIN skill-garden workflow-state trellis-route v0.5 -->
+FINAL ROUTE GUARD (skill-garden):
+This guard is intentionally appended after upstream in_progress breadcrumbs and overrides earlier direct-dispatch defaults in this same <workflow-state>.
+At Phase 2.1/2.2/3.1, invoke `trellis-route(implement|check)` first.
+Do NOT spawn `trellis-implement` / `trellis-check` directly from the main session unless `trellis-route` just selected a subagent mode.
+If `trellis-route` selected inline mode, load `trellis-before-dev` / `trellis-check` / `trellis-check-all` as applicable and execute in the main session.
+ANTI-DEFER: at phase boundaries, never ask meta questions ("X or Y?", "continue?", "what's next?") — invoke `trellis-route(check)` instead.
+<!-- END skill-garden workflow-state trellis-route v0.5 -->
+
 [/workflow-state:in_progress]
 
 <!-- Per-turn breadcrumb: shown while status='in_progress' when
@@ -628,6 +651,51 @@ The AI drives a batched commit of this task's code changes so `/finish-work` can
 After the above, remind the user they can run `/finish-work` to wrap up (archive the task, record the session).
 
 ---
+
+## skill-garden Override: trellis-route routing
+
+<!-- BEGIN skill-garden enhancement v0.5 -->
+
+> Long-form rules complementing the per-turn breadcrumb. Source: github.com/SilentFlower/skill-garden.
+
+**Scope**: Phase 2.1 / 2.2 / 3.1 dispatch decisions, plus the Skill Routing + DO-NOT-skip tables. Per-turn breadcrumb covers the high-level rules; this file holds the specifics that don't fit there.
+
+### Override A — No pre-invoke chatter
+
+`trellis-route` returns 4 modes for `target=check` (check-all/check × inline/subagent) and 2 for `target=implement`. Step 1.7's recommendation is generated INSIDE the skill and surfaced via Step 2's `AskUserQuestion` — the **only** prompt point.
+
+Before invoking the skill, **never**:
+- write pre-questions ("ready to start? / shall I proceed?")
+- state "I lean towards X" or text-preview the inline/subagent options
+- surface Step 1.7 rationale ahead of time
+
+Why: pre-invoke chatter creates double-asking, forces users to reply in prose instead of using the skill's number shortcuts (1/2/3/4), and breaks the routing path.
+
+### Override B — Anti-defer rule (long-form details)
+
+The per-turn ANTI-DEFER summarizes; here are the three forbidden patterns in full.
+
+1. **Asking a meta continuation question instead of invoking trellis-route.** Mechanical check: if your draft response would end with an open-ended "should I X or Y?" and the answer determines the next workflow phase, replace it with `Skill({skill: "trellis-route", args: "target=..."})`.
+
+2. **Treating PRD-level PR1/PR2/PR3 multi-PR plans as Trellis phase boundaries.** PRs in the PRD are an implementation strategy for code-review readability — they are NOT `trellis-implement` → `trellis-check` boundaries. The `implement` phase ends when the WHOLE task is structurally done (or at a deliberate user-requested pause).
+
+3. **Inferring an inline override from a prior user turn.** "User said 'inline' two turns ago" is NOT a license to skip `trellis-route` on the current turn. Each turn at a phase boundary needs its own routing decision.
+
+**Worked example of a real violation** (committed by an Opus session, 2026-05-08, before this rule existed):
+
+> Context: just finished refactoring a 2k-line script (PR1 of a 3-PR plan listed in the PRD).
+>
+> ❌ What the model said:
+> > "PR1 done, quality gates green, 18/18 tests pass. Want me to keep going inline with PR2, or pause for you to review first?"
+>
+> ✅ What the model should have said (and done):
+> > Either:
+> > (a) Continue PR2/PR3 inline silently (since the plan was a single implement phase and the user already said "inline" for it), or
+> > (b) Invoke `Skill({skill: "trellis-route", args: "target=check"})` to surface the choice through the routing skill instead of free-form chat.
+> >
+> > In either case, NO meta question to the user.
+
+<!-- END skill-garden enhancement v0.5 -->
 
 ## Customizing Trellis (for forks)
 
