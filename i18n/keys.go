@@ -55,6 +55,12 @@ const (
 	MsgTokenExhausted            = "token.exhausted"
 	MsgTokenStatusUnavailable    = "token.status_unavailable"
 	MsgTokenDbError              = "token.db_error"
+	// Token migration messages（令牌迁移到独立账号）
+	MsgTokenMigrateForbidden        = "token.migrate_forbidden"
+	MsgTokenMigrateInvalidIds       = "token.migrate_invalid_ids"
+	MsgTokenMigrateBatchTooMany     = "token.migrate_batch_too_many"
+	MsgTokenMigrateNotFound         = "token.migrate_not_found"
+	MsgTokenMigrateUsernameConflict = "token.migrate_username_conflict"
 )
 
 // Redemption related messages

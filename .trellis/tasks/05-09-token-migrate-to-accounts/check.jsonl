@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "审查时对照后端规范总入口。"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "重点验证：所有 DB 操作走 GORM、唯一索引冲突由事务回滚 + 应用层重命名处理；不能出现 MySQL/PG 专属语法；逐令牌事务边界清晰。"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "验证迁移返回的 success/failed 状态分类与 error_msg 国际化是否符合项目错误处理规范。"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "硬性 Check：搜索整个补丁，确认任何 SysLog / RecordLog / 结构化日志中都不含明文密码；审计日志含必要的 username + token_id。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "代码质量基线：无遗留 debug 代码、命名规范、测试覆盖等。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "重点跨层校验：sk-xxx 调用链路（middleware.TokenAuth → user cache → token cache → 计费 quota.go）在迁移前后必须一致；Redis 令牌缓存里的 UserId 已被刷新；新 user 的 group 能通过 GetUserUsableGroups 校验放行 token.Group。"}
+{"file": "CLAUDE.md", "reason": "Rule 1/2/3/5/6 全部要逐条对照（JSON 包装、跨库兼容、Bun、保护标识、前端零值字段）。"}
+{"file": ".trellis/tasks/05-09-token-migrate-to-accounts/prd.md", "reason": "PRD 的 Acceptance Criteria 是 check 阶段最权威的对照清单。"}

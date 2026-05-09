@@ -48,6 +48,32 @@ export async function fetchTokenKeysBatch(tokenIds) {
 }
 
 /**
+ * 批量将所选令牌迁移到独立账号（仅超级管理员可调用）。
+ * 后端会为每个令牌创建一个新用户，并把 token.user_id 切换到新用户上；
+ * 令牌的 key / group / 额度 / 状态等其他字段保持不变，外部调用方完全无感。
+ *
+ * @param {number[]} tokenIds 待迁移令牌 ID 数组
+ * @returns {Promise<{results: Array<{
+ *   token_id: number,
+ *   token_name: string,
+ *   new_username?: string,
+ *   new_user_id?: number,
+ *   status: 'success' | 'failed',
+ *   error?: string,
+ * }>}>} 后端返回的迁移结果列表
+ */
+export async function migrateTokensToAccounts(tokenIds) {
+  const response = await API.post('/api/token/migrate', {
+    token_ids: tokenIds,
+  });
+  const { success, data, message } = response.data || {};
+  if (!success) {
+    throw new Error(message || 'Failed to migrate tokens');
+  }
+  return data || { results: [] };
+}
+
+/**
  * 获取可用的 token keys
  * @returns {Promise<string[]>} 返回 active 状态的不带 sk- 前缀的真实 token key 数组
  */

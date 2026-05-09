@@ -337,3 +337,30 @@ if !common.IsMasterNode {
 3. **布尔值硬编码**：在 WHERE 条件中使用 `1`/`true` 而非 `commonTrueVal`
 4. **日志表操作用错句柄**：日志相关操作应使用 `LOG_DB`，而非 `DB`
 5. **非原子计数器更新**：先 `SELECT` 再 `UPDATE` 计数器字段，导致并发丢失更新
+
+### User.Insert / InsertWithTx 的隐式字段覆盖（坑）
+
+**症状**：调用方设置了 `user.Quota = X` / `user.AffCode = Y` 后调用 `Insert` 或
+`InsertWithTx`，DB 里查到的却不是预期值；或者新建用户时意外多出来一个默认令牌。
+
+**原因**：`model/user.go` 里 `Insert` / `InsertWithTx` 会**强制覆盖**两个字段：
+
+```go
+user.Quota = common.QuotaForNewUser    // 不论调用方传入什么，都会被覆盖
+user.AffCode = common.GetRandomString(4) // 同样会被随机重写
+```
+
+并且 `Insert`（不是 `InsertWithTx`）在用户创建后还会读 `constant.GenerateDefaultToken`，
+若开启则**额外创建一条令牌**，污染令牌列表。
+
+**正确写法**：
+
+| 场景 | 选用 | 后续动作 |
+|---|---|---|
+| 程序化批量创建用户、需要精确 quota | `InsertWithTx` | 在同一事务内 `tx.Model(&User{}).Where("id=?", u.Id).Update("quota", target)` |
+| 需要稳定的 AffCode（如做迁移映射） | `InsertWithTx` 后 `Update("aff_code", target)` | 否则下次重新随机 |
+| 不希望触发默认令牌 | **必须** `InsertWithTx`（不要 `Insert`） | — |
+| 普通注册流程（quota=新人额度即可） | `Insert` | 无需额外动作 |
+
+**何时踩到**：批量用户创建脚本、令牌迁移、从旧系统导入用户、测试用户工厂等场景。
+普通注册不会暴露这个坑，因为新人额度就是 `QuotaForNewUser`。

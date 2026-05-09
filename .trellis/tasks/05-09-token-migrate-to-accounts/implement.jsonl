@@ -1,0 +1,10 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "后端开发整体规范入口，明确分层与开发前必读清单。"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "新增 controller/token_migrate.go 与 model/token_migrate.go 时遵守 Router→Controller→Service→Model 分层与命名约定。"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "迁移涉及多表（users / tokens）操作；CLAUDE.md Rule 2 要求 SQLite/MySQL/PostgreSQL 三库兼容；逐令牌独立事务与 GORM 用法需要严格遵守。"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "迁移有部分成功语义，每个令牌可能返回 success / failed + error_msg；错误响应格式与 i18n 必须遵循项目规范。"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "硬性约束：迁移流程绝不能把生成密码写入日志；同时需要记录 LogTypeManage 审计条目，必须遵守日志规范。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "通用代码质量门控（禁止模式 / 必需模式 / 测试要求）。"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "迁移要尽量复用 User.InsertWithTx / cacheSetToken / GetTokenKeysByIds / RootAuth 等既有实现，禁止平行新写。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "改动横跨 Router / Controller / Model / 前端 / Redis 缓存，最关键是迁移后 token 的 sk-xxx 调用链路（鉴权→缓存→计费）必须无感工作，需要按跨层契约思考。"}
+{"file": "CLAUDE.md", "reason": "项目级规则：Rule 1(JSON 包装)、Rule 2(三库兼容)、Rule 3(前端用 Bun)、Rule 5(保护 new-api / QuantumNous 标识) 都直接适用。"}
+{"file": ".trellis/tasks/05-09-token-migrate-to-accounts/prd.md", "reason": "本任务 PRD：包含命名规则、quota/group 派生规则、失败语义、安全约束等所有决策。"}

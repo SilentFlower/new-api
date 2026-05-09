@@ -48,6 +48,11 @@ token.expired: "該令牌已過期"
 token.exhausted: "該令牌額度已用盡 TokenStatusExhausted[sk-{{.Prefix}}***{{.Suffix}}]"
 token.status_unavailable: "該令牌狀態不可用"
 token.db_error: "無效的令牌，資料庫查詢出錯，請聯繫管理員"
+token.migrate_forbidden: "僅超級管理員可執行令牌遷移操作"
+token.migrate_invalid_ids: "請提供 1-100 個有效的令牌 ID"
+token.migrate_batch_too_many: "單次遷移最多 {{.Max}} 個令牌"
+token.migrate_not_found: "令牌不存在或不屬於當前使用者"
+token.migrate_username_conflict: "用戶名衝突重試次數過多，請修改令牌名後重試"
 
 # Redemption messages
 redemption.name_length: "兌換碼名稱長度必須在1-20之間"

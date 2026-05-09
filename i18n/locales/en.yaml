@@ -47,6 +47,11 @@ token.expired: "This token has expired"
 token.exhausted: "This token quota is exhausted TokenStatusExhausted[sk-{{.Prefix}}***{{.Suffix}}]"
 token.status_unavailable: "This token status is unavailable"
 token.db_error: "Invalid token, database query error, please contact administrator"
+token.migrate_forbidden: "Only the root administrator can migrate tokens"
+token.migrate_invalid_ids: "Please provide 1-100 valid token IDs"
+token.migrate_batch_too_many: "A single migration request can include at most {{.Max}} tokens"
+token.migrate_not_found: "Token does not exist or does not belong to the current user"
+token.migrate_username_conflict: "Too many username conflicts; please rename the token and retry"
 
 # Redemption messages
 redemption.name_length: "Redemption code name length must be between 1-20"

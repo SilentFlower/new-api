@@ -258,6 +258,10 @@ func SetApiRouter(router *gin.Engine) {
 			tokenRoute.DELETE("/:id", controller.DeleteToken)
 			tokenRoute.POST("/batch", controller.DeleteTokenBatch)
 			tokenRoute.POST("/batch/keys", middleware.CriticalRateLimit(), middleware.DisableCache(), controller.GetTokenKeysBatch)
+			// 令牌迁移到独立账号：仅超级管理员可调用，限频走 CriticalRateLimit。
+			// 注意：此路由继承 tokenRoute 上的 UserAuth()，再叠加 RootAuth() 做权限收紧；
+			// 中间件按声明顺序执行，无副作用。
+			tokenRoute.POST("/migrate", middleware.RootAuth(), middleware.CriticalRateLimit(), controller.MigrateTokensToAccounts)
 		}
 
 		usageRoute := apiRouter.Group("/usage")

@@ -17,11 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Button, Space } from '@douyinfe/semi-ui';
 import { showError } from '../../../helpers';
+import { isRoot } from '../../../helpers/utils';
 import CopyTokensModal from './modals/CopyTokensModal';
 import DeleteTokensModal from './modals/DeleteTokensModal';
+import MigrateToAccountsModal from './modals/MigrateToAccountsModal';
 
 const TokensActions = ({
   selectedKeys,
@@ -29,11 +31,17 @@ const TokensActions = ({
   setShowEdit,
   batchCopyTokens,
   batchDeleteTokens,
+  refresh,
   t,
 }) => {
   // Modal states
   const [showCopyModal, setShowCopyModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showMigrateModal, setShowMigrateModal] = useState(false);
+
+  // 仅超级管理员（role >= 100）可见迁移按钮；后端会再校一次 RootAuth。
+  // 用 useMemo 锁住一次，避免每次渲染都读 localStorage。
+  const isRootUser = useMemo(() => isRoot(), []);
 
   // Handle copy selected tokens with options
   const handleCopySelectedTokens = () => {
@@ -53,10 +61,27 @@ const TokensActions = ({
     setShowDeleteModal(true);
   };
 
+  // Handle migrate selected tokens
+  const handleMigrateSelectedTokens = () => {
+    if (selectedKeys.length === 0) {
+      showError(t('请至少选择一个令牌！'));
+      return;
+    }
+    setShowMigrateModal(true);
+  };
+
   // Handle delete confirmation
   const handleConfirmDelete = () => {
     batchDeleteTokens();
     setShowDeleteModal(false);
+  };
+
+  // Handle migrate success: close modal + refresh list
+  const handleMigrateSuccess = () => {
+    setShowMigrateModal(false);
+    if (typeof refresh === 'function') {
+      refresh();
+    }
   };
 
   return (
@@ -85,6 +110,17 @@ const TokensActions = ({
           {t('复制所选令牌')}
         </Button>
 
+        {isRootUser && (
+          <Button
+            type='secondary'
+            className='flex-1 md:flex-initial'
+            onClick={handleMigrateSelectedTokens}
+            size='small'
+          >
+            {t('迁移到独立账号')}
+          </Button>
+        )}
+
         <Button
           type='danger'
           className='w-full md:w-auto'
@@ -109,6 +145,16 @@ const TokensActions = ({
         selectedKeys={selectedKeys}
         t={t}
       />
+
+      {isRootUser && (
+        <MigrateToAccountsModal
+          visible={showMigrateModal}
+          selectedTokens={selectedKeys}
+          onCancel={() => setShowMigrateModal(false)}
+          onSuccess={handleMigrateSuccess}
+          t={t}
+        />
+      )}
     </>
   );
 };
