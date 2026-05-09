@@ -77,8 +77,9 @@ const MigrateToAccountsModal = ({
       {
         title: t('密钥'),
         dataIndex: 'key',
-        // key 已经在 list 接口被 mask 处理过，这里仅展示
-        render: (text) => text || '-',
+        // key 已经在 list 接口被 mask 处理过；展示时补上 sk- 前缀，
+        // 与令牌列表（TokensColumnDefs.jsx）的 displayedKey 拼接方式保持一致。
+        render: (text) => (text ? `sk-${text}` : '-'),
       },
     ],
     [t],
