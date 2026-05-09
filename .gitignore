@@ -21,7 +21,12 @@ tiktoken_cache
 .cache
 web/bun.lock
 plans
-.claude
+.claude/*
+!.claude/agents/
+!.claude/commands/
+!.claude/hooks/
+!.claude/skills/
+!.claude/settings.json
 
 electron/node_modules
 electron/dist
