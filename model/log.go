@@ -523,7 +523,7 @@ func GetLogDetailByKeyModel(startTimestamp int64, endTimestamp int64, username s
 }
 
 // exportLogMaxRows 导出日志的最大行数限制，防止大数据量导致内存溢出
-const exportLogMaxRows = 100000
+const exportLogMaxRows = 500000
 
 // GetLogsForExport 获取指定条件的消费日志用于导出（不分页）
 // 仅查询消费类型日志（type=2），按创建时间升序排列
