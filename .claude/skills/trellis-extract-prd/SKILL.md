@@ -1,8 +1,8 @@
 ---
-name: trellis-create-prd
-description: "Generate prd.md + task.json by faithfully extracting one requirement from a source requirements document."
+name: trellis-extract-prd
+description: "Extract a single requirement faithfully from a source requirements document into structured prd.md + task.json; forbid embellishment, preserve UI copy verbatim, annotate source positions. Triggers: 「提取需求」「从需求文档抽 PRD」「严格提取 PRD」「extract PRD」. Not for conversational PRD generation (trellis-brainstorm) or task-spec coverage audit (trellis-verify-task)."
 ---
-# Create PRD — 基于原始需求文档
+# Extract PRD — 基于原始需求文档
 
 从原始需求文档中提取指定需求的完整内容，结构化为 `prd.md`。**正文必须有据可依，禁止自行发挥**；仅允许在「本任务 TL;DR」与「本任务范围」两块做结论性提炼（且必须能在原文找到依据）。
 
@@ -192,6 +192,6 @@ python3 .trellis/scripts/task.py create "<PRD标题>" \
 | 入口 | 形态 | 职责 | 时机 |
 |------|------|------|------|
 | `trellis-plan-version` | skill | 版本级需求扫描 + 覆盖度确认 | 版本规划阶段 |
-| `trellis-create-prd` | skill（本技能） | 单个需求的 PRD + task.json 生成 | 任务开发前 |
-| `trellis-verify-prd` | skill | 校验已有 PRD 的准确性 + 覆盖度 | PRD 生成后 |
-| `trellis-brainstorm` | skill | 对话式需求发现（无原始文档时） | 需求模糊时 |
+| `trellis-brainstorm` | skill（上游） | 对话式需求发现（**无原始文档时**） | 需求模糊时 |
+| `trellis-extract-prd` | skill（本技能） | 基于原始文档**严格提取**单个需求的 PRD + task.json | 任务开发前、有正式需求文档时 |
+| `trellis-verify-task` | skill | 校验任务三件套（prd / design / implement）准确性 + 覆盖度 + 跨层一致性 | PRD / Design / Implement 生成后 |

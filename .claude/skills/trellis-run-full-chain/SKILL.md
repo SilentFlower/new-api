@@ -325,7 +325,7 @@ Playbook 内容范围（**跨任务可复用的环境常量**，不含具体场�
 | `trellis-check` | skill | lint / typecheck / spec 规范 |
 | `trellis-check-all` | skill | PRD→代码 静态对照 + 假设验证 |
 | **`trellis-run-full-chain`** | skill（本技能）| **运行时行为跨层验证（UI+API+DB）** |
-| `trellis-verify-prd` | skill | PRD↔源需求文档对账 |
+| `trellis-verify-task` | skill | 三件套（prd/design/implement）↔源需求文档 + 跨层一致性对账 |
 
 ---
 

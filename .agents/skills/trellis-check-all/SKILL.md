@@ -1,6 +1,6 @@
 ---
 name: trellis-check-all
-description: "Full pre-commit/PR review in 3 steps: PRD-implementation correctness → 5-dim assumption validation (API, component context, data history/flow, tests) → cross-layer completeness + spec compliance (delegates to trellis-check). Pauses on ❌. Triggers: 「全面检查」「提交前检查」「check-all」「从 PRD 到代码过一遍」. For lint/spec-only, use trellis-check directly."
+description: "Full pre-commit/PR review in 3 steps: spec-trio implementation correctness (code ↔ prd.md / design.md / implement.md when present) → 5-dim assumption validation (API, component context, data history/flow, tests) → cross-layer completeness + spec compliance (delegates to trellis-check). Pauses on ❌. Triggers: 「全面检查」「提交前检查」「check-all」「从 PRD 到代码过一遍」「从三件套到代码过一遍」. For lint/spec-only, use trellis-check directly."
 ---
 # Check All — 全维度代码检查
 
@@ -27,7 +27,7 @@ description: "Full pre-commit/PR review in 3 steps: PRD-implementation correctne
 
 | 顺序 | 维度 | 检查什么 | 对照物 |
 |------|------|---------|--------|
-| 1 | PRD 实现 | 实现对不对 | PRD |
+| 1 | 三件套实现 | 实现对不对 | `prd.md`（必读）+ `design.md` / `implement.md`（若存在） |
 | 2 | 假设验证 | 假设对不对 | 源码/真实数据 |
 | 3 | 完整性+规范性（trellis-check） | 改全了没 + 写得规范吗 | git diff 影响范围 + spec 开发规范 |
 
@@ -42,32 +42,45 @@ git log --oneline -10
 
 如果无变更，提示用户并终止。
 
-读取当前任务的 `prd.md`（由 trellis 的 session hook 自动加载，或手动确认任务目录）。如果没有 PRD，跳过 Step 1 从 Step 2 开始。
+读取当前任务的规划三件套：`prd.md`（必读，没有则跳过 Step 1 从 Step 2 开始）、`design.md`（若存在）、`implement.md`（若存在）。三件套由 trellis 的 session hook 自动加载，或手动确认任务目录。
+
+> **Lightweight 任务**：通常只有 `prd.md`，Step 1 内的 Design / Implement 维度自动跳过
+> **Complex 任务**：三件套齐全，Step 1 对照矩阵覆盖三层（行为 / 契约 / 执行清单）
 
 ---
 
-## Step 1: 对照 PRD 检查实现
+## Step 1: 对照规划三件套检查实现
 
-**重点**：PRD 中的每条需求和 AC 是否都正确实现了？有没有行为偏差、功能缺失、文案不一致？
+**重点**：三件套（PRD / Design / Implement）中的每条规划是否都正确实现了？有没有行为偏差、契约不一致、执行清单漏落地？
 
 ### 1.1 核心原则（不可违反）
 
-1. **PRD 是验收标准** — 每条 Requirement 和 AC 都必须在代码中找到对应实现，找不到即为缺失
+1. **规划三件套都是验收依据** — PRD 的 Requirement / AC 是**行为基线**；Design（若存在）的 API 契约、数据模型、数据流、rollback 设计是**技术基线**；Implement（若存在）的有序步骤是**落地基线**。三层都要在代码中找到对应实现，找不到即为缺失
 2. **逐条追踪，不跳不漏** — 不能只看 happy path，PRD 中提到的边界条件、异常处理、空值场景都要追踪
 3. **读代码，不猜代码** — 必须实际读到实现代码，不能因为"应该写了"就标记通过
 4. **文案逐字比对** — PRD 中的 UI 文案（按钮、提示语、Toast、弹窗、表头、placeholder）必须与代码中的字面值**完全一致**
 5. **只报事实，不加发挥** — 报告中只陈述 PRD 要求 vs 代码实现的差异，不要加入 PRD 之外的建议
 
-### 1.2 分解 PRD 为可验证条目
+### 1.2 分解三件套为可验证条目
 
-从 PRD 中提取（按优先级）：
+按优先级提取以下条目（design / implement 维度仅在对应文件存在时启用）：
+
+**来自 `prd.md`（总是启用）**：
 1. **Acceptance Criteria** — 最直接的验证条目
 2. **Requirements** — 每条需求对应的行为
 3. **业务规则** — 条件判断、计算逻辑、状态流转
 4. **UI 文案** — 所有用户可见文字
 5. **边界/异常场景** — 空值处理、上限、错误提示等
 
-每条记录格式：`[条目ID] <PRD 原文摘要> — 来源：<PRD 中位置>`
+**来自 `design.md`（complex 任务启用）**：
+
+6. **Design 契约** — API 路径 / 方法 / 入参 / 出参、数据模型字段名+类型+约束、数据流路径、关键 tradeoff 决策、rollout / rollback 设计
+
+**来自 `implement.md`（complex 任务启用）**：
+
+7. **Implement 执行清单** — 每个有序步骤是否落地、validation commands 的前置条件是否满足（**静态检查**；真跑命令归 Step 3 的 trellis-check 或用户执行）、review gates 是否到位、rollback points 是否实际可用
+
+每条记录格式：`[条目ID] <三件套原文摘要> — 来源：<prd / design / implement 中位置>`
 
 ### 1.3 逐条追踪代码实现
 
@@ -81,6 +94,8 @@ git log --oneline -10
 | UI 文案 | grep 关键字，前端代码精确匹配 |
 | 计算/转换逻辑 | service 层，读具体算法 |
 | 状态流转 | 状态枚举 + 转换条件代码 |
+| Design 契约（API / schema） | 实际 Controller / DTO / DB migration，对照路径、方法、字段名、类型、必填、默认值 |
+| Implement 执行步骤 | 代码 / 配置 / 迁移脚本是否处于 implement 步骤要求的状态（如：步骤说"加索引"则验证 migration 文件存在） |
 
 对每条标记状态：
 
@@ -108,8 +123,8 @@ git log --oneline -10
 **❌ 实现偏差 / 🔴 未实现 / ⚠️ 部分实现**：
 
 ```markdown
-##### [条目ID] <PRD 原文摘要>
-- **PRD 要求**：<原文>
+##### [条目ID] <三件套原文摘要> ｜ 来源：<prd / design / implement>
+- **规划要求**：<原文>
 - **实际实现**：<代码行为描述>
 - **代码位置**：<文件路径:行号>
 - **偏差/缺失说明**：<具体差异或缺失点>
@@ -264,7 +279,7 @@ git log --oneline -10
 
 | 维度 | 状态 | 问题数 | 关键问题 |
 |------|------|--------|---------|
-| PRD 实现 | ✅/❌ | N | <最严重的问题摘要> |
+| 三件套实现 | ✅/❌ | N | <最严重的问题摘要 + 来源层> |
 | 假设验证 | ✅/❌ | N | <最严重的问题摘要> |
 | 跨层完整+规范 | ✅/❌ | N | <最严重的问题摘要> |
 
@@ -307,6 +322,7 @@ git log --oneline -10
 - 每个维度独立输出报告，最后汇总
 - 如果某个维度发现严重问题（❌ / 🔴），会暂停询问是否先修复
 - 如果当前任务没有 PRD，自动跳过 Step 1，从 Step 2 开始
+- Step 1 对照矩阵随任务复杂度自动扩展：lightweight 仅查 prd 五类条目；complex 在场则追加 design 契约 + implement 执行清单两类条目
 - 只想快速检查某一维度：
   - 只查规范/跨层：直接用 `trellis-check` skill
   - 只查 PRD 或假设：在 prompt 里指定"只做 Step 1"或"只做 Step 2"
@@ -319,6 +335,8 @@ git log --oneline -10
 - ❌ 只检查 happy path，忽略 PRD 提到的边界/异常场景
 - ❌ 文案只看"意思对"就通过（必须逐字一致）
 - ❌ 只查后端不查前端，或反之
-- ❌ 检查报告中加入 PRD 之外的改进建议（只对照 PRD，不发挥）
+- ❌ 检查报告中加入三件套之外的改进建议（只对照规划，不发挥）
 - ❌ 发现问题直接改，不经用户确认
 - ❌ 委派给子 agent 跑各 Step（见执行模式段）
+- ❌ Complex 任务下只对照 PRD，忽略 `design.md` / `implement.md`（三层都要查）
+- ❌ 把 `implement.md` 的 validation commands 真跑算到 Step 1（Step 1 是静态对照；真跑归 Step 3 或用户执行）

@@ -46,7 +46,9 @@ option label 里**不写"（推荐）"后缀**——推荐落点通过 question 
 
 ## Step 2: 询问用户
 
-调用 `AskUserQuestion`。**选项 label 前缀 1/2/3/4，方便用户直接打数字快速选**。`question` 字段首句必须是 Step 1.7 输出的推荐理由（1-2 句中文），**不可省略**。
+优先调用 `AskUserQuestion`。**选项 label 前缀 1/2/3/4，方便用户直接打数字快速选**。`question` 字段首句必须是 Step 1.7 输出的推荐理由（1-2 句中文），**不可省略**。
+
+如果当前平台或模式没有 `AskUserQuestion` / `request_user_input`，不要选择 inline 或 subagent 继续。改用普通聊天消息原样呈现同一组编号选项，并停止等待用户回复；用户回复数字后再进入 Step 2.5 / 2.6 / 3。禁止写"request_user_input 当前不可用，所以记录为 inline/subagent 路径并继续"。
 
 ### target = implement（4 选项）
 
@@ -128,7 +130,7 @@ echo "subagent" > .trellis/.route-prefs.tmp
 
 1. **决策与执行分离**：本 skill 只输出指令，下一轮由主 agent 调工具
 2. **严格执行用户选择**：路由结论一旦输出，主 agent 必须按指令执行，不可"出于谨慎"再换路径
-3. **无偏好命中必问，无任何 fallback**：Step 1.5 未命中偏好时，Step 2 询问是强制步骤；缺工具/权限是平台问题，**不是**绕过询问的合法理由
+3. **无偏好命中必问，无自动 fallback**：Step 1.5 未命中偏好时，Step 2 询问是强制步骤；缺工具/权限时必须退化为普通聊天询问并等待用户回复，**不是**绕过询问或自行选择路径的合法理由
 4. **推荐由主 agent 上下文判断生成**（Step 1.7），不在 SKILL.md 里硬编码"哪个是推荐项"——避免静态偏好和当下任务实际不匹配
 5. **本会话偏好仅 implement 适用**：check 每次询问（避免累积偏好导致提交前漏跑 check-all）
 6. **config 联动仅 implement subagent 路径**：`subagent_skip_compile` 仅在 target=implement + 选 subagent 时读取并注入 prompt
@@ -138,7 +140,8 @@ echo "subagent" > .trellis/.route-prefs.tmp
 ## 反模式
 
 - ❌ 本 skill 内部直接调用 `Agent` / `Skill` 工具（违反"决策与执行分离"）
-- ❌ 自行编造"工具/权限/平台不支持子代理"等理由跳过 Step 2 询问（**无偏好命中时必须 AskUserQuestion，SKILL.md 没有任何 fallback 分支**；缺能力是平台问题，不是绕过路由的借口）
+- ❌ 自行编造"工具/权限/平台不支持子代理"等理由跳过 Step 2 询问（**无偏好命中时必须询问用户**；交互工具不可用时用普通聊天询问并等待，不能绕过路由）
+- ❌ `AskUserQuestion` / `request_user_input` 不可用时，记录为 inline 或 subagent 路径并继续
 - ❌ Step 1.7 推荐理由空着、随便写一句敷衍、或不放进 question 文案（推荐必须基于当前任务的具体上下文，给用户可判断依据）
 - ❌ check 端默认降级到轻量 trellis-check，特别是 pre-commit Phase 3.1（除非 Step 1.7 已显式说明"改动仅 lint/重命名级别"才走 check）
 - ❌ check-all 选项被错误降级为普通 trellis-check（必须优先 trellis-check-all skill / subagent）
