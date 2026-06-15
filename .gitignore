@@ -8,6 +8,9 @@ upload
 build
 *.db-journal
 logs
+web/default/dist
+web/classic/dist
+web/node_modules
 web/dist
 .env
 one-api
@@ -19,7 +22,6 @@ tiktoken_cache
 .gocache
 .gomodcache/
 .cache
-web/bun.lock
 plans
 .claude/*
 !.claude/agents/
@@ -27,6 +29,7 @@ plans
 !.claude/hooks/
 !.claude/skills/
 !.claude/settings.json
+.cursor
 
 electron/node_modules
 electron/dist
@@ -34,5 +37,7 @@ data/
 .gomodcache/
 .gocache-temp
 .gopath
-
+.test
 token_estimator_test.go
+skills-lock.json
+.playwright-mcp
