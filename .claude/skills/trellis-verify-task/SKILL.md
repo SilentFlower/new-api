@@ -1,6 +1,6 @@
 ---
 name: trellis-verify-task
-description: "Audit task planning artifacts (prd.md, plus design.md and implement.md when present) against the original requirements doc AND across layers via forward checks + reverse coverage scans + cross-layer consistency; flag missing/misinterpreted/embellished/UI-copy-mismatch/cross-layer-drift items and propose ONE consolidated edit list. Triggers: 「校验任务」「校验三件套」「对照原始需求」「verify task spec」「verify task」. Not for PRD generation (trellis-brainstorm/trellis-extract-prd) or implementation-vs-spec check (trellis-check-all)."
+description: "Audit task planning artifacts (prd.md, plus design.md and implement.md when present) against the original requirements doc AND across layers via forward checks + reverse coverage scans + cohesive task boundary + version wave consistency; flag missing/misinterpreted/embellished/UI-copy-mismatch/cross-layer-drift items and propose ONE consolidated edit list. Triggers: 「校验任务」「校验三件套」「对照原始需求」「verify task spec」「verify task」. Not for PRD generation (trellis-brainstorm/trellis-extract-prd) or implementation-vs-spec check (trellis-check-all)."
 ---
 # 校验任务 — 三件套统一校验
 
@@ -8,6 +8,7 @@ description: "Audit task planning artifacts (prd.md, plus design.md and implemen
 
 - **Lightweight 任务**（只有 `prd.md`）：仅做 PRD 准确性 + 覆盖度校验
 - **Complex 任务**（含 `design.md` 和/或 `implement.md`）：在上述基础上追加 PRD↔Design / Design↔Implement / 跨层一致性三道校验
+- **版本规划任务**（存在 `doc/<版本>/任务拆分与waves.md` 或 PRD / `task.json.meta.version_plan` 指向版本规划产物）：在单 task 校验之外，追加“版本需求 -> 内聚 task -> wave”覆盖度、粒度和边界校验
 
 发现的所有偏差**一次性汇总**为一份完整修正清单，获得用户**单次确认**后批量更新，不分层逐次确认。
 
@@ -23,6 +24,9 @@ description: "Audit task planning artifacts (prd.md, plus design.md and implemen
 6. **版本变更全覆盖** — 原始需求中属于本次版本的所有变更内容都必须被某个任务/PRD 覆盖，不得遗漏
 7. **跨层不可发明** — 下层（Design / Implement）不得引入上层（PRD）未提及的需求或行为；只能引入"实现上必需的技术决策"，并标注"实现必需"原因
 8. **修正清单一次性给完整** — 不要边发现边改，也不要按层分次请用户确认。一次扫完，一次给清单，一次确认，一次落盘
+9. **版本规划不替代原始需求** — 版本规划产物用于校验 task 边界、wave 归属和覆盖矩阵；原始需求文档仍是需求内容和文案的最终权威
+10. **task 必须是内聚闭环** — 一个版本可以拆多个 task，但每个 task 必须可开发、可自测、可验收；不能按章节 / 页面 / 接口 / 字段机械碎拆，也不能把整个版本塞进一个过大的 task
+11. **wave 是版本级批次** — wave 用来组织多个内聚 task 的分批提测 / 分批交付，不是 `task.py` 状态，也不强制一个 wave 对应一个 task
 
 ---
 
@@ -31,6 +35,7 @@ description: "Audit task planning artifacts (prd.md, plus design.md and implemen
 - 任务三件套刚写完，尚未进入开发，需要对照原始需求文档做正反双向核对
 - 需求文档更新后，想确认 PRD / Design / Implement 是否仍完整反映了最新版本的所有变更
 - 多任务 / 多 PRD 并行时，怀疑某次版本变更被漏挂到任何任务下
+- 已通过 `trellis-plan-version` 生成版本级内聚 task 候选和 wave 编排，想确认单 task PRD 与版本规划是否一致
 - 怀疑 Design 或 Implement 跟 PRD 漂移（命名、边界、UI 文案任一不一致）
 
 ---
@@ -56,7 +61,11 @@ python3 ./.trellis/scripts/task.py list
 
 ### Step 2: 获取原始需求文档
 
-**必须主动获取原始需求文档来源**。按以下优先级查找：
+**必须主动获取原始需求文档来源**。同时检查是否存在版本规划产物。
+
+#### 2.1 获取原始需求文档
+
+按以下优先级查找：
 
 1. **任务目录下的附件** — 检查任务目录下是否有 `requirements.md`、`spec.md`、`需求.md`、`*.xlsx`、`*.pdf` 等文件
 2. **PRD 中的引用链接 / Technical Notes** — 检查 PRD 头部 `> 来源:` 行或 Technical Notes 中是否引用了外部文档路径
@@ -71,6 +80,27 @@ python3 ./.trellis/scripts/task.py list
 ```
 
 > **[!] 严禁在没有原始需求文档的情况下进行 Step 3 / 3.5 校验** — 没有参照物的校验没有意义。Step 4 / 5 / 6 是内部一致性校验，不强依赖原始文档，但仍推荐先有原始文档以便交叉印证。
+
+#### 2.2 获取版本规划产物（如有）
+
+按以下优先级查找：
+
+1. **`task.json.meta.version_plan`** — 如果当前 task 写了版本规划路径，优先使用
+2. **PRD 的「版本规划上下文」或 Technical Notes** — 查找 `版本规划`、`version_plan`、`任务拆分与waves.md`
+3. **默认路径** — 根据版本号尝试 `doc/<版本>/任务拆分与waves.md`
+4. **用户提供** — 如果用户明确要做版本级校验但上述都没有，询问版本规划产物路径
+
+如果版本规划产物存在，读取其中：
+- task 候选列表
+- 每个 task 的范围、非范围、来源需求、散射组、依赖、可验收结果
+- wave 计划
+- 覆盖度矩阵
+- 依赖关系
+- 争议 / 待确认
+
+如果版本规划产物不存在：
+- 跳过 Step 3.6
+- 不要编造 wave 或 task 候选
 
 ### Step 3: 原始需求 ↔ prd.md（正向准确性校验）
 
@@ -125,6 +155,79 @@ Step 3.5 是**反向检查**（原始文档里本次版本的变更 → PRD 里�
 
 > **特别注意散射型变更**：同一个功能点可能散布在多个需求单元中。
 > 即使主需求已覆盖，也要检查所有关联位置。
+
+### Step 3.6: 版本规划覆盖校验（存在版本规划产物时）
+
+当存在 `doc/<版本>/任务拆分与waves.md` 或显式版本规划产物时，追加版本级对照。
+
+校验目标不是让 task 数量越多越好，也不是把版本压成一个 task；目标是确认版本需求被拆成若干内聚、可验收、可编排到 wave 的 task。
+
+#### 3.6.0 task 粒度与内聚性
+
+逐个读取 task 候选，检查它是否是合理的开发闭环：
+
+| 检查项 | 说明 |
+|--------|------|
+| **内聚闭环** | task 是否围绕同一业务或技术闭环，而不是多个无关模块拼盘 |
+| **不过散** | task 是否只剩孤立字段、按钮、页面小块、接口小块或文档章节切片 |
+| **不过大** | task 是否横跨多个可独立开发 / 验收的闭环，导致边界、并行和验收失控 |
+| **闭环未被拆散** | 页面、接口、数据、状态流转、导出、权限等同一闭环是否被拆到多个互相等待的 task |
+| **散射组归组合理** | 同一字段 / 规则 / 权限 / 校验 / 导出链路是否归到同一 task，或同一 wave 下有明确边界 |
+| **可验收结果明确** | task 完成后是否能说明“测试验什么” |
+
+判定规则：
+- 只对应文档章节、单个页面、单个接口、单个字段、单个按钮，且不能独立验收 → 标记 🔴 过散
+- 横跨多个互不相关业务域，且可自然拆成多个独立闭环 → 标记 🔴 过大
+- 同一业务闭环被拆成多个 task，任一 task 单独完成都是半成品 → 标记 🔴 闭环被拆散
+- task 边界合理但依赖 / 非范围 / 验收结果未写清 → 标记 ⚠️ 边界不清
+
+#### 3.6.1 版本需求 -> task 覆盖
+
+逐条读取版本规划产物的覆盖度矩阵和 task 候选列表，检查：
+
+| 检查项 | 说明 |
+|--------|------|
+| **需求已覆盖** | 每个版本需求条目都至少归属一个 task |
+| **需求未覆盖** | 覆盖度矩阵中无 task，或 task 候选列表没有对应范围 |
+| **重复覆盖** | 多个 task 覆盖同一需求，但没有明确主次 / 边界 |
+| **散射组完整** | 同一散射组是否被同一个 task 或同一个 wave 有意识地归组 |
+| **覆盖粒度合理** | 覆盖 task 是否是内聚闭环，而不是把一个需求拆成不可验收的碎片 |
+
+#### 3.6.2 task -> wave 覆盖
+
+逐个检查 task 候选：
+
+| 检查项 | 说明 |
+|--------|------|
+| **已归 wave** | task 出现在某个 wave 的包含 task 中 |
+| **未归 wave** | task 没有任何 wave 归属 |
+| **半成品标注** | 不可独立提测 task 是否说明依赖哪个 wave |
+| **依赖一致** | wave 前置条件是否覆盖 task 依赖 |
+
+#### 3.6.3 wave 可提测性
+
+逐个检查 wave：
+
+| 检查项 | 说明 |
+|--------|------|
+| **提测目标明确** | 说明这一批完成后测试能验什么 |
+| **前置条件明确** | 列出依赖 task、外部系统、数据准备 |
+| **完成条件明确** | 有可判断的验收 / 完成标准 |
+| **不是半成品批次** | 只有基础设施、迁移、公共组件或接口契约的批次不得标为可独立提测 |
+
+#### 3.6.4 单 task PRD 与版本规划边界一致
+
+如果当前校验的是单个 task：
+
+| 检查项 | 说明 |
+|--------|------|
+| **PRD 指向正确 task 候选** | PRD / `task.json.meta` 的 task 候选、wave、来源需求能在版本规划产物中找到 |
+| **Scope 不越界** | PRD 的 ✅ 本任务实现不超过版本规划中 task 候选范围 |
+| **Scope 不碎化** | PRD 没有只截取版本规划 task 候选中的页面 / 接口 / 字段碎片，除非版本规划明确允许 |
+| **非范围一致** | PRD 的 ❌ 不在范围覆盖版本规划中明确排除的内容 |
+| **来源需求一致** | `source_requirements` 与版本规划覆盖矩阵一致 |
+
+> Step 3.6 的输出必须进入统一报告。不要因为单 task PRD 通过了原始需求校验，就跳过版本级 task / wave 边界校验。
 
 ### Step 4: prd.md ↔ design.md（仅 Complex 任务）
 
@@ -244,6 +347,38 @@ Step 3.5 是**反向检查**（原始文档里本次版本的变更 → PRD 里�
 
 ---
 
+### 二点五、版本规划覆盖校验（存在版本规划产物时）
+
+#### 2.5.0 task 粒度和内聚性
+- ✅ 内聚: X ｜ 🔴 过散: X ｜ 🔴 过大: X ｜ ⚠️ 边界不清: X
+
+| Task | 范围摘要 | 主要 Wave | 状态 | 问题 |
+|------|----------|-----------|------|------|
+
+#### 2.5.1 版本需求 -> task
+- ✅ 已覆盖: X ｜ 🔴 未覆盖: X ｜ ⚠️ 重复 / 边界不清: X
+
+| 需求条目 | 来源位置 | 覆盖 task | 状态 | 问题 |
+|----------|----------|-----------|------|------|
+
+#### 2.5.2 task -> wave
+- ✅ 已归 wave: X ｜ 🔴 未归 wave: X ｜ ⚠️ 半成品标注不清: X
+
+| Task | Wave | 单 task 可提测 | 状态 | 问题 |
+|------|------|---------------|------|------|
+
+#### 2.5.3 wave 可提测性
+- ✅ 可独立提测: X ｜ 🔴 不可提测却标为可提测: X ｜ ⚠️ 条件不清: X
+
+| Wave | 提测目标 | 前置条件 | 完成条件 | 状态 |
+|------|----------|----------|----------|------|
+
+#### 2.5.4 当前 PRD 与版本规划边界
+| 检查项 | PRD / task.json | 版本规划 | 状态 |
+|--------|-----------------|----------|------|
+
+---
+
 ### 三、prd.md ↔ design.md（仅 Complex）
 
 #### 3.1 正向（Design → PRD）
@@ -300,7 +435,8 @@ Step 3.5 是**反向检查**（原始文档里本次版本的变更 → PRD 里�
 ### prd.md
 1. **<需求点>**（Step 3 ❌ 曲解）: <原 PRD 内容> → <修正后内容>
 2. **<需求点>**（Step 3.5 🔴 缺失）: 补充章节 ... → <建议内容>
-3. ...
+3. **<版本规划边界>**（Step 3.6 ❌ Scope 越界）: <PRD 当前 Scope> → <版本规划允许范围>
+4. ...
 
 ### design.md
 1. **<设计单元>**（Step 4.1 ❌ 越界）: 删除 ... 段落
@@ -316,6 +452,10 @@ Step 3.5 是**反向检查**（原始文档里本次版本的变更 → PRD 里�
 
 ### 补任务建议（不在本任务范围）
 - <未覆盖的变更> — 建议挂到任务 <name> 或新建任务
+- <过散 task> — 建议与 <相关 task> 合并为一个可验收闭环
+- <过大 task> — 建议按 <业务闭环 / 复用链 / wave 提测边界> 拆成多个内聚 task
+- <版本规划中未归 wave 的 task> — 建议补 wave 归属或标记为某 wave 前置依赖
+- <不可独立提测的 wave> — 建议拆分 / 合并 wave 或补前置条件
 
 ---
 
@@ -344,6 +484,14 @@ Step 3.5 是**反向检查**（原始文档里本次版本的变更 → PRD 里�
 - ❌ 覆盖度扫描只看需求总表/目录，不扫描全文（嵌入式变更会遗漏）
 - ❌ 假设需求文档有固定的变更标记格式（每份文档结构可能不同）
 - ❌ 只追踪主需求单元，忽略同一功能点在其他页面/模块的散射变更
+- ❌ 有版本规划产物却不做 Step 3.6，导致 task / wave 漏覆盖或 PRD Scope 越界
+- ❌ 把版本规划产物当成原始需求权威，忽略原始需求文档和 UI 文案逐字一致要求
+- ❌ 把 task 数量当目标，按章节 / 页面 / 接口 / 字段机械碎拆
+- ❌ 为避免碎拆，把整个版本塞进一个过大的 task，导致多人协作和阶段验收失控
+- ❌ 单 task PRD 只截取了版本规划 task 候选中的一个页面 / 接口 / 字段碎片，却没有回到版本规划调整 task 边界
+- ❌ wave 当成 task 拆分依据，强制一个 wave 一个 task，或把一个 task 当成完整 wave
+- ❌ wave 只看时间顺序，不检查提测目标、前置条件、完成条件
+- ❌ 发现 task 未归 wave 后直接替用户补 wave，不先输出修正清单确认
 - ❌ Lightweight 任务硬跑 Step 4 / 5 / 6（没有 design / implement 跑不了）
 - ❌ 把 Design / Implement 中的「实现必需」决策当作越界（凡标注了理由的"实现必需"都是合规的 🟡，不是 ❌）
 - ❌ 跨层一致性只校验三个 .md 中的两个（命名 / 文案 / 边界都必须三层全扫）
@@ -355,6 +503,7 @@ Step 3.5 是**反向检查**（原始文档里本次版本的变更 → PRD 里�
 | 入口 | 形态 | 用途 | 时机 |
 |------|------|------|------|
 | `trellis-brainstorm` | skill（上游） | 从模糊想法对话生成 PRD（无原始文档时） | 需求讨论阶段 |
-| `trellis-extract-prd` | skill | 从原始需求文档**严格提取** PRD + task.json | 任务开发前、有正式需求文档时 |
-| `trellis-verify-task` | skill（本技能） | 校验任务三件套（prd / design / implement）准确性 + 覆盖度 + 跨层一致性 | 三件套生成后、开发前 |
+| `trellis-plan-version` | skill | 从原始需求文档生成版本级需求清单 + 内聚 task 候选 + wave 编排 + 工时评估 | 版本规划阶段 |
+| `trellis-extract-prd` | skill | 从原始需求文档**严格提取** PRD + task.json；如有版本规划，则绑定 task 候选 / wave / 来源需求 | 任务开发前、有正式需求文档时 |
+| `trellis-verify-task` | skill（本技能） | 校验任务三件套准确性 + 覆盖度 + 跨层一致性；如有版本规划，则追加版本需求 -> task -> wave 对照 | 三件套生成后、开发前 |
 | `trellis-check-all` | skill | 代码实现对照三件套全面检查 | 编码完成后、提交前 |

@@ -1,0 +1,36 @@
+{
+  "flowerVersion": "0.2.5-beta.1",
+  "variant": "0.6",
+  "version": "0.6.0-beta.8",
+  "skills": [
+    "trellis-check-all",
+    "trellis-create-command",
+    "trellis-draw-uml",
+    "trellis-extract-prd",
+    "trellis-plan-version",
+    "trellis-push",
+    "trellis-route",
+    "trellis-run-full-chain",
+    "trellis-verify-task"
+  ],
+  "paths": [
+    ".agents/skills/trellis-check-all",
+    ".agents/skills/trellis-create-command",
+    ".agents/skills/trellis-draw-uml",
+    ".agents/skills/trellis-extract-prd",
+    ".agents/skills/trellis-plan-version",
+    ".agents/skills/trellis-push",
+    ".agents/skills/trellis-route",
+    ".agents/skills/trellis-run-full-chain",
+    ".agents/skills/trellis-verify-task",
+    ".claude/skills/trellis-check-all",
+    ".claude/skills/trellis-create-command",
+    ".claude/skills/trellis-draw-uml",
+    ".claude/skills/trellis-extract-prd",
+    ".claude/skills/trellis-plan-version",
+    ".claude/skills/trellis-push",
+    ".claude/skills/trellis-route",
+    ".claude/skills/trellis-run-full-chain",
+    ".claude/skills/trellis-verify-task"
+  ]
+}
