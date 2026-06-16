@@ -55,7 +55,14 @@ import {
   IconTypograph,
   IconRefresh,
 } from '@douyinfe/semi-icons';
-import { PieChart, Activity, Zap, Gauge, KeyRound, CalendarClock } from 'lucide-react';
+import {
+  PieChart,
+  Activity,
+  Zap,
+  Gauge,
+  KeyRound,
+  CalendarClock,
+} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
 import { VChart } from '@visactor/react-vchart';
@@ -281,7 +288,11 @@ const LogViewer = () => {
   // ========== 全局时间范围计算 ==========
   const getGlobalTimeRange = useCallback(() => {
     const now = Math.floor(Date.now() / 1000);
-    if (timePreset === 'custom' && customDateRange && customDateRange.length === 2) {
+    if (
+      timePreset === 'custom' &&
+      customDateRange &&
+      customDateRange.length === 2
+    ) {
       return {
         startTs: Math.floor(new Date(customDateRange[0]).getTime() / 1000),
         endTs: Math.floor(new Date(customDateRange[1]).getTime() / 1000),
@@ -305,7 +316,11 @@ const LogViewer = () => {
       '7d': t('最近 7 天'),
       '30d': t('最近 30 天'),
     };
-    if (timePreset === 'custom' && customDateRange && customDateRange.length === 2) {
+    if (
+      timePreset === 'custom' &&
+      customDateRange &&
+      customDateRange.length === 2
+    ) {
       const fmt = (d) => {
         const dt = new Date(d);
         return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
