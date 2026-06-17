@@ -3677,6 +3677,24 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "视觉辅助识别": "Reconnaissance visuelle assistée",
+    "启用视觉辅助识别": "Activer la reconnaissance visuelle assistée",
+    "当目标渠道不支持图片时，先调用配置的视觉模型生成图片描述，再将请求改写为文本请求": "Lorsque le canal cible ne prend pas en charge les images, appelle d'abord le modèle visuel configuré pour générer une description, puis réécrit la requête en texte.",
+    "辅助渠道 ID": "ID du canal auxiliaire",
+    "例如: 12": "Exemple : 12",
+    "辅助模型": "Modèle auxiliaire",
+    "例如: gpt-4o-mini": "Exemple : gpt-4o-mini",
+    "目标上游模型": "Modèles amont cibles",
+    "留空表示全部，多个模型用英文逗号分隔": "Laissez vide pour tous. Séparez plusieurs modèles par des virgules.",
+    "按 model_mapping 重定向后的最终上游模型匹配，而不是用户请求的原始模型": "Correspond au modèle amont final après redirection model_mapping, pas au modèle d'origine demandé par l'utilisateur.",
+    "辅助提示词": "Prompt auxiliaire",
+    "留空使用默认图片描述提示词": "Laissez vide pour utiliser le prompt de description d’image par défaut.",
+    "缓存时间（秒）": "Durée du cache (secondes)",
+    "失败策略": "Stratégie d'échec",
+    "报错": "Erreur",
+    "跳过": "Ignorer",
+    "移除原始图片": "Supprimer les images d'origine",
+    "推荐开启，避免非视觉模型收到无法处理的图片内容": "Recommandé pour éviter d’envoyer du contenu image non pris en charge aux modèles non visuels."
   }
 }

@@ -450,7 +450,19 @@ export function transformChannelToFormDefaults(
  * Build the setting JSON string from form extra settings
  */
 function buildSettingJSON(formData: ChannelFormValues): string {
+  let existingSettings: Record<string, unknown> = {}
+  if (formData.setting) {
+    try {
+      const parsed = JSON.parse(formData.setting)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        existingSettings = parsed
+      }
+    } catch {
+      existingSettings = {}
+    }
+  }
   const settingObj = {
+    ...existingSettings,
     force_format: formData.force_format || false,
     thinking_to_content: formData.thinking_to_content || false,
     proxy: formData.proxy || '',

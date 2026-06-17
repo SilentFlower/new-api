@@ -126,6 +126,32 @@ const PARAM_OVERRIDE_OPERATIONS_TEMPLATE = {
   ],
 };
 
+const parseJsonObject = (value) => {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch (error) {
+    return {};
+  }
+};
+
+const parseCommaList = (value) =>
+  Array.from(
+    new Set(
+      String(value || '')
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean),
+    ),
+  );
+
+const joinList = (value) => (Array.isArray(value) ? value.join(',') : '');
+
 const DEPRECATED_DOUBAO_CODING_PLAN_BASE_URL = 'doubao-coding-plan';
 
 // 支持并且已适配通过接口获取模型列表的渠道类型
@@ -194,6 +220,14 @@ const EditChannelModal = (props) => {
     pass_through_body_enabled: false,
     system_prompt: '',
     system_prompt_override: false,
+    vision_assist_enabled: false,
+    vision_assist_channel_id: '',
+    vision_assist_model: '',
+    vision_assist_target_models: '',
+    vision_assist_prompt: '',
+    vision_assist_cache_ttl_seconds: 86400,
+    vision_assist_failure_policy: 'error',
+    vision_assist_strip_image: true,
     settings: '',
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
@@ -515,9 +549,56 @@ const EditChannelModal = (props) => {
     proxy: '',
     pass_through_body_enabled: false,
     system_prompt: '',
+    system_prompt_override: false,
+    vision_assist_enabled: false,
+    vision_assist_channel_id: '',
+    vision_assist_model: '',
+    vision_assist_target_models: '',
+    vision_assist_prompt: '',
+    vision_assist_cache_ttl_seconds: 86400,
+    vision_assist_failure_policy: 'error',
+    vision_assist_strip_image: true,
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
+
+  const buildChannelExtraSettings = (values) => {
+    const existingChannelExtraSettings = parseJsonObject(values.setting);
+    const visionAssistChannelId = parseInt(
+      values.vision_assist_channel_id,
+      10,
+    );
+    const visionAssistCacheTTL = parseInt(
+      values.vision_assist_cache_ttl_seconds,
+      10,
+    );
+    return {
+      ...existingChannelExtraSettings,
+      force_format: values.force_format || false,
+      thinking_to_content: values.thinking_to_content || false,
+      proxy: values.proxy || '',
+      pass_through_body_enabled: values.pass_through_body_enabled || false,
+      system_prompt: values.system_prompt || '',
+      system_prompt_override: values.system_prompt_override || false,
+      vision_assist: {
+        ...(existingChannelExtraSettings.vision_assist || {}),
+        enabled: values.vision_assist_enabled === true,
+        assist_channel_id: Number.isFinite(visionAssistChannelId)
+          ? visionAssistChannelId
+          : 0,
+        assist_model: String(values.vision_assist_model || '').trim(),
+        target_models: parseCommaList(values.vision_assist_target_models),
+        prompt: String(values.vision_assist_prompt || '').trim(),
+        cache_ttl_seconds:
+          Number.isFinite(visionAssistCacheTTL) && visionAssistCacheTTL > 0
+            ? visionAssistCacheTTL
+            : 86400,
+        failure_policy:
+          values.vision_assist_failure_policy === 'skip' ? 'skip' : 'error',
+        strip_image: values.vision_assist_strip_image !== false,
+      },
+    };
+  };
 
   // 处理渠道额外设置的更新
   const handleChannelSettingsChange = (key, value) => {
@@ -530,12 +611,17 @@ const EditChannelModal = (props) => {
     }
 
     // 同步更新inputs状态
-    setInputs((prev) => ({ ...prev, [key]: value }));
-
-    // 生成setting JSON并更新
-    const newSettings = { ...channelSettings, [key]: value };
-    const settingsJson = JSON.stringify(newSettings);
-    handleInputChange('setting', settingsJson);
+    setInputs((prev) => {
+      const next = { ...prev, [key]: value };
+      const settingsJson = JSON.stringify(buildChannelExtraSettings(next));
+      if (formApiRef.current) {
+        formApiRef.current.setValue('setting', settingsJson);
+      }
+      return {
+        ...next,
+        setting: settingsJson,
+      };
+    });
   };
 
   const handleChannelOtherSettingsChange = (key, value) => {
@@ -868,6 +954,23 @@ const EditChannelModal = (props) => {
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
+          const visionAssist = parsedSettings.vision_assist || {};
+          data.vision_assist_enabled = visionAssist.enabled === true;
+          data.vision_assist_channel_id =
+            visionAssist.assist_channel_id || '';
+          data.vision_assist_model = visionAssist.assist_model || '';
+          data.vision_assist_target_models = joinList(
+            visionAssist.target_models,
+          );
+          data.vision_assist_prompt = visionAssist.prompt || '';
+          data.vision_assist_cache_ttl_seconds =
+            visionAssist.cache_ttl_seconds || 86400;
+          data.vision_assist_failure_policy =
+            visionAssist.failure_policy || 'error';
+          data.vision_assist_strip_image =
+            visionAssist.strip_image === undefined
+              ? true
+              : visionAssist.strip_image === true;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -876,6 +979,14 @@ const EditChannelModal = (props) => {
           data.pass_through_body_enabled = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
+          data.vision_assist_enabled = false;
+          data.vision_assist_channel_id = '';
+          data.vision_assist_model = '';
+          data.vision_assist_target_models = '';
+          data.vision_assist_prompt = '';
+          data.vision_assist_cache_ttl_seconds = 86400;
+          data.vision_assist_failure_policy = 'error';
+          data.vision_assist_strip_image = true;
         }
       } else {
         data.force_format = false;
@@ -884,6 +995,14 @@ const EditChannelModal = (props) => {
         data.pass_through_body_enabled = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
+        data.vision_assist_enabled = false;
+        data.vision_assist_channel_id = '';
+        data.vision_assist_model = '';
+        data.vision_assist_target_models = '';
+        data.vision_assist_prompt = '';
+        data.vision_assist_cache_ttl_seconds = 86400;
+        data.vision_assist_failure_policy = 'error';
+        data.vision_assist_strip_image = true;
       }
 
       if (data.settings) {
@@ -993,6 +1112,16 @@ const EditChannelModal = (props) => {
         pass_through_body_enabled: data.pass_through_body_enabled,
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
+        vision_assist_enabled: data.vision_assist_enabled || false,
+        vision_assist_channel_id: data.vision_assist_channel_id || '',
+        vision_assist_model: data.vision_assist_model || '',
+        vision_assist_target_models: data.vision_assist_target_models || '',
+        vision_assist_prompt: data.vision_assist_prompt || '',
+        vision_assist_cache_ttl_seconds:
+          data.vision_assist_cache_ttl_seconds || 86400,
+        vision_assist_failure_policy:
+          data.vision_assist_failure_policy || 'error',
+        vision_assist_strip_image: data.vision_assist_strip_image !== false,
       });
       initialModelsRef.current = (data.models || [])
         .map((model) => (model || '').trim())
@@ -1035,6 +1164,10 @@ const EditChannelModal = (props) => {
         data.pass_through_body_enabled ||
         data.force_format ||
         data.claude_beta_query ||
+        data.vision_assist_enabled ||
+        data.vision_assist_channel_id ||
+        data.vision_assist_model ||
+        data.vision_assist_target_models ||
         data.system_prompt_override;
       if (hasAdvancedValues) {
         setAdvancedSettingsOpen(true);
@@ -1377,6 +1510,14 @@ const EditChannelModal = (props) => {
       pass_through_body_enabled: false,
       system_prompt: '',
       system_prompt_override: false,
+      vision_assist_enabled: false,
+      vision_assist_channel_id: '',
+      vision_assist_model: '',
+      vision_assist_target_models: '',
+      vision_assist_prompt: '',
+      vision_assist_cache_ttl_seconds: 86400,
+      vision_assist_failure_policy: 'error',
+      vision_assist_strip_image: true,
     });
     // 重置密钥模式状态
     setKeyMode('append');
@@ -1739,16 +1880,8 @@ const EditChannelModal = (props) => {
       localInputs.other = 'v2.1';
     }
 
-    // 生成渠道额外设置JSON
-    const channelExtraSettings = {
-      force_format: localInputs.force_format || false,
-      thinking_to_content: localInputs.thinking_to_content || false,
-      proxy: localInputs.proxy || '',
-      pass_through_body_enabled: localInputs.pass_through_body_enabled || false,
-      system_prompt: localInputs.system_prompt || '',
-      system_prompt_override: localInputs.system_prompt_override || false,
-    };
-    localInputs.setting = JSON.stringify(channelExtraSettings);
+    // 生成渠道额外设置 JSON，保留后端已存储但当前表单未展示的设置字段。
+    localInputs.setting = JSON.stringify(buildChannelExtraSettings(localInputs));
 
     // 处理 settings 字段（包括企业账户设置和字段透传控制）
     let settings = {};
@@ -1828,6 +1961,14 @@ const EditChannelModal = (props) => {
     delete localInputs.pass_through_body_enabled;
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
+    delete localInputs.vision_assist_enabled;
+    delete localInputs.vision_assist_channel_id;
+    delete localInputs.vision_assist_model;
+    delete localInputs.vision_assist_target_models;
+    delete localInputs.vision_assist_prompt;
+    delete localInputs.vision_assist_cache_ttl_seconds;
+    delete localInputs.vision_assist_failure_policy;
+    delete localInputs.vision_assist_strip_image;
     delete localInputs.is_enterprise_account;
     // 顶层的 vertex_key_type 不应发送给后端
     delete localInputs.vertex_key_type;
@@ -2518,6 +2659,33 @@ const EditChannelModal = (props) => {
 
                   <Form.Switch field='thinking_to_content' label={t('思考内容转换')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('thinking_to_content', value)} extraText={t('将 reasoning_content 转换为 <think> 标签拼接到内容中')} />
                   <Form.Switch field='pass_through_body_enabled' label={t('透传请求体')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('pass_through_body_enabled', value)} extraText={t('启用请求体透传功能')} />
+
+                  <div className='mt-4 mb-2 text-sm font-medium text-gray-700'>
+                    {t('视觉辅助识别')}
+                  </div>
+                  <Form.Switch field='vision_assist_enabled' label={t('启用视觉辅助识别')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('vision_assist_enabled', value)} extraText={t('当目标渠道不支持图片时，先调用配置的视觉模型生成图片描述，再将请求改写为文本请求')} />
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.InputNumber field='vision_assist_channel_id' label={t('辅助渠道 ID')} placeholder={t('例如: 12')} min={0} onNumberChange={(value) => handleChannelSettingsChange('vision_assist_channel_id', value)} style={{ width: '100%' }} />
+                    </Col>
+                    <Col span={12}>
+                      <Form.Input field='vision_assist_model' label={t('辅助模型')} placeholder={t('例如: gpt-4o-mini')} onChange={(value) => handleChannelSettingsChange('vision_assist_model', value)} showClear />
+                    </Col>
+                  </Row>
+                  <Form.Input field='vision_assist_target_models' label={t('目标上游模型')} placeholder={t('留空表示全部，多个模型用英文逗号分隔')} onChange={(value) => handleChannelSettingsChange('vision_assist_target_models', value)} showClear extraText={t('按 model_mapping 重定向后的最终上游模型匹配，而不是用户请求的原始模型')} />
+                  <Form.TextArea field='vision_assist_prompt' label={t('辅助提示词')} placeholder={t('留空使用默认图片描述提示词')} onChange={(value) => handleChannelSettingsChange('vision_assist_prompt', value)} autosize showClear />
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.InputNumber field='vision_assist_cache_ttl_seconds' label={t('缓存时间（秒）')} placeholder='86400' min={1} onNumberChange={(value) => handleChannelSettingsChange('vision_assist_cache_ttl_seconds', value)} style={{ width: '100%' }} />
+                    </Col>
+                    <Col span={12}>
+                      <Form.Select field='vision_assist_failure_policy' label={t('失败策略')} optionList={[
+                        { label: t('报错'), value: 'error' },
+                        { label: t('跳过'), value: 'skip' },
+                      ]} onChange={(value) => handleChannelSettingsChange('vision_assist_failure_policy', value)} style={{ width: '100%' }} />
+                    </Col>
+                  </Row>
+                  <Form.Switch field='vision_assist_strip_image' label={t('移除原始图片')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('vision_assist_strip_image', value)} extraText={t('推荐开启，避免非视觉模型收到无法处理的图片内容')} />
 
                   <Form.Input field='proxy' label={t('代理地址')} placeholder={t('例如: socks5://user:pass@host:port')} onChange={(value) => handleChannelSettingsChange('proxy', value)} showClear extraText={t('用于配置网络代理，支持 socks5 协议')} />
 

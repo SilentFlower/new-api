@@ -123,53 +123,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		return
 	}
 
-	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
-	needCountToken := constant.CountToken
-	// Avoid building huge CombineText (strings.Join) when token counting and sensitive check are both disabled.
-	var meta *types.TokenCountMeta
-	if needSensitiveCheck || needCountToken {
-		meta = request.GetTokenCountMeta()
-	} else {
-		meta = fastTokenCountMetaForPricing(request)
-	}
-
-	if needSensitiveCheck && meta != nil {
-		contains, words := service.CheckSensitiveText(meta.CombineText)
-		if contains {
-			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
-			newAPIError = types.NewError(err, types.ErrorCodeSensitiveWordsDetected)
-			return
-		}
-	}
-
-	tokens, err := service.EstimateRequestToken(c, meta, relayInfo)
+	originalRequest, err := cloneRelayRequest(request)
 	if err != nil {
-		newAPIError = types.NewError(err, types.ErrorCodeCountTokenFailed)
+		newAPIError = types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 		return
 	}
 
-	relayInfo.SetEstimatePromptTokens(tokens)
-
-	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
-	if err != nil {
-		newAPIError = types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
-		return
-	}
-
-	// common.SetContextKey(c, constant.ContextKeyTokenCountMeta, meta)
-
-	if priceData.FreeModel {
-		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
-	} else {
-		newAPIError = service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
-		if newAPIError != nil {
-			return
-		}
-	}
-
+	mainBillingPrepared := false
 	defer func() {
-		// Only return quota if downstream failed and quota was actually pre-consumed
-		if newAPIError != nil {
+		// 只有当前尝试已完成主请求预扣费且最终失败时，才退还主请求预扣费。
+		if mainBillingPrepared && newAPIError != nil {
 			newAPIError = service.NormalizeViolationFeeError(newAPIError)
 			if relayInfo.Billing != nil {
 				relayInfo.Billing.Refund(c)
@@ -189,6 +152,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		relayInfo.RetryIndex = retryParam.GetRetry()
+		attemptRequest, cloneErr := cloneRelayRequest(originalRequest)
+		if cloneErr != nil {
+			newAPIError = types.NewError(cloneErr, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
+			break
+		}
+		relayInfo.Request = attemptRequest
+		relayInfo.ChannelMeta = nil
+		resetMainRelayAttemptBillingFields(relayInfo)
+		common.SetContextKey(c, constant.ContextKeyVisionAssistPrepared, false)
+
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
 		if channelErr != nil {
 			logger.LogError(c, channelErr.Error())
@@ -197,6 +170,15 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		addUsedChannel(c, channel.Id)
+		newAPIError = relay.PrepareRequestForSelectedChannel(c, relayInfo)
+		if newAPIError != nil {
+			break
+		}
+		newAPIError = prepareMainRelayBilling(c, relayInfo)
+		if newAPIError != nil {
+			break
+		}
+		mainBillingPrepared = true
 		bodyStorage, bodyErr := common.GetBodyStorage(c)
 		if bodyErr != nil {
 			// Ensure consistent 413 for oversized bodies even when error occurs later (e.g., retry path)
@@ -289,8 +271,87 @@ func fastTokenCountMetaForPricing(request dto.Request) *types.TokenCountMeta {
 	return meta
 }
 
+func cloneRelayRequest(request dto.Request) (dto.Request, error) {
+	switch req := request.(type) {
+	case *dto.GeneralOpenAIRequest:
+		data, err := common.Marshal(req)
+		if err != nil {
+			return nil, err
+		}
+		var cloned dto.GeneralOpenAIRequest
+		if err := common.Unmarshal(data, &cloned); err != nil {
+			return nil, err
+		}
+		return &cloned, nil
+	case *dto.ClaudeRequest:
+		data, err := common.Marshal(req)
+		if err != nil {
+			return nil, err
+		}
+		var cloned dto.ClaudeRequest
+		if err := common.Unmarshal(data, &cloned); err != nil {
+			return nil, err
+		}
+		return &cloned, nil
+	default:
+		return request, nil
+	}
+}
+
+func resetMainRelayAttemptBillingFields(relayInfo *relaycommon.RelayInfo) {
+	relayInfo.FinalPreConsumedQuota = 0
+	relayInfo.SubscriptionPostDelta = 0
+}
+
+func prepareMainRelayBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	request := relayInfo.Request
+	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
+	needCountToken := constant.CountToken
+	// token 计数和敏感词都关闭时，避免为大请求拼接完整 CombineText。
+	var meta *types.TokenCountMeta
+	if needSensitiveCheck || needCountToken {
+		meta = request.GetTokenCountMeta()
+	} else {
+		meta = fastTokenCountMetaForPricing(request)
+	}
+
+	if needSensitiveCheck && meta != nil {
+		contains, words := service.CheckSensitiveText(meta.CombineText)
+		if contains {
+			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
+			return types.NewError(fmt.Errorf("sensitive words detected"), types.ErrorCodeSensitiveWordsDetected, types.ErrOptionWithSkipRetry())
+		}
+	}
+
+	tokens, err := service.EstimateRequestToken(c, meta, relayInfo)
+	if err != nil {
+		return types.NewError(err, types.ErrorCodeCountTokenFailed)
+	}
+	relayInfo.SetEstimatePromptTokens(tokens)
+
+	priceData, err := helper.ModelPriceHelper(c, relayInfo, tokens, meta)
+	if err != nil {
+		return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest))
+	}
+	if priceData.FreeModel {
+		logger.LogInfo(c, fmt.Sprintf("模型 %s 免费，跳过预扣费", relayInfo.OriginModelName))
+		if relayInfo.Billing != nil {
+			relayInfo.FinalPreConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
+		}
+		return nil
+	}
+	if relayInfo.Billing != nil {
+		if err := relayInfo.Billing.Reserve(priceData.QuotaToPreConsume); err != nil {
+			return types.NewError(err, types.ErrorCodePreConsumeTokenQuotaFailed, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+		}
+		relayInfo.FinalPreConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
+		return nil
+	}
+	return service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
+}
+
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {
-	if info.ChannelMeta == nil {
+	if retryParam.GetRetry() == 0 {
 		autoBan := c.GetBool("auto_ban")
 		autoBanInt := 1
 		if !autoBan {
@@ -381,6 +442,11 @@ func processChannelError(c *gin.Context, channelError types.ChannelError, err *t
 		other["channel_id"] = channelId
 		other["channel_name"] = c.GetString("channel_name")
 		other["channel_type"] = c.GetInt("channel_type")
+		if logOther, ok := common.GetContextKeyType[map[string]interface{}](c, constant.ContextKeyLogOther); ok {
+			for key, value := range logOther {
+				other[key] = value
+			}
+		}
 		adminInfo := make(map[string]interface{})
 		adminInfo["use_channel"] = c.GetStringSlice("use_channel")
 		isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)

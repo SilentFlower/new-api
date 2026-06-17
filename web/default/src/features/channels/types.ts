@@ -86,6 +86,16 @@ export interface ChannelSettings {
   pass_through_body_enabled?: boolean
   system_prompt?: string
   system_prompt_override?: boolean
+  vision_assist?: {
+    enabled?: boolean
+    assist_channel_id?: number
+    assist_model?: string
+    target_models?: string[]
+    prompt?: string
+    cache_ttl_seconds?: number
+    failure_policy?: 'error' | 'skip'
+    strip_image?: boolean
+  }
 }
 
 export interface ChannelOtherSettings {

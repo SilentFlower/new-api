@@ -3830,6 +3830,24 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "视觉辅助识别": "Vision assist recognition",
+    "启用视觉辅助识别": "Enable vision assist recognition",
+    "当目标渠道不支持图片时，先调用配置的视觉模型生成图片描述，再将请求改写为文本请求": "When the target channel does not support images, call the configured vision model to generate image descriptions, then rewrite the request as text.",
+    "辅助渠道 ID": "Assist channel ID",
+    "例如: 12": "Example: 12",
+    "辅助模型": "Assist model",
+    "例如: gpt-4o-mini": "Example: gpt-4o-mini",
+    "目标上游模型": "Target upstream models",
+    "留空表示全部，多个模型用英文逗号分隔": "Leave blank for all. Separate multiple models with commas.",
+    "按 model_mapping 重定向后的最终上游模型匹配，而不是用户请求的原始模型": "Matches the final upstream model after model_mapping redirection, not the original model requested by the user.",
+    "辅助提示词": "Assist prompt",
+    "留空使用默认图片描述提示词": "Leave blank to use the default image description prompt.",
+    "缓存时间（秒）": "Cache time (seconds)",
+    "失败策略": "Failure policy",
+    "报错": "Error",
+    "跳过": "Skip",
+    "移除原始图片": "Remove original images",
+    "推荐开启，避免非视觉模型收到无法处理的图片内容": "Recommended, to avoid sending unsupported image content to non-vision models."
   }
 }

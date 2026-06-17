@@ -4211,6 +4211,24 @@
     "并确认自行承担部署": "confirm that I bear legal responsibility arising from deployment",
     "运营和收费行为产生的法律责任": "operation and charging behavior",
     "，": ", ",
-    "、": ", "
+    "、": ", ",
+    "视觉辅助识别": "Nhận dạng hình ảnh hỗ trợ",
+    "启用视觉辅助识别": "Bật nhận dạng hình ảnh hỗ trợ",
+    "当目标渠道不支持图片时，先调用配置的视觉模型生成图片描述，再将请求改写为文本请求": "Khi kênh đích không hỗ trợ hình ảnh, gọi mô hình thị giác đã cấu hình để tạo mô tả ảnh, rồi viết lại yêu cầu thành văn bản.",
+    "辅助渠道 ID": "ID kênh hỗ trợ",
+    "例如: 12": "Ví dụ: 12",
+    "辅助模型": "Mô hình hỗ trợ",
+    "例如: gpt-4o-mini": "Ví dụ: gpt-4o-mini",
+    "目标上游模型": "Mô hình upstream đích",
+    "留空表示全部，多个模型用英文逗号分隔": "Để trống nghĩa là tất cả. Phân tách nhiều mô hình bằng dấu phẩy.",
+    "按 model_mapping 重定向后的最终上游模型匹配，而不是用户请求的原始模型": "Khớp theo mô hình upstream cuối cùng sau chuyển hướng model_mapping, không phải mô hình gốc người dùng yêu cầu.",
+    "辅助提示词": "Prompt hỗ trợ",
+    "留空使用默认图片描述提示词": "Để trống để dùng prompt mô tả ảnh mặc định.",
+    "缓存时间（秒）": "Thời gian cache (giây)",
+    "失败策略": "Chiến lược khi lỗi",
+    "报错": "Báo lỗi",
+    "跳过": "Bỏ qua",
+    "移除原始图片": "Xóa ảnh gốc",
+    "推荐开启，避免非视觉模型收到无法处理的图片内容": "Nên bật để tránh gửi nội dung hình ảnh không được hỗ trợ tới mô hình không có thị giác."
   }
 }

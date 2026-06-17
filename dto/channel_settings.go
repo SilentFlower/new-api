@@ -1,12 +1,25 @@
 package dto
 
 type ChannelSettings struct {
-	ForceFormat            bool   `json:"force_format,omitempty"`
-	ThinkingToContent      bool   `json:"thinking_to_content,omitempty"`
-	Proxy                  string `json:"proxy"`
-	PassThroughBodyEnabled bool   `json:"pass_through_body_enabled,omitempty"`
-	SystemPrompt           string `json:"system_prompt,omitempty"`
-	SystemPromptOverride   bool   `json:"system_prompt_override,omitempty"`
+	ForceFormat            bool                        `json:"force_format,omitempty"`
+	ThinkingToContent      bool                        `json:"thinking_to_content,omitempty"`
+	Proxy                  string                      `json:"proxy"`
+	PassThroughBodyEnabled bool                        `json:"pass_through_body_enabled,omitempty"`
+	SystemPrompt           string                      `json:"system_prompt,omitempty"`
+	SystemPromptOverride   bool                        `json:"system_prompt_override,omitempty"`
+	VisionAssist           ChannelVisionAssistSettings `json:"vision_assist,omitempty"`
+}
+
+// ChannelVisionAssistSettings 描述目标渠道的视觉辅助识别配置。
+type ChannelVisionAssistSettings struct {
+	Enabled         bool     `json:"enabled,omitempty"`
+	AssistChannelId int      `json:"assist_channel_id,omitempty"`
+	AssistModel     string   `json:"assist_model,omitempty"`
+	TargetModels    []string `json:"target_models,omitempty"`
+	Prompt          string   `json:"prompt,omitempty"`
+	CacheTTLSeconds int      `json:"cache_ttl_seconds,omitempty"`
+	FailurePolicy   string   `json:"failure_policy,omitempty"`
+	StripImage      *bool    `json:"strip_image,omitempty"`
 }
 
 type VertexKeyType string
