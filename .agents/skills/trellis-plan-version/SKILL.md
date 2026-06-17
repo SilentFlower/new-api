@@ -169,7 +169,25 @@ description: "Generate a version development plan from a source requirements doc
 
 > 如果一批只包含基础设施、迁移、公共组件或接口契约，不能直接标成“可独立提测 wave”。应作为后续 wave 的前置依赖，或并入首个能形成业务验收闭环的 wave。
 
-#### 4.2 输出 task / wave 拆分结果
+#### 4.2 Task 创建顺序
+
+在输出 task / wave 拆分结果时，必须同时给出明确的 task 创建顺序。创建顺序用于后续 `trellis-extract-prd` 批量生成具体 task，不能只依赖 Task ID、需求文档顺序或人工临时创建顺序。
+
+排序规则：
+- 先按 wave 分组，同一 wave 的 task 必须连续出现。
+- 同一 wave 内按依赖关系排序，前置能力在前。
+- 无依赖关系时，按可提测闭环优先级、风险或用户确认的优先级排序。
+- 跨 wave 支撑 task 放在它服务的首个 wave 之前，或明确标记为跨 wave 前置项。
+
+slug 建议使用：
+
+```text
+<version>-wNN-tNN-<task-slug>
+```
+
+其中 `wNN` 表示 wave 顺序，`tNN` 表示全版本 task 创建顺序。后续执行 `task.py create --slug` 时，`--slug` 只传上述排序 slug，不要加入日期前缀；`task.py create` 会自动添加 `MM-DD-` 前缀。
+
+#### 4.3 输出 task / wave 拆分结果
 
 ```markdown
 ## <版本> 任务拆分与 Waves
@@ -181,6 +199,11 @@ description: "Generate a version development plan from a source requirements doc
 
 | Task ID | Task 名称 | 本 task 范围 | 不在范围 | 来源需求 | 散射组 | 依赖 | 主要 Wave | 可验收结果 | 风险 |
 |---------|-----------|-------------|----------|----------|--------|------|-----------|------------|------|
+
+### Task 创建顺序
+
+| 创建序号 | Wave | Wave 内序号 | Task ID | Task 名称 | Slug 建议 | 排序原因 |
+|----------|------|-------------|---------|-----------|-----------|----------|
 
 ### Wave 计划
 
@@ -243,6 +266,7 @@ doc/
 
 `任务拆分与waves.md` 是后续单 task PRD 的版本级来源：
 - `trellis-extract-prd` 从其中读取 task 候选、wave、来源需求位置和边界
+- `trellis-extract-prd` 批量创建 task 时必须按其中的“Task 创建顺序”执行
 - `trellis-verify-task` 用它检查“版本需求 -> task -> wave”的覆盖和边界一致性
 
 ---
@@ -257,6 +281,8 @@ doc/
 - ❌ 散射型变更分给不同 task 且没有统一归组理由
 - ❌ wave 只按日期、人员或模块排序，没有可提测目标和完成条件
 - ❌ 把只有基础设施 / 迁移 / 公共组件的半成品批次标成可提测 wave
+- ❌ 生成 task 创建顺序时让同一 wave 的 task 被其他 wave 插开
+- ❌ slug 建议缺少稳定排序键，导致目录自然排序无法按 wave 聚合
 - ❌ 生成 task / wave 拆分后不等待用户确认，直接做工时评估或创建 task
 - ❌ 假设文档有特定格式或特定的角色分工模式
 - ❌ 当多个来源的优先级冲突时不明确说明以哪个为准

@@ -1,7 +1,7 @@
 {
-  "flowerVersion": "0.3.0-beta.1",
+  "flowerVersion": "0.3.0-beta.3",
   "variant": "0.6",
-  "version": "0.6.0",
+  "version": "0.6.2",
   "skills": [
     "trellis-check-all",
     "trellis-create-command",
@@ -9,6 +9,7 @@
     "trellis-extract-prd",
     "trellis-plan-version",
     "trellis-push",
+    "trellis-release",
     "trellis-route",
     "trellis-run-full-chain",
     "trellis-verify-task"
@@ -20,6 +21,7 @@
     ".agents/skills/trellis-extract-prd",
     ".agents/skills/trellis-plan-version",
     ".agents/skills/trellis-push",
+    ".agents/skills/trellis-release",
     ".agents/skills/trellis-route",
     ".agents/skills/trellis-run-full-chain",
     ".agents/skills/trellis-verify-task",
@@ -29,6 +31,7 @@
     ".claude/skills/trellis-extract-prd",
     ".claude/skills/trellis-plan-version",
     ".claude/skills/trellis-push",
+    ".claude/skills/trellis-release",
     ".claude/skills/trellis-route",
     ".claude/skills/trellis-run-full-chain",
     ".claude/skills/trellis-verify-task"

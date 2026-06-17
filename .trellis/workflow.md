@@ -121,7 +121,7 @@ python3 ./.trellis/scripts/get_context.py --mode phase --step <X.Y>  # detailed 
     [workflow-state:no_task]      → no active task; before Phase 1
     [workflow-state:planning]     → all of Phase 1 (status='planning')
     [workflow-state:planning-inline] → Codex inline variant of Phase 1
-    [workflow-state:in_progress]  → Phase 2 + Phase 3.1-3.4
+    [workflow-state:in_progress]  → Phase 2 + Phase 3.2-3.4
                                     (status stays 'in_progress' from
                                     task.py start until task.py archive)
     [workflow-state:in_progress-inline] → Codex inline variant of Phase 2/3
@@ -151,13 +151,15 @@ python3 ./.trellis/scripts/get_context.py --mode phase --step <X.Y>  # detailed 
 
 **Priority**: This hub overrides any conflicting Trellis workflow, skill, or command text for the scoped behaviors below.
 
-**Scope**: Phase 2.1 / 2.2 / 3.1 dispatch routing, post-check stop, Phase 3.4 code commit/push via trellis-push, explicit Phase 3.5 finish-work bookkeeping, and push-progress recovery. State blocks should keep only one short skill-garden sentinel per state; long-form rules live here.
+**Scope**: Phase 2.1 implement routing, Phase 2.2 check/check-all routing, post-check stop, Phase 3.4 code commit/push via trellis-push, explicit Phase 3.5 finish-work bookkeeping, and push-progress recovery. State blocks should keep only one short skill-garden sentinel per state; long-form rules live here.
 
 **Mechanical rule**: use this hub as the source of truth. Do not add separate top-level skill-garden override sections or multiple skill-garden sentinels inside the same `workflow-state:*` block.
 
 #### Routing Gate
 
-Before any implement/check agent or check skill runs from the main session, the immediately preceding routing decision must come from `trellis-route` or from the same numbered fallback choices shown in normal chat when the helper is unavailable.
+Before Phase 2.1 implementation mode selection or Phase 2.2 check/check-all execution runs from the main session, the immediately preceding routing decision must come from `trellis-route` or from the same numbered fallback choices shown in normal chat when the helper is unavailable.
+
+Phase 2.2 is the normal Trellis check execution point. It may dispatch `trellis-check` / `trellis-check-all` only when `trellis-route(target=check)` just selected a subagent mode. If a pre-commit re-check is needed because the Phase 2.2 result is missing, code changed after check, risk is high, or the user explicitly asks for final re-check, return to Phase 2.2 and invoke `trellis-route(check)`.
 
 `trellis-route` may use the gitignored personal preference file `.trellis/.route-prefs.tmp` to skip repeated prompts. This file is developer-local state and must never be staged or committed.
 
@@ -172,7 +174,7 @@ Before invoking the skill, never:
 - state "I lean towards X" or preview the inline/subagent options
 - surface route options ahead of time
 
-At phase boundaries, do not ask meta continuation questions such as "continue?", "what's next?", or "X or Y?" when the answer determines the next workflow phase. Invoke `trellis-route(implement|check)` first, or ask the same numbered route choices if the helper is unavailable.
+At Phase 2.1 and Phase 2.2 boundaries, do not ask meta continuation questions such as "continue?", "what's next?", or "X or Y?" when the answer determines the next workflow phase. Invoke `trellis-route(implement|check)` first, or ask the same numbered route choices if the helper is unavailable.
 
 If the user says "temporary override", "reselect", "use X this time", "clear route default", or equivalent, the personal preference file must not take priority. `trellis-route` must show the override options again and let the user choose whether the choice is one-time, saved as the new default, or clears the default.
 
@@ -180,7 +182,7 @@ For normal check routing, default to `trellis-check-all` paths. Do not route to 
 
 #### Post-Check Stop Gate
 
-After `trellis-check` or `trellis-check-all` finishes, stop and report the result. Do not run `/trellis:finish-work`, do not archive the task, and do not imply the task is ready to wrap up solely because checks passed.
+After `trellis-check` or `trellis-check-all` finishes, stop and report the result; point the user to Phase 3.4 `trellis-push` (or commit-only when needed). Do not run `/trellis:finish-work`, do not archive the task, and do not imply the task is ready to wrap up solely because checks passed.
 
 If checks pass, the next allowed workflow steps are Phase 3.3 `trellis-update-spec` and Phase 3.4 `trellis-push`/commit confirmation. `/trellis:finish-work` is explicit-only: run it only after Phase 3.4 is complete and the user asks to wrap up, archive, or finish the task.
 
@@ -255,7 +257,7 @@ Complex task: ask the user if you can create a Trellis task and enter the planni
 - 1.0 Create task `[required · once]` (only after task-creation consent)
 - 1.1 Requirement exploration `[required · repeatable]` (`prd.md`; complex tasks also need `design.md` + `implement.md`)
 - 1.2 Research `[optional · repeatable]`
-- 1.3 Configure context `[conditional · once]` — Claude Code, Cursor, OpenCode, Codex, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi
+- 1.3 Configure context `[required · once]` — Claude Code, Cursor, OpenCode, Codex, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi (sub-agent-dispatch platforms only; inline platforms skip)
 - 1.4 Activate task `[required · once]` (review gate, then `task.py start`; status → in_progress)
 - 1.5 Completion criteria
 
@@ -294,7 +296,7 @@ Inline mode: skip jsonl curation; Phase 2 reads artifacts/specs via `trellis-bef
 - 2.3 Rollback `[on demand]`
 
 <!-- Per-turn breadcrumb: shown while status='in_progress'.
-     Scope: all of Phase 2 + Phase 3.1-3.4 (status stays 'in_progress' from
+     Scope: all of Phase 2 + Phase 3.2-3.4 (status stays 'in_progress' from
      task.py start until task.py archive; only archive flips it). The body
      therefore must cover every required step from implementation through
      commit, including Phase 3.3 spec update and Phase 3.4 commit. -->
@@ -304,10 +306,11 @@ Sub-agent dispatch protocol applies to all platforms and all sub-agents, includi
 [workflow-state:in_progress]
 <!-- BEGIN skill-garden workflow-state in_progress v0.6 -->
 HIGHEST PRIORITY SKILL-GARDEN STATE GUARD (in_progress):
-At Phase 2.1/2.2/3.1, invoke `trellis-route(implement|check)` first, including every check / check-all path.
-Do not spawn `trellis-implement`, `trellis-check`, or `trellis-check-all` directly unless `trellis-route` just selected subagent mode.
-If routing helper is unavailable, ask the same numbered route choices in normal chat and wait for the user's selection.
-After `trellis-check` / `trellis-check-all`, stop and report; do not run `/trellis:finish-work` unless the user explicitly asks after Phase 3.4 is complete.
+At Phase 2.1, invoke `trellis-route(implement)` first.
+At Phase 2.2, invoke `trellis-route(check)` before running or dispatching check/check-all.
+Do not spawn `trellis-implement` at Phase 2.1 or `trellis-check` / `trellis-check-all` at Phase 2.2 unless `trellis-route` just selected subagent mode.
+If routing helper is unavailable at the Phase 2.1 or Phase 2.2 route boundary, ask the same numbered route choices in normal chat and wait for the user's selection.
+After `trellis-check` / `trellis-check-all`, stop and report; point the user to Phase 3.4 `trellis-push` (or commit-only when needed). Do not run `/trellis:finish-work` unless the user explicitly asks after Phase 3.4 is complete.
 This guard overrides any lower `Flow: ... -> /trellis:finish-work` line in this state block.
 At Phase 3.4, code commit/push goes through `trellis-push` (commit-only mode for commit-without-push); never bare `git commit`/`git push` on code (hub: Code Commit Confirmation Gate).
 If active task.json has `last_push_snapshot`, relay `partial_step` + `next_step` once before starting new work.
@@ -327,8 +330,8 @@ Dispatch prompt starts with `Active task: <task path from task.py current>`. Rea
 [workflow-state:in_progress-inline]
 <!-- BEGIN skill-garden workflow-state in_progress_inline v0.6 -->
 HIGHEST PRIORITY SKILL-GARDEN STATE GUARD (in_progress-inline):
-Inline mode does not skip or constrain `trellis-route`: before implementation, route `implement` first; before checking, route `check` first. The default inline flow is direct main-session work, but if the immediate route decision selects subagent, that decision permits dispatch for this step.
-After `trellis-check` / `trellis-check-all`, stop and report; do not run `/trellis:finish-work` unless the user explicitly asks after Phase 3.4 is complete.
+Inline mode does not skip or constrain `trellis-route`: at Phase 2.1, route `implement` first; at Phase 2.2, route `check` before running check/check-all.
+After `trellis-check` / `trellis-check-all`, stop and report; point the user to Phase 3.4 `trellis-push` (or commit-only when needed). Do not run `/trellis:finish-work` unless the user explicitly asks after Phase 3.4 is complete.
 This guard overrides any lower `Flow: ... -> /trellis:finish-work` line in this state block.
 At Phase 3.4, code commit/push still goes through `trellis-push` (commit-only for commit-without-push); never bare `git commit`/`git push` on code (hub: Code Commit Confirmation Gate).
 If active task.json has `last_push_snapshot`, relay `partial_step` + `next_step` once before starting new work.
@@ -340,11 +343,12 @@ Read context: `prd.md` -> `design.md if present` -> `implement.md if present`, p
 [/workflow-state:in_progress-inline]
 
 ### Phase 3: Finish
-- 3.1 Quality verification `[required · repeatable]`
 - 3.2 Debug retrospective `[on demand]`
 - 3.3 Spec update `[required · once]`
 - 3.4 Commit changes `[required · once]`
 - 3.5 Wrap-up reminder
+
+> Note: step 3.1 was folded into 2.2 (last-iteration full-scope check) and 3.4 (commit preamble). Numbering kept stable to avoid breaking external references.
 
 <!-- Per-turn breadcrumb: shown while status='completed'.
      Currently DEAD in normal flow: cmd_archive writes status='completed' in
@@ -649,6 +653,8 @@ If issues are found → fix → re-check, until green.
 
 [/codex-inline, Kilo, Antigravity, Windsurf]
 
+**Final pass (before Phase 3.4 commit)**: the last 2.2 of a task must run full-scope, not just on the latest implement chunk. List all affected packages with `python3 ./.trellis/scripts/get_context.py --mode packages`, then load each package's spec index Quality Check section. This catches cross-layer / multi-package issues a mid-iteration local 2.2 cannot.
+
 #### 2.3 Rollback `[on demand]`
 
 - `check` reveals a prd defect → return to Phase 1, fix `prd.md`, then redo 2.1
@@ -660,15 +666,6 @@ If issues are found → fix → re-check, until green.
 ## Phase 3: Finish
 
 Goal: ensure code quality, capture lessons, record the work.
-
-#### 3.1 Quality verification `[required · repeatable]`
-
-Load the `trellis-check` skill and do a final verification:
-- Spec compliance
-- lint / type-check / tests
-- Cross-layer consistency (when changes span layers)
-
-If issues are found → fix → re-check, until green.
 
 #### 3.2 Debug retrospective `[on demand]`
 
@@ -689,6 +686,8 @@ Load the `trellis-update-spec` skill and review whether this task produced new k
 Update the docs under `.trellis/spec/` accordingly. Even if the conclusion is "nothing to update", walk through the judgment.
 
 #### 3.4 Commit changes `[required · once]`
+
+**Spec-sync preamble**: before drafting commits, ask: did this task fix a bug or surface non-obvious knowledge that should land in `.trellis/spec/` so future-you (or future-AI) doesn't repeat the mistake? If yes, return to Phase 3.3 first — spec writes belong in the same task's commit batch, not as a forgotten follow-up.
 
 The AI drives a batched commit of this task's code changes so `/finish-work` can run cleanly afterwards. Goal: produce work commits FIRST, then bookkeeping (archive + journal) commits land after — never interleaved.
 
@@ -762,8 +761,8 @@ All tag blocks live in the `## Phase Index` section above, immediately after eac
 | No active task (before Phase 1) | `[workflow-state:no_task]` (after the Phase Index ASCII art) |
 | All of Phase 1 (task created → ready for implementation) | `[workflow-state:planning]` (after Phase 1 summary) |
 | Codex inline Phase 1 | `[workflow-state:planning-inline]` |
-| Phase 2 + Phase 3.1–3.4 (implementation + check + wrap-up) | `[workflow-state:in_progress]` (after Phase 2 summary) |
-| Codex inline Phase 2 + Phase 3.1–3.4 | `[workflow-state:in_progress-inline]` |
+| Phase 2 + Phase 3.2–3.4 (implementation + check + wrap-up) | `[workflow-state:in_progress]` (after Phase 2 summary) |
+| Codex inline Phase 2 + Phase 3.2–3.4 | `[workflow-state:in_progress-inline]` |
 | After Phase 3.5 (archived) | `[workflow-state:completed]` (after Phase 3 summary; **currently DEAD**) |
 
 ### Changing the per-turn prompt text

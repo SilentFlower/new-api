@@ -4,13 +4,14 @@ description: |
   Route trellis-implement / trellis-check execution mode with a gitignored personal preference file.
   Implement can route inline or subagent. Check defaults to check-all inline/subagent; lightweight
   trellis-check is hidden and only available when the user explicitly requests "light check" / "轻量检查".
-  Invoked from Phase 2.1 / 2.2 / 3.1 of the routing-aware workflow. Skip in non-trellis projects
-  (no .trellis/). Not for other subagents (trellis-research / trellis-debug).
+  Invoked from Phase 2.1 target=implement and Phase 2.2 target=check/check-all of the routing-aware workflow.
+  Trellis 0.6.1 keeps Phase 3.1 as a numbered gap; final re-checks return to Phase 2.2 before commit.
+  Skip in non-trellis projects (no .trellis/). Not for other subagents (trellis-research / trellis-debug).
 ---
 
 # Trellis 路由器：implement / check 执行模式选择
 
-主 agent 进入 Phase 2.1 / 2.2 / 3.1 时调用本 skill，决定 implement / check 的执行模式。核心目标是减少重复打断：正常路由优先读取个人本地配置；用户要求临时改、重新选择或清除默认时，必须绕过配置并重新展示选项。
+主 agent 进入 Phase 2.1 的实现路由或 Phase 2.2 的检查路由时调用本 skill，决定 implement / check 的执行模式。Trellis 0.6.1 中 Phase 3.1 是编号空洞；提交前若确实需要最终复查，应回到 Phase 2.2 再执行 check 路由。核心目标是减少重复打断：正常路由优先读取个人本地配置；用户要求临时改、重新选择或清除默认时，必须绕过配置并重新展示选项。
 
 个人配置只写入 `.trellis/.route-prefs.tmp`。该文件匹配 `.trellis/.gitignore` 的 `*.tmp` 规则，属于开发者本地偏好，不纳入 git，也不影响其他开发者。
 
@@ -18,7 +19,7 @@ description: |
 
 ## Step 0: 识别目标与用户意图
 
-个人 route 配置只决定“已获准执行后的模式”，不是开工授权。读取 `.trellis/.route-prefs.tmp` 前，必须确认当前 workflow 已允许进入对应 target：implement 需要任务已完成规划确认并处于 `in_progress`；check 需要已有本轮实现变更或用户明确要求检查。如果仍在 planning、等待用户确认，或用户表达“等一下 / 我再想想”，停止，不读取个人配置。
+个人 route 配置只决定“已获准执行后的模式”，不是开工授权。读取 `.trellis/.route-prefs.tmp` 前，必须确认当前 workflow 已允许进入对应 target：implement 需要任务已完成规划确认并处于 `in_progress`；check 用于 Phase 2.2 检查执行，或用户明确要求最终复查 / 轻量检查。最终复查只有在 Phase 2.2 结果缺失、check 后代码变更、风险较高或用户明确要求复查时才回到 Phase 2.2 并重新进入 check 路由。如果仍在 planning、等待用户确认，或用户表达“等一下 / 我再想想”，停止，不读取个人配置。
 
 Codex inline mode 只表示主会话默认直接执行，不是 route 选项过滤器。即使当前上下文出现 `<codex-mode>inline...do not dispatch...</codex-mode>` 或 `workflow-state:in_progress-inline`，也不能推断“只能 inline”或跳过 subagent 选项；仍必须读取 `.trellis/.route-prefs.tmp`，或在无有效配置时展示正常 inline/subagent 选项。若本 skill 的紧邻路由决定是 subagent，本步骤允许主 agent dispatch 对应 implement/check sub-agent；禁止的是绕过 `trellis-route` 直接 dispatch。
 

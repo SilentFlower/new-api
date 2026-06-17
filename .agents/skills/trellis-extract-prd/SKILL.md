@@ -33,6 +33,7 @@ description: "Extract a cohesive task PRD faithfully from a source requirements 
 - **版本规划产物路径**（默认尝试 `doc/<版本>/任务拆分与waves.md`）
 - **Task ID / task 候选名称**
 - **Wave ID / wave 名称**
+- **批量生成范围**（例如某个版本规划中的全部 task，或指定 wave 下的 task）
 
 ---
 
@@ -61,6 +62,13 @@ description: "Extract a cohesive task PRD faithfully from a source requirements 
 - 散射组归属
 - 依赖 task
 - 可验收结果 / 可提测性
+- Task 创建顺序和 slug 建议（如存在）
+
+如果用户要求批量生成多个 task：
+- 必须优先按版本规划产物中的「Task 创建顺序」执行。
+- 如果版本规划产物没有「Task 创建顺序」，必须先补齐或请用户确认顺序；不要按需求文档顺序、Task ID 字面顺序或临时判断直接创建。
+- 同一 wave 的 task 必须连续创建，不能被其他 wave 插开。
+- 跨 wave 支撑 task 按版本规划标注放在服务的首个 wave 之前，或作为跨 wave 前置项单独说明。
 
 如果版本规划产物存在但找不到用户指定的 task 候选：
 - 不要猜测映射
@@ -167,6 +175,27 @@ python3 .trellis/scripts/task.py create "<PRD标题>" \
   --description "<TL;DR「做什么」一句话>"
 ```
 
+如果基于版本规划批量创建 task，按以下规则生成 slug：
+
+```text
+<version>-wNN-tNN-<task-slug>
+```
+
+- `wNN`：wave 顺序号，例如 `w01`、`w02`
+- `tNN`：全版本 task 创建顺序号，例如 `t01`、`t02`
+- `<task-slug>`：保留业务语义的短 slug
+
+示例：
+
+```bash
+python3 .trellis/scripts/task.py create "项目列表反馈投标状态" \
+  --slug "srm-iqs-v141-w01-t01-project-list-feedback-bid-status" \
+  --priority P2 \
+  --description "项目列表反馈投标状态"
+```
+
+不要把日期写入 `--slug`；`task.py create` 会自动添加 `MM-DD-` 前缀。批量创建时，必须按版本规划的「Task 创建顺序」逐个执行上述命令。
+
 创建完成后，根据 PRD 中的分析补充 `task.json` 中的字段：
 - `dev_type`：`frontend` / `backend` / `fullstack`
 - `relatedFiles`：PRD Technical Notes 中识别的关键文件路径
@@ -210,6 +239,7 @@ python3 .trellis/scripts/task.py create "<PRD标题>" \
 | **散射完整** | 至少对 2-3 个关键实体做过全文搜索 |
 | **任务边界匹配** | 如存在版本规划产物，Scope 是否严格落在 task 候选范围内 |
 | **Wave 匹配** | PRD / `task.json.meta` 的 wave 是否与版本规划一致 |
+| **创建顺序匹配** | 批量生成时，实际创建顺序和 slug 是否遵循版本规划的「Task 创建顺序」 |
 
 ---
 
@@ -227,6 +257,8 @@ python3 .trellis/scripts/task.py create "<PRD标题>" \
 - ❌ 把一个内聚 task 拆成页面 / 接口 / 字段碎片
 - ❌ 未找到版本规划产物时自行编造 wave id 或 Task ID
 - ❌ 把 wave 当成独立 task 目录或 `task.py` 状态
+- ❌ 批量创建 task 时忽略版本规划的「Task 创建顺序」
+- ❌ slug 缺少 `wNN-tNN` 等稳定排序键，导致同一 wave 的 task 在目录中分散
 
 ---
 
