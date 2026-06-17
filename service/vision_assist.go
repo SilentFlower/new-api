@@ -1,8 +1,10 @@
 package service
 
 import (
+	"context"
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -23,11 +25,18 @@ const (
 	VisionAssistFailurePolicyError = "error"
 	VisionAssistFailurePolicySkip  = "skip"
 
+	VisionAssistEndpointModeAuto              = "auto"
+	VisionAssistEndpointModeOpenAIChat        = "openai_chat"
+	VisionAssistEndpointModeOpenAIResponses   = "openai_responses"
+	VisionAssistEndpointModeAnthropicMessages = "anthropic_messages"
+	VisionAssistEndpointModeGeminiNative      = "gemini_native"
+
 	defaultVisionAssistPrompt           = "请客观描述图片内容，保留图片中的文字、表格、关键对象、空间关系和可能影响回答的细节。"
 	defaultVisionAssistCacheTTLSeconds  = 86400
 	visionAssistCacheCapacity           = 4096
 	visionAssistInjectedTextHeader      = "[图片内容]"
 	visionAssistInjectedTextInstruction = "以下内容是当前用户消息中图片的可见信息，请直接用于回答用户。"
+	defaultVisionAssistRetryBackoffMs   = 500
 )
 
 // VisionAssistCaller 调用实际视觉辅助模型，并返回每张图片的文字识别结果。
@@ -54,6 +63,26 @@ type visionAssistCacheValue struct {
 	Text string `json:"text"`
 }
 
+type visionAssistExecutionStats struct {
+	EndpointMode         string
+	ResolvedEndpointMode string
+	MaxConcurrency       int
+	RetryCount           int
+	RetryBackoffMs       int
+	RetryAttempts        int
+	FailedImageCount     int
+	LastErrorCode        string
+	LastError            string
+}
+
+type visionAssistImageAttemptResult struct {
+	image                VisionAssistImage
+	results              []VisionAssistResult
+	err                  *types.NewAPIError
+	retryAttempts        int
+	resolvedEndpointMode string
+}
+
 var (
 	visionAssistCache     *cachex.HybridCache[visionAssistCacheValue]
 	visionAssistCacheOnce sync.Once
@@ -77,6 +106,12 @@ func ApplyVisionAssist(c *gin.Context, info *relaycommon.RelayInfo, caller Visio
 
 	prompt := normalizedVisionAssistPrompt(setting)
 	ttl := normalizedVisionAssistTTL(setting)
+	stats := visionAssistExecutionStats{
+		EndpointMode:   normalizedVisionAssistEndpointMode(setting),
+		MaxConcurrency: normalizedVisionAssistMaxConcurrency(setting),
+		RetryCount:     normalizedVisionAssistRetryCount(setting),
+		RetryBackoffMs: normalizedVisionAssistRetryBackoff(setting),
+	}
 	results := make([]VisionAssistResult, 0, len(images))
 	missing := make([]VisionAssistImage, 0, len(images))
 	requestCache := map[string]string{}
@@ -103,54 +138,67 @@ func ApplyVisionAssist(c *gin.Context, info *relaycommon.RelayInfo, caller Visio
 		missing = append(missing, image)
 	}
 
-	for _, image := range missing {
-		assistRequest := buildVisionAssistRequest(setting, prompt, []VisionAssistImage{image})
-		newResults, apiErr := caller(c, info, assistRequest, []VisionAssistImage{image})
-		if apiErr != nil {
-			mergeVisionAssistLogOther(c, buildVisionAssistFailureLogOther(info, setting, "assist_call_failed", apiErr.Error()))
-			if normalizedVisionAssistFailurePolicy(setting) == VisionAssistFailurePolicySkip {
-				logger.LogWarn(c, "视觉辅助失败，按配置跳过: "+apiErr.Error())
-				return nil
+	if len(missing) > 0 {
+		executionResults := executeVisionAssistMissingImages(c, info, setting, prompt, missing, caller)
+		var firstErr *types.NewAPIError
+		for _, item := range executionResults {
+			if stats.ResolvedEndpointMode == "" && item.resolvedEndpointMode != "" {
+				stats.ResolvedEndpointMode = item.resolvedEndpointMode
 			}
-			return apiErr
-		}
-		for _, result := range newResults {
-			result.Text = strings.TrimSpace(result.Text)
-			if result.Text == "" {
+			stats.RetryAttempts += item.retryAttempts
+			if item.err != nil {
+				cacheKey := buildVisionAssistCacheKey(setting, prompt, item.image)
+				stats.FailedImageCount += len(missingByCacheKey[cacheKey])
+				if firstErr == nil {
+					firstErr = item.err
+				}
+				stats.LastErrorCode = string(item.err.GetErrorCode())
+				stats.LastError = common.LocalLogPreview(item.err.Error())
 				continue
 			}
-			cacheKey := buildVisionAssistCacheKey(setting, prompt, result.Image)
-			requestCache[cacheKey] = result.Text
-			results = append(results, result)
-			for _, duplicatedImage := range missingByCacheKey[cacheKey][1:] {
-				results = append(results, VisionAssistResult{
-					Image:  duplicatedImage,
-					Text:   result.Text,
-					Reused: true,
-				})
+			for _, result := range item.results {
+				result.Text = strings.TrimSpace(result.Text)
+				if result.Text == "" {
+					continue
+				}
+				cacheKey := buildVisionAssistCacheKey(setting, prompt, result.Image)
+				requestCache[cacheKey] = result.Text
+				results = append(results, result)
+				for _, duplicatedImage := range missingByCacheKey[cacheKey][1:] {
+					results = append(results, VisionAssistResult{
+						Image:  duplicatedImage,
+						Text:   result.Text,
+						Reused: true,
+					})
+				}
+				if err := getVisionAssistCache().SetWithTTL(cacheKey, visionAssistCacheValue{Text: result.Text}, ttl); err != nil {
+					logger.LogWarn(c, "写入视觉辅助缓存失败: "+err.Error())
+				}
 			}
-			if err := getVisionAssistCache().SetWithTTL(cacheKey, visionAssistCacheValue{Text: result.Text}, ttl); err != nil {
-				logger.LogWarn(c, "写入视觉辅助缓存失败: "+err.Error())
-			}
+		}
+		if firstErr != nil && normalizedVisionAssistFailurePolicy(setting) != VisionAssistFailurePolicySkip {
+			mergeVisionAssistLogOther(c, buildVisionAssistFailureLogOther(info, setting, "assist_call_failed", firstErr.Error(), stats))
+			return firstErr
+		}
+		if firstErr != nil {
+			logger.LogWarn(c, "视觉辅助部分图片失败，按配置跳过: "+firstErr.Error())
 		}
 	}
 
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].Image.Index < results[j].Image.Index
+	})
+
 	if len(results) == 0 {
+		if stats.FailedImageCount > 0 {
+			mergeVisionAssistLogOther(c, buildVisionAssistFailureLogOther(info, setting, "assist_call_failed", stats.LastError, stats))
+			return nil
+		}
 		return nil
 	}
-	mergeVisionAssistLogOther(c, map[string]interface{}{
-		"vision_assist_applied":        true,
-		"vision_assist_cache_hits":     countVisionAssistCacheHits(results),
-		"vision_assist_reused_hits":    countVisionAssistReusedHits(results),
-		"vision_assist_image_count":    len(results),
-		"vision_assist_channel_id":     setting.AssistChannelId,
-		"vision_assist_model":          strings.TrimSpace(setting.AssistModel),
-		"vision_assist_target_channel": info.ChannelId,
-		"vision_assist_target_model":   info.OriginModelName,
-		"vision_assist_upstream_model": info.UpstreamModelName,
-	})
+	mergeVisionAssistLogOther(c, buildVisionAssistSuccessLogOther(info, setting, results, stats))
 	if err := rewriteVisionAssistRequest(request, results, shouldStripVisionAssistImage(setting)); err != nil {
-		mergeVisionAssistLogOther(c, buildVisionAssistFailureLogOther(info, setting, "rewrite_failed", err.Error()))
+		mergeVisionAssistLogOther(c, buildVisionAssistFailureLogOther(info, setting, "rewrite_failed", err.Error(), stats))
 		if normalizedVisionAssistFailurePolicy(setting) == VisionAssistFailurePolicySkip {
 			logger.LogWarn(c, "视觉辅助改写失败，按配置跳过: "+err.Error())
 			return nil
@@ -161,7 +209,158 @@ func ApplyVisionAssist(c *gin.Context, info *relaycommon.RelayInfo, caller Visio
 	return nil
 }
 
-func buildVisionAssistFailureLogOther(info *relaycommon.RelayInfo, setting dto.ChannelVisionAssistSettings, reason string, message string) map[string]interface{} {
+func executeVisionAssistMissingImages(c *gin.Context, info *relaycommon.RelayInfo, setting dto.ChannelVisionAssistSettings, prompt string, missing []VisionAssistImage, caller VisionAssistCaller) []visionAssistImageAttemptResult {
+	results := make([]visionAssistImageAttemptResult, len(missing))
+	maxConcurrency := normalizedVisionAssistMaxConcurrency(setting)
+	if maxConcurrency > len(missing) {
+		maxConcurrency = len(missing)
+	}
+	if maxConcurrency <= 1 {
+		for i, image := range missing {
+			results[i] = executeVisionAssistImageWithRetry(c, info, setting, prompt, image, caller)
+		}
+		return results
+	}
+
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+	for worker := 0; worker < maxConcurrency; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for index := range jobs {
+				results[index] = executeVisionAssistImageWithRetry(c, info, setting, prompt, missing[index], caller)
+			}
+		}()
+	}
+	for i := range missing {
+		jobs <- i
+	}
+	close(jobs)
+	wg.Wait()
+	return results
+}
+
+func executeVisionAssistImageWithRetry(c *gin.Context, info *relaycommon.RelayInfo, setting dto.ChannelVisionAssistSettings, prompt string, image VisionAssistImage, caller VisionAssistCaller) visionAssistImageAttemptResult {
+	retryCount := normalizedVisionAssistRetryCount(setting)
+	backoff := normalizedVisionAssistRetryBackoff(setting)
+	var lastErr *types.NewAPIError
+	retryAttempts := 0
+	resolvedEndpointMode := ""
+	for attempt := 0; attempt <= retryCount; attempt++ {
+		if attempt > 0 {
+			retryAttempts++
+		}
+		assistRequest := buildVisionAssistRequest(setting, prompt, []VisionAssistImage{image})
+		attemptCtx := cloneVisionAssistContext(c)
+		newResults, apiErr := caller(attemptCtx, info, assistRequest, []VisionAssistImage{image})
+		if resolved := common.GetContextKeyString(attemptCtx, constant.ContextKeyVisionAssistEndpointMode); resolved != "" {
+			resolvedEndpointMode = resolved
+		}
+		if apiErr == nil {
+			for i := range newResults {
+				newResults[i].Text = strings.TrimSpace(newResults[i].Text)
+			}
+			return visionAssistImageAttemptResult{image: image, results: newResults, retryAttempts: retryAttempts, resolvedEndpointMode: resolvedEndpointMode}
+		}
+		lastErr = apiErr
+		if attempt >= retryCount || !isRetriableVisionAssistError(apiErr) {
+			break
+		}
+		if !sleepVisionAssistRetry(c, time.Duration(backoff*(attempt+1))*time.Millisecond) {
+			break
+		}
+	}
+	return visionAssistImageAttemptResult{image: image, err: lastErr, retryAttempts: retryAttempts, resolvedEndpointMode: resolvedEndpointMode}
+}
+
+func cloneVisionAssistContext(c *gin.Context) *gin.Context {
+	if c == nil {
+		return nil
+	}
+	return c.Copy()
+}
+
+func sleepVisionAssistRetry(c *gin.Context, duration time.Duration) bool {
+	if duration <= 0 {
+		return true
+	}
+	var ctx context.Context
+	if c != nil && c.Request != nil {
+		ctx = c.Request.Context()
+	} else {
+		ctx = context.Background()
+	}
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func isRetriableVisionAssistError(apiErr *types.NewAPIError) bool {
+	if apiErr == nil {
+		return false
+	}
+	if types.IsSkipRetryError(apiErr) {
+		return false
+	}
+	if apiErr.StatusCode == http.StatusTooManyRequests || apiErr.StatusCode == http.StatusRequestTimeout {
+		return true
+	}
+	if apiErr.StatusCode >= http.StatusBadRequest && apiErr.StatusCode < http.StatusInternalServerError {
+		return false
+	}
+	if apiErr.StatusCode >= http.StatusInternalServerError && apiErr.StatusCode <= 599 {
+		return true
+	}
+	switch apiErr.GetErrorCode() {
+	case types.ErrorCodeDoRequestFailed, types.ErrorCodeReadResponseBodyFailed, types.ErrorCodeEmptyResponse, types.ErrorCodeBadResponse:
+		return true
+	default:
+		return false
+	}
+}
+
+func buildVisionAssistSuccessLogOther(info *relaycommon.RelayInfo, setting dto.ChannelVisionAssistSettings, results []VisionAssistResult, stats visionAssistExecutionStats) map[string]interface{} {
+	fields := map[string]interface{}{
+		"vision_assist_applied":        true,
+		"vision_assist_cache_hits":     countVisionAssistCacheHits(results),
+		"vision_assist_reused_hits":    countVisionAssistReusedHits(results),
+		"vision_assist_image_count":    len(results),
+		"vision_assist_channel_id":     setting.AssistChannelId,
+		"vision_assist_model":          strings.TrimSpace(setting.AssistModel),
+		"vision_assist_target_channel": 0,
+	}
+	mergeVisionAssistStats(fields, stats)
+	if info != nil {
+		fields["vision_assist_target_channel"] = info.ChannelId
+		fields["vision_assist_target_model"] = info.OriginModelName
+		fields["vision_assist_upstream_model"] = info.UpstreamModelName
+	}
+	return fields
+}
+
+func mergeVisionAssistStats(fields map[string]interface{}, stats visionAssistExecutionStats) {
+	fields["vision_assist_endpoint_mode"] = stats.EndpointMode
+	fields["vision_assist_resolved_endpoint_mode"] = stats.ResolvedEndpointMode
+	fields["vision_assist_max_concurrency"] = stats.MaxConcurrency
+	fields["vision_assist_retry_count"] = stats.RetryCount
+	fields["vision_assist_retry_backoff_ms"] = stats.RetryBackoffMs
+	fields["vision_assist_retry_attempts"] = stats.RetryAttempts
+	fields["vision_assist_failed_image_count"] = stats.FailedImageCount
+	if stats.LastErrorCode != "" {
+		fields["vision_assist_last_error_code"] = stats.LastErrorCode
+	}
+	if stats.LastError != "" {
+		fields["vision_assist_last_error"] = stats.LastError
+	}
+}
+
+func buildVisionAssistFailureLogOther(info *relaycommon.RelayInfo, setting dto.ChannelVisionAssistSettings, reason string, message string, stats visionAssistExecutionStats) map[string]interface{} {
 	fields := map[string]interface{}{
 		"vision_assist_applied":        false,
 		"vision_assist_failure_reason": reason,
@@ -169,6 +368,7 @@ func buildVisionAssistFailureLogOther(info *relaycommon.RelayInfo, setting dto.C
 		"vision_assist_channel_id":     setting.AssistChannelId,
 		"vision_assist_model":          strings.TrimSpace(setting.AssistModel),
 	}
+	mergeVisionAssistStats(fields, stats)
 	if message != "" {
 		fields["vision_assist_error"] = common.LocalLogPreview(message)
 	}
@@ -283,6 +483,49 @@ func normalizedVisionAssistFailurePolicy(setting dto.ChannelVisionAssistSettings
 	default:
 		return VisionAssistFailurePolicyError
 	}
+}
+
+func normalizedVisionAssistEndpointMode(setting dto.ChannelVisionAssistSettings) string {
+	mode := strings.ToLower(strings.TrimSpace(setting.EndpointMode))
+	switch mode {
+	case VisionAssistEndpointModeOpenAIChat,
+		VisionAssistEndpointModeOpenAIResponses,
+		VisionAssistEndpointModeAnthropicMessages,
+		VisionAssistEndpointModeGeminiNative:
+		return mode
+	default:
+		return VisionAssistEndpointModeAuto
+	}
+}
+
+func normalizedVisionAssistMaxConcurrency(setting dto.ChannelVisionAssistSettings) int {
+	if setting.MaxConcurrency <= 0 {
+		return 1
+	}
+	if setting.MaxConcurrency > 8 {
+		return 8
+	}
+	return setting.MaxConcurrency
+}
+
+func normalizedVisionAssistRetryCount(setting dto.ChannelVisionAssistSettings) int {
+	if setting.RetryCount < 0 {
+		return 0
+	}
+	if setting.RetryCount > 5 {
+		return 5
+	}
+	return setting.RetryCount
+}
+
+func normalizedVisionAssistRetryBackoff(setting dto.ChannelVisionAssistSettings) int {
+	if setting.RetryBackoffMs <= 0 {
+		return defaultVisionAssistRetryBackoffMs
+	}
+	if setting.RetryBackoffMs > 30000 {
+		return 30000
+	}
+	return setting.RetryBackoffMs
 }
 
 func shouldStripVisionAssistImage(setting dto.ChannelVisionAssistSettings) bool {

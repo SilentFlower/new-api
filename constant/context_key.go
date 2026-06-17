@@ -56,9 +56,10 @@ const (
 
 	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"
 
-	ContextKeyVisionAssistProcessing ContextKey = "vision_assist_processing"
-	ContextKeyVisionAssistPrepared   ContextKey = "vision_assist_prepared"
-	ContextKeyLogOther               ContextKey = "log_other"
+	ContextKeyVisionAssistProcessing   ContextKey = "vision_assist_processing"
+	ContextKeyVisionAssistPrepared     ContextKey = "vision_assist_prepared"
+	ContextKeyVisionAssistEndpointMode ContextKey = "vision_assist_endpoint_mode"
+	ContextKeyLogOther                 ContextKey = "log_other"
 
 	// ContextKeyFileSourcesToCleanup stores file sources that need cleanup when request ends
 	ContextKeyFileSourcesToCleanup ContextKey = "file_sources_to_cleanup"

@@ -79,6 +79,13 @@ function isOptionalStatusCodeMapping(value: string | undefined): boolean {
   }
 }
 
+function parseCommaList(value: string | undefined): string[] {
+  return String(value || '')
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 function isCodexCredential(value: string | undefined): boolean {
   try {
     const parsed = parseOptionalJson(value)
@@ -118,6 +125,41 @@ function addRequiredIssue(
     path: [path],
     message,
   })
+}
+
+const visionAssistEndpointModes = [
+  'auto',
+  'openai_chat',
+  'openai_responses',
+  'anthropic_messages',
+  'gemini_native',
+] as const
+
+type VisionAssistEndpointMode = (typeof visionAssistEndpointModes)[number]
+
+function normalizeVisionAssistEndpointMode(
+  value: unknown
+): VisionAssistEndpointMode {
+  const endpointMode = String(value || '')
+  return visionAssistEndpointModes.includes(
+    endpointMode as VisionAssistEndpointMode
+  )
+    ? (endpointMode as VisionAssistEndpointMode)
+    : 'auto'
+}
+
+function numberOrDefault(value: unknown, defaultValue: number): number {
+  const numberValue = Number(value)
+  return Number.isFinite(numberValue) ? numberValue : defaultValue
+}
+
+function minNumberOrDefault(
+  value: unknown,
+  minValue: number,
+  defaultValue: number
+): number {
+  const numberValue = numberOrDefault(value, defaultValue)
+  return numberValue >= minValue ? numberValue : defaultValue
 }
 
 export const channelFormSchema = z
@@ -183,6 +225,18 @@ export const channelFormSchema = z
     use_upstream_model_for_billing: z.boolean().optional(),
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
+    vision_assist_enabled: z.boolean().optional(),
+    vision_assist_channel_id: z.number().min(0).optional(),
+    vision_assist_model: z.string().optional(),
+    vision_assist_target_models: z.string().optional(),
+    vision_assist_prompt: z.string().optional(),
+    vision_assist_cache_ttl_seconds: z.number().min(0).optional(),
+    vision_assist_failure_policy: z.enum(['error', 'skip']).optional(),
+    vision_assist_strip_image: z.boolean().optional(),
+    vision_assist_endpoint_mode: z.enum(visionAssistEndpointModes).optional(),
+    vision_assist_max_concurrency: z.number().min(1).max(8).optional(),
+    vision_assist_retry_count: z.number().min(0).max(5).optional(),
+    vision_assist_retry_backoff_ms: z.number().min(1).max(30000).optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -260,6 +314,26 @@ export const channelFormSchema = z
         'Vertex AI API Key mode does not support batch creation'
       )
     }
+
+    if (data.vision_assist_enabled === true) {
+      if (
+        !data.vision_assist_channel_id ||
+        data.vision_assist_channel_id <= 0
+      ) {
+        addRequiredIssue(
+          ctx,
+          'vision_assist_channel_id',
+          'Assist channel ID is required when vision assist is enabled'
+        )
+      }
+      if (!data.vision_assist_model?.trim()) {
+        addRequiredIssue(
+          ctx,
+          'vision_assist_model',
+          'Assist model is required when vision assist is enabled'
+        )
+      }
+    }
   })
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
@@ -302,6 +376,18 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   use_upstream_model_for_billing: false,
   system_prompt: '',
   system_prompt_override: false,
+  vision_assist_enabled: false,
+  vision_assist_channel_id: 0,
+  vision_assist_model: '',
+  vision_assist_target_models: '',
+  vision_assist_prompt: '',
+  vision_assist_cache_ttl_seconds: 86400,
+  vision_assist_failure_policy: 'error',
+  vision_assist_strip_image: true,
+  vision_assist_endpoint_mode: 'auto',
+  vision_assist_max_concurrency: 2,
+  vision_assist_retry_count: 1,
+  vision_assist_retry_backoff_ms: 500,
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -339,6 +425,18 @@ export function transformChannelToFormDefaults(
     use_upstream_model_for_billing: false,
     system_prompt: '',
     system_prompt_override: false,
+    vision_assist_enabled: false,
+    vision_assist_channel_id: 0,
+    vision_assist_model: '',
+    vision_assist_target_models: '',
+    vision_assist_prompt: '',
+    vision_assist_cache_ttl_seconds: 86400,
+    vision_assist_failure_policy: 'error' as 'error' | 'skip',
+    vision_assist_strip_image: true,
+    vision_assist_endpoint_mode: 'auto' as VisionAssistEndpointMode,
+    vision_assist_max_concurrency: 2,
+    vision_assist_retry_count: 1,
+    vision_assist_retry_backoff_ms: 500,
   }
 
   if (channel.setting) {
@@ -353,6 +451,45 @@ export function transformChannelToFormDefaults(
           parsed.use_upstream_model_for_billing === true,
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
+        vision_assist_enabled: parsed.vision_assist?.enabled === true,
+        vision_assist_channel_id:
+          Number(parsed.vision_assist?.assist_channel_id) || 0,
+        vision_assist_model: parsed.vision_assist?.assist_model || '',
+        vision_assist_target_models: Array.isArray(
+          parsed.vision_assist?.target_models
+        )
+          ? parsed.vision_assist.target_models.join(',')
+          : '',
+        vision_assist_prompt: parsed.vision_assist?.prompt || '',
+        vision_assist_cache_ttl_seconds: minNumberOrDefault(
+          parsed.vision_assist?.cache_ttl_seconds,
+          0,
+          86400
+        ),
+        vision_assist_failure_policy:
+          parsed.vision_assist?.failure_policy === 'skip' ? 'skip' : 'error',
+        vision_assist_strip_image:
+          parsed.vision_assist?.strip_image === undefined
+            ? true
+            : parsed.vision_assist.strip_image !== false,
+        vision_assist_endpoint_mode: normalizeVisionAssistEndpointMode(
+          parsed.vision_assist?.endpoint_mode
+        ),
+        vision_assist_max_concurrency: minNumberOrDefault(
+          parsed.vision_assist?.max_concurrency,
+          1,
+          2
+        ),
+        vision_assist_retry_count: minNumberOrDefault(
+          parsed.vision_assist?.retry_count,
+          0,
+          1
+        ),
+        vision_assist_retry_backoff_ms: minNumberOrDefault(
+          parsed.vision_assist?.retry_backoff_ms,
+          1,
+          500
+        ),
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -476,6 +613,38 @@ function buildSettingJSON(formData: ChannelFormValues): string {
       formData.use_upstream_model_for_billing === true,
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
+    vision_assist: {
+      ...((isJsonObjectValue(existingSettings.vision_assist)
+        ? existingSettings.vision_assist
+        : {}) as Record<string, unknown>),
+      enabled: formData.vision_assist_enabled === true,
+      assist_channel_id: Number(formData.vision_assist_channel_id) || 0,
+      assist_model: String(formData.vision_assist_model || '').trim(),
+      target_models: parseCommaList(formData.vision_assist_target_models),
+      prompt: String(formData.vision_assist_prompt || '').trim(),
+      cache_ttl_seconds: minNumberOrDefault(
+        formData.vision_assist_cache_ttl_seconds,
+        0,
+        86400
+      ),
+      failure_policy:
+        formData.vision_assist_failure_policy === 'skip' ? 'skip' : 'error',
+      strip_image: formData.vision_assist_strip_image !== false,
+      endpoint_mode: normalizeVisionAssistEndpointMode(
+        formData.vision_assist_endpoint_mode
+      ),
+      max_concurrency: minNumberOrDefault(
+        formData.vision_assist_max_concurrency,
+        1,
+        2
+      ),
+      retry_count: minNumberOrDefault(formData.vision_assist_retry_count, 0, 1),
+      retry_backoff_ms: minNumberOrDefault(
+        formData.vision_assist_retry_backoff_ms,
+        1,
+        500
+      ),
+    },
   }
   return JSON.stringify(settingObj)
 }

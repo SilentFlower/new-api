@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -22,6 +23,12 @@ import (
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 )
+
+type visionAssistPreparedRequest struct {
+	info *relaycommon.RelayInfo
+	req  dto.Request
+	mode string
+}
 
 // PrepareRequestForSelectedChannel 在主请求计费前完成渠道元信息、模型映射与视觉辅助改写。
 func PrepareRequestForSelectedChannel(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
@@ -74,12 +81,14 @@ func callVisionAssistModel(c *gin.Context, info *relaycommon.RelayInfo, request 
 	}
 	defer restore()
 
-	assistInfo := buildVisionAssistRelayInfo(c, info, request)
-	if apiErr := PrepareRequestForSelectedChannel(c, assistInfo); apiErr != nil {
+	prepared, apiErr := prepareVisionAssistRequest(c, info, request, channelModel)
+	if apiErr != nil {
 		return nil, apiErr
 	}
+	assistInfo := prepared.info
+	common.SetContextKey(c, constant.ContextKeyVisionAssistEndpointMode, prepared.mode)
 
-	meta := request.GetTokenCountMeta()
+	meta := prepared.req.GetTokenCountMeta()
 	tokens, err := service.EstimateRequestToken(c, meta, assistInfo)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeCountTokenFailed, types.ErrOptionWithSkipRetry())
@@ -96,7 +105,7 @@ func callVisionAssistModel(c *gin.Context, info *relaycommon.RelayInfo, request 
 		}
 	}
 
-	text, usage, apiErr := doVisionAssistRequest(c, assistInfo, request)
+	text, usage, apiErr := doVisionAssistRequest(c, assistInfo, prepared.req, prepared.mode)
 	if apiErr != nil {
 		if assistInfo.Billing != nil {
 			assistInfo.Billing.Refund(c)
@@ -115,10 +124,66 @@ func callVisionAssistModel(c *gin.Context, info *relaycommon.RelayInfo, request 
 	return results, nil
 }
 
-func buildVisionAssistRelayInfo(c *gin.Context, parent *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) *relaycommon.RelayInfo {
-	assistInfo := relaycommon.GenRelayInfoOpenAI(c, request)
-	assistInfo.RelayMode = relayconstant.RelayModeChatCompletions
-	assistInfo.RequestURLPath = "/v1/chat/completions"
+func prepareVisionAssistRequest(c *gin.Context, parent *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, channelModel *model.Channel) (*visionAssistPreparedRequest, *types.NewAPIError) {
+	mode := resolveVisionAssistEndpointMode(parent.ChannelSetting.VisionAssist.EndpointMode, channelModel.Type, strings.TrimSpace(request.Model))
+	switch mode {
+	case service.VisionAssistEndpointModeOpenAIResponses:
+		responsesRequest, err := service.ChatCompletionsRequestToResponsesRequest(request)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		assistInfo := buildVisionAssistRelayInfo(c, parent, responsesRequest, mode)
+		if err := helper.ModelMappedHelper(c, assistInfo, responsesRequest); err != nil {
+			return nil, types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
+		}
+		return &visionAssistPreparedRequest{info: assistInfo, req: responsesRequest, mode: mode}, nil
+	case service.VisionAssistEndpointModeAnthropicMessages:
+		claudeRequest, err := claude.RequestOpenAI2ClaudeMessage(c, *request)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		assistInfo := buildVisionAssistRelayInfo(c, parent, claudeRequest, mode)
+		if err := helper.ModelMappedHelper(c, assistInfo, claudeRequest); err != nil {
+			return nil, types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
+		}
+		return &visionAssistPreparedRequest{info: assistInfo, req: claudeRequest, mode: mode}, nil
+	case service.VisionAssistEndpointModeGeminiNative:
+		geminiRequest, err := buildVisionAssistGeminiRequest(c, request)
+		if err != nil {
+			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+		}
+		assistInfo := buildVisionAssistRelayInfo(c, parent, geminiRequest, mode)
+		if err := helper.ModelMappedHelper(c, assistInfo, geminiRequest); err != nil {
+			return nil, types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
+		}
+		return &visionAssistPreparedRequest{info: assistInfo, req: geminiRequest, mode: mode}, nil
+	default:
+		assistInfo := buildVisionAssistRelayInfo(c, parent, request, service.VisionAssistEndpointModeOpenAIChat)
+		if err := helper.ModelMappedHelper(c, assistInfo, request); err != nil {
+			return nil, types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
+		}
+		return &visionAssistPreparedRequest{info: assistInfo, req: request, mode: service.VisionAssistEndpointModeOpenAIChat}, nil
+	}
+}
+
+func buildVisionAssistRelayInfo(c *gin.Context, parent *relaycommon.RelayInfo, request dto.Request, mode string) *relaycommon.RelayInfo {
+	var assistInfo *relaycommon.RelayInfo
+	switch req := request.(type) {
+	case *dto.OpenAIResponsesRequest:
+		assistInfo = relaycommon.GenRelayInfoResponses(c, req)
+		assistInfo.RequestURLPath = "/v1/responses"
+	case *dto.ClaudeRequest:
+		assistInfo = relaycommon.GenRelayInfoClaude(c, req)
+		assistInfo.RequestURLPath = "/v1/messages"
+	case *dto.GeminiChatRequest:
+		assistInfo = relaycommon.GenRelayInfoGemini(c, req)
+		assistInfo.RelayMode = relayconstant.RelayModeGemini
+		assistInfo.RequestURLPath = "/v1beta/models/" + strings.TrimSpace(parent.ChannelSetting.VisionAssist.AssistModel) + ":generateContent"
+	default:
+		assistInfo = relaycommon.GenRelayInfoOpenAI(c, request)
+		assistInfo.RelayMode = relayconstant.RelayModeChatCompletions
+		assistInfo.RequestURLPath = "/v1/chat/completions"
+	}
 	assistInfo.RequestHeaders = cloneVisionAssistHeaders(parent.RequestHeaders)
 	assistInfo.UserSetting = parent.UserSetting
 	assistInfo.UserQuota = parent.UserQuota
@@ -130,11 +195,12 @@ func buildVisionAssistRelayInfo(c *gin.Context, parent *relaycommon.RelayInfo, r
 	assistInfo.TokenKey = parent.TokenKey
 	assistInfo.TokenUnlimited = parent.TokenUnlimited
 	assistInfo.IsPlayground = parent.IsPlayground
-	assistInfo.OriginModelName = request.Model
+	assistInfo.OriginModelName = strings.TrimSpace(parent.ChannelSetting.VisionAssist.AssistModel)
 	assistInfo.RequestId = parent.RequestId + ":vision_assist:" + common.GetRandomString(8)
 	assistInfo.StartTime = time.Now()
 	assistInfo.FirstResponseTime = assistInfo.StartTime.Add(-time.Second)
 	assistInfo.InitRequestConversionChain()
+	common.SetContextKey(c, constant.ContextKeyVisionAssistEndpointMode, mode)
 	return assistInfo
 }
 
@@ -149,14 +215,104 @@ func cloneVisionAssistHeaders(headers map[string]string) map[string]string {
 	return clone
 }
 
-func doVisionAssistRequest(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest) (string, *dto.Usage, *types.NewAPIError) {
+func resolveVisionAssistEndpointMode(configuredMode string, channelType int, modelName string) string {
+	mode := strings.ToLower(strings.TrimSpace(configuredMode))
+	switch mode {
+	case service.VisionAssistEndpointModeOpenAIChat,
+		service.VisionAssistEndpointModeOpenAIResponses,
+		service.VisionAssistEndpointModeAnthropicMessages,
+		service.VisionAssistEndpointModeGeminiNative:
+		return mode
+	}
+
+	modelName = strings.ToLower(strings.TrimSpace(modelName))
+	switch channelType {
+	case constant.ChannelTypeGemini:
+		return service.VisionAssistEndpointModeGeminiNative
+	case constant.ChannelTypeVertexAi:
+		if strings.HasPrefix(modelName, "claude") {
+			return service.VisionAssistEndpointModeAnthropicMessages
+		}
+		return service.VisionAssistEndpointModeGeminiNative
+	case constant.ChannelTypeAnthropic:
+		return service.VisionAssistEndpointModeAnthropicMessages
+	case constant.ChannelTypeAws:
+		if strings.Contains(modelName, "claude") {
+			return service.VisionAssistEndpointModeAnthropicMessages
+		}
+	}
+	return service.VisionAssistEndpointModeOpenAIChat
+}
+
+func buildVisionAssistGeminiRequest(c *gin.Context, request *dto.GeneralOpenAIRequest) (*dto.GeminiChatRequest, error) {
+	if request == nil {
+		return nil, errors.New("request is nil")
+	}
+	parts := make([]dto.GeminiPart, 0)
+	for _, message := range request.Messages {
+		for _, content := range message.ParseContent() {
+			switch content.Type {
+			case dto.ContentTypeText:
+				if strings.TrimSpace(content.Text) != "" {
+					parts = append(parts, dto.GeminiPart{Text: content.Text})
+				}
+			case dto.ContentTypeImageURL:
+				image := content.GetImageMedia()
+				if image == nil || strings.TrimSpace(image.Url) == "" {
+					continue
+				}
+				source := types.NewFileSourceFromData(image.Url, image.MimeType)
+				base64Data, mimeType, err := service.GetBase64Data(c, source, "formatting image for Gemini vision assist")
+				if err != nil {
+					return nil, fmt.Errorf("get file data from '%s' failed: %w", source.GetIdentifier(), err)
+				}
+				if strings.TrimSpace(mimeType) == "" {
+					mimeType = image.MimeType
+				}
+				if strings.TrimSpace(mimeType) == "" {
+					mimeType = "image/png"
+				}
+				parts = append(parts, dto.GeminiPart{
+					InlineData: &dto.GeminiInlineData{
+						MimeType: mimeType,
+						Data:     base64Data,
+					},
+				})
+			}
+		}
+	}
+	if len(parts) == 0 {
+		return nil, errors.New("vision assist Gemini request has no content")
+	}
+	return &dto.GeminiChatRequest{
+		Contents: []dto.GeminiChatContent{{
+			Role:  "user",
+			Parts: parts,
+		}},
+	}, nil
+}
+
+func doVisionAssistRequest(c *gin.Context, info *relaycommon.RelayInfo, request dto.Request, mode string) (string, *dto.Usage, *types.NewAPIError) {
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {
 		return "", nil, types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
 
-	convertedRequest, err := adaptor.ConvertOpenAIRequest(c, info, request)
+	var convertedRequest any
+	var err error
+	switch req := request.(type) {
+	case *dto.OpenAIResponsesRequest:
+		convertedRequest, err = adaptor.ConvertOpenAIResponsesRequest(c, info, *req)
+	case *dto.ClaudeRequest:
+		convertedRequest, err = adaptor.ConvertClaudeRequest(c, info, req)
+	case *dto.GeminiChatRequest:
+		convertedRequest, err = adaptor.ConvertGeminiRequest(c, info, req)
+	case *dto.GeneralOpenAIRequest:
+		convertedRequest, err = adaptor.ConvertOpenAIRequest(c, info, req)
+	default:
+		err = fmt.Errorf("unsupported vision assist request type: %T", request)
+	}
 	if err != nil {
 		return "", nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
@@ -195,6 +351,19 @@ func doVisionAssistRequest(c *gin.Context, info *relaycommon.RelayInfo, request 
 	if err != nil {
 		return "", nil, types.NewError(err, types.ErrorCodeReadResponseBodyFailed)
 	}
+	switch mode {
+	case service.VisionAssistEndpointModeOpenAIResponses:
+		return parseVisionAssistResponsesResponse(body, info)
+	case service.VisionAssistEndpointModeAnthropicMessages:
+		return parseVisionAssistClaudeResponse(body, info)
+	case service.VisionAssistEndpointModeGeminiNative:
+		return parseVisionAssistGeminiResponse(body, info)
+	default:
+		return parseVisionAssistOpenAIResponse(body, info)
+	}
+}
+
+func parseVisionAssistOpenAIResponse(body []byte, info *relaycommon.RelayInfo) (string, *dto.Usage, *types.NewAPIError) {
 	var response dto.OpenAITextResponse
 	if err := common.Unmarshal(body, &response); err != nil {
 		return "", nil, types.NewError(err, types.ErrorCodeBadResponseBody)
@@ -223,6 +392,71 @@ func doVisionAssistRequest(c *gin.Context, info *relaycommon.RelayInfo, request 
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
 	return text, &usage, nil
+}
+
+func parseVisionAssistResponsesResponse(body []byte, info *relaycommon.RelayInfo) (string, *dto.Usage, *types.NewAPIError) {
+	var response dto.OpenAIResponsesResponse
+	if err := common.Unmarshal(body, &response); err != nil {
+		return "", nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+	}
+	if openaiErr := response.GetOpenAIError(); openaiErr != nil {
+		return "", nil, types.WithOpenAIError(*openaiErr, http.StatusBadGateway)
+	}
+	text := strings.TrimSpace(service.ExtractOutputTextFromResponses(&response))
+	if text == "" {
+		return "", nil, types.NewError(errors.New("视觉辅助响应为空"), types.ErrorCodeEmptyResponse)
+	}
+	usage := dto.Usage{}
+	if response.Usage != nil {
+		usage.PromptTokens = response.Usage.InputTokens
+		usage.CompletionTokens = response.Usage.OutputTokens
+		usage.TotalTokens = response.Usage.TotalTokens
+		if response.Usage.InputTokensDetails != nil {
+			usage.PromptTokensDetails.CachedTokens = response.Usage.InputTokensDetails.CachedTokens
+		}
+	}
+	fillVisionAssistUsageFallback(&usage, info, text)
+	return text, &usage, nil
+}
+
+func parseVisionAssistClaudeResponse(body []byte, info *relaycommon.RelayInfo) (string, *dto.Usage, *types.NewAPIError) {
+	var response dto.ClaudeResponse
+	if err := common.Unmarshal(body, &response); err != nil {
+		return "", nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+	}
+	if claudeErr := response.GetClaudeError(); claudeErr != nil && claudeErr.Type != "" {
+		return "", nil, types.WithClaudeError(*claudeErr, http.StatusBadGateway)
+	}
+	text := strings.TrimSpace(extractVisionAssistClaudeResponseText(response))
+	if text == "" {
+		return "", nil, types.NewError(errors.New("视觉辅助响应为空"), types.ErrorCodeEmptyResponse)
+	}
+	usage := visionAssistClaudeUsage(response.Usage)
+	fillVisionAssistUsageFallback(&usage, info, text)
+	return text, &usage, nil
+}
+
+func parseVisionAssistGeminiResponse(body []byte, info *relaycommon.RelayInfo) (string, *dto.Usage, *types.NewAPIError) {
+	var response dto.GeminiChatResponse
+	if err := common.Unmarshal(body, &response); err != nil {
+		return "", nil, types.NewError(err, types.ErrorCodeBadResponseBody)
+	}
+	text := strings.TrimSpace(extractVisionAssistGeminiResponseText(response))
+	if text == "" {
+		return "", nil, types.NewError(errors.New("视觉辅助响应为空"), types.ErrorCodeEmptyResponse)
+	}
+	usage := visionAssistGeminiUsage(response.UsageMetadata, info.GetEstimatePromptTokens())
+	fillVisionAssistUsageFallback(&usage, info, text)
+	return text, &usage, nil
+}
+
+func fillVisionAssistUsageFallback(usage *dto.Usage, info *relaycommon.RelayInfo, text string) {
+	if usage == nil || usage.TotalTokens != 0 {
+		return
+	}
+	usage.PromptTokens = info.GetEstimatePromptTokens()
+	usage.CompletionTokens = service.EstimateTokenByModel(info.OriginModelName, text)
+	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 }
 
 func extractVisionAssistResponseText(response dto.OpenAITextResponse) string {
@@ -257,6 +491,18 @@ func extractVisionAssistClaudeResponseText(response dto.ClaudeResponse) string {
 	return strings.Join(parts, "\n")
 }
 
+func extractVisionAssistGeminiResponseText(response dto.GeminiChatResponse) string {
+	parts := make([]string, 0)
+	for _, candidate := range response.Candidates {
+		for _, part := range candidate.Content.Parts {
+			if strings.TrimSpace(part.Text) != "" {
+				parts = append(parts, strings.TrimSpace(part.Text))
+			}
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 func visionAssistClaudeUsage(usage *dto.ClaudeUsage) dto.Usage {
 	if usage == nil {
 		return dto.Usage{}
@@ -274,6 +520,59 @@ func visionAssistClaudeUsage(usage *dto.ClaudeUsage) dto.Usage {
 			CachedCreationTokens: usage.CacheCreationInputTokens,
 		},
 	}
+}
+
+func visionAssistGeminiUsage(metadata dto.GeminiUsageMetadata, fallbackPromptTokens int) dto.Usage {
+	promptTokens := metadata.PromptTokenCount + metadata.ToolUsePromptTokenCount
+	if promptTokens <= 0 && fallbackPromptTokens > 0 {
+		promptTokens = fallbackPromptTokens
+	}
+	usage := dto.Usage{
+		PromptTokens:     promptTokens,
+		CompletionTokens: metadata.CandidatesTokenCount + metadata.ThoughtsTokenCount,
+		TotalTokens:      metadata.TotalTokenCount,
+		UsageSemantic:    "gemini",
+		UsageSource:      "gemini",
+	}
+	usage.CompletionTokenDetails.ReasoningTokens = metadata.ThoughtsTokenCount
+	usage.PromptTokensDetails.CachedTokens = metadata.CachedContentTokenCount
+	for _, detail := range metadata.PromptTokensDetails {
+		switch detail.Modality {
+		case "AUDIO":
+			usage.PromptTokensDetails.AudioTokens += detail.TokenCount
+		case "TEXT":
+			usage.PromptTokensDetails.TextTokens += detail.TokenCount
+		case "IMAGE":
+			usage.PromptTokensDetails.ImageTokens += detail.TokenCount
+		}
+	}
+	for _, detail := range metadata.ToolUsePromptTokensDetails {
+		switch detail.Modality {
+		case "AUDIO":
+			usage.PromptTokensDetails.AudioTokens += detail.TokenCount
+		case "TEXT":
+			usage.PromptTokensDetails.TextTokens += detail.TokenCount
+		case "IMAGE":
+			usage.PromptTokensDetails.ImageTokens += detail.TokenCount
+		}
+	}
+	for _, detail := range metadata.CandidatesTokensDetails {
+		switch detail.Modality {
+		case "IMAGE":
+			usage.CompletionTokenDetails.ImageTokens += detail.TokenCount
+		case "AUDIO":
+			usage.CompletionTokenDetails.AudioTokens += detail.TokenCount
+		case "TEXT":
+			usage.CompletionTokenDetails.TextTokens += detail.TokenCount
+		}
+	}
+	if usage.TotalTokens > 0 && usage.CompletionTokens <= 0 {
+		usage.CompletionTokens = usage.TotalTokens - usage.PromptTokens
+	}
+	if usage.PromptTokens > 0 && usage.PromptTokensDetails.TextTokens == 0 && usage.PromptTokensDetails.AudioTokens == 0 && usage.PromptTokensDetails.ImageTokens == 0 {
+		usage.PromptTokensDetails.TextTokens = usage.PromptTokens
+	}
+	return usage
 }
 
 type visionAssistContextSnapshot struct {

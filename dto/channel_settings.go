@@ -21,6 +21,10 @@ type ChannelVisionAssistSettings struct {
 	CacheTTLSeconds int      `json:"cache_ttl_seconds,omitempty"`
 	FailurePolicy   string   `json:"failure_policy,omitempty"`
 	StripImage      *bool    `json:"strip_image,omitempty"`
+	EndpointMode    string   `json:"endpoint_mode,omitempty"`
+	MaxConcurrency  int      `json:"max_concurrency,omitempty"`
+	RetryCount      int      `json:"retry_count,omitempty"`
+	RetryBackoffMs  int      `json:"retry_backoff_ms,omitempty"`
 }
 
 type VertexKeyType string

@@ -217,6 +217,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.pass_through_body_enabled ||
     values.use_upstream_model_for_billing ||
     values.system_prompt_override ||
+    values.vision_assist_enabled ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
@@ -3289,6 +3290,360 @@ export function ChannelMutateDrawer({
                           </FormItem>
                         )}
                       />
+
+                      <div className='border-border/60 flex flex-col gap-4 border-y py-4'>
+                        <SubHeading
+                          title={t('Vision Assist Settings')}
+                          icon={<Eye className='h-3.5 w-3.5' />}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='vision_assist_enabled'
+                          render={({ field }) => (
+                            <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                              <div className='space-y-0.5'>
+                                <FormLabel>
+                                  {t('Enable vision assist')}
+                                </FormLabel>
+                                <FormDescription>
+                                  {t(
+                                    'Convert images to text before forwarding requests to this channel'
+                                  )}
+                                </FormDescription>
+                              </div>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='vision_assist_channel_id'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Assist channel ID')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={0}
+                                    placeholder='0'
+                                    value={field.value ?? 0}
+                                    onChange={(e) =>
+                                      field.onChange(Number(e.target.value))
+                                    }
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t(
+                                    'Channel ID used to call the vision assist model'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='vision_assist_model'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Assist model')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    placeholder={t('e.g., gemini-2.5-flash')}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormDescription>
+                                  {t('Model used to read image content')}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <FormField
+                          control={form.control}
+                          name='vision_assist_target_models'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Target models')}</FormLabel>
+                              <FormControl>
+                                <Input
+                                  placeholder={t(
+                                    'Leave empty to apply to all models'
+                                  )}
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Comma-separated upstream model names that should use vision assist'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='vision_assist_prompt'
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>{t('Vision assist prompt')}</FormLabel>
+                              <FormControl>
+                                <Textarea
+                                  rows={3}
+                                  placeholder={t(
+                                    'Leave empty to use the built-in default prompt'
+                                  )}
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Prompt sent to the assist model for each image'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='vision_assist_endpoint_mode'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Endpoint mode')}</FormLabel>
+                                <Select
+                                  items={[
+                                    { value: 'auto', label: t('Auto') },
+                                    {
+                                      value: 'openai_chat',
+                                      label: t('OpenAI Chat Completions'),
+                                    },
+                                    {
+                                      value: 'openai_responses',
+                                      label: t('OpenAI Responses'),
+                                    },
+                                    {
+                                      value: 'anthropic_messages',
+                                      label: t('Anthropic Messages'),
+                                    },
+                                    {
+                                      value: 'gemini_native',
+                                      label: t('Gemini Native'),
+                                    },
+                                  ]}
+                                  value={field.value || 'auto'}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    <SelectGroup>
+                                      <SelectItem value='auto'>
+                                        {t('Auto')}
+                                      </SelectItem>
+                                      <SelectItem value='openai_chat'>
+                                        {t('OpenAI Chat Completions')}
+                                      </SelectItem>
+                                      <SelectItem value='openai_responses'>
+                                        {t('OpenAI Responses')}
+                                      </SelectItem>
+                                      <SelectItem value='anthropic_messages'>
+                                        {t('Anthropic Messages')}
+                                      </SelectItem>
+                                      <SelectItem value='gemini_native'>
+                                        {t('Gemini Native')}
+                                      </SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormDescription>
+                                  {t(
+                                    'Auto uses Gemini native for Gemini, Anthropic Messages for Claude, and OpenAI Chat otherwise'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='vision_assist_failure_policy'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Failure policy')}</FormLabel>
+                                <Select
+                                  items={[
+                                    { value: 'error', label: t('Error') },
+                                    { value: 'skip', label: t('Skip') },
+                                  ]}
+                                  value={field.value || 'error'}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    <SelectGroup>
+                                      <SelectItem value='error'>
+                                        {t('Error')}
+                                      </SelectItem>
+                                      <SelectItem value='skip'>
+                                        {t('Skip')}
+                                      </SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormDescription>
+                                  {t(
+                                    'Error fails the request; skip ignores failed images'
+                                  )}
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <div className='grid gap-4 sm:grid-cols-4'>
+                          <FormField
+                            control={form.control}
+                            name='vision_assist_cache_ttl_seconds'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Cache TTL seconds')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={0}
+                                    placeholder='86400'
+                                    value={field.value ?? 86400}
+                                    onChange={(e) =>
+                                      field.onChange(Number(e.target.value))
+                                    }
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='vision_assist_max_concurrency'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Max concurrency')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    max={8}
+                                    placeholder='2'
+                                    value={field.value ?? 2}
+                                    onChange={(e) =>
+                                      field.onChange(Number(e.target.value))
+                                    }
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='vision_assist_retry_count'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Retry count')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={0}
+                                    max={5}
+                                    placeholder='1'
+                                    value={field.value ?? 1}
+                                    onChange={(e) =>
+                                      field.onChange(Number(e.target.value))
+                                    }
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='vision_assist_retry_backoff_ms'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Retry backoff ms')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    max={30000}
+                                    placeholder='500'
+                                    value={field.value ?? 500}
+                                    onChange={(e) =>
+                                      field.onChange(Number(e.target.value))
+                                    }
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <FormField
+                          control={form.control}
+                          name='vision_assist_strip_image'
+                          render={({ field }) => (
+                            <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                              <div className='space-y-0.5'>
+                                <FormLabel>
+                                  {t('Remove original images')}
+                                </FormLabel>
+                                <FormDescription>
+                                  {t(
+                                    'After text is injected, remove original image parts from the forwarded request'
+                                  )}
+                                </FormDescription>
+                              </div>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value !== false}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+                      </div>
 
                       {MODEL_FETCHABLE_TYPES.has(currentType) && (
                         <div className='border-border/60 flex flex-col gap-3 border-y py-4'>

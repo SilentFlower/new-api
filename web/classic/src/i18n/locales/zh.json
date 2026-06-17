@@ -2645,6 +2645,15 @@
     "移除原始图片": "移除原始图片",
     "推荐开启，避免非视觉模型收到无法处理的图片内容": "推荐开启，避免非视觉模型收到无法处理的图片内容",
     "重定向后按上游模型计费": "重定向后按上游模型计费",
-    "开启后，model_mapping 生效时日志主模型与计费价格按最终上游模型计算": "开启后，model_mapping 生效时日志主模型与计费价格按最终上游模型计算"
+    "开启后，model_mapping 生效时日志主模型与计费价格按最终上游模型计算": "开启后，model_mapping 生效时日志主模型与计费价格按最终上游模型计算",
+    "Anthropic Messages": "Anthropic Messages",
+    "Gemini 原生": "Gemini 原生",
+    "OpenAI Chat Completions": "OpenAI Chat Completions",
+    "OpenAI Responses": "OpenAI Responses",
+    "自动模式会让 Gemini 走原生接口、Claude 走 Messages，其他渠道走 OpenAI Chat": "自动模式会让 Gemini 走原生接口、Claude 走 Messages，其他渠道走 OpenAI Chat",
+    "辅助失败重试次数": "辅助失败重试次数",
+    "辅助并发数": "辅助并发数",
+    "辅助请求端点": "辅助请求端点",
+    "重试退避（毫秒）": "重试退避（毫秒）"
   }
 }

@@ -152,6 +152,21 @@ const parseCommaList = (value) =>
 
 const joinList = (value) => (Array.isArray(value) ? value.join(',') : '');
 
+const VISION_ASSIST_ENDPOINT_MODES = [
+  'auto',
+  'openai_chat',
+  'openai_responses',
+  'anthropic_messages',
+  'gemini_native',
+];
+
+const normalizeVisionAssistEndpointMode = (value) => {
+  const endpointMode = String(value || '');
+  return VISION_ASSIST_ENDPOINT_MODES.includes(endpointMode)
+    ? endpointMode
+    : 'auto';
+};
+
 const DEPRECATED_DOUBAO_CODING_PLAN_BASE_URL = 'doubao-coding-plan';
 
 // 支持并且已适配通过接口获取模型列表的渠道类型
@@ -229,6 +244,10 @@ const EditChannelModal = (props) => {
     vision_assist_cache_ttl_seconds: 86400,
     vision_assist_failure_policy: 'error',
     vision_assist_strip_image: true,
+    vision_assist_endpoint_mode: 'auto',
+    vision_assist_max_concurrency: 2,
+    vision_assist_retry_count: 1,
+    vision_assist_retry_backoff_ms: 500,
     settings: '',
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
@@ -560,6 +579,10 @@ const EditChannelModal = (props) => {
     vision_assist_cache_ttl_seconds: 86400,
     vision_assist_failure_policy: 'error',
     vision_assist_strip_image: true,
+    vision_assist_endpoint_mode: 'auto',
+    vision_assist_max_concurrency: 2,
+    vision_assist_retry_count: 1,
+    vision_assist_retry_backoff_ms: 500,
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
@@ -572,6 +595,18 @@ const EditChannelModal = (props) => {
     );
     const visionAssistCacheTTL = parseInt(
       values.vision_assist_cache_ttl_seconds,
+      10,
+    );
+    const visionAssistMaxConcurrency = parseInt(
+      values.vision_assist_max_concurrency,
+      10,
+    );
+    const visionAssistRetryCount = parseInt(
+      values.vision_assist_retry_count,
+      10,
+    );
+    const visionAssistRetryBackoff = parseInt(
+      values.vision_assist_retry_backoff_ms,
       10,
     );
     return {
@@ -600,6 +635,23 @@ const EditChannelModal = (props) => {
         failure_policy:
           values.vision_assist_failure_policy === 'skip' ? 'skip' : 'error',
         strip_image: values.vision_assist_strip_image !== false,
+        endpoint_mode: normalizeVisionAssistEndpointMode(
+          values.vision_assist_endpoint_mode,
+        ),
+        max_concurrency:
+          Number.isFinite(visionAssistMaxConcurrency) &&
+          visionAssistMaxConcurrency > 0
+            ? visionAssistMaxConcurrency
+            : 2,
+        retry_count:
+          Number.isFinite(visionAssistRetryCount) && visionAssistRetryCount >= 0
+            ? visionAssistRetryCount
+            : 1,
+        retry_backoff_ms:
+          Number.isFinite(visionAssistRetryBackoff) &&
+          visionAssistRetryBackoff > 0
+            ? visionAssistRetryBackoff
+            : 500,
       },
     };
   };
@@ -977,6 +1029,21 @@ const EditChannelModal = (props) => {
             visionAssist.strip_image === undefined
               ? true
               : visionAssist.strip_image === true;
+          data.vision_assist_endpoint_mode = normalizeVisionAssistEndpointMode(
+            visionAssist.endpoint_mode,
+          );
+          data.vision_assist_max_concurrency =
+            Number(visionAssist.max_concurrency) > 0
+              ? Number(visionAssist.max_concurrency)
+              : 2;
+          data.vision_assist_retry_count =
+            Number(visionAssist.retry_count) >= 0
+              ? Number(visionAssist.retry_count)
+              : 1;
+          data.vision_assist_retry_backoff_ms =
+            Number(visionAssist.retry_backoff_ms) > 0
+              ? Number(visionAssist.retry_backoff_ms)
+              : 500;
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -994,6 +1061,10 @@ const EditChannelModal = (props) => {
           data.vision_assist_cache_ttl_seconds = 86400;
           data.vision_assist_failure_policy = 'error';
           data.vision_assist_strip_image = true;
+          data.vision_assist_endpoint_mode = 'auto';
+          data.vision_assist_max_concurrency = 2;
+          data.vision_assist_retry_count = 1;
+          data.vision_assist_retry_backoff_ms = 500;
         }
       } else {
         data.force_format = false;
@@ -1011,6 +1082,10 @@ const EditChannelModal = (props) => {
         data.vision_assist_cache_ttl_seconds = 86400;
         data.vision_assist_failure_policy = 'error';
         data.vision_assist_strip_image = true;
+        data.vision_assist_endpoint_mode = 'auto';
+        data.vision_assist_max_concurrency = 2;
+        data.vision_assist_retry_count = 1;
+        data.vision_assist_retry_backoff_ms = 500;
       }
 
       if (data.settings) {
@@ -1132,6 +1207,14 @@ const EditChannelModal = (props) => {
         vision_assist_failure_policy:
           data.vision_assist_failure_policy || 'error',
         vision_assist_strip_image: data.vision_assist_strip_image !== false,
+        vision_assist_endpoint_mode: data.vision_assist_endpoint_mode || 'auto',
+        vision_assist_max_concurrency: data.vision_assist_max_concurrency || 2,
+        vision_assist_retry_count:
+          data.vision_assist_retry_count === undefined
+            ? 1
+            : data.vision_assist_retry_count,
+        vision_assist_retry_backoff_ms:
+          data.vision_assist_retry_backoff_ms || 500,
       });
       initialModelsRef.current = (data.models || [])
         .map((model) => (model || '').trim())
@@ -1530,6 +1613,10 @@ const EditChannelModal = (props) => {
       vision_assist_cache_ttl_seconds: 86400,
       vision_assist_failure_policy: 'error',
       vision_assist_strip_image: true,
+      vision_assist_endpoint_mode: 'auto',
+      vision_assist_max_concurrency: 2,
+      vision_assist_retry_count: 1,
+      vision_assist_retry_backoff_ms: 500,
     });
     // 重置密钥模式状态
     setKeyMode('append');
@@ -1982,6 +2069,10 @@ const EditChannelModal = (props) => {
     delete localInputs.vision_assist_cache_ttl_seconds;
     delete localInputs.vision_assist_failure_policy;
     delete localInputs.vision_assist_strip_image;
+    delete localInputs.vision_assist_endpoint_mode;
+    delete localInputs.vision_assist_max_concurrency;
+    delete localInputs.vision_assist_retry_count;
+    delete localInputs.vision_assist_retry_backoff_ms;
     delete localInputs.is_enterprise_account;
     // 顶层的 vertex_key_type 不应发送给后端
     delete localInputs.vertex_key_type;
@@ -2690,6 +2781,20 @@ const EditChannelModal = (props) => {
                   <Form.TextArea field='vision_assist_prompt' label={t('辅助提示词')} placeholder={t('留空使用默认图片描述提示词')} onChange={(value) => handleChannelSettingsChange('vision_assist_prompt', value)} autosize showClear />
                   <Row gutter={12}>
                     <Col span={12}>
+                      <Form.Select field='vision_assist_endpoint_mode' label={t('辅助请求端点')} optionList={[
+                        { label: t('自动选择'), value: 'auto' },
+                        { label: t('OpenAI Chat Completions'), value: 'openai_chat' },
+                        { label: t('OpenAI Responses'), value: 'openai_responses' },
+                        { label: t('Anthropic Messages'), value: 'anthropic_messages' },
+                        { label: t('Gemini 原生'), value: 'gemini_native' },
+                      ]} onChange={(value) => handleChannelSettingsChange('vision_assist_endpoint_mode', value)} style={{ width: '100%' }} extraText={t('自动模式会让 Gemini 走原生接口、Claude 走 Messages，其他渠道走 OpenAI Chat')} />
+                    </Col>
+                    <Col span={12}>
+                      <Form.InputNumber field='vision_assist_max_concurrency' label={t('辅助并发数')} placeholder='2' min={1} max={8} onNumberChange={(value) => handleChannelSettingsChange('vision_assist_max_concurrency', value)} style={{ width: '100%' }} />
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
                       <Form.InputNumber field='vision_assist_cache_ttl_seconds' label={t('缓存时间（秒）')} placeholder='86400' min={1} onNumberChange={(value) => handleChannelSettingsChange('vision_assist_cache_ttl_seconds', value)} style={{ width: '100%' }} />
                     </Col>
                     <Col span={12}>
@@ -2697,6 +2802,14 @@ const EditChannelModal = (props) => {
                         { label: t('报错'), value: 'error' },
                         { label: t('跳过'), value: 'skip' },
                       ]} onChange={(value) => handleChannelSettingsChange('vision_assist_failure_policy', value)} style={{ width: '100%' }} />
+                    </Col>
+                  </Row>
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.InputNumber field='vision_assist_retry_count' label={t('辅助失败重试次数')} placeholder='1' min={0} max={5} onNumberChange={(value) => handleChannelSettingsChange('vision_assist_retry_count', value)} style={{ width: '100%' }} />
+                    </Col>
+                    <Col span={12}>
+                      <Form.InputNumber field='vision_assist_retry_backoff_ms' label={t('重试退避（毫秒）')} placeholder='500' min={1} max={30000} onNumberChange={(value) => handleChannelSettingsChange('vision_assist_retry_backoff_ms', value)} style={{ width: '100%' }} />
                     </Col>
                   </Row>
                   <Form.Switch field='vision_assist_strip_image' label={t('移除原始图片')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('vision_assist_strip_image', value)} extraText={t('推荐开启，避免非视觉模型收到无法处理的图片内容')} />

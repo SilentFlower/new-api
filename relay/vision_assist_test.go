@@ -60,3 +60,64 @@ func TestApplyVisionAssistAfterModelMappingUsesFinalUpstreamModel(t *testing.T) 
 	assert.Contains(t, common.GetJsonString(info.Request), "映射后的图片描述")
 	assert.NotContains(t, common.GetJsonString(info.Request), "image_url")
 }
+
+func TestResolveVisionAssistEndpointMode(t *testing.T) {
+	tests := []struct {
+		name       string
+		configured string
+		channel    int
+		model      string
+		expected   string
+	}{
+		{
+			name:     "Gemini 渠道默认原生 Gemini",
+			channel:  constant.ChannelTypeGemini,
+			model:    "gemini-2.5-flash",
+			expected: service.VisionAssistEndpointModeGeminiNative,
+		},
+		{
+			name:     "Vertex Gemini 默认原生 Gemini",
+			channel:  constant.ChannelTypeVertexAi,
+			model:    "gemini-2.5-flash",
+			expected: service.VisionAssistEndpointModeGeminiNative,
+		},
+		{
+			name:     "Vertex Claude 默认 Anthropic Messages",
+			channel:  constant.ChannelTypeVertexAi,
+			model:    "claude-sonnet-4-5",
+			expected: service.VisionAssistEndpointModeAnthropicMessages,
+		},
+		{
+			name:     "Anthropic 默认 Anthropic Messages",
+			channel:  constant.ChannelTypeAnthropic,
+			model:    "claude-sonnet-4-5",
+			expected: service.VisionAssistEndpointModeAnthropicMessages,
+		},
+		{
+			name:     "AWS Claude 默认 Anthropic Messages",
+			channel:  constant.ChannelTypeAws,
+			model:    "anthropic.claude-sonnet-4-5",
+			expected: service.VisionAssistEndpointModeAnthropicMessages,
+		},
+		{
+			name:     "其他渠道默认 OpenAI Chat",
+			channel:  constant.ChannelTypeOpenAI,
+			model:    "gpt-4o-mini",
+			expected: service.VisionAssistEndpointModeOpenAIChat,
+		},
+		{
+			name:       "显式 Responses 覆盖 auto",
+			configured: service.VisionAssistEndpointModeOpenAIResponses,
+			channel:    constant.ChannelTypeGemini,
+			model:      "gemini-2.5-flash",
+			expected:   service.VisionAssistEndpointModeOpenAIResponses,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			actual := resolveVisionAssistEndpointMode(tt.configured, tt.channel, tt.model)
+			assert.Equal(t, tt.expected, actual)
+		})
+	}
+}
