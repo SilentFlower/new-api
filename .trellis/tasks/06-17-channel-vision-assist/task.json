@@ -24,10 +24,10 @@
   "notes": "",
   "meta": {},
   "last_push_snapshot": {
-    "snapshot_at": "2026-06-17T18:18:50+08:00",
+    "snapshot_at": "2026-06-17T23:11:31+08:00",
     "branch": "build-bak",
     "pushed_commits": {
-      "root": "329e77fe"
+      "root": "00c1b57a"
     },
     "completed_steps": [
       "Step 1",
@@ -37,10 +37,12 @@
       "Step 5",
       "Step 6",
       "Step 7",
-      "Step 8"
+      "Step 8",
+      "追加修正：视觉辅助写回文本改为中性图片内容上下文",
+      "追加修正：修复 Claude 文件内容转换与模型列表 token-limit 测试"
     ],
-    "partial_step": "质量验证：Go 分包测试与 diff 检查已跑；组合 controller/relay/service/dto 测试存在既有失败；classic build 因缺少 Bun/node_modules 未跑",
+    "partial_step": "质量验证：go test ./dto ./relay/... ./service/... ./controller/... 已通过；classic build 仍未补跑",
     "next_step": "在有 Bun 环境后补跑 classic build；如需结束任务，再走 finish-work",
-    "notes": "实现渠道级视觉辅助识别，支持 OpenAI chat completions 与 Claude messages，配置挂渠道并按最终 UpstreamModelName 触发"
+    "notes": "视觉辅助写回不再向目标文本模型暴露辅助识别实现细节；补齐文件 MIME 推断和 Claude 文本/PDF/图片转换行为"
   }
 }
