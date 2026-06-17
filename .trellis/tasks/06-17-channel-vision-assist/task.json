@@ -22,5 +22,25 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-06-17T18:18:50+08:00",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "root": "329e77fe"
+    },
+    "completed_steps": [
+      "Step 1",
+      "Step 2",
+      "Step 3",
+      "Step 4",
+      "Step 5",
+      "Step 6",
+      "Step 7",
+      "Step 8"
+    ],
+    "partial_step": "质量验证：Go 分包测试与 diff 检查已跑；组合 controller/relay/service/dto 测试存在既有失败；classic build 因缺少 Bun/node_modules 未跑",
+    "next_step": "在有 Bun 环境后补跑 classic build；如需结束任务，再走 finish-work",
+    "notes": "实现渠道级视觉辅助识别，支持 OpenAI chat completions 与 Claude messages，配置挂渠道并按最终 UpstreamModelName 触发"
+  }
 }
