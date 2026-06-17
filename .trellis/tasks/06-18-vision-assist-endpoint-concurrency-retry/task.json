@@ -22,5 +22,26 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-06-18T07:57:41+08:00",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "root": "fae993f3"
+    },
+    "completed_steps": [
+      "Step 1 扩展配置 DTO 与归一化 helper",
+      "Step 2 抽象单图辅助执行结果",
+      "Step 3 增加有限并发 worker",
+      "Step 4 增加重试逻辑",
+      "Step 5 增加端点模式解析与执行",
+      "Step 6 补充日志字段",
+      "Step 7 更新默认 UI",
+      "Step 8 更新经典 UI",
+      "Step 9 测试与验证"
+    ],
+    "partial_step": "",
+    "next_step": "等待用户确认归档或继续后续任务",
+    "notes": "check-all 已通过；代码已随本次提交推送。"
+  }
 }
