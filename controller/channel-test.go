@@ -505,7 +505,7 @@ func testChannel(channel *model.Channel, testUserID int, testModel string, endpo
 		ChannelId:        channel.Id,
 		PromptTokens:     usage.PromptTokens,
 		CompletionTokens: usage.CompletionTokens,
-		ModelName:        info.OriginModelName,
+		ModelName:        info.BillingModelName(),
 		TokenName:        "模型测试",
 		Quota:            quota,
 		Content:          "模型测试",

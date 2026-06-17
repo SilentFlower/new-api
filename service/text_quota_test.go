@@ -107,6 +107,58 @@ func TestCalculateTextQuotaSummaryUsesSplitClaudeCacheCreationRatios(t *testing.
 	require.Equal(t, 118, summary.Quota)
 }
 
+func TestCalculateTextQuotaSummaryUsesBillingModelName(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	tests := []struct {
+		name          string
+		channelSwitch bool
+		wantModelName string
+	}{
+		{
+			name:          "开关关闭时日志主模型使用原始模型",
+			wantModelName: "origin-model",
+		},
+		{
+			name:          "开关开启且发生映射时日志主模型使用上游模型",
+			channelSwitch: true,
+			wantModelName: "upstream-model",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			relayInfo := &relaycommon.RelayInfo{
+				OriginModelName: "origin-model",
+				PriceData: types.PriceData{
+					ModelRatio:      1,
+					CompletionRatio: 1,
+					GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+				},
+				ChannelMeta: &relaycommon.ChannelMeta{
+					IsModelMapped:     true,
+					UpstreamModelName: "upstream-model",
+					ChannelSetting: dto.ChannelSettings{
+						UseUpstreamModelForBilling: tt.channelSwitch,
+					},
+				},
+				StartTime: time.Now(),
+			}
+			usage := &dto.Usage{
+				PromptTokens:     100,
+				CompletionTokens: 50,
+				TotalTokens:      150,
+			}
+
+			summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+			require.Equal(t, tt.wantModelName, summary.ModelName)
+		})
+	}
+}
+
 func TestCalculateTextQuotaSummaryUsesAnthropicUsageSemanticFromUpstreamUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

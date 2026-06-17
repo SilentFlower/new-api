@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查后端 JSON 规则、测试要求和禁止模式。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查配置从前端到后端计费和日志的跨层一致性。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查是否遗漏统一 helper 或出现重复判断。"}
+{"file":"pkg/billingexpr/expr.md","reason":"检查分层表达式计费快照和日志显示是否仍一致。"}
+{"file":".trellis/tasks/06-17-upstream-model-billing-log/prd.md","reason":"按验收标准核对实现。"}
+{"file":".trellis/tasks/06-17-upstream-model-billing-log/design.md","reason":"按设计合同核对实现。"}
+{"file":".trellis/tasks/06-17-upstream-model-billing-log/implement.md","reason":"按实施计划和风险点核对实现。"}

@@ -218,6 +218,7 @@ const EditChannelModal = (props) => {
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
+    use_upstream_model_for_billing: false,
     system_prompt: '',
     system_prompt_override: false,
     vision_assist_enabled: false,
@@ -548,6 +549,7 @@ const EditChannelModal = (props) => {
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
+    use_upstream_model_for_billing: false,
     system_prompt: '',
     system_prompt_override: false,
     vision_assist_enabled: false,
@@ -578,6 +580,8 @@ const EditChannelModal = (props) => {
       thinking_to_content: values.thinking_to_content || false,
       proxy: values.proxy || '',
       pass_through_body_enabled: values.pass_through_body_enabled || false,
+      use_upstream_model_for_billing:
+        values.use_upstream_model_for_billing === true,
       system_prompt: values.system_prompt || '',
       system_prompt_override: values.system_prompt_override || false,
       vision_assist: {
@@ -951,6 +955,8 @@ const EditChannelModal = (props) => {
           data.proxy = parsedSettings.proxy || '';
           data.pass_through_body_enabled =
             parsedSettings.pass_through_body_enabled || false;
+          data.use_upstream_model_for_billing =
+            parsedSettings.use_upstream_model_for_billing === true;
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
@@ -977,6 +983,7 @@ const EditChannelModal = (props) => {
           data.thinking_to_content = false;
           data.proxy = '';
           data.pass_through_body_enabled = false;
+          data.use_upstream_model_for_billing = false;
           data.system_prompt = '';
           data.system_prompt_override = false;
           data.vision_assist_enabled = false;
@@ -993,6 +1000,7 @@ const EditChannelModal = (props) => {
         data.thinking_to_content = false;
         data.proxy = '';
         data.pass_through_body_enabled = false;
+        data.use_upstream_model_for_billing = false;
         data.system_prompt = '';
         data.system_prompt_override = false;
         data.vision_assist_enabled = false;
@@ -1110,6 +1118,8 @@ const EditChannelModal = (props) => {
         thinking_to_content: data.thinking_to_content,
         proxy: data.proxy,
         pass_through_body_enabled: data.pass_through_body_enabled,
+        use_upstream_model_for_billing:
+          data.use_upstream_model_for_billing || false,
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
         vision_assist_enabled: data.vision_assist_enabled || false,
@@ -1162,6 +1172,7 @@ const EditChannelModal = (props) => {
         (data.system_prompt && data.system_prompt.trim()) ||
         data.thinking_to_content ||
         data.pass_through_body_enabled ||
+        data.use_upstream_model_for_billing ||
         data.force_format ||
         data.claude_beta_query ||
         data.vision_assist_enabled ||
@@ -1508,6 +1519,7 @@ const EditChannelModal = (props) => {
       thinking_to_content: false,
       proxy: '',
       pass_through_body_enabled: false,
+      use_upstream_model_for_billing: false,
       system_prompt: '',
       system_prompt_override: false,
       vision_assist_enabled: false,
@@ -1959,6 +1971,7 @@ const EditChannelModal = (props) => {
     delete localInputs.thinking_to_content;
     delete localInputs.proxy;
     delete localInputs.pass_through_body_enabled;
+    delete localInputs.use_upstream_model_for_billing;
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
     delete localInputs.vision_assist_enabled;
@@ -2659,6 +2672,7 @@ const EditChannelModal = (props) => {
 
                   <Form.Switch field='thinking_to_content' label={t('思考内容转换')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('thinking_to_content', value)} extraText={t('将 reasoning_content 转换为 <think> 标签拼接到内容中')} />
                   <Form.Switch field='pass_through_body_enabled' label={t('透传请求体')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('pass_through_body_enabled', value)} extraText={t('启用请求体透传功能')} />
+                  <Form.Switch field='use_upstream_model_for_billing' label={t('重定向后按上游模型计费')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('use_upstream_model_for_billing', value)} extraText={t('开启后，model_mapping 生效时日志主模型与计费价格按最终上游模型计算')} />
 
                   <div className='mt-4 mb-2 text-sm font-medium text-gray-700'>
                     {t('视觉辅助识别')}

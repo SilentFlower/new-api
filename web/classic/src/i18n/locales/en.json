@@ -3848,6 +3848,8 @@
     "报错": "Error",
     "跳过": "Skip",
     "移除原始图片": "Remove original images",
-    "推荐开启，避免非视觉模型收到无法处理的图片内容": "Recommended, to avoid sending unsupported image content to non-vision models."
+    "推荐开启，避免非视觉模型收到无法处理的图片内容": "Recommended, to avoid sending unsupported image content to non-vision models.",
+    "重定向后按上游模型计费": "Bill by upstream model after redirect",
+    "开启后，model_mapping 生效时日志主模型与计费价格按最终上游模型计算": "When enabled, if model_mapping is applied, the log model and billing price are calculated using the final upstream model"
   }
 }

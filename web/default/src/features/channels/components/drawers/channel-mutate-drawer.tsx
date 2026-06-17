@@ -215,6 +215,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.force_format ||
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
+    values.use_upstream_model_for_billing ||
     values.system_prompt_override ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
@@ -3181,6 +3182,31 @@ export function ChannelMutateDrawer({
                                 <FormLabel>{t('Pass Through Body')}</FormLabel>
                                 <FormDescription>
                                   {t('Pass request body directly to upstream')}
+                                </FormDescription>
+                              </div>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='use_upstream_model_for_billing'
+                          render={({ field }) => (
+                            <FormItem className='flex items-center justify-between px-4 py-3'>
+                              <div className='space-y-0.5'>
+                                <FormLabel>
+                                  {t('Bill Mapped Upstream Model')}
+                                </FormLabel>
+                                <FormDescription>
+                                  {t(
+                                    'When model_mapping is applied, use the final upstream model for logs and billing'
+                                  )}
                                 </FormDescription>
                               </div>
                               <FormControl>

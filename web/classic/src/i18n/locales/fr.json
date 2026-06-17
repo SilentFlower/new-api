@@ -3695,6 +3695,8 @@
     "报错": "Erreur",
     "跳过": "Ignorer",
     "移除原始图片": "Supprimer les images d'origine",
-    "推荐开启，避免非视觉模型收到无法处理的图片内容": "Recommandé pour éviter d’envoyer du contenu image non pris en charge aux modèles non visuels."
+    "推荐开启，避免非视觉模型收到无法处理的图片内容": "Recommandé pour éviter d’envoyer du contenu image non pris en charge aux modèles non visuels.",
+    "重定向后按上游模型计费": "Facturer selon le modèle amont après redirection",
+    "开启后，model_mapping 生效时日志主模型与计费价格按最终上游模型计算": "Une fois activé, lorsque model_mapping s’applique, le modèle principal du journal et le prix de facturation sont calculés selon le modèle amont final"
   }
 }

@@ -18,9 +18,10 @@ import (
 // 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	tokenName := c.GetString("token_name")
+	billingModelName := info.BillingModelName()
 	logContent := fmt.Sprintf("操作 %s", info.Action)
 	// 支持任务仅按次计费
-	if common.StringsContains(constant.TaskPricePatches, info.OriginModelName) {
+	if common.StringsContains(constant.TaskPricePatches, billingModelName) {
 		logContent = fmt.Sprintf("%s，按次计费", logContent)
 	} else {
 		if len(info.PriceData.OtherRatios) > 0 {
@@ -48,11 +49,15 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	}
 	if info.IsModelMapped {
 		other["is_model_mapped"] = true
+		other["origin_model_name"] = info.OriginModelName
 		other["upstream_model_name"] = info.UpstreamModelName
+	}
+	if billingModelName != "" {
+		other["billing_model_name"] = billingModelName
 	}
 	model.RecordConsumeLog(c, info.UserId, model.RecordConsumeLogParams{
 		ChannelId: info.ChannelId,
-		ModelName: info.OriginModelName,
+		ModelName: billingModelName,
 		TokenName: tokenName,
 		Quota:     info.PriceData.Quota,
 		Content:   logContent,
@@ -130,10 +135,17 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 				other[k] = v
 			}
 		}
+		if bc.OriginModelName != "" {
+			other["origin_model_name"] = bc.OriginModelName
+		}
+		if bc.BillingModelName != "" {
+			other["billing_model_name"] = bc.BillingModelName
+		}
 	}
 	props := task.Properties
 	if props.UpstreamModelName != "" && props.UpstreamModelName != props.OriginModelName {
 		other["is_model_mapped"] = true
+		other["origin_model_name"] = props.OriginModelName
 		other["upstream_model_name"] = props.UpstreamModelName
 	}
 	return other
@@ -141,6 +153,9 @@ func taskBillingOther(task *model.Task) map[string]interface{} {
 
 // taskModelName 从 BillingContext 或 Properties 中获取模型名称。
 func taskModelName(task *model.Task) string {
+	if bc := task.PrivateData.BillingContext; bc != nil && bc.BillingModelName != "" {
+		return bc.BillingModelName
+	}
 	if bc := task.PrivateData.BillingContext; bc != nil && bc.OriginModelName != "" {
 		return bc.OriginModelName
 	}

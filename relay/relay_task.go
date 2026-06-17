@@ -177,7 +177,6 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 4. 价格计算：基础模型价格
-	info.OriginModelName = modelName
 	priceData, err := helper.ModelPriceHelperPerCall(c, info)
 	if err != nil {
 		return nil, service.TaskErrorWrapper(err, "model_price_error", http.StatusBadRequest)
@@ -194,7 +193,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 	}
 
 	// 6. 将 OtherRatios 应用到基础额度
-	if !common.StringsContains(constant.TaskPricePatches, modelName) {
+	if !common.StringsContains(constant.TaskPricePatches, info.BillingModelName()) {
 		for _, ra := range info.PriceData.OtherRatios {
 			if ra != 1.0 {
 				info.PriceData.Quota = int(float64(info.PriceData.Quota) * ra)

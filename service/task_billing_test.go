@@ -4,13 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/types"
+	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -607,6 +611,55 @@ func TestNonTerminalUpdate_NoBilling(t *testing.T) {
 	var reloaded model.Task
 	require.NoError(t, model.DB.First(&reloaded, task.ID).Error)
 	assert.Equal(t, "50%", reloaded.Progress)
+}
+
+func TestLogTaskConsumptionUsesBillingModelAndTraceFields(t *testing.T) {
+	truncate(t)
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/video/generations", http.NoBody)
+	ctx.Set("token_name", "task-token")
+
+	const userID, channelID = 40, 40
+	seedUser(t, userID, 10000)
+	seedChannel(t, channelID)
+
+	info := &relaycommon.RelayInfo{
+		UserId:          userID,
+		ChannelMeta:     &relaycommon.ChannelMeta{},
+		OriginModelName: "origin-task-model",
+		PriceData: types.PriceData{
+			Quota:          1234,
+			ModelRatio:     1,
+			OtherRatios:    map[string]float64{"duration": 2},
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+		TaskRelayInfo: &relaycommon.TaskRelayInfo{
+			Action: "submit",
+		},
+	}
+	info.ChannelId = channelID
+	info.ChannelMeta.IsModelMapped = true
+	info.ChannelMeta.UpstreamModelName = "upstream-task-model"
+	info.ChannelMeta.ChannelSetting = dto.ChannelSettings{
+		UseUpstreamModelForBilling: true,
+	}
+
+	LogTaskConsumption(ctx, info)
+
+	log := getLastLog(t)
+	require.NotNil(t, log)
+	assert.Equal(t, model.LogTypeConsume, log.Type)
+	assert.Equal(t, "upstream-task-model", log.ModelName)
+	assert.Equal(t, 1234, log.Quota)
+
+	var other map[string]interface{}
+	require.NoError(t, common.Unmarshal([]byte(log.Other), &other))
+	assert.Equal(t, true, other["is_model_mapped"])
+	assert.Equal(t, "origin-task-model", other["origin_model_name"])
+	assert.Equal(t, "upstream-task-model", other["upstream_model_name"])
+	assert.Equal(t, "upstream-task-model", other["billing_model_name"])
 }
 
 // ===========================================================================

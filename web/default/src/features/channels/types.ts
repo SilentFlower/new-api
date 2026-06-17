@@ -84,6 +84,7 @@ export interface ChannelSettings {
   thinking_to_content?: boolean
   proxy?: string
   pass_through_body_enabled?: boolean
+  use_upstream_model_for_billing?: boolean
   system_prompt?: string
   system_prompt_override?: boolean
   vision_assist?: {

@@ -4229,6 +4229,8 @@
     "报错": "Báo lỗi",
     "跳过": "Bỏ qua",
     "移除原始图片": "Xóa ảnh gốc",
-    "推荐开启，避免非视觉模型收到无法处理的图片内容": "Nên bật để tránh gửi nội dung hình ảnh không được hỗ trợ tới mô hình không có thị giác."
+    "推荐开启，避免非视觉模型收到无法处理的图片内容": "Nên bật để tránh gửi nội dung hình ảnh không được hỗ trợ tới mô hình không có thị giác.",
+    "重定向后按上游模型计费": "Tính phí theo mô hình upstream sau chuyển hướng",
+    "开启后，model_mapping 生效时日志主模型与计费价格按最终上游模型计算": "Khi bật, nếu model_mapping có hiệu lực, mô hình chính trong nhật ký và giá tính phí được tính theo mô hình upstream cuối cùng"
   }
 }

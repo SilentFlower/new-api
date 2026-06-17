@@ -14,6 +14,7 @@ import (
 	"github.com/QuantumNous/new-api/pkg/billingexpr"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -239,6 +240,30 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	if info.Request != nil {
 		info.Request.SetModelName(info.OriginModelName)
 	}
+}
+
+// ShouldUseUpstreamModelForBilling 判断当前请求是否应按最终上游模型计费。
+// 仅当渠道显式开启开关且实际发生模型映射时返回 true，避免影响历史渠道。
+func (info *RelayInfo) ShouldUseUpstreamModelForBilling() bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	return info.ChannelSetting.UseUpstreamModelForBilling && info.IsModelMapped && strings.TrimSpace(info.UpstreamModelName) != ""
+}
+
+// BillingModelName 返回本次请求用于计费和消费日志主模型的模型名。
+// 默认保持原始请求模型；渠道开启开关且模型映射生效时返回最终上游模型。
+func (info *RelayInfo) BillingModelName() string {
+	if info == nil {
+		return ""
+	}
+	if info.ShouldUseUpstreamModelForBilling() {
+		if strings.HasSuffix(info.OriginModelName, ratio_setting.CompactModelSuffix) {
+			return ratio_setting.WithCompactModelSuffix(info.UpstreamModelName)
+		}
+		return info.UpstreamModelName
+	}
+	return info.OriginModelName
 }
 
 func (info *RelayInfo) ToString() string {
