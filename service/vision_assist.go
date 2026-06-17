@@ -23,9 +23,11 @@ const (
 	VisionAssistFailurePolicyError = "error"
 	VisionAssistFailurePolicySkip  = "skip"
 
-	defaultVisionAssistPrompt          = "请客观描述图片内容，保留图片中的文字、表格、关键对象、空间关系和可能影响回答的细节。"
-	defaultVisionAssistCacheTTLSeconds = 86400
-	visionAssistCacheCapacity          = 4096
+	defaultVisionAssistPrompt           = "请客观描述图片内容，保留图片中的文字、表格、关键对象、空间关系和可能影响回答的细节。"
+	defaultVisionAssistCacheTTLSeconds  = 86400
+	visionAssistCacheCapacity           = 4096
+	visionAssistInjectedTextHeader      = "[图片内容]"
+	visionAssistInjectedTextInstruction = "以下内容是当前用户消息中图片的可见信息，请直接用于回答用户。"
 )
 
 // VisionAssistCaller 调用实际视觉辅助模型，并返回每张图片的文字识别结果。
@@ -432,12 +434,15 @@ func rewriteVisionAssistRequest(request dto.Request, results []VisionAssistResul
 }
 
 func visionAssistText(results []VisionAssistResult) string {
-	lines := []string{"[图片辅助识别结果]"}
+	lines := []string{visionAssistInjectedTextHeader, visionAssistInjectedTextInstruction}
 	for _, result := range results {
 		if strings.TrimSpace(result.Text) == "" {
 			continue
 		}
 		lines = append(lines, fmt.Sprintf("图片 %d：%s", result.Image.Index, strings.TrimSpace(result.Text)))
+	}
+	if len(lines) == 2 {
+		return ""
 	}
 	return strings.Join(lines, "\n")
 }
@@ -447,7 +452,7 @@ func rewriteOpenAIVisionAssistRequest(request *dto.GeneralOpenAIRequest, results
 	for i := range request.Messages {
 		messageResults := byMessage[i]
 		text := visionAssistText(messageResults)
-		if strings.TrimSpace(text) == "[图片辅助识别结果]" {
+		if text == "" {
 			continue
 		}
 		contents := request.Messages[i].ParseContent()
@@ -480,7 +485,7 @@ func rewriteClaudeVisionAssistRequest(request *dto.ClaudeRequest, results []Visi
 	for i := range request.Messages {
 		messageResults := byMessage[i]
 		text := visionAssistText(messageResults)
-		if strings.TrimSpace(text) == "[图片辅助识别结果]" {
+		if text == "" {
 			continue
 		}
 		if request.Messages[i].IsStringContent() {

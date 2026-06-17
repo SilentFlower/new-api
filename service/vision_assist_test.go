@@ -80,8 +80,9 @@ func TestRewriteOpenAIVisionAssistRequestStripImage(t *testing.T) {
 	assert.Equal(t, dto.ContentTypeText, contents[0].Type)
 	assert.Equal(t, "原始问题", contents[0].Text)
 	assert.Equal(t, dto.ContentTypeText, contents[1].Type)
-	assert.Contains(t, contents[1].Text, "[图片辅助识别结果]")
+	assert.Contains(t, contents[1].Text, "[图片内容]")
 	assert.Contains(t, contents[1].Text, "一张图片")
+	assert.NotContains(t, contents[1].Text, "辅助识别")
 }
 
 func TestExtractAndRewriteClaudeVisionAssistImages(t *testing.T) {
@@ -111,7 +112,25 @@ func TestExtractAndRewriteClaudeVisionAssistImages(t *testing.T) {
 	require.Len(t, contents, 2)
 	assert.Equal(t, dto.ContentTypeText, contents[0].Type)
 	assert.Equal(t, dto.ContentTypeText, contents[1].Type)
+	assert.Contains(t, contents[1].GetText(), "[图片内容]")
 	assert.Contains(t, contents[1].GetText(), "图片里有文字")
+	assert.NotContains(t, contents[1].GetText(), "辅助识别")
+}
+
+func TestVisionAssistTextSkipsEmptyResultsAndHidesImplementationDetails(t *testing.T) {
+	emptyText := visionAssistText([]VisionAssistResult{{
+		Image: VisionAssistImage{Index: 1, MessageIndex: 0},
+		Text:  "  ",
+	}})
+	assert.Empty(t, emptyText)
+
+	text := visionAssistText([]VisionAssistResult{{
+		Image: VisionAssistImage{Index: 1, MessageIndex: 0},
+		Text:  "图片里有表格",
+	}})
+	assert.Contains(t, text, "[图片内容]")
+	assert.Contains(t, text, "图片里有表格")
+	assert.NotContains(t, text, "辅助识别")
 }
 
 func TestVisionAssistCacheKeyUsesAssistSettings(t *testing.T) {
