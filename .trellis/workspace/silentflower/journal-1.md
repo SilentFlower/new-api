@@ -40,3 +40,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 2: 渠道视觉辅助收尾
+
+**Date**: 2026-06-17
+**Task**: 渠道视觉辅助收尾
+**Branch**: `build-bak`
+
+### Summary
+
+完成渠道级视觉辅助识别，实现请求改写、缓存、辅助调用、计费日志，并追加优化注入给下游模型的图片内容文本；修复 Claude 文件转换和模型列表 token-limit 测试，验证 go test ./dto ./relay/... ./service/... ./controller/... 通过。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `329e77fe` | (see git log) |
+| `00c1b57a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
