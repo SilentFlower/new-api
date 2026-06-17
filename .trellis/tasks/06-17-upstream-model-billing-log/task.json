@@ -22,5 +22,25 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-06-18T00:12:51+08:00",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "root": "8106a70c"
+    },
+    "completed_steps": [
+      "Step 1",
+      "Step 2",
+      "Step 3",
+      "Step 4",
+      "Step 5",
+      "Step 6",
+      "Step 7",
+      "Step 8",
+      "Step 9"
+    ],
+    "next_step": "等待归档或后续发布检查",
+    "notes": "已完成渠道开关、计费模型选择、日志追溯字段、默认 UI 与经典 UI 配置入口、后端单元测试和 i18n 检查。"
+  }
 }
