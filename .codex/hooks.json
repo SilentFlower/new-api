@@ -1,23 +1,23 @@
 {
   "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 .codex/hooks/session-start.py",
-            "timeout": 5
-          }
-        ]
-      }
-    ],
     "UserPromptSubmit": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "python3 .codex/hooks/inject-workflow-state.py",
-            "timeout": 5
+            "command": "python3 -X utf8 .codex/hooks/inject-workflow-state.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -X utf8 .codex/hooks/session-start.py",
+            "timeout": 30
           }
         ]
       }

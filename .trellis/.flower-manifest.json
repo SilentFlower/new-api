@@ -1,7 +1,7 @@
 {
-  "flowerVersion": "0.2.5-beta.1",
+  "flowerVersion": "0.3.0-beta.1",
   "variant": "0.6",
-  "version": "0.6.0-beta.8",
+  "version": "0.6.0",
   "skills": [
     "trellis-check-all",
     "trellis-create-command",

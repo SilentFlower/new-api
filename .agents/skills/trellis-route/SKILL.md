@@ -20,6 +20,8 @@ description: |
 
 个人 route 配置只决定“已获准执行后的模式”，不是开工授权。读取 `.trellis/.route-prefs.tmp` 前，必须确认当前 workflow 已允许进入对应 target：implement 需要任务已完成规划确认并处于 `in_progress`；check 需要已有本轮实现变更或用户明确要求检查。如果仍在 planning、等待用户确认，或用户表达“等一下 / 我再想想”，停止，不读取个人配置。
 
+Codex inline mode 只表示主会话默认直接执行，不是 route 选项过滤器。即使当前上下文出现 `<codex-mode>inline...do not dispatch...</codex-mode>` 或 `workflow-state:in_progress-inline`，也不能推断“只能 inline”或跳过 subagent 选项；仍必须读取 `.trellis/.route-prefs.tmp`，或在无有效配置时展示正常 inline/subagent 选项。若本 skill 的紧邻路由决定是 subagent，本步骤允许主 agent dispatch 对应 implement/check sub-agent；禁止的是绕过 `trellis-route` 直接 dispatch。
+
 先判断本次路由目标：
 
 - `target=implement`：决定 `inline` / `subagent`。
@@ -239,6 +241,7 @@ OLD_CHECK=$(awk -F= '$1=="check"{print $2}' "$PREF_FILE" 2>/dev/null | tail -n 1
 5. **轻量 check 是隐藏逃生口**：只有用户明确请求 `light check` / `轻量检查` 时才可走轻量 `trellis-check`。
 6. **决策与执行分离**：本 skill 只输出指令，下一轮由主 agent 调工具。
 7. **严格执行用户选择**：路由结论一旦输出，主 agent 必须按指令执行，不可“出于谨慎”再换路径。
+8. **Codex inline 不裁剪选项**：Codex inline 是默认执行模式，不是只能 inline 的强制模式；route 明确选中 subagent 时，本步骤可按 subagent 路径执行。
 
 ---
 
@@ -252,6 +255,7 @@ OLD_CHECK=$(awk -F= '$1=="check"{print $2}' "$PREF_FILE" 2>/dev/null | tail -n 1
 - `AskUserQuestion` / `request_user_input` 不可用时，记录为 inline 或 subagent 路径并继续。
 - 给 check 任何模式附加“跳过编译”指令。
 - 询问后忽视用户答案默认 subagent。
+- 因 `<codex-mode>` 或 `in_progress-inline` 提到 inline，就自行把无配置 route 结果改成 inline 或隐藏 subagent 选项。
 
 ---
 

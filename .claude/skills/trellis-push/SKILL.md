@@ -44,7 +44,7 @@ Step 5  写入已确认的任务进度快照，并补齐运行后字段
 Step 6  输出结果
 ```
 
-除非出现“计划变化、执行失败重试、用户调整 snapshot、父仓出现额外 dirty 文件、merge 冲突”等情况，否则不要在执行中途追加新的确认问题。
+除非出现“计划变化、执行失败重试、用户调整 snapshot、父仓 staged/冲突/task 文件预脏等 bookkeeping 安全条件不满足、merge 冲突”等情况，否则不要在执行中途追加新的确认问题。
 
 ---
 
@@ -120,7 +120,12 @@ git log <base_branch>..HEAD --oneline
 - 有未合并状态、rebase 状态或 merge 冲突残留：立即停止，展示状态；不要继续生成执行计划。
 - 当前分支为空、detached HEAD、或无法确认分支：停止并说明原因。
 - dirty 文件必须按来源分组：**AI 本轮编辑** 与 **未识别 dirty 文件**。未识别 dirty 文件默认不纳入提交计划。
-- 如果父仓（含 `.trellis/` 的仓库）后续要写 snapshot，先记录父仓当前 `git status --short`，供 Step 5 判断是否有额外 dirty 文件。
+- 如果父仓（含 `.trellis/` 的仓库）后续要写 snapshot，先记录父仓当前 `git status --porcelain`，供 Step 5 判断：
+  - 是否存在未合并 / 冲突状态；
+  - 是否存在与本次 bookkeeping 无关的 staged 文件；
+  - `<task_dir>/task.json` 是否在写入前已经 dirty；
+  - reconfigure 场景下 `.trellis/config.yaml` 是否在写入前已经 dirty 且未在统一计划中确认。
+  父仓存在无关、未暂存 dirty 文件本身不阻塞 snapshot；这些文件只需要在计划或结果中提示会保留未提交。
 
 ---
 
@@ -225,6 +230,8 @@ commit-only 模式下，字段名仍保持 `pushed_commits` 以兼容恢复逻�
 ### 父仓 bookkeeping
 
 - <跳过原因，或仅提交 `<task_dir>/task.json`>
+- 无关未暂存 dirty：<list 或 无>（保留未提交，不阻塞 snapshot commit）
+- 无关 staged / 冲突 / 目标文件预脏：<list 或 无>（有则停止，需处理后重新计划）
 
 确认后将按上述计划执行。回复 `ok` / `行` / `确认` 执行；回复 `skip snapshot` 跳过快照；回复修改意见则先更新计划；回复 `manual` / `我自己来` 则停止。
 ```
@@ -334,6 +341,15 @@ git checkout <current_branch>
 - `pushed_commits`：各 package 的短 hash
 - `notes`：保留已确认 notes；commit-only 模式追加“本地已提交，未推送”
 
+写入前先复核目标文件：
+
+```bash
+git status --porcelain -- <task_json_path> [".trellis/config.yaml"]
+```
+
+- `<task_json_path>` 如果在本次写入前已经 dirty，且该 dirty 未在统一计划中确认：立即停止并说明原因，避免覆盖或混入别人对同一任务文件的修改。
+- reconfigure 场景下，`.trellis/config.yaml` 如果在本次回写前已经 dirty，且未在统一计划中确认：立即停止并说明原因。
+
 写入方式：
 
 1. 读 `<task_dir>/task.json`
@@ -349,15 +365,21 @@ git checkout <current_branch>
 写完 snapshot 后，在父仓根目录执行：
 
 ```bash
-git status --short
+git status --porcelain
+git diff --name-only --cached
 ```
 
-只允许自动处理统一计划中确认过的文件：
+bookkeeping 的自动处理范围只允许统一计划中确认过的文件：
 
 - `<task_dir>/task.json`
 - 如果 Step 4 选择了 reconfigure：`.trellis/config.yaml`
 
-如果父仓 status 显示其它改动，立即停止并询问用户如何处理。不要静默打包。
+检查规则：
+
+- 如果存在未合并路径、rebase 状态或 merge 冲突残留：立即停止，展示状态。
+- 如果 `git diff --name-only --cached` 显示除上述允许文件之外的 staged 文件：立即停止，说明这些 staged 文件会被普通 commit 混入，必须先处理或重新确认。
+- 如果存在除上述允许文件之外的**未暂存** dirty 文件：不要阻塞；保留它们未暂存，并在结果中提示“未纳入 snapshot commit”。
+- 如果允许文件之外的 dirty 同时被 staged 和 unstaged 修改，按 staged 风险处理：立即停止。
 
 如果父仓也是本次业务仓库，snapshot / config bookkeeping 仍然使用单独 commit，不和业务 commit 混合。
 
@@ -365,8 +387,10 @@ git status --short
 
 ```bash
 git add <task_json_path> [".trellis/config.yaml"]
-git commit -m "chore(task): update <task_name> push snapshot"
+git commit --only -m "chore(task): update <task_name> push snapshot" -- <task_json_path> [".trellis/config.yaml"]
 ```
+
+`git commit --only ... -- <paths>` 的目的是把 bookkeeping commit 限定到当前任务的 `task.json`（以及已确认的 `config.yaml`），即使父仓还有无关未暂存 dirty 文件，也不会把它们带入本次提交。执行前仍必须确认 staged 区没有无关文件；如果本地 Git 对 `--only` 参数不兼容，只有在 staged 区确认仅包含上述允许文件时，才可退回普通 `git commit -m ...`。
 
 检查父仓是否配置 remote：
 
@@ -393,6 +417,7 @@ git remote -v | grep -E "^origin\s+"
 
 任务进度快照：已写入 `<task_dir>/task.json`，完成 Step 1-3，下一步 Step 5。
 父仓同步：已提交并推送 `chore(task): update <task_name> push snapshot`。
+父仓存在未暂存 dirty 时补充：这些文件已保留未暂存，未纳入 snapshot commit：<list>
 ```
 
 如果部分仓库已成功、后续失败，必须明确列出：
@@ -410,7 +435,7 @@ git remote -v | grep -E "^origin\s+"
 2. **未识别 dirty 文件隔离** — 默认不纳入提交，除非用户明确确认。
 3. **执行前复核** — git 状态与计划不一致时停止，不临时扩展范围。
 4. **snapshot 合并确认** — 语义字段执行前确认，运行后字段执行后补齐。
-5. **父仓 bookkeeping 隔离** — 只提交已确认的 `task.json` / `config.yaml`，其它 dirty 文件必须询问。
+5. **父仓 bookkeeping 隔离** — 只提交已确认的 `task.json` / `config.yaml`；无关未暂存 dirty 文件保留未提交并提示，不阻塞；无关 staged 文件、冲突状态、目标文件预脏必须停止。
 6. **merge 冲突处理** — 冲突时暂停，不静默跳过。
 7. **主分支保护** — 目标分支是 `master` / `main` 时必须在计划中额外警告确认。
 8. **不使用 force push** — 始终使用普通 push。
@@ -426,6 +451,8 @@ git remote -v | grep -E "^origin\s+"
 - ❌ push 后临时追问 merge，而不是在计划中提前确认
 - ❌ snapshot 语义内容未确认就写入 task.json
 - ❌ 父仓 snapshot commit 混入业务代码提交
+- ❌ 父仓存在无关未暂存 dirty 就跳过 snapshot，尽管可以只提交目标 `task.json`
+- ❌ 父仓已有无关 staged 文件时仍执行 snapshot commit
 - ❌ merge 冲突后静默 abort 或跳过
 - ❌ force push 到当前分支或目标分支
 - ❌ 在目标分支上直接开发（只 merge，不在目标分支上改代码）
