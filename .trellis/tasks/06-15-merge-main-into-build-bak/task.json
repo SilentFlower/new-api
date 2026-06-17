@@ -22,5 +22,18 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-06-17T16:19:52+08:00",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "root": "7d1c4466"
+    },
+    "completed_steps": [
+      "已提交并推送 build-bak 上的合并相关成果",
+      "已纳入 Trellis 工作流、技能与任务上下文文件"
+    ],
+    "next_step": "等待后续质量检查、spec 更新或 finish-work",
+    "notes": "缺少 implement.md，快照按当前任务 PRD、现有提交和本次提交计划推断。"
+  }
 }
