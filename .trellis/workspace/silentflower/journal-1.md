@@ -108,3 +108,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 4: 报表导出令牌筛选与快捷时间
+
+**Date**: 2026-06-18
+**Task**: 报表导出令牌筛选与快捷时间
+**Branch**: `build-bak`
+
+### Summary
+
+完成经典数据看板导出报表令牌多选筛选、导出接口 token_names 兼容、搜索快捷时间标签，并修复快捷标签未回填 Semi Form 字段的问题。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cc6882bc` | (see git log) |
+| `0e72fabe` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
