@@ -1,12 +1,14 @@
 package relay
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
@@ -120,4 +122,43 @@ func TestResolveVisionAssistEndpointMode(t *testing.T) {
 			assert.Equal(t, tt.expected, actual)
 		})
 	}
+}
+
+func TestBuildVisionAssistRelayInfoInitializesAssistChannelMeta(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages?beta=true", nil)
+	baseURL := "https://assist.example.com"
+	common.SetContextKey(c, constant.ContextKeyOriginalModel, "vision-model")
+	common.SetContextKey(c, constant.ContextKeyChannelId, 99)
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeOpenAI)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, baseURL)
+	common.SetContextKey(c, constant.ContextKeyChannelKey, "assist-key")
+	common.SetContextKey(c, constant.ContextKeyChannelSetting, dto.ChannelSettings{})
+
+	parent := &relaycommon.RelayInfo{
+		RequestId:       "parent-request",
+		RequestHeaders:  map[string]string{"Content-Type": "application/json"},
+		OriginModelName: "target-model",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "target-model",
+			ChannelSetting: dto.ChannelSettings{
+				VisionAssist: dto.ChannelVisionAssistSettings{
+					AssistModel: "vision-model",
+				},
+			},
+		},
+	}
+	request := &dto.GeneralOpenAIRequest{Model: "vision-model"}
+
+	assistInfo := buildVisionAssistRelayInfo(c, parent, request, service.VisionAssistEndpointModeOpenAIChat)
+	require.NotNil(t, assistInfo.ChannelMeta)
+	assert.Equal(t, baseURL, assistInfo.ChannelBaseUrl)
+	assert.Equal(t, "vision-model", assistInfo.OriginModelName)
+
+	adaptor := &openai.Adaptor{}
+	adaptor.Init(assistInfo)
+	requestURL, err := adaptor.GetRequestURL(assistInfo)
+	require.NoError(t, err)
+	assert.Equal(t, "https://assist.example.com/v1/chat/completions", requestURL)
 }

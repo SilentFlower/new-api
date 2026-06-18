@@ -184,6 +184,8 @@ func buildVisionAssistRelayInfo(c *gin.Context, parent *relaycommon.RelayInfo, r
 		assistInfo.RelayMode = relayconstant.RelayModeChatCompletions
 		assistInfo.RequestURLPath = "/v1/chat/completions"
 	}
+	// 此时 context 已切到辅助渠道，必须初始化辅助渠道元信息，否则适配器会拿空 base_url 拼出相对 URL。
+	assistInfo.InitChannelMeta(c)
 	assistInfo.RequestHeaders = cloneVisionAssistHeaders(parent.RequestHeaders)
 	assistInfo.UserSetting = parent.UserSetting
 	assistInfo.UserQuota = parent.UserQuota
