@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查前后端参数契约、空值、多选和兼容旧参数是否一致。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查 Go 代码质量、测试和禁止模式。"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "检查新增查询条件的多数据库兼容性。"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "检查接口错误处理是否符合项目约定。"}

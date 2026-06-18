@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "功能跨经典前端、后端控制器、模型查询三层，需要明确参数契约和数据流。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "后端改动需遵守项目质量规则、JSON/构建/测试要求。"}
+{"file": ".trellis/spec/backend/directory-structure.md", "reason": "确认控制器与模型层职责边界。"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "导出查询新增 IN 过滤，必须兼容 SQLite、MySQL、PostgreSQL。"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "导出接口参数错误和查询错误需符合管理 API 响应格式。"}
