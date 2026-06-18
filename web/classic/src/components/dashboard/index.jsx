@@ -187,6 +187,7 @@ const Dashboard = () => {
           onCancel={dashboardData.closeExportModal}
           loading={dashboardData.exportLoading}
           isMobile={dashboardData.isMobile}
+          tokenOptions={dashboardData.tokenOptions}
           t={dashboardData.t}
         />
       )}

@@ -43,6 +43,14 @@ export const TIME_OPTIONS = [
   { label: '周', value: 'week' },
 ];
 
+export const QUICK_TIME_RANGE_OPTIONS = [
+  { label: '查询 1 天内的', value: 'today' },
+  { label: '查询本周的', value: 'this_week' },
+  { label: '查询上周的', value: 'last_week' },
+  { label: '查询本月的', value: 'this_month' },
+  { label: '查询上月的', value: 'last_month' },
+];
+
 export const DEFAULT_TIME_INTERVALS = {
   hour: { seconds: 3600, minutes: 60 },
   day: { seconds: 86400, minutes: 1440 },

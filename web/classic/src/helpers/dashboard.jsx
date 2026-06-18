@@ -62,6 +62,71 @@ export const getInitialTimestamp = () => {
   }
 };
 
+const toDateTimeString = (date) => timestamp2string(date.getTime() / 1000);
+
+const startOfDay = (date) => {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  return result;
+};
+
+const endOfDay = (date) => {
+  const result = new Date(date);
+  result.setHours(23, 59, 59, 0);
+  return result;
+};
+
+const getMondayBasedWeekStart = (date) => {
+  const result = startOfDay(date);
+  const day = result.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  result.setDate(result.getDate() + diff);
+  return result;
+};
+
+const buildRange = (start, end) => ({
+  start_timestamp: toDateTimeString(start),
+  end_timestamp: toDateTimeString(end),
+});
+
+/**
+ * 获取数据看板快速查询标签对应的本地自然时间范围。
+ *
+ * @param {string} rangeType 快捷范围类型。
+ * @return {{start_timestamp: string, end_timestamp: string}} 起止时间字符串。
+ */
+export const getDashboardQuickTimeRange = (rangeType) => {
+  const now = new Date();
+  switch (rangeType) {
+    case 'this_week': {
+      const start = getMondayBasedWeekStart(now);
+      const end = endOfDay(new Date(start));
+      end.setDate(start.getDate() + 6);
+      return buildRange(start, end);
+    }
+    case 'last_week': {
+      const start = getMondayBasedWeekStart(now);
+      start.setDate(start.getDate() - 7);
+      const end = endOfDay(new Date(start));
+      end.setDate(start.getDate() + 6);
+      return buildRange(start, end);
+    }
+    case 'this_month':
+      return buildRange(
+        new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0),
+        new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 0),
+      );
+    case 'last_month':
+      return buildRange(
+        new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0),
+        new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 0),
+      );
+    case 'today':
+    default:
+      return buildRange(startOfDay(now), endOfDay(now));
+  }
+};
+
 // ========== 数据处理工具函数 ==========
 export const updateMapValue = (map, key, value) => {
   if (!map.has(key)) {

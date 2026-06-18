@@ -167,7 +167,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
           // 使用 "name\0username" 作为唯一 value，避免同名令牌冲突
           tokens = data.map((item) => ({
             value: `${item.name}\0${item.username}`,
-            label: item.username ? `${item.name} (${item.username})` : item.name,
+            label: item.username
+              ? `${item.name} (${item.username})`
+              : item.name,
           }));
         }
       } else {
@@ -336,25 +338,36 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   // ========== 导出 Excel ==========
   const showExportModal = useCallback(() => {
+    loadTokenOptions();
     setExportModalVisible(true);
-  }, []);
+  }, [loadTokenOptions]);
 
   const closeExportModal = useCallback(() => {
     setExportModalVisible(false);
   }, []);
 
   const exportExcel = useCallback(
-    async (startTime, endTime) => {
+    async (startTime, endTime, selectedTokenValues = []) => {
       setExportLoading(true);
       try {
         let localStartTimestamp = Date.parse(startTime) / 1000;
         let localEndTimestamp = Date.parse(endTime) / 1000;
+        const params = new URLSearchParams();
+        params.append('start_timestamp', localStartTimestamp);
+        params.append('end_timestamp', localEndTimestamp);
 
-        const res = await API.get('/api/data/export', {
-          params: {
-            start_timestamp: localStartTimestamp,
-            end_timestamp: localEndTimestamp,
-          },
+        const tokenNames = Array.from(
+          new Set(
+            selectedTokenValues
+              .map((value) => String(value).split('\0')[0].trim())
+              .filter(Boolean),
+          ),
+        );
+        tokenNames.forEach((tokenName) => {
+          params.append('token_names', tokenName);
+        });
+
+        const res = await API.get(`/api/data/export?${params.toString()}`, {
           responseType: 'blob',
           disableDuplicate: true,
         });

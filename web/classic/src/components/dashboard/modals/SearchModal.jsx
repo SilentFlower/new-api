@@ -18,7 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 
 import React, { useRef } from 'react';
-import { Modal, Form } from '@douyinfe/semi-ui';
+import { Modal, Form, Button } from '@douyinfe/semi-ui';
+import { QUICK_TIME_RANGE_OPTIONS } from '../../../constants/dashboard.constants';
+import { getDashboardQuickTimeRange } from '../../../helpers/dashboard';
 
 const SearchModal = ({
   searchModalVisible,
@@ -46,12 +48,18 @@ const SearchModal = ({
 
   const { start_timestamp, end_timestamp, username, token_name } = inputs;
 
+  const handleQuickTimeRange = (rangeType) => {
+    const range = getDashboardQuickTimeRange(rangeType);
+    handleInputChange(range.start_timestamp, 'start_timestamp');
+    handleInputChange(range.end_timestamp, 'end_timestamp');
+  };
+
   // 管理员模式下，根据 token_name + username 匹配下拉选中值
-  const selectedTokenValue = isAdminUser && token_name
-    ? tokenOptions.find(
-        (opt) => opt.value === `${token_name}\0${username}`,
-      )?.value || undefined
-    : token_name || undefined;
+  const selectedTokenValue =
+    isAdminUser && token_name
+      ? tokenOptions.find((opt) => opt.value === `${token_name}\0${username}`)
+          ?.value || undefined
+      : token_name || undefined;
 
   return (
     <Modal
@@ -65,6 +73,23 @@ const SearchModal = ({
       centered
     >
       <Form ref={formRef} layout='vertical' className='w-full'>
+        <div className='mb-3'>
+          <div className='mb-2 text-sm font-medium'>{t('快速查询')}</div>
+          <div className='flex flex-wrap gap-2'>
+            {QUICK_TIME_RANGE_OPTIONS.map((option) => (
+              <Button
+                key={option.value}
+                size='small'
+                type='tertiary'
+                htmlType='button'
+                onClick={() => handleQuickTimeRange(option.value)}
+              >
+                {t(option.label)}
+              </Button>
+            ))}
+          </div>
+        </div>
+
         {createFormField(Form.DatePicker, {
           field: 'start_timestamp',
           label: t('起始时间'),

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -42,6 +43,7 @@ func GetAllQuotaDates(c *gin.Context) {
 func ExportQuotaDataExcel(c *gin.Context) {
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	tokenNames := parseExportTokenNames(c)
 
 	// 校验必填参数
 	if startTimestamp == 0 || endTimestamp == 0 {
@@ -50,21 +52,21 @@ func ExportQuotaDataExcel(c *gin.Context) {
 	}
 
 	// 查询 Sheet 1 数据：按 API Key 汇总（从 logs 表聚合）
-	summaryData, err := model.GetLogSummaryByKey(startTimestamp, endTimestamp, "", "")
+	summaryData, err := model.GetLogSummaryByKey(startTimestamp, endTimestamp, "", tokenNames)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	// 查询 Sheet 2 数据：按 API Key + 模型明细（从 logs 表聚合）
-	detailData, err := model.GetLogDetailByKeyModel(startTimestamp, endTimestamp, "", "")
+	detailData, err := model.GetLogDetailByKeyModel(startTimestamp, endTimestamp, "", tokenNames)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	// 查询 Sheet 3 数据：请求日志明细
-	logs, err := model.GetLogsForExport(startTimestamp, endTimestamp, "", "")
+	logs, err := model.GetLogsForExport(startTimestamp, endTimestamp, "", tokenNames)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -241,6 +243,33 @@ func ExportQuotaDataExcel(c *gin.Context) {
 		common.SysLog(fmt.Sprintf("导出 Excel 文件失败: %s", err.Error()))
 		return
 	}
+}
+
+// parseExportTokenNames 解析导出接口的令牌名称筛选参数，并兼容旧的 token_name 单值参数。
+func parseExportTokenNames(c *gin.Context) []string {
+	var rawTokenNames []string
+	tokenNames, hasTokenNames := c.GetQueryArray("token_names")
+	bracketTokenNames, hasBracketTokenNames := c.GetQueryArray("token_names[]")
+	rawTokenNames = append(rawTokenNames, tokenNames...)
+	rawTokenNames = append(rawTokenNames, bracketTokenNames...)
+	if !hasTokenNames && !hasBracketTokenNames {
+		rawTokenNames = append(rawTokenNames, c.Query("token_name"))
+	}
+
+	seen := make(map[string]struct{}, len(rawTokenNames))
+	normalized := make([]string, 0, len(rawTokenNames))
+	for _, tokenName := range rawTokenNames {
+		tokenName = strings.TrimSpace(tokenName)
+		if tokenName == "" {
+			continue
+		}
+		if _, exists := seen[tokenName]; exists {
+			continue
+		}
+		seen[tokenName] = struct{}{}
+		normalized = append(normalized, tokenName)
+	}
+	return normalized
 }
 
 // cellName 将列号和行号转换为 Excel 单元格名称（如 A1, B2）

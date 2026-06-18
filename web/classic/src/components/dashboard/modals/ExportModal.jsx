@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Modal, Form } from '@douyinfe/semi-ui';
 import { timestamp2string } from '../../../helpers';
 
@@ -27,6 +27,7 @@ const ExportModal = ({
   onCancel,
   loading,
   isMobile,
+  tokenOptions = [],
   t,
 }) => {
   const formRef = useRef();
@@ -39,6 +40,13 @@ const ExportModal = ({
   const [endTime, setEndTime] = useState(
     timestamp2string(now.getTime() / 1000 + 3600),
   );
+  const [selectedTokenValues, setSelectedTokenValues] = useState([]);
+
+  useEffect(() => {
+    if (visible) {
+      setSelectedTokenValues([]);
+    }
+  }, [visible]);
 
   const FORM_FIELD_PROPS = {
     className: 'w-full mb-2 !rounded-lg',
@@ -49,7 +57,7 @@ const ExportModal = ({
   );
 
   const handleOk = () => {
-    onConfirm(startTime, endTime);
+    onConfirm(startTime, endTime, selectedTokenValues);
   };
 
   return (
@@ -84,6 +92,22 @@ const ExportModal = ({
           type: 'dateTime',
           name: 'export_end_timestamp',
           onChange: (value) => setEndTime(value),
+        })}
+
+        {createFormField(Form.Select, {
+          field: 'export_token_names',
+          label: t('令牌名称'),
+          value: selectedTokenValues,
+          placeholder: t('全部'),
+          name: 'export_token_names',
+          optionList: tokenOptions,
+          multiple: true,
+          filter: true,
+          showClear: true,
+          autoClearSearchValue: false,
+          searchPosition: 'dropdown',
+          onChange: (value) =>
+            setSelectedTokenValues(Array.isArray(value) ? value : []),
         })}
       </Form>
     </Modal>
