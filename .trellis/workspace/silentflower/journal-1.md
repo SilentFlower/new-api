@@ -142,3 +142,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 5: 收尾视觉辅助与上游模型计费任务
+
+**Date**: 2026-06-18
+**Task**: 收尾视觉辅助与上游模型计费任务
+**Branch**: `build-bak`
+
+### Summary
+
+完成上游模型计费日志任务归档，补充 release 操作说明；沉淀 Gemini 视觉辅助请求构造契约并推送。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8106a70c` | (see git log) |
+| `7cf45a50` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

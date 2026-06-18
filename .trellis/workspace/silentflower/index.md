@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 4
+- **Total Sessions**: 5
 - **Last Active**: 2026-06-18
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~144 | Active |
+| `journal-1.md` | ~178 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 5 | 2026-06-18 | 收尾视觉辅助与上游模型计费任务 | `8106a70c`, `7cf45a50` | `build-bak` |
 | 4 | 2026-06-18 | 报表导出令牌筛选与快捷时间 | `cc6882bc`, `0e72fabe` | `build-bak` |
 | 3 | 2026-06-18 | 完成视觉辅助端点并发与重试任务 | `fae993f3`, `af15fa5a` | `build-bak` |
 | 2 | 2026-06-17 | 渠道视觉辅助收尾 | `329e77fe`, `00c1b57a` | `build-bak` |
