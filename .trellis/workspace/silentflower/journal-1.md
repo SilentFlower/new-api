@@ -74,3 +74,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 3: 完成视觉辅助端点并发与重试任务
+
+**Date**: 2026-06-18
+**Task**: 完成视觉辅助端点并发与重试任务
+**Branch**: `build-bak`
+
+### Summary
+
+完成渠道视觉辅助端点模式、单请求有限并发、失败重试、日志字段、默认 UI 与经典 UI 配置；修复部署中辅助渠道 base_url 未初始化导致的相对 URL 请求，并让视觉辅助预处理失败写入错误日志；补充 release.md 并归档任务。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `fae993f3` | (see git log) |
+| `af15fa5a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
