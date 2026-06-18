@@ -24,18 +24,19 @@
   "notes": "",
   "meta": {},
   "last_push_snapshot": {
-    "snapshot_at": "2026-06-18T02:41:06.374640Z",
+    "snapshot_at": "2026-06-18T03:33:08.742814Z",
     "branch": "build-bak",
     "pushed_commits": {
-      "root": "5011f7e8"
+      "root": "0e72fabe"
     },
     "completed_steps": [
       "实现计划 Step 1-8",
       "Phase 3.3 spec update",
-      "Phase 3.4 business commit/push"
+      "Phase 3.4 business commit/push",
+      "修复快捷查询回填表单 bug"
     ],
     "partial_step": "",
     "next_step": "Phase 3.5 finish-work（需用户明确要求）",
-    "notes": "前端 build、相关 Prettier、相关 ESLint、参数序列化和快捷时间边界手动验证已通过；Go 测试和 gofmt 因当前环境缺少 go/gofmt 未运行。"
+    "notes": "修复快捷标签只更新外部 inputs、未同步 Semi Form 内部字段导致下方 DatePicker 不回填的问题；相关 Prettier、ESLint 与 npm run build 已通过。"
   }
 }
