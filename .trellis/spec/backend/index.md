@@ -18,6 +18,7 @@
 | [目录结构](./directory-structure.md) | 模块组织、文件布局和命名规范 | 已完成 |
 | [数据库规范](./database-guidelines.md) | GORM 用法、查询模式、迁移、多数据库兼容性 | 已完成 |
 | [API 契约规范](./api-contracts.md) | 管理 API 查询参数、跨层契约和边界行为 | 已完成 |
+| [Relay 视觉辅助契约](./relay-vision-assist.md) | 视觉辅助请求构造、端点模式、Gemini Native 边界行为 | 已完成 |
 | [错误处理](./error-handling.md) | 错误类型、传播流程、API 响应格式 | 已完成 |
 | [代码质量标准](./quality-guidelines.md) | 禁止模式、必需模式、测试、构建流程 | 已完成 |
 | [日志规范](./logging-guidelines.md) | 日志层级、格式、敏感数据处理 | 已完成 |
@@ -42,6 +43,10 @@
 - [API 契约规范](./api-contracts.md) — 查询参数、跨层传递和兼容行为
 - [错误处理](./error-handling.md) — 管理 API vs 转发 API 的响应格式差异
 - [日志规范](./logging-guidelines.md) — 日志级别选择和敏感数据保护
+
+### 涉及 Relay 视觉辅助
+
+- [Relay 视觉辅助契约](./relay-vision-assist.md) — 辅助请求构造、端点模式、Gemini Native 转换边界
 
 ### 涉及新渠道适配器
 
