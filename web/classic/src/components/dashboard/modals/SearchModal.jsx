@@ -50,6 +50,8 @@ const SearchModal = ({
 
   const handleQuickTimeRange = (rangeType) => {
     const range = getDashboardQuickTimeRange(rangeType);
+    formRef.current?.setValue('start_timestamp', range.start_timestamp);
+    formRef.current?.setValue('end_timestamp', range.end_timestamp);
     handleInputChange(range.start_timestamp, 'start_timestamp');
     handleInputChange(range.end_timestamp, 'end_timestamp');
   };
@@ -72,7 +74,11 @@ const SearchModal = ({
       size={isMobile ? 'full-width' : 'small'}
       centered
     >
-      <Form ref={formRef} layout='vertical' className='w-full'>
+      <Form
+        getFormApi={(formAPI) => (formRef.current = formAPI)}
+        layout='vertical'
+        className='w-full'
+      >
         <div className='mb-3'>
           <div className='mb-2 text-sm font-medium'>{t('快速查询')}</div>
           <div className='flex flex-wrap gap-2'>
