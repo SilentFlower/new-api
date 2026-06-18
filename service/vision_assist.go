@@ -620,13 +620,14 @@ func buildVisionAssistRequest(setting dto.ChannelVisionAssistSettings, prompt st
 			},
 		})
 	}
+	message := dto.Message{
+		Role: "user",
+	}
+	message.SetMediaContent(content)
 	return &dto.GeneralOpenAIRequest{
-		Model:  strings.TrimSpace(setting.AssistModel),
-		Stream: &stream,
-		Messages: []dto.Message{{
-			Role:    "user",
-			Content: content,
-		}},
+		Model:    strings.TrimSpace(setting.AssistModel),
+		Stream:   &stream,
+		Messages: []dto.Message{message},
 	}
 }
 

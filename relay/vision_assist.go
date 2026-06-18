@@ -126,6 +126,9 @@ func callVisionAssistModel(c *gin.Context, info *relaycommon.RelayInfo, request 
 
 func prepareVisionAssistRequest(c *gin.Context, parent *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, channelModel *model.Channel) (*visionAssistPreparedRequest, *types.NewAPIError) {
 	mode := resolveVisionAssistEndpointMode(parent.ChannelSetting.VisionAssist.EndpointMode, channelModel.Type, strings.TrimSpace(request.Model))
+	if err := validateVisionAssistEndpointMode(mode, channelModel.Type); err != nil {
+		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	}
 	switch mode {
 	case service.VisionAssistEndpointModeOpenAIResponses:
 		responsesRequest, err := service.ChatCompletionsRequestToResponsesRequest(request)
@@ -246,12 +249,27 @@ func resolveVisionAssistEndpointMode(configuredMode string, channelType int, mod
 	return service.VisionAssistEndpointModeOpenAIChat
 }
 
+func validateVisionAssistEndpointMode(mode string, channelType int) error {
+	if mode != service.VisionAssistEndpointModeGeminiNative {
+		return nil
+	}
+	switch channelType {
+	case constant.ChannelTypeGemini, constant.ChannelTypeVertexAi:
+		return nil
+	default:
+		return fmt.Errorf("视觉辅助端点模式 gemini_native 需要 Gemini 或 Vertex AI 辅助渠道，当前渠道类型: %d", channelType)
+	}
+}
+
 func buildVisionAssistGeminiRequest(c *gin.Context, request *dto.GeneralOpenAIRequest) (*dto.GeminiChatRequest, error) {
 	if request == nil {
 		return nil, errors.New("request is nil")
 	}
 	parts := make([]dto.GeminiPart, 0)
 	for _, message := range request.Messages {
+		if message.Role != "" && message.Role != "user" {
+			continue
+		}
 		for _, content := range message.ParseContent() {
 			switch content.Type {
 			case dto.ContentTypeText:

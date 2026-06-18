@@ -543,6 +543,12 @@ func (m *Message) ParseContent() []MediaContent {
 	}
 
 	var contentList []MediaContent
+	mediaContent, ok := m.Content.([]MediaContent)
+	if ok {
+		m.parsedContent = mediaContent
+		return mediaContent
+	}
+
 	// 先尝试解析为字符串
 	content, ok := m.Content.(string)
 	if ok {

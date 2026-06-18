@@ -95,3 +95,21 @@ func TestGeneralOpenAIRequestGetSystemRoleName(t *testing.T) {
 		})
 	}
 }
+
+func TestMessageParseContentSupportsTypedMediaContent(t *testing.T) {
+	message := Message{
+		Role: "user",
+		Content: []MediaContent{
+			{Type: ContentTypeText, Text: "看图"},
+			{Type: ContentTypeImageURL, ImageUrl: &MessageImageUrl{Url: "data:image/png;base64,abc"}},
+		},
+	}
+
+	contents := message.ParseContent()
+
+	require.Len(t, contents, 2)
+	require.Equal(t, ContentTypeText, contents[0].Type)
+	require.Equal(t, "看图", contents[0].Text)
+	require.Equal(t, ContentTypeImageURL, contents[1].Type)
+	require.Equal(t, "data:image/png;base64,abc", contents[1].GetImageMedia().Url)
+}

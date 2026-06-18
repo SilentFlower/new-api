@@ -124,6 +124,16 @@ func TestResolveVisionAssistEndpointMode(t *testing.T) {
 	}
 }
 
+func TestValidateVisionAssistEndpointModeRejectsGeminiNativeUnsupportedChannel(t *testing.T) {
+	err := validateVisionAssistEndpointMode(service.VisionAssistEndpointModeGeminiNative, constant.ChannelTypeOpenAI)
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "gemini_native")
+
+	err = validateVisionAssistEndpointMode(service.VisionAssistEndpointModeGeminiNative, constant.ChannelTypeGemini)
+	require.NoError(t, err)
+}
+
 func TestBuildVisionAssistRelayInfoInitializesAssistChannelMeta(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -161,4 +171,43 @@ func TestBuildVisionAssistRelayInfoInitializesAssistChannelMeta(t *testing.T) {
 	requestURL, err := adaptor.GetRequestURL(assistInfo)
 	require.NoError(t, err)
 	assert.Equal(t, "https://assist.example.com/v1/chat/completions", requestURL)
+}
+
+func TestBuildVisionAssistGeminiRequestUsesCleanUserContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	request := &dto.GeneralOpenAIRequest{
+		Model:     "gemini-2.5-flash",
+		MaxTokens: common.GetPointer[uint](256),
+		Messages: []dto.Message{
+			{Role: "assistant", Content: "历史回复不应进入视觉辅助 Gemini 请求"},
+			{
+				Role: "user",
+				Content: []dto.MediaContent{
+					{Type: dto.ContentTypeText, Text: "描述图片"},
+					{Type: dto.ContentTypeImageURL, ImageUrl: &dto.MessageImageUrl{
+						Url:      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+						Detail:   "low",
+						MimeType: "image/png",
+					}},
+				},
+			},
+		},
+	}
+
+	geminiRequest, err := buildVisionAssistGeminiRequest(c, request)
+
+	require.NoError(t, err)
+	require.Len(t, geminiRequest.Contents, 1)
+	assert.Equal(t, "user", geminiRequest.Contents[0].Role)
+	require.Len(t, geminiRequest.Contents[0].Parts, 2)
+	assert.Equal(t, "描述图片", geminiRequest.Contents[0].Parts[0].Text)
+	require.NotNil(t, geminiRequest.Contents[0].Parts[1].InlineData)
+	assert.Equal(t, "image/png", geminiRequest.Contents[0].Parts[1].InlineData.MimeType)
+	assert.Equal(t, "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=", geminiRequest.Contents[0].Parts[1].InlineData.Data)
+
+	body := common.GetJsonString(geminiRequest)
+	assert.NotContains(t, body, "max_tokens")
+	assert.NotContains(t, body, "stream_options")
+	assert.NotContains(t, body, "历史回复")
 }

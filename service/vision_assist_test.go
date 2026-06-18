@@ -335,6 +335,29 @@ func TestVisionAssistExecutionSettingsNormalizeDefaults(t *testing.T) {
 	assert.Equal(t, 30000, normalizedVisionAssistRetryBackoff(setting))
 }
 
+func TestBuildVisionAssistRequestKeepsTypedMediaContentParsable(t *testing.T) {
+	setting := dto.ChannelVisionAssistSettings{
+		AssistModel: "gemini-2.5-flash",
+	}
+	request := buildVisionAssistRequest(setting, "描述图片", []VisionAssistImage{{
+		Index:    1,
+		Source:   &testFileSource{raw: "data:image/png;base64,abc"},
+		Detail:   "low",
+		MimeType: "image/png",
+	}})
+
+	require.Len(t, request.Messages, 1)
+	assert.Equal(t, "user", request.Messages[0].Role)
+	contents := request.Messages[0].ParseContent()
+	require.Len(t, contents, 3)
+	assert.Equal(t, dto.ContentTypeText, contents[0].Type)
+	assert.Equal(t, "描述图片", contents[0].Text)
+	assert.Equal(t, dto.ContentTypeText, contents[1].Type)
+	assert.Equal(t, "图片 1：", contents[1].Text)
+	assert.Equal(t, dto.ContentTypeImageURL, contents[2].Type)
+	assert.Equal(t, "data:image/png;base64,abc", contents[2].GetImageMedia().Url)
+}
+
 func TestApplyVisionAssistRespectsMaxConcurrency(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
