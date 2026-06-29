@@ -22,6 +22,7 @@
 | [错误处理](./error-handling.md) | 错误类型、传播流程、API 响应格式 | 已完成 |
 | [代码质量标准](./quality-guidelines.md) | 禁止模式、必需模式、测试、构建流程 | 已完成 |
 | [日志规范](./logging-guidelines.md) | 日志层级、格式、敏感数据处理 | 已完成 |
+| [远程令牌运维 SOP](./remote-token-operations-sop.md) | 远程批量令牌创建、IP 记录修正、Cloudflare D1 同步流程 | 已完成 |
 
 ---
 
@@ -43,6 +44,10 @@
 - [API 契约规范](./api-contracts.md) — 查询参数、跨层传递和兼容行为
 - [错误处理](./error-handling.md) — 管理 API vs 转发 API 的响应格式差异
 - [日志规范](./logging-guidelines.md) — 日志级别选择和敏感数据保护
+
+### 涉及远程令牌运维或外部 Key 同步
+
+- [远程令牌运维 SOP](./remote-token-operations-sop.md) — 批量创建 token、quota 换算、迁移后 IP 记录、D1 同步
 
 ### 涉及 Relay 视觉辅助
 

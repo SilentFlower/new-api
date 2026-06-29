@@ -24,6 +24,7 @@ import (
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -225,6 +226,7 @@ func migrateSingleTokenInTx(c *gin.Context, srcUser *model.User, tk *model.Token
 			Status:      common.UserStatusEnabled,
 			Group:       newGroup,
 		}
+		newUser.SetSetting(dto.UserSetting{RecordIpLog: true})
 		if insertErr := newUser.InsertWithTx(tx, 0); insertErr != nil {
 			return insertErr
 		}
