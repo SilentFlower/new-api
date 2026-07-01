@@ -137,6 +137,15 @@ const visionAssistEndpointModes = [
 
 type VisionAssistEndpointMode = (typeof visionAssistEndpointModes)[number]
 
+const webSearchProviders = ['tavily', 'anysearch'] as const
+type WebSearchProvider = (typeof webSearchProviders)[number]
+
+const tavilySearchDepths = ['basic', 'advanced'] as const
+type TavilySearchDepth = (typeof tavilySearchDepths)[number]
+
+const anySearchFreshnessValues = ['', 'day', 'week', 'month', 'year'] as const
+type AnySearchFreshness = (typeof anySearchFreshnessValues)[number]
+
 function normalizeVisionAssistEndpointMode(
   value: unknown
 ): VisionAssistEndpointMode {
@@ -146,6 +155,27 @@ function normalizeVisionAssistEndpointMode(
   )
     ? (endpointMode as VisionAssistEndpointMode)
     : 'auto'
+}
+
+function normalizeWebSearchProvider(value: unknown): WebSearchProvider {
+  const provider = String(value || '')
+  return webSearchProviders.includes(provider as WebSearchProvider)
+    ? (provider as WebSearchProvider)
+    : 'tavily'
+}
+
+function normalizeTavilySearchDepth(value: unknown): TavilySearchDepth {
+  const depth = String(value || '')
+  return tavilySearchDepths.includes(depth as TavilySearchDepth)
+    ? (depth as TavilySearchDepth)
+    : 'basic'
+}
+
+function normalizeAnySearchFreshness(value: unknown): AnySearchFreshness {
+  const freshness = String(value || '')
+  return anySearchFreshnessValues.includes(freshness as AnySearchFreshness)
+    ? (freshness as AnySearchFreshness)
+    : ''
 }
 
 function numberOrDefault(value: unknown, defaultValue: number): number {
@@ -237,6 +267,15 @@ export const channelFormSchema = z
     vision_assist_max_concurrency: z.number().min(1).max(8).optional(),
     vision_assist_retry_count: z.number().min(0).max(5).optional(),
     vision_assist_retry_backoff_ms: z.number().min(1).max(30000).optional(),
+    web_search_enabled: z.boolean().optional(),
+    web_search_provider: z.enum(webSearchProviders).optional(),
+    web_search_api_key: z.string().optional(),
+    web_search_api_key_configured: z.boolean().optional(),
+    web_search_clear_api_key: z.boolean().optional(),
+    web_search_max_results: z.number().min(1).max(20).optional(),
+    web_search_search_depth: z.enum(tavilySearchDepths).optional(),
+    web_search_freshness: z.enum(anySearchFreshnessValues).optional(),
+    web_search_content_types: z.string().optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -334,6 +373,29 @@ export const channelFormSchema = z
         )
       }
     }
+    if (data.web_search_enabled === true) {
+      const providerRequiresKey = data.web_search_provider === 'tavily'
+      const hasNewKey = Boolean(data.web_search_api_key?.trim())
+      const hasExistingKey = data.web_search_api_key_configured === true
+      if (providerRequiresKey && !hasNewKey && !hasExistingKey) {
+        addRequiredIssue(
+          ctx,
+          'web_search_api_key',
+          'API Key is required when Tavily WebSearch is enabled'
+        )
+      }
+      if (
+        providerRequiresKey &&
+        data.web_search_clear_api_key === true &&
+        !hasNewKey
+      ) {
+        addRequiredIssue(
+          ctx,
+          'web_search_api_key',
+          'Enter a new API Key before clearing the existing one'
+        )
+      }
+    }
   })
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
@@ -388,6 +450,15 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   vision_assist_max_concurrency: 2,
   vision_assist_retry_count: 1,
   vision_assist_retry_backoff_ms: 500,
+  web_search_enabled: false,
+  web_search_provider: 'tavily',
+  web_search_api_key: '',
+  web_search_api_key_configured: false,
+  web_search_clear_api_key: false,
+  web_search_max_results: 5,
+  web_search_search_depth: 'basic',
+  web_search_freshness: '',
+  web_search_content_types: '',
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -437,6 +508,15 @@ export function transformChannelToFormDefaults(
     vision_assist_max_concurrency: 2,
     vision_assist_retry_count: 1,
     vision_assist_retry_backoff_ms: 500,
+    web_search_enabled: false,
+    web_search_provider: 'tavily' as WebSearchProvider,
+    web_search_api_key: '',
+    web_search_api_key_configured: false,
+    web_search_clear_api_key: false,
+    web_search_max_results: 5,
+    web_search_search_depth: 'basic' as TavilySearchDepth,
+    web_search_freshness: '' as AnySearchFreshness,
+    web_search_content_types: '',
   }
 
   if (channel.setting) {
@@ -490,6 +570,30 @@ export function transformChannelToFormDefaults(
           1,
           500
         ),
+        web_search_enabled: parsed.web_search?.enabled === true,
+        web_search_provider: normalizeWebSearchProvider(
+          parsed.web_search?.provider
+        ),
+        web_search_api_key: '',
+        web_search_api_key_configured:
+          parsed.web_search?.api_key_configured === true,
+        web_search_clear_api_key: false,
+        web_search_max_results: minNumberOrDefault(
+          parsed.web_search?.max_results,
+          1,
+          5
+        ),
+        web_search_search_depth: normalizeTavilySearchDepth(
+          parsed.web_search?.search_depth
+        ),
+        web_search_freshness: normalizeAnySearchFreshness(
+          parsed.web_search?.freshness
+        ),
+        web_search_content_types: Array.isArray(
+          parsed.web_search?.content_types
+        )
+          ? parsed.web_search.content_types.join(',')
+          : '',
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -644,6 +748,23 @@ function buildSettingJSON(formData: ChannelFormValues): string {
         1,
         500
       ),
+    },
+    web_search: {
+      ...((isJsonObjectValue(existingSettings.web_search)
+        ? existingSettings.web_search
+        : {}) as Record<string, unknown>),
+      enabled: formData.web_search_enabled === true,
+      provider: normalizeWebSearchProvider(formData.web_search_provider),
+      api_key: String(formData.web_search_api_key || '').trim() || undefined,
+      clear_api_key:
+        formData.web_search_clear_api_key === true &&
+        !String(formData.web_search_api_key || '').trim(),
+      max_results: minNumberOrDefault(formData.web_search_max_results, 1, 5),
+      search_depth: normalizeTavilySearchDepth(
+        formData.web_search_search_depth
+      ),
+      freshness: normalizeAnySearchFreshness(formData.web_search_freshness),
+      content_types: parseCommaList(formData.web_search_content_types),
     },
   }
   return JSON.stringify(settingObj)

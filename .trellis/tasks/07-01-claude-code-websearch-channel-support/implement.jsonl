@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/error-handling.md","reason":"实现 relay 和管理 API 错误返回时必须遵循项目错误格式、NewAPIError 传播和敏感信息脱敏约束。"}
+{"file":".trellis/spec/backend/relay-vision-assist.md","reason":"WebSearch 模拟同属 relay 派生请求能力，需要参考视觉辅助对跨层派生请求、干净请求体和配置错误处理的约束。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"实现前必须优先复用现有 Claude web_search DTO、渠道设置和计费逻辑，避免重复实现。"}
+{"file":".trellis/tasks/07-01-claude-code-websearch-channel-support/research.md","reason":"记录本仓库、sub2api、AnySearch 和 Tavily 的已核实契约，供实现阶段作为上下文。"}

@@ -106,6 +106,17 @@ export interface ChannelSettings {
     retry_count?: number
     retry_backoff_ms?: number
   }
+  web_search?: {
+    enabled?: boolean
+    provider?: 'tavily' | 'anysearch'
+    api_key?: string
+    api_key_configured?: boolean
+    clear_api_key?: boolean
+    max_results?: number
+    search_depth?: 'basic' | 'advanced'
+    freshness?: '' | 'day' | 'week' | 'month' | 'year'
+    content_types?: string[]
+  }
 }
 
 export interface ChannelOtherSettings {

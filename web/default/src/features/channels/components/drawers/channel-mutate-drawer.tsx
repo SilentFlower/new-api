@@ -41,6 +41,7 @@ import {
   RefreshCw,
   Code,
   Route,
+  Search,
   Settings,
   SlidersHorizontal,
   Wand2,
@@ -218,6 +219,14 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.use_upstream_model_for_billing ||
     values.system_prompt_override ||
     values.vision_assist_enabled ||
+    values.web_search_enabled ||
+    values.web_search_provider !== 'tavily' ||
+    values.web_search_api_key?.trim() ||
+    values.web_search_clear_api_key ||
+    (values.web_search_max_results && values.web_search_max_results !== 5) ||
+    values.web_search_search_depth !== 'basic' ||
+    values.web_search_freshness ||
+    values.web_search_content_types?.trim() ||
     values.claude_beta_query ||
     values.upstream_model_update_check_enabled ||
     values.upstream_model_update_auto_sync_enabled ||
@@ -373,6 +382,7 @@ export function ChannelMutateDrawer({
   const currentModelMapping = form.watch('model_mapping')
   const awsKeyType = form.watch('aws_key_type')
   const vertexKeyType = form.watch('vertex_key_type')
+  const webSearchProvider = form.watch('web_search_provider')
   const upstreamModelUpdateCheckEnabled = form.watch(
     'upstream_model_update_check_enabled'
   )
@@ -3290,6 +3300,271 @@ export function ChannelMutateDrawer({
                           </FormItem>
                         )}
                       />
+
+                      <div className='border-border/60 flex flex-col gap-4 border-y py-4'>
+                        <SubHeading
+                          title={t('Claude Code WebSearch')}
+                          icon={<Search className='h-3.5 w-3.5' />}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='web_search_enabled'
+                          render={({ field }) => (
+                            <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                              <div className='space-y-0.5'>
+                                <FormLabel>
+                                  {t('Enable WebSearch emulation')}
+                                </FormLabel>
+                                <FormDescription>
+                                  {t(
+                                    'Handle pure Claude Code web_search requests locally for this channel'
+                                  )}
+                                </FormDescription>
+                              </div>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
+                        <div className='grid gap-4 sm:grid-cols-2'>
+                          <FormField
+                            control={form.control}
+                            name='web_search_provider'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Search provider')}</FormLabel>
+                                <Select
+                                  items={[
+                                    { value: 'tavily', label: 'Tavily' },
+                                    { value: 'anysearch', label: 'AnySearch' },
+                                  ]}
+                                  value={field.value || 'tavily'}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    <SelectGroup>
+                                      <SelectItem value='tavily'>
+                                        Tavily
+                                      </SelectItem>
+                                      <SelectItem value='anysearch'>
+                                        AnySearch
+                                      </SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={form.control}
+                            name='web_search_max_results'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Max search results')}</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    type='number'
+                                    min={1}
+                                    max={20}
+                                    placeholder='5'
+                                    value={field.value ?? 5}
+                                    onChange={(e) =>
+                                      field.onChange(Number(e.target.value))
+                                    }
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <FormField
+                          control={form.control}
+                          name='web_search_api_key'
+                          render={({ field }) => (
+                            <FormItem>
+                              <div className='flex flex-wrap items-center gap-2'>
+                                <FormLabel>{t('WebSearch API Key')}</FormLabel>
+                                {form.watch('web_search_api_key_configured') && (
+                                  <Badge variant='secondary'>
+                                    {t('Configured')}
+                                  </Badge>
+                                )}
+                              </div>
+                              <FormControl>
+                                <Input
+                                  type='password'
+                                  autoComplete='new-password'
+                                  placeholder={
+                                    form.watch('web_search_api_key_configured')
+                                      ? t('Leave empty to keep existing key')
+                                      : webSearchProvider === 'anysearch'
+                                        ? t('Optional provider API Key')
+                                        : t('Enter provider API Key')
+                                  }
+                                  {...field}
+                                />
+                              </FormControl>
+                              <FormDescription>
+                                {t(
+                                  'Required for Tavily. Optional for AnySearch; when provided it is sent with Authorization Bearer and never returned by the API'
+                                )}
+                              </FormDescription>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <FormField
+                          control={form.control}
+                          name='web_search_clear_api_key'
+                          render={({ field }) => (
+                            <FormItem className='flex items-center justify-between gap-3 px-4 py-3'>
+                              <div className='space-y-0.5'>
+                                <FormLabel>
+                                  {t('Clear saved WebSearch key')}
+                                </FormLabel>
+                                <FormDescription>
+                                  {t(
+                                    'Clearing is allowed for AnySearch. Tavily requires WebSearch disabled or a replacement key.'
+                                  )}
+                                </FormDescription>
+                              </div>
+                              <FormControl>
+                                <Switch
+                                  checked={field.value}
+                                  onCheckedChange={field.onChange}
+                                />
+                              </FormControl>
+                            </FormItem>
+                          )}
+                        />
+
+                        {webSearchProvider === 'tavily' ? (
+                          <FormField
+                            control={form.control}
+                            name='web_search_search_depth'
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>{t('Tavily search depth')}</FormLabel>
+                                <Select
+                                  items={[
+                                    { value: 'basic', label: t('Basic') },
+                                    { value: 'advanced', label: t('Advanced') },
+                                  ]}
+                                  value={field.value || 'basic'}
+                                  onValueChange={field.onChange}
+                                >
+                                  <FormControl>
+                                    <SelectTrigger>
+                                      <SelectValue />
+                                    </SelectTrigger>
+                                  </FormControl>
+                                  <SelectContent alignItemWithTrigger={false}>
+                                    <SelectGroup>
+                                      <SelectItem value='basic'>
+                                        {t('Basic')}
+                                      </SelectItem>
+                                      <SelectItem value='advanced'>
+                                        {t('Advanced')}
+                                      </SelectItem>
+                                    </SelectGroup>
+                                  </SelectContent>
+                                </Select>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        ) : (
+                          <div className='grid gap-4 sm:grid-cols-2'>
+                            <FormField
+                              control={form.control}
+                              name='web_search_freshness'
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>
+                                    {t('AnySearch freshness')}
+                                  </FormLabel>
+                                  <Select
+                                    items={[
+                                      { value: 'none', label: t('None') },
+                                      { value: 'day', label: t('Day') },
+                                      { value: 'week', label: t('Week') },
+                                      { value: 'month', label: t('Month') },
+                                      { value: 'year', label: t('Year') },
+                                    ]}
+                                    value={field.value || 'none'}
+                                    onValueChange={(value) =>
+                                      field.onChange(
+                                        value === 'none' ? '' : value
+                                      )
+                                    }
+                                  >
+                                    <FormControl>
+                                      <SelectTrigger>
+                                        <SelectValue />
+                                      </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent alignItemWithTrigger={false}>
+                                      <SelectGroup>
+                                        <SelectItem value='none'>
+                                          {t('None')}
+                                        </SelectItem>
+                                        <SelectItem value='day'>
+                                          {t('Day')}
+                                        </SelectItem>
+                                        <SelectItem value='week'>
+                                          {t('Week')}
+                                        </SelectItem>
+                                        <SelectItem value='month'>
+                                          {t('Month')}
+                                        </SelectItem>
+                                        <SelectItem value='year'>
+                                          {t('Year')}
+                                        </SelectItem>
+                                      </SelectGroup>
+                                    </SelectContent>
+                                  </Select>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={form.control}
+                              name='web_search_content_types'
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>
+                                    {t('AnySearch content types')}
+                                  </FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      placeholder='web,news,doc'
+                                      {...field}
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          </div>
+                        )}
+                      </div>
 
                       <div className='border-border/60 flex flex-col gap-4 border-y py-4'>
                         <SubHeading

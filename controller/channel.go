@@ -69,6 +69,166 @@ func clearChannelInfo(channel *model.Channel) {
 	}
 }
 
+func sanitizeChannelForResponse(channel *model.Channel) *model.Channel {
+	if channel == nil {
+		return nil
+	}
+	clone := *channel
+	clearChannelInfo(&clone)
+	sanitizeChannelWebSearchSetting(&clone)
+	return &clone
+}
+
+func sanitizeChannelsForResponse(channels []*model.Channel) []*model.Channel {
+	result := make([]*model.Channel, 0, len(channels))
+	for _, channel := range channels {
+		result = append(result, sanitizeChannelForResponse(channel))
+	}
+	return result
+}
+
+func parseChannelSettingRecord(setting *string) (map[string]any, error) {
+	record := make(map[string]any)
+	if setting == nil || strings.TrimSpace(*setting) == "" {
+		return record, nil
+	}
+	if err := common.Unmarshal([]byte(*setting), &record); err != nil {
+		return nil, err
+	}
+	if record == nil {
+		record = make(map[string]any)
+	}
+	return record, nil
+}
+
+func parseWebSearchSettingsFromRecord(record map[string]any) (dto.ChannelWebSearchSettings, bool, error) {
+	raw, ok := record["web_search"]
+	if !ok || raw == nil {
+		return dto.ChannelWebSearchSettings{}, false, nil
+	}
+	rawBytes, err := common.Marshal(raw)
+	if err != nil {
+		return dto.ChannelWebSearchSettings{}, false, err
+	}
+	var settings dto.ChannelWebSearchSettings
+	if err := common.Unmarshal(rawBytes, &settings); err != nil {
+		return dto.ChannelWebSearchSettings{}, false, err
+	}
+	settings.Normalize()
+	return settings, true, nil
+}
+
+func setWebSearchSettingsToRecord(record map[string]any, settings dto.ChannelWebSearchSettings) error {
+	settings.APIKeyConfigured = false
+	settings.ClearAPIKey = false
+	rawBytes, err := common.Marshal(settings)
+	if err != nil {
+		return err
+	}
+	var raw map[string]any
+	if err := common.Unmarshal(rawBytes, &raw); err != nil {
+		return err
+	}
+	record["web_search"] = raw
+	return nil
+}
+
+func applyChannelSettingRecord(channel *model.Channel, record map[string]any) error {
+	settingBytes, err := common.Marshal(record)
+	if err != nil {
+		return err
+	}
+	channel.Setting = common.GetPointer(string(settingBytes))
+	return nil
+}
+
+func sanitizeChannelWebSearchSetting(channel *model.Channel) {
+	record, err := parseChannelSettingRecord(channel.Setting)
+	if err != nil {
+		return
+	}
+	settings, exists, err := parseWebSearchSettingsFromRecord(record)
+	if err != nil || !exists {
+		return
+	}
+	configured := settings.HasAPIKey() || settings.APIKeyConfigured
+	settings.APIKey = ""
+	settings.APIKeyConfigured = configured
+	settings.ClearAPIKey = false
+	rawBytes, err := common.Marshal(settings)
+	if err != nil {
+		return
+	}
+	var raw map[string]any
+	if err := common.Unmarshal(rawBytes, &raw); err != nil {
+		return
+	}
+	record["web_search"] = raw
+	if err := applyChannelSettingRecord(channel, record); err != nil {
+		return
+	}
+}
+
+func normalizeChannelWebSearchForCreate(channel *model.Channel) error {
+	if channel == nil {
+		return fmt.Errorf("channel cannot be empty")
+	}
+	record, err := parseChannelSettingRecord(channel.Setting)
+	if err != nil {
+		return err
+	}
+	settings, exists, err := parseWebSearchSettingsFromRecord(record)
+	if err != nil || !exists {
+		return err
+	}
+	if settings.ClearAPIKey {
+		settings.APIKey = ""
+	}
+	settings.Normalize()
+	if err := settings.ValidateForRelay(); err != nil {
+		return err
+	}
+	if err := setWebSearchSettingsToRecord(record, settings); err != nil {
+		return err
+	}
+	return applyChannelSettingRecord(channel, record)
+}
+
+func mergeChannelWebSearchAPIKey(channel *model.Channel, origin *model.Channel) error {
+	if channel == nil || origin == nil {
+		return fmt.Errorf("channel cannot be empty")
+	}
+	record, err := parseChannelSettingRecord(channel.Setting)
+	if err != nil {
+		return err
+	}
+	settings, exists, err := parseWebSearchSettingsFromRecord(record)
+	if err != nil || !exists {
+		return err
+	}
+	originRecord, err := parseChannelSettingRecord(origin.Setting)
+	if err != nil {
+		return err
+	}
+	originSettings, originExists, err := parseWebSearchSettingsFromRecord(originRecord)
+	if err != nil {
+		return err
+	}
+	if settings.ClearAPIKey {
+		settings.APIKey = ""
+	} else if !settings.HasAPIKey() && originExists && originSettings.HasAPIKey() {
+		settings.APIKey = originSettings.APIKey
+	}
+	settings.Normalize()
+	if err := settings.ValidateForRelay(); err != nil {
+		return err
+	}
+	if err := setWebSearchSettingsToRecord(record, settings); err != nil {
+		return err
+	}
+	return applyChannelSettingRecord(channel, record)
+}
+
 func applyChannelStatusFilter(query *gorm.DB, statusFilter int) *gorm.DB {
 	if statusFilter == common.ChannelStatusEnabled {
 		return query.Where("status = ?", common.ChannelStatusEnabled)
@@ -157,9 +317,7 @@ func GetAllChannels(c *gin.Context) {
 		}
 	}
 
-	for _, datum := range channelData {
-		clearChannelInfo(datum)
-	}
+	responseData := sanitizeChannelsForResponse(channelData)
 
 	countQuery := buildChannelListQuery(groupFilter, statusFilter, -1)
 	var results []struct {
@@ -176,7 +334,7 @@ func GetAllChannels(c *gin.Context) {
 		typeCounts[r.Type] = r.Count
 	}
 	common.ApiSuccess(c, gin.H{
-		"items":       channelData,
+		"items":       responseData,
 		"total":       total,
 		"page":        pageInfo.GetPage(),
 		"page_size":   pageInfo.GetPageSize(),
@@ -363,15 +521,13 @@ func SearchChannels(c *gin.Context) {
 
 	pagedData := channelData[startIdx:endIdx]
 
-	for _, datum := range pagedData {
-		clearChannelInfo(datum)
-	}
+	responseData := sanitizeChannelsForResponse(pagedData)
 
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
 		"data": gin.H{
-			"items":       pagedData,
+			"items":       responseData,
 			"total":       total,
 			"type_counts": typeCounts,
 		},
@@ -390,9 +546,7 @@ func GetChannel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
-	if channel != nil {
-		clearChannelInfo(channel)
-	}
+	channel = sanitizeChannelForResponse(channel)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
@@ -457,6 +611,9 @@ func validateTwoFactorAuth(twoFA *model.TwoFA, code string) bool {
 
 // validateChannel 通用的渠道校验函数
 func validateChannel(channel *model.Channel, isAdd bool) error {
+	if channel == nil {
+		return fmt.Errorf("channel cannot be empty")
+	}
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
@@ -464,7 +621,7 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 
 	// 如果是添加操作，检查 channel 和 key 是否为空
 	if isAdd {
-		if channel == nil || channel.Key == "" {
+		if channel.Key == "" {
 			return fmt.Errorf("channel cannot be empty")
 		}
 
@@ -596,6 +753,13 @@ func AddChannel(c *gin.Context) {
 
 	// 使用统一的校验函数
 	if err := validateChannel(addChannelRequest.Channel, true); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	if err := normalizeChannelWebSearchForCreate(addChannelRequest.Channel); err != nil {
 		c.JSON(http.StatusOK, gin.H{
 			"success": false,
 			"message": err.Error(),
@@ -918,6 +1082,13 @@ func UpdateChannel(c *gin.Context) {
 
 	// Always copy the original ChannelInfo so that fields like IsMultiKey and MultiKeySize are retained.
 	channel.ChannelInfo = originChannel.ChannelInfo
+	if err := mergeChannelWebSearchAPIKey(&channel.Channel, originChannel); err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
 
 	// If the request explicitly specifies a new MultiKeyMode, apply it on top of the original info.
 	if channel.MultiKeyMode != nil && *channel.MultiKeyMode != "" {
@@ -1037,11 +1208,11 @@ func UpdateChannel(c *gin.Context) {
 		"changed_fields": changedFields,
 	})
 	channel.Key = ""
-	clearChannelInfo(&channel.Channel)
+	responseChannel := sanitizeChannelForResponse(&channel.Channel)
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
 		"message": "",
-		"data":    channel,
+		"data":    responseChannel,
 	})
 	return
 }

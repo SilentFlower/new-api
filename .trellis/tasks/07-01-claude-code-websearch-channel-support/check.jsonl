@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查 relay 错误、管理 API 错误和敏感信息脱敏是否符合项目规范。"}
+{"file":".trellis/spec/backend/relay-vision-assist.md","reason":"检查 WebSearch 短路是否避免污染主请求体，并覆盖派生请求的跨层契约风险。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查新增实现是否复用现有 DTO、渠道复制、计费和表单模式，避免重复逻辑。"}
+{"file":".trellis/tasks/07-01-claude-code-websearch-channel-support/research.md","reason":"检查实现是否忠实落地已核实的 AnySearch/Tavily/sub2api 参考契约。"}
