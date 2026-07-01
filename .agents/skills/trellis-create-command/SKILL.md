@@ -74,7 +74,7 @@ description: "Create a new trellis entry as command or skill; writes agents copy
 | 形态 | 何时选 | 触发方式 |
 |------|--------|---------|
 | **command** | 显式动作、高风险、需确认点（如 finish-work、continue） | `/trellis:<name>` |
-| **skill** | 自然语可触发、查询 / 分析 / 检查、低破坏性（如 check-all、extract-prd、draw-uml） | Claude 自动路由 + `/trellis-<name>` |
+| **skill** | 自然语可触发、查询 / 分析 / 检查、低破坏性（如 check-all、extract-prd、visualize） | Claude 自动路由 + `/trellis-<name>` |
 
 决定不了时**推荐 skill**：自然语路由更灵活，显式斜杠仍可用。反过来，后悔做成 skill 想改 command 比较费事。
 
@@ -253,7 +253,7 @@ cp -r <target>/.agents/skills/trellis-<X> <skill-garden>/.trellis/0.6/.agents/sk
 | Create / generate（从零创建） | `create-` | `create-command` |
 | Analyze | `analyze-` | `analyze-task` |
 | Sync / update | `sync-` / `update-` | `sync-prd` / `update-spec` |
-| 动作类 | 动词开头 | `push` / `draw-uml` |
+| 动作类 | 动词开头 | `push` / `visualize` |
 
 > **0.6 命名取舍**：「严格提取」类用 `extract-` 前缀（强调原文不动、禁止发挥）；「从零创建」类才用 `create-` 前缀（如 create-command）。区分这两者能让 AI 在触发时不混淆生成 vs 提取的语义。
 
