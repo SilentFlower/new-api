@@ -152,6 +152,64 @@ const parseCommaList = (value) =>
 
 const joinList = (value) => (Array.isArray(value) ? value.join(',') : '');
 
+const WEB_SEARCH_PROVIDERS = ['tavily', 'anysearch'];
+const TAVILY_SEARCH_DEPTHS = ['basic', 'advanced'];
+const ANYSEARCH_FRESHNESS_VALUES = ['', 'day', 'week', 'month', 'year'];
+const WEB_SEARCH_FORM_DEFAULTS = {
+  web_search_enabled: false,
+  web_search_provider: 'tavily',
+  web_search_api_key: '',
+  web_search_api_key_configured: false,
+  web_search_clear_api_key: false,
+  web_search_max_results: 5,
+  web_search_search_depth: 'basic',
+  web_search_freshness: '',
+  web_search_content_types: '',
+};
+
+const normalizeWebSearchProvider = (value) => {
+  const provider = String(value || '');
+  return WEB_SEARCH_PROVIDERS.includes(provider) ? provider : 'tavily';
+};
+
+const normalizeTavilySearchDepth = (value) => {
+  const depth = String(value || '');
+  return TAVILY_SEARCH_DEPTHS.includes(depth) ? depth : 'basic';
+};
+
+const normalizeAnySearchFreshness = (value) => {
+  const freshness = String(value || '');
+  return ANYSEARCH_FRESHNESS_VALUES.includes(freshness) ? freshness : '';
+};
+
+const normalizeWebSearchMaxResults = (value) => {
+  const maxResults = parseInt(value, 10);
+  if (!Number.isFinite(maxResults)) {
+    return 5;
+  }
+  return Math.min(Math.max(maxResults, 1), 20);
+};
+
+const parseWebSearchSettings = (settings) => {
+  const webSearch = settings?.web_search || {};
+  return {
+    ...WEB_SEARCH_FORM_DEFAULTS,
+    web_search_enabled: webSearch.enabled === true,
+    web_search_provider: normalizeWebSearchProvider(webSearch.provider),
+    web_search_api_key: '',
+    web_search_api_key_configured: webSearch.api_key_configured === true,
+    web_search_clear_api_key: false,
+    web_search_max_results: normalizeWebSearchMaxResults(
+      webSearch.max_results,
+    ),
+    web_search_search_depth: normalizeTavilySearchDepth(
+      webSearch.search_depth,
+    ),
+    web_search_freshness: normalizeAnySearchFreshness(webSearch.freshness),
+    web_search_content_types: joinList(webSearch.content_types),
+  };
+};
+
 const VISION_ASSIST_ENDPOINT_MODES = [
   'auto',
   'openai_chat',
@@ -248,6 +306,7 @@ const EditChannelModal = (props) => {
     vision_assist_max_concurrency: 2,
     vision_assist_retry_count: 1,
     vision_assist_retry_backoff_ms: 500,
+    ...WEB_SEARCH_FORM_DEFAULTS,
     settings: '',
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
@@ -583,6 +642,7 @@ const EditChannelModal = (props) => {
     vision_assist_max_concurrency: 2,
     vision_assist_retry_count: 1,
     vision_assist_retry_backoff_ms: 500,
+    ...WEB_SEARCH_FORM_DEFAULTS,
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
@@ -652,6 +712,23 @@ const EditChannelModal = (props) => {
           visionAssistRetryBackoff > 0
             ? visionAssistRetryBackoff
             : 500,
+      },
+      web_search: {
+        ...(existingChannelExtraSettings.web_search || {}),
+        enabled: values.web_search_enabled === true,
+        provider: normalizeWebSearchProvider(values.web_search_provider),
+        api_key: String(values.web_search_api_key || '').trim() || undefined,
+        clear_api_key:
+          values.web_search_clear_api_key === true &&
+          !String(values.web_search_api_key || '').trim(),
+        max_results: normalizeWebSearchMaxResults(
+          values.web_search_max_results,
+        ),
+        search_depth: normalizeTavilySearchDepth(
+          values.web_search_search_depth,
+        ),
+        freshness: normalizeAnySearchFreshness(values.web_search_freshness),
+        content_types: parseCommaList(values.web_search_content_types),
       },
     };
   };
@@ -1044,6 +1121,7 @@ const EditChannelModal = (props) => {
             Number(visionAssist.retry_backoff_ms) > 0
               ? Number(visionAssist.retry_backoff_ms)
               : 500;
+          Object.assign(data, parseWebSearchSettings(parsedSettings));
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
@@ -1065,6 +1143,7 @@ const EditChannelModal = (props) => {
           data.vision_assist_max_concurrency = 2;
           data.vision_assist_retry_count = 1;
           data.vision_assist_retry_backoff_ms = 500;
+          Object.assign(data, WEB_SEARCH_FORM_DEFAULTS);
         }
       } else {
         data.force_format = false;
@@ -1086,6 +1165,7 @@ const EditChannelModal = (props) => {
         data.vision_assist_max_concurrency = 2;
         data.vision_assist_retry_count = 1;
         data.vision_assist_retry_backoff_ms = 500;
+        Object.assign(data, WEB_SEARCH_FORM_DEFAULTS);
       }
 
       if (data.settings) {
@@ -1215,6 +1295,16 @@ const EditChannelModal = (props) => {
             : data.vision_assist_retry_count,
         vision_assist_retry_backoff_ms:
           data.vision_assist_retry_backoff_ms || 500,
+        web_search_enabled: data.web_search_enabled || false,
+        web_search_provider: data.web_search_provider || 'tavily',
+        web_search_api_key: '',
+        web_search_api_key_configured:
+          data.web_search_api_key_configured === true,
+        web_search_clear_api_key: false,
+        web_search_max_results: data.web_search_max_results || 5,
+        web_search_search_depth: data.web_search_search_depth || 'basic',
+        web_search_freshness: data.web_search_freshness || '',
+        web_search_content_types: data.web_search_content_types || '',
       });
       initialModelsRef.current = (data.models || [])
         .map((model) => (model || '').trim())
@@ -1262,6 +1352,14 @@ const EditChannelModal = (props) => {
         data.vision_assist_channel_id ||
         data.vision_assist_model ||
         data.vision_assist_target_models ||
+        data.web_search_enabled ||
+        data.web_search_api_key_configured ||
+        data.web_search_provider !== 'tavily' ||
+        data.web_search_clear_api_key ||
+        data.web_search_max_results !== 5 ||
+        data.web_search_search_depth !== 'basic' ||
+        data.web_search_freshness ||
+        data.web_search_content_types ||
         data.system_prompt_override;
       if (hasAdvancedValues) {
         setAdvancedSettingsOpen(true);
@@ -1617,6 +1715,7 @@ const EditChannelModal = (props) => {
       vision_assist_max_concurrency: 2,
       vision_assist_retry_count: 1,
       vision_assist_retry_backoff_ms: 500,
+      ...WEB_SEARCH_FORM_DEFAULTS,
     });
     // 重置密钥模式状态
     setKeyMode('append');
@@ -1892,6 +1991,34 @@ const EditChannelModal = (props) => {
       showInfo(t('请至少选择一个模型！'));
       return;
     }
+    if (localInputs.web_search_enabled === true) {
+      const webSearchProvider = normalizeWebSearchProvider(
+        localInputs.web_search_provider,
+      );
+      const hasNewWebSearchKey = Boolean(
+        String(localInputs.web_search_api_key || '').trim(),
+      );
+      const hasExistingWebSearchKey =
+        localInputs.web_search_api_key_configured === true;
+      if (
+        webSearchProvider === 'tavily' &&
+        !hasNewWebSearchKey &&
+        !hasExistingWebSearchKey
+      ) {
+        showInfo(t('启用 Tavily WebSearch 时必须填写 WebSearch API Key'));
+        return;
+      }
+      if (
+        webSearchProvider === 'tavily' &&
+        localInputs.web_search_clear_api_key === true &&
+        !hasNewWebSearchKey
+      ) {
+        showInfo(
+          t('Tavily WebSearch 清空已保存密钥前，请先填写新的 WebSearch API Key 或关闭 WebSearch'),
+        );
+        return;
+      }
+    }
     if (
       localInputs.type === 45 &&
       (!localInputs.base_url || localInputs.base_url.trim() === '')
@@ -2073,6 +2200,15 @@ const EditChannelModal = (props) => {
     delete localInputs.vision_assist_max_concurrency;
     delete localInputs.vision_assist_retry_count;
     delete localInputs.vision_assist_retry_backoff_ms;
+    delete localInputs.web_search_enabled;
+    delete localInputs.web_search_provider;
+    delete localInputs.web_search_api_key;
+    delete localInputs.web_search_api_key_configured;
+    delete localInputs.web_search_clear_api_key;
+    delete localInputs.web_search_max_results;
+    delete localInputs.web_search_search_depth;
+    delete localInputs.web_search_freshness;
+    delete localInputs.web_search_content_types;
     delete localInputs.is_enterprise_account;
     // 顶层的 vertex_key_type 不应发送给后端
     delete localInputs.vertex_key_type;
@@ -2764,6 +2900,156 @@ const EditChannelModal = (props) => {
                   <Form.Switch field='thinking_to_content' label={t('思考内容转换')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('thinking_to_content', value)} extraText={t('将 reasoning_content 转换为 <think> 标签拼接到内容中')} />
                   <Form.Switch field='pass_through_body_enabled' label={t('透传请求体')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('pass_through_body_enabled', value)} extraText={t('启用请求体透传功能')} />
                   <Form.Switch field='use_upstream_model_for_billing' label={t('重定向后按上游模型计费')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('use_upstream_model_for_billing', value)} extraText={t('开启后，model_mapping 生效时日志主模型与计费价格按最终上游模型计算')} />
+
+                  <div className='mt-4 mb-2 text-sm font-medium text-gray-700'>
+                    {t('Claude Code WebSearch')}
+                  </div>
+                  <Form.Switch
+                    field='web_search_enabled'
+                    label={t('启用 WebSearch 模拟')}
+                    checkedText={t('开')}
+                    uncheckedText={t('关')}
+                    onChange={(value) =>
+                      handleChannelSettingsChange('web_search_enabled', value)
+                    }
+                    extraText={t(
+                      '开启后在此渠道本地处理 Claude Code 纯 web_search 请求',
+                    )}
+                  />
+                  <Row gutter={12}>
+                    <Col span={12}>
+                      <Form.Select
+                        field='web_search_provider'
+                        label={t('搜索供应商')}
+                        optionList={[
+                          { label: 'Tavily', value: 'tavily' },
+                          { label: 'AnySearch', value: 'anysearch' },
+                        ]}
+                        onChange={(value) =>
+                          handleChannelSettingsChange(
+                            'web_search_provider',
+                            value,
+                          )
+                        }
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+                    <Col span={12}>
+                      <Form.InputNumber
+                        field='web_search_max_results'
+                        label={t('最大搜索结果数')}
+                        placeholder='5'
+                        min={1}
+                        max={20}
+                        onNumberChange={(value) =>
+                          handleChannelSettingsChange(
+                            'web_search_max_results',
+                            value,
+                          )
+                        }
+                        style={{ width: '100%' }}
+                      />
+                    </Col>
+                  </Row>
+                  <Form.Input
+                    field='web_search_api_key'
+                    label={
+                      <span className='inline-flex items-center gap-2'>
+                        {t('WebSearch API Key')}
+                        {inputs.web_search_api_key_configured && (
+                          <Tag color='green' size='small'>
+                            {t('已配置')}
+                          </Tag>
+                        )}
+                      </span>
+                    }
+                    mode='password'
+                    autoComplete='new-password'
+                    placeholder={
+                      inputs.web_search_api_key_configured
+                        ? t('留空表示保留已有密钥')
+                        : inputs.web_search_provider === 'anysearch'
+                          ? t('供应商 API Key（可选）')
+                          : t('请输入供应商 API Key')
+                    }
+                    onChange={(value) =>
+                      handleChannelSettingsChange('web_search_api_key', value)
+                    }
+                    showClear
+                    extraText={t(
+                      'Tavily 必填；AnySearch 可选。填写后通过 Authorization Bearer 发送，接口响应不会返回明文密钥',
+                    )}
+                  />
+                  <Form.Switch
+                    field='web_search_clear_api_key'
+                    label={t('清空已保存的 WebSearch 密钥')}
+                    checkedText={t('开')}
+                    uncheckedText={t('关')}
+                    disabled={!inputs.web_search_api_key_configured}
+                    onChange={(value) =>
+                      handleChannelSettingsChange(
+                        'web_search_clear_api_key',
+                        value,
+                      )
+                    }
+                    extraText={t(
+                      'AnySearch 可清空后继续启用；Tavily 需要关闭 WebSearch 或填写新密钥',
+                    )}
+                  />
+                  {inputs.web_search_provider === 'tavily' ? (
+                    <Form.Select
+                      field='web_search_search_depth'
+                      label={t('Tavily 搜索深度')}
+                      optionList={[
+                        { label: t('基础'), value: 'basic' },
+                        { label: t('高级'), value: 'advanced' },
+                      ]}
+                      onChange={(value) =>
+                        handleChannelSettingsChange(
+                          'web_search_search_depth',
+                          value,
+                        )
+                      }
+                      style={{ width: '100%' }}
+                    />
+                  ) : (
+                    <Row gutter={12}>
+                      <Col span={12}>
+                        <Form.Select
+                          field='web_search_freshness'
+                          label={t('AnySearch 时效')}
+                          optionList={[
+                            { label: t('无'), value: '' },
+                            { label: t('天'), value: 'day' },
+                            { label: t('周'), value: 'week' },
+                            { label: t('月'), value: 'month' },
+                            { label: t('年'), value: 'year' },
+                          ]}
+                          onChange={(value) =>
+                            handleChannelSettingsChange(
+                              'web_search_freshness',
+                              value,
+                            )
+                          }
+                          style={{ width: '100%' }}
+                        />
+                      </Col>
+                      <Col span={12}>
+                        <Form.Input
+                          field='web_search_content_types'
+                          label={t('AnySearch 内容类型')}
+                          placeholder='web,news,doc'
+                          onChange={(value) =>
+                            handleChannelSettingsChange(
+                              'web_search_content_types',
+                              value,
+                            )
+                          }
+                          showClear
+                        />
+                      </Col>
+                    </Row>
+                  )}
 
                   <div className='mt-4 mb-2 text-sm font-medium text-gray-700'>
                     {t('视觉辅助识别')}

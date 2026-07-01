@@ -3712,6 +3712,24 @@
     "辅助失败重试次数": "Nombre de retries d'assistance",
     "辅助并发数": "Concurrence d'assistance",
     "辅助请求端点": "Endpoint de requête d'assistance",
-    "重试退避（毫秒）": "Délai de retry (ms)"
+    "重试退避（毫秒）": "Délai de retry (ms)",
+    "Claude Code WebSearch": "Claude Code WebSearch",
+    "启用 WebSearch 模拟": "Activer l’émulation WebSearch",
+    "开启后在此渠道本地处理 Claude Code 纯 web_search 请求": "Traite localement les requêtes Claude Code web_search pures pour ce canal",
+    "最大搜索结果数": "Nombre maximal de résultats",
+    "WebSearch API Key": "Clé API WebSearch",
+    "已配置": "Configuré",
+    "留空表示保留已有密钥": "Laissez vide pour conserver la clé existante",
+    "供应商 API Key（可选）": "Clé API du fournisseur (facultatif)",
+    "请输入供应商 API Key": "Saisissez la clé API du fournisseur",
+    "Tavily 必填；AnySearch 可选。填写后通过 Authorization Bearer 发送，接口响应不会返回明文密钥": "Obligatoire pour Tavily ; facultatif pour AnySearch. Une fois renseignée, elle est envoyée via Authorization Bearer et n’est jamais renvoyée en clair par l’API",
+    "清空已保存的 WebSearch 密钥": "Effacer la clé WebSearch enregistrée",
+    "AnySearch 可清空后继续启用；Tavily 需要关闭 WebSearch 或填写新密钥": "AnySearch peut rester activé après effacement ; Tavily nécessite de désactiver WebSearch ou de saisir une nouvelle clé",
+    "Tavily 搜索深度": "Profondeur de recherche Tavily",
+    "基础": "Basique",
+    "AnySearch 时效": "Fraîcheur AnySearch",
+    "AnySearch 内容类型": "Types de contenu AnySearch",
+    "启用 Tavily WebSearch 时必须填写 WebSearch API Key": "La clé API WebSearch est requise lorsque Tavily WebSearch est activé",
+    "Tavily WebSearch 清空已保存密钥前，请先填写新的 WebSearch API Key 或关闭 WebSearch": "Avant d’effacer la clé Tavily WebSearch enregistrée, saisissez une nouvelle clé WebSearch API ou désactivez WebSearch"
   }
 }

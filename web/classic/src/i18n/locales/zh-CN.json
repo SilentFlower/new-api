@@ -3850,6 +3850,24 @@
     "辅助失败重试次数": "辅助失败重试次数",
     "辅助并发数": "辅助并发数",
     "辅助请求端点": "辅助请求端点",
-    "重试退避（毫秒）": "重试退避（毫秒）"
+    "重试退避（毫秒）": "重试退避（毫秒）",
+    "Claude Code WebSearch": "Claude Code WebSearch",
+    "启用 WebSearch 模拟": "启用 WebSearch 模拟",
+    "开启后在此渠道本地处理 Claude Code 纯 web_search 请求": "开启后在此渠道本地处理 Claude Code 纯 web_search 请求",
+    "最大搜索结果数": "最大搜索结果数",
+    "WebSearch API Key": "WebSearch API Key",
+    "已配置": "已配置",
+    "留空表示保留已有密钥": "留空表示保留已有密钥",
+    "供应商 API Key（可选）": "供应商 API Key（可选）",
+    "请输入供应商 API Key": "请输入供应商 API Key",
+    "Tavily 必填；AnySearch 可选。填写后通过 Authorization Bearer 发送，接口响应不会返回明文密钥": "Tavily 必填；AnySearch 可选。填写后通过 Authorization Bearer 发送，接口响应不会返回明文密钥",
+    "清空已保存的 WebSearch 密钥": "清空已保存的 WebSearch 密钥",
+    "AnySearch 可清空后继续启用；Tavily 需要关闭 WebSearch 或填写新密钥": "AnySearch 可清空后继续启用；Tavily 需要关闭 WebSearch 或填写新密钥",
+    "Tavily 搜索深度": "Tavily 搜索深度",
+    "基础": "基础",
+    "AnySearch 时效": "AnySearch 时效",
+    "AnySearch 内容类型": "AnySearch 内容类型",
+    "启用 Tavily WebSearch 时必须填写 WebSearch API Key": "启用 Tavily WebSearch 时必须填写 WebSearch API Key",
+    "Tavily WebSearch 清空已保存密钥前，请先填写新的 WebSearch API Key 或关闭 WebSearch": "Tavily WebSearch 清空已保存密钥前，请先填写新的 WebSearch API Key 或关闭 WebSearch"
   }
 }
