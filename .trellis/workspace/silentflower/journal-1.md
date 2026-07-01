@@ -176,3 +176,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 6: Claude Code WebSearch 渠道支持
+
+**Date**: 2026-07-02
+**Task**: Claude Code WebSearch 渠道支持
+**Branch**: `build-bak`
+
+### Summary
+
+完成渠道级 Claude Code WebSearch 支持，接入 Tavily 和 AnySearch，保证纯 web_search 本地短路不污染上游请求体；补齐 default 与 classic 渠道配置 UI、密钥保留和多语言，并完成任务归档前的发布操作说明。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e280416c` | (see git log) |
+| `17ba4cc3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
