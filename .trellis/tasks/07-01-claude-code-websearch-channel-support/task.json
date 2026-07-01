@@ -24,18 +24,19 @@
   "notes": "",
   "meta": {},
   "last_push_snapshot": {
-    "snapshot_at": "2026-07-01T17:26:52Z",
+    "snapshot_at": "2026-07-01T18:13:57Z",
     "branch": "build-bak",
     "pushed_commits": {
-      "root": "e280416c"
+      "root": "17ba4cc3"
     },
     "completed_steps": [
       "实施步骤 1-8",
       "Phase 2.2 全面检查",
       "Phase 3.3 spec update",
-      "Phase 3.4 trellis-push"
+      "Phase 3.4 trellis-push",
+      "补充旧 UI WebSearch 配置"
     ],
     "next_step": "等待用户按需运行 /trellis:finish-work 归档任务",
-    "notes": "WebSearch 渠道级模拟已实现并验证；Tavily key 必填，AnySearch key 可选；commit 已推送。"
+    "notes": "旧 UI 已补齐渠道级 Claude Code WebSearch 配置入口；default/classic UI 均可配置 Tavily/AnySearch；旧 UI 构建验证通过。"
   }
 }
