@@ -22,5 +22,20 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-07-01T17:26:52Z",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "root": "e280416c"
+    },
+    "completed_steps": [
+      "实施步骤 1-8",
+      "Phase 2.2 全面检查",
+      "Phase 3.3 spec update",
+      "Phase 3.4 trellis-push"
+    ],
+    "next_step": "等待用户按需运行 /trellis:finish-work 归档任务",
+    "notes": "WebSearch 渠道级模拟已实现并验证；Tavily key 必填，AnySearch key 可选；commit 已推送。"
+  }
 }
