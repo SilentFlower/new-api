@@ -65,7 +65,7 @@ func HandleGroupRatio(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) types.
 }
 
 func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens int, meta *types.TokenCountMeta) (types.PriceData, error) {
-	billingModelName := info.BillingModelName()
+	billingModelName := info.ResolveBillingModelName()
 	modelPrice, usePrice := ratio_setting.GetModelPrice(billingModelName, false)
 
 	groupRatioInfo := HandleGroupRatio(c, info)
@@ -160,6 +160,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 	if common.DebugEnabled {
 		logger.LogDebug(c, "model_price_helper result: %s", priceData.ToSetting())
 	}
+	info.FreezeBillingModelName(billingModelName)
 	info.PriceData = priceData
 	return priceData, nil
 }
@@ -168,7 +169,7 @@ func ModelPriceHelper(c *gin.Context, info *relaycommon.RelayInfo, promptTokens 
 func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types.PriceData, error) {
 	groupRatioInfo := HandleGroupRatio(c, info)
 
-	billingModelName := info.BillingModelName()
+	billingModelName := info.ResolveBillingModelName()
 	modelPrice, success := ratio_setting.GetModelPrice(billingModelName, true)
 	usePrice := success
 	var modelRatio float64
@@ -223,6 +224,7 @@ func ModelPriceHelperPerCall(c *gin.Context, info *relaycommon.RelayInfo) (types
 		Quota:          quota,
 		GroupRatioInfo: groupRatioInfo,
 	}
+	info.FreezeBillingModelName(billingModelName)
 	return priceData, nil
 }
 
@@ -303,6 +305,7 @@ func modelPriceHelperTiered(c *gin.Context, info *relaycommon.RelayInfo, billing
 
 	logger.LogDebug(c, "model_price_helper_tiered result: model=%s preConsume=%d quotaBeforeGroup=%.2f groupRatio=%.2f tier=%s", billingModelName, preConsumedQuota, quotaBeforeGroup, groupRatioInfo.GroupRatio, trace.MatchedTier)
 
+	info.FreezeBillingModelName(billingModelName)
 	info.PriceData = priceData
 	return priceData, nil
 }

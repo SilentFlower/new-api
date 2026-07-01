@@ -143,17 +143,20 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
 		originModelName := info.OriginModelName
 		originPriceData := info.PriceData
+		originBillingModelName := info.ResolvedBillingModelName
 
 		_, err := helper.ModelPriceHelper(c, info, info.GetEstimatePromptTokens(), &types.TokenCountMeta{})
 		if err != nil {
 			info.OriginModelName = originModelName
 			info.PriceData = originPriceData
+			info.ResolvedBillingModelName = originBillingModelName
 			return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry(), types.ErrOptionWithStatusCode(http.StatusBadRequest))
 		}
 		service.PostTextConsumeQuota(c, info, usageDto, nil)
 
 		info.OriginModelName = originModelName
 		info.PriceData = originPriceData
+		info.ResolvedBillingModelName = originBillingModelName
 		return nil
 	}
 

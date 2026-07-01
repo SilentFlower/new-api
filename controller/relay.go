@@ -302,6 +302,7 @@ func cloneRelayRequest(request dto.Request) (dto.Request, error) {
 func resetMainRelayAttemptBillingFields(relayInfo *relaycommon.RelayInfo) {
 	relayInfo.FinalPreConsumedQuota = 0
 	relayInfo.SubscriptionPostDelta = 0
+	relayInfo.ClearBillingModelName()
 }
 
 func prepareMainRelayBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {

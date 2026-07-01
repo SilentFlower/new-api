@@ -159,6 +159,42 @@ func TestCalculateTextQuotaSummaryUsesBillingModelName(t *testing.T) {
 	}
 }
 
+func TestCalculateTextQuotaSummaryUsesFrozenBillingModelAfterUpstreamModelChanged(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(w)
+
+	relayInfo := &relaycommon.RelayInfo{
+		OriginModelName: "origin-model",
+		PriceData: types.PriceData{
+			ModelRatio:      1,
+			CompletionRatio: 1,
+			GroupRatioInfo:  types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			IsModelMapped:     true,
+			UpstreamModelName: "mapped-model",
+			ChannelSetting: dto.ChannelSettings{
+				UseUpstreamModelForBilling: true,
+			},
+		},
+		StartTime: time.Now(),
+	}
+	relayInfo.FreezeBillingModelName(relayInfo.ResolveBillingModelName())
+	relayInfo.UpstreamModelName = "accounts/fireworks/models/glm-5p2"
+
+	usage := &dto.Usage{
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+	}
+
+	summary := calculateTextQuotaSummary(ctx, relayInfo, usage)
+
+	require.Equal(t, "mapped-model", summary.ModelName)
+	require.Equal(t, "mapped-model", relayInfo.BillingModelName())
+}
+
 func TestCalculateTextQuotaSummaryUsesAnthropicUsageSemanticFromUpstreamUsage(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

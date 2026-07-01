@@ -163,6 +163,9 @@ type RelayInfo struct {
 	UpstreamRequestBodySize int64
 
 	PriceData types.PriceData
+	// ResolvedBillingModelName 是本次价格计算成功时冻结的计费模型名。
+	// 上游响应可能返回资源路径形式的实际模型名，不能反向影响本次结算。
+	ResolvedBillingModelName string
 
 	// TieredBillingSnapshot is a frozen snapshot of tiered billing rules
 	// captured at pre-consume time. Non-nil only when billing mode is "tiered_expr".
@@ -251,9 +254,9 @@ func (info *RelayInfo) ShouldUseUpstreamModelForBilling() bool {
 	return info.ChannelSetting.UseUpstreamModelForBilling && info.IsModelMapped && strings.TrimSpace(info.UpstreamModelName) != ""
 }
 
-// BillingModelName 返回本次请求用于计费和消费日志主模型的模型名。
-// 默认保持原始请求模型；渠道开启开关且模型映射生效时返回最终上游模型。
-func (info *RelayInfo) BillingModelName() string {
+// ResolveBillingModelName 返回当前上下文下应使用的计费模型名，不读取已冻结的计费快照。
+// 价格计算阶段使用它来解析当次模型映射链的最终落点。
+func (info *RelayInfo) ResolveBillingModelName() string {
 	if info == nil {
 		return ""
 	}
@@ -264,6 +267,34 @@ func (info *RelayInfo) BillingModelName() string {
 		return info.UpstreamModelName
 	}
 	return info.OriginModelName
+}
+
+// FreezeBillingModelName 冻结本次请求实际用于查价和结算的模型名。
+func (info *RelayInfo) FreezeBillingModelName(modelName string) {
+	if info == nil {
+		return
+	}
+	info.ResolvedBillingModelName = strings.TrimSpace(modelName)
+}
+
+// ClearBillingModelName 清理上一次渠道尝试留下的计费模型快照。
+func (info *RelayInfo) ClearBillingModelName() {
+	if info == nil {
+		return
+	}
+	info.ResolvedBillingModelName = ""
+}
+
+// BillingModelName 返回本次请求用于计费和消费日志主模型的模型名。
+// 价格计算成功后优先返回冻结值，避免上游响应里的实际模型名污染结算。
+func (info *RelayInfo) BillingModelName() string {
+	if info == nil {
+		return ""
+	}
+	if strings.TrimSpace(info.ResolvedBillingModelName) != "" {
+		return info.ResolvedBillingModelName
+	}
+	return info.ResolveBillingModelName()
 }
 
 func (info *RelayInfo) ToString() string {

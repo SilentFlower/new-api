@@ -126,8 +126,58 @@ func TestModelPriceHelperUsesMappedUpstreamModelWhenChannelSettingEnabled(t *tes
 			require.NoError(t, err)
 			require.Equal(t, tt.wantRatio, priceData.ModelRatio)
 			require.Equal(t, tt.wantQuota, priceData.QuotaToPreConsume)
+			require.Equal(t, info.ResolveBillingModelName(), info.BillingModelName())
 		})
 	}
+}
+
+func TestModelPriceHelperFreezesMappedBillingModel(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	savedConfig := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		savedConfig[key] = value
+		return nil
+	}))
+	savedModelRatio := ratio_setting.ModelRatio2JSONString()
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(savedConfig))
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(savedModelRatio))
+	})
+
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"group_ratio_setting.group_ratio": `{"default":1}`,
+		"billing_setting.billing_mode":    `{}`,
+		"billing_setting.billing_expr":    `{}`,
+	}))
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"mapped-billing-model":5}`))
+
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Set("group", "default")
+
+	info := &relaycommon.RelayInfo{
+		OriginModelName: "origin-model",
+		UserGroup:       "default",
+		UsingGroup:      "default",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			IsModelMapped:     true,
+			UpstreamModelName: "mapped-billing-model",
+			ChannelSetting: dto.ChannelSettings{
+				UseUpstreamModelForBilling: true,
+			},
+		},
+	}
+
+	priceData, err := ModelPriceHelper(ctx, info, 1000, &types.TokenCountMeta{})
+	require.NoError(t, err)
+	require.Equal(t, 5.0, priceData.ModelRatio)
+	require.Equal(t, "mapped-billing-model", info.BillingModelName())
+
+	info.UpstreamModelName = "accounts/fireworks/models/glm-5p2"
+
+	require.Equal(t, "mapped-billing-model", info.BillingModelName())
+	require.Equal(t, "accounts/fireworks/models/glm-5p2", info.UpstreamModelName)
 }
 
 func TestModelPriceHelperTieredUsesMappedUpstreamModelWhenChannelSettingEnabled(t *testing.T) {
