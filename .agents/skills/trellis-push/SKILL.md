@@ -101,12 +101,13 @@ merge 目标仍从对应 package 的 `merge_target` 读取；父仓没有 packag
 ```bash
 # 在仓库根目录（含 .trellis/ 的项目根，不是 package 子目录）
 python3 ./.trellis/scripts/task.py current
+python3 ./.trellis/scripts/push_snapshot.py status --json
 ```
 
 - **无活动任务**（命令退出码非 0 或输出为空）：在计划中标记 `snapshot: 跳过（无活动任务）`。
 - **有活动任务**：解析输出拿到 task 路径（形如 `.trellis/tasks/MM-DD-name/`），并读取下列内容：
   - `<task_dir>/implement.md`（如有）— 步骤清单，AI 推断进度的主依据
-  - `<task_dir>/task.json` 的 `last_push_snapshot` 字段（如有）— 上次推送时的进度基线
+  - `push_snapshot.py status --json` 的 `snapshot` / `summary`（如有）— 上次推送时的进度基线；若返回 `no-snapshot` / `no-current-task`，按无上次 snapshot 继续
   - `<task_dir>/task.json` 的 `base_branch` 字段 — 用于 `git log <base_branch>..HEAD` 圈定本任务 commit 范围
 
 ---
@@ -192,6 +193,7 @@ commit message 生成规则：
 - branch: 执行成功后按实际分支补齐
 - pushed_commits: 执行成功后按实际 commit hash 补齐
 - snapshot_at: 执行成功后写入当前 ISO 8601 时间
+- push_mode: <push / commit-only / snapshot-only / 指定仓库 / reconfigure / 临时目标>
 - bookkeeping: 只提交 `<task_dir>/task.json`
 ```
 
@@ -205,6 +207,7 @@ commit message 生成规则：
     "frontend": "abc1234",
     "backend": "def5678"
   },
+  "push_mode": "push",
   "completed_steps": ["Step 1", "Step 2"],
   "partial_step": "Step 3（可选）",
   "next_step": "Step 4（可选）",
@@ -214,7 +217,9 @@ commit message 生成规则：
 
 > `pushed_commits`、`snapshot_at`、实际 branch / commit hash 是运行后字段。用户确认的是 snapshot 的语义内容和写入动作；执行成功后由 AI 按实际结果补齐。
 
-commit-only 模式下，字段名仍保持 `pushed_commits` 以兼容恢复逻辑；值记录本次生成的本地 commit hash，并在 `notes` 中注明“commit-only：本地已提交，未推送”。
+`push_mode` 记录本轮确认的模式。默认实际 push 模式写 `"push"`；commit-only 写 `"commit-only"`；snapshot-only 写 `"snapshot-only"`；指定仓库、reconfigure 或临时目标可写对应模式名。
+
+commit-only 模式下，字段名仍保持 `pushed_commits` 以兼容恢复逻辑；值记录本次生成的本地 commit hash，`push_mode` 写 `"commit-only"`，并在 `notes` 中注明“commit-only：本地已提交，未推送”。
 
 ### 2.3 展示确认模板
 
@@ -356,6 +361,7 @@ git checkout <current_branch>
 - `snapshot_at`：当前 ISO 8601 时间戳
 - `branch`：实际分支；多仓不同分支时使用字典
 - `pushed_commits`：各 package 的短 hash
+- `push_mode`：统一执行计划确认的模式；默认 push 写 `"push"`，commit-only 写 `"commit-only"`，snapshot-only 写 `"snapshot-only"`
 - `notes`：保留已确认 notes；commit-only 模式追加“本地已提交，未推送”
 
 写入前先复核目标文件：
@@ -369,13 +375,16 @@ git status --porcelain -- <task_json_path> [".trellis/config.yaml"]
 
 写入方式：
 
-1. 读 `<task_dir>/task.json`
-2. 解析 JSON
-3. 只设置 / 更新 `last_push_snapshot` 字段
-4. 保留其它字段原样
-5. 写回并保持原有缩进（通常 2 空格）
+1. 将已确认语义内容与运行后字段合并成完整 snapshot JSON。
+2. 调用 helper 写入：
 
-不要覆盖整个 `task.json`。
+   ```bash
+   python3 ./.trellis/scripts/push_snapshot.py write --task <task_dir> --snapshot-json '<完整 snapshot JSON>'
+   ```
+
+3. 确认 helper 成功返回；失败时停止并展示错误，不继续父仓 bookkeeping commit。
+
+helper 只允许更新 `last_push_snapshot` 字段；不要绕过 helper 手工覆盖整个 `task.json`。
 
 ### 5.2 父仓 status 检查
 

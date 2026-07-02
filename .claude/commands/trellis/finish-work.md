@@ -70,6 +70,20 @@ Do not write `None`, `No release operations identified`, or `Rollback code only`
 
 If multiple tasks will be archived in the same finish-work run, process the active task at minimum. Process extra archived tasks only when Step 1 provides enough local context to infer safely; do not add per-task confirmation prompts.
 
+#### Finish Bookkeeping Auto-push Step
+
+Run this step after finish-work Step 4 records the session journal and produces the `chore: record journal` commit, before the final finish-work report.
+
+Read the active task's `last_push_snapshot.push_mode` with `python3 ./.trellis/scripts/push_snapshot.py status --json` before archive moves the task. If `push_mode` is `"commit-only"` or missing, do not auto-push finish-work's archive/journal commits; report that local bookkeeping commits remain ahead.
+
+If `push_mode` is not `"commit-only"`, Step 4 left `git status --porcelain` clean, and the current branch has an upstream, push the current branch:
+
+```bash
+git push origin <current_branch>
+```
+
+Never force push. If push fails, stop and report the failure.
+
 <!-- END skill-garden skill override trellis-finish-work v0.6 -->
 
 # Finish Work

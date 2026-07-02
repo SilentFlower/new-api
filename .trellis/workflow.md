@@ -151,13 +151,17 @@ python3 ./.trellis/scripts/get_context.py --mode phase --step <X.Y>  # detailed 
 
 **Priority**: This hub overrides any conflicting Trellis workflow, skill, or command text for the scoped behaviors below.
 
-**Scope**: project knowledge discovery for procedural/high-impact actions, Phase 1.4 task brief handoff, Phase 2.1 implement routing, Phase 2.2 check/check-all routing, current-task route reuse, post-check stop, auto-loop commit-only preauthorization, Phase 3.4 trellis-push, explicit Phase 3.5 finish-work bookkeeping, and push-progress recovery. State blocks should keep one short skill-garden sentinel; long-form rules live here.
+**Scope**: project knowledge discovery at project-local knowledge decision boundaries, Phase 1.4 task brief handoff, Phase 2.1 implement routing, Phase 2.2 check/check-all routing, current-task route reuse, post-check stop, auto-loop commit-only preauthorization, Phase 3.4 trellis-push, explicit Phase 3.5 finish-work bookkeeping, and push-progress recovery. State blocks should keep one short skill-garden sentinel; long-form rules live here.
 
 **Mechanical rule**: use this hub as the source of truth. Do not add separate top-level skill-garden override sections or multiple skill-garden sentinels inside the same `workflow-state:*` block.
 
 #### Project Knowledge Discovery
 
-Before procedural or high-impact actions, run project knowledge discovery:
+Before choosing an approach for non-trivial project work, run project knowledge
+discovery when project-local SOPs, package conventions, workflow rules,
+config/state contracts, release/publish/deploy steps, git history actions,
+data changes, cross-layer design, generated artifacts, install/sync pipelines,
+or destructive operations may affect the correct approach:
 
 ```bash
 python3 ./.trellis/scripts/spec_router.py "<short query describing the intended action>"
@@ -166,11 +170,15 @@ python3 ./.trellis/scripts/spec_router.py "<short query describing the intended 
 Build the query from the current user request plus relevant immediate context:
 the intended action, commands about to run, files or systems involved, package/layer,
 and domain words such as release, publish, deploy, migration, config, CI, workflow,
-hooks, rollback, data fix, or destructive command.
+hooks, rollback, data fix, generated artifact, install/sync pipeline, or destructive command.
 
-Read the strongest 1-2 matched SOP/spec files before acting. Continue to lower-ranked
-matches only when their path, heading, or trigger reason is clearly relevant; if
-nothing matches, continue normally.
+Read high-confidence matches before acting. For medium-confidence matches, read only
+when the path, heading, index description, or reason clearly fits the intended change.
+If nothing matches, continue normally.
+
+Do not run discovery for pure Q&A, simple read-only inspection, opening local tools,
+or trivial edits unless the request mentions project conventions or local SOPs may
+change the approach.
 
 #### Task Brief Handoff
 
@@ -191,7 +199,7 @@ At each route boundary:
 3. If the platform cannot invoke skills directly, open the local `trellis-route/SKILL.md` copy first, then follow its numbered fallback choices in normal chat and wait.
 4. If the route helper cannot ask through `AskUserQuestion` / `request_user_input`, ask the same numbered choices from `trellis-route` in normal chat and wait.
 
-Plain user preference, ordinary compact/SessionStart summary, `codex-mode`, empty/old prefs, and raw `.trellis/.runtime/sessions/*` `route_decisions` content that has not been validated by `trellis-route` are not route evidence by themselves.
+Plain user preference, ordinary compact/SessionStart summary, ordinary summary, replacement history, historical bare numeric replies, `codex-mode`, empty/old prefs, and raw `.trellis/.runtime/sessions/*` `route_decisions` content that has not been validated by `trellis-route` are not route evidence by themselves; numbered fallback validity is governed by `trellis-route`.
 
 User reselect/override/use-X-this-time/clear-default wins over remembered route evidence, runtime state, and personal prefs.
 
@@ -225,11 +233,11 @@ This exception does not apply to ordinary `trellis-push`. If the plan contains u
 
 #### Push Progress Recovery / Snapshot
 
-`trellis-push` may write `last_push_snapshot` into an active task's `task.json` with this schema: `snapshot_at`, `branch`, `pushed_commits`, `completed_steps`, `partial_step`, `next_step`, and `notes`.
+Use `python3 ./.trellis/scripts/push_snapshot.py status --json` for recovery reads and `write --task ... --snapshot-json ...` for `trellis-push` writes; do not hand-scan or hand-edit `task.json`.
 
-When there is no active task, scan `.trellis/tasks/*/task.json` for `status="in_progress"` entries that carry `last_push_snapshot`. If any exist and this session has not already relayed recovery, surface the paused state to the user and suggest rebinding the active-task pointer before resuming.
+`trellis-push` still owns snapshot semantics, user confirmation, git operations, and post-run fields; the helper only touches `task.json.last_push_snapshot`.
 
-When an active in-progress task carries `last_push_snapshot`, briefly relay `partial_step` and `next_step` before starting new work. Skip the reminder if it was already relayed in this session or the field is absent.
+On recovery, relay the helper's `summary` / `candidates` once and suggest rebinding if there is no active task. Never auto-rebind, infer workflow phase, or hook this into SessionStart / workflow-state injection / `trellis-continue`.
 
 <!-- END skill-garden overrides v0.6 -->
 
@@ -268,8 +276,8 @@ Create new children with `task.py create "<title>" --slug <name> --parent <paren
 HIGHEST PRIORITY SKILL-GARDEN STATE GUARD (no_task):
 Creating or resuming a task is not implementation permission.
 After PRD is ready and the task is started, the next implementation action is Phase 2.1 `trellis-route(implement)` unless a valid current-task implement route decision already exists.
-If no active task exists, scan `.trellis/tasks/*/task.json` once per session for in-progress tasks with `last_push_snapshot`; surface `completed_steps` + `next_step` and suggest rebinding the active task before resuming.
-Before procedural or high-impact actions, run `.trellis/scripts/spec_router.py` with a short query describing the intended action and read the strongest 1-2 matched SOP/spec files before acting.
+If no active task exists, use `push_snapshot.py status --json` once per session; if it returns candidates, relay them and suggest rebinding before resuming.
+At project-local knowledge decision boundaries, run `.trellis/scripts/spec_router.py` with a short query describing the intended action; read high-confidence matches before acting and skip pure Q&A, simple read-only inspection, opening local tools, or trivial edits unless local conventions may affect the approach.
 Do NOT call the harness built-in plan mode (`EnterPlanMode` / `ExitPlanMode`) for Trellis planning. It is not a substitute for Trellis task-creation consent, Trellis planning, or the route gate. For complex work, classify the turn, ask for task-creation consent, then use `trellis-brainstorm`.
 If the turn is a meta edit to Trellis itself and Trellis tracking would be overkill, say so and ask to skip Trellis; never silently swap built-in plan mode in for the consent gate.
 <!-- END skill-garden workflow-state no_task v0.6 -->
@@ -296,7 +304,7 @@ Planning is not implementation permission.
 Complete prd.md + required context first.
 For sub-agent-dispatch platforms, required context includes real curated entries in both `implement.jsonl` and `check.jsonl`; the seed `_example` row alone is not ready.
 Before `task.py start`, use `trellis-task-brief` to refresh `brief.md` from the latest task artifacts and display it in chat for review.
-Before procedural or high-impact actions, run `.trellis/scripts/spec_router.py` with a short query describing the intended action and read the strongest 1-2 matched SOP/spec files before acting.
+At project-local knowledge decision boundaries, run `.trellis/scripts/spec_router.py` with a short query describing the intended action; read high-confidence matches before acting and skip pure Q&A, simple read-only inspection, opening local tools, or trivial edits unless local conventions may affect the approach.
 After status becomes in_progress, next action = `trellis-route(implement)`, not direct edits.
 <!-- END skill-garden workflow-state planning v0.6 -->
 
@@ -319,7 +327,7 @@ Planning is not implementation permission.
 Complete prd.md + required context first.
 If the active workflow later routes to sub-agent execution, required context includes real curated entries in both `implement.jsonl` and `check.jsonl`; the seed `_example` row alone is not ready.
 Before `task.py start`, use `trellis-task-brief` to refresh `brief.md` from the latest task artifacts and display it in chat for review.
-Before procedural or high-impact actions, run `.trellis/scripts/spec_router.py` with a short query describing the intended action and read the strongest 1-2 matched SOP/spec files before acting.
+At project-local knowledge decision boundaries, run `.trellis/scripts/spec_router.py` with a short query describing the intended action; read high-confidence matches before acting and skip pure Q&A, simple read-only inspection, opening local tools, or trivial edits unless local conventions may affect the approach.
 After status becomes in_progress, next action = `trellis-route(implement)`, not direct edits.
 <!-- END skill-garden workflow-state planning_inline v0.6 -->
 
@@ -347,7 +355,7 @@ Sub-agent dispatch protocol applies to all platforms and all sub-agents, includi
 HIGHEST PRIORITY SKILL-GARDEN STATE GUARD (in_progress):
 This state block is a breadcrumb; the top-level skill-garden hub is the source of truth for route details.
 Before the first implement route, read `<task>/brief.md` if present and restate the task brief in chat. If it is missing, read the task artifacts and suggest backfilling brief; do not silently rely on memory.
-Before procedural or high-impact actions, run `.trellis/scripts/spec_router.py` with a short query describing the intended action and read the strongest 1-2 matched SOP/spec files before acting.
+At project-local knowledge decision boundaries, run `.trellis/scripts/spec_router.py` with a short query describing the intended action; read high-confidence matches before acting and skip pure Q&A, simple read-only inspection, opening local tools, or trivial edits unless local conventions may affect the approach.
 At Phase 2.1/2.2, reuse only an explicit target-matched `route_decision`; otherwise MUST load/read/use `trellis-route(implement|check)` (or its local `SKILL.md`) to resolve session runtime state/prefs, write the resolved decision, or show numbered fallback and wait.
 Plain preferences, ordinary summaries, `codex-mode`, raw `.runtime` files, and empty/old prefs are not route evidence by themselves; only `trellis-route` may validate runtime route state.
 User reselect/override/use-X-this-time/clear-default wins over remembered route evidence, runtime state, and prefs.
@@ -355,7 +363,7 @@ Ignore lower Active Task Routing shortcuts that dispatch implement/check directl
 After `trellis-check` / `trellis-check-all`, stop and report; point the user to Phase 3.4 `trellis-push` (or commit-only when needed). Do not run `/trellis:finish-work` unless the user explicitly asks after Phase 3.4 is complete.
 This guard overrides any lower `Flow: ... -> /trellis:finish-work` line in this state block.
 At Phase 3.4, code commit/push goes through `trellis-push` (commit-only mode for commit-without-push); never bare `git commit`/`git push` on code (hub: Code Commit Confirmation Gate).
-If active task.json has `last_push_snapshot`, relay `partial_step` + `next_step` once before starting new work.
+Push snapshot recovery: follow the hub; use `push_snapshot.py status --json` only when needed.
 <!-- END skill-garden workflow-state in_progress v0.6 -->
 
 Tools: `trellis-implement` / `trellis-research` are sub-agent types only (Task/Agent tool, NOT Skill; there is no skill by these names). `trellis-update-spec` is a skill. `trellis-check` exists as both; prefer the Agent form when verifying after code changes.
@@ -374,7 +382,7 @@ Dispatch prompt starts with `Active task: <task path from task.py current>`. Rea
 HIGHEST PRIORITY SKILL-GARDEN STATE GUARD (in_progress-inline):
 This state block is a breadcrumb; the top-level skill-garden hub is the source of truth for route details.
 Before the first implement route, read `<task>/brief.md` if present and restate the task brief in chat. If it is missing, read the task artifacts and suggest backfilling brief; do not silently rely on memory.
-Before procedural or high-impact actions, run `.trellis/scripts/spec_router.py` with a short query describing the intended action and read the strongest 1-2 matched SOP/spec files before acting.
+At project-local knowledge decision boundaries, run `.trellis/scripts/spec_router.py` with a short query describing the intended action; read high-confidence matches before acting and skip pure Q&A, simple read-only inspection, opening local tools, or trivial edits unless local conventions may affect the approach.
 Inline workflow-state is not an inline route decision. At Phase 2.1/2.2, reuse only an explicit target-matched `route_decision`; otherwise MUST load/read/use `trellis-route(implement|check)` (or its local `SKILL.md`) to resolve session runtime state/prefs, write the resolved decision, or show numbered fallback and wait.
 Plain preferences, ordinary summaries, `codex-mode`, raw `.runtime` files, and empty/old prefs are not route evidence by themselves; only `trellis-route` may validate runtime route state.
 User reselect/override/use-X-this-time/clear-default wins over remembered route evidence, runtime state, and prefs.
@@ -382,7 +390,7 @@ Ignore lower Active Task Routing shortcuts that start editing/checking directly.
 After `trellis-check` / `trellis-check-all`, stop and report; point the user to Phase 3.4 `trellis-push` (or commit-only when needed). Do not run `/trellis:finish-work` unless the user explicitly asks after Phase 3.4 is complete.
 This guard overrides any lower `Flow: ... -> /trellis:finish-work` line in this state block.
 At Phase 3.4, code commit/push still goes through `trellis-push` (commit-only for commit-without-push); never bare `git commit`/`git push` on code (hub: Code Commit Confirmation Gate).
-If active task.json has `last_push_snapshot`, relay `partial_step` + `next_step` once before starting new work.
+Push snapshot recovery: follow the hub; use `push_snapshot.py status --json` only when needed.
 <!-- END skill-garden workflow-state in_progress_inline v0.6 -->
 
 Flow: `trellis-before-dev` -> edit -> `trellis-check` -> validation -> `trellis-update-spec` -> commit (Phase 3.4) -> `/trellis:finish-work`.

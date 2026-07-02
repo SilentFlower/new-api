@@ -26,7 +26,7 @@ func TestShouldHandleClaudeWebSearchEmulation(t *testing.T) {
 			want:        false,
 		},
 		{
-			name:        "官方 Anthropic base URL 尾部斜杠仍视为官方上游",
+			name:        "官方 Anthropic base URL 尾部斜杠未启用本地模拟时透传",
 			channelType: constant.ChannelTypeAnthropic,
 			baseURL:     constant.ChannelBaseURLs[constant.ChannelTypeAnthropic] + "/",
 			enabled:     false,
@@ -40,17 +40,24 @@ func TestShouldHandleClaudeWebSearchEmulation(t *testing.T) {
 			want:        true,
 		},
 		{
-			name:        "Anthropic 兼容自定义上游未启用本地模拟时继续拦截",
+			name:        "Anthropic 兼容自定义上游未启用本地模拟时透传",
 			channelType: constant.ChannelTypeAnthropic,
 			baseURL:     "https://anthropic-proxy.example.com",
 			enabled:     false,
-			want:        true,
+			want:        false,
 		},
 		{
-			name:        "非原生渠道未启用本地模拟时继续拦截",
+			name:        "非原生渠道未启用本地模拟时也透传",
 			channelType: constant.ChannelTypeDeepSeek,
 			baseURL:     "https://api.deepseek.com",
 			enabled:     false,
+			want:        false,
+		},
+		{
+			name:        "非原生渠道启用本地模拟时短路",
+			channelType: constant.ChannelTypeDeepSeek,
+			baseURL:     "https://api.deepseek.com",
+			enabled:     true,
 			want:        true,
 		},
 	}
@@ -75,6 +82,6 @@ func TestShouldHandleClaudeWebSearchEmulation(t *testing.T) {
 }
 
 func TestShouldHandleClaudeWebSearchEmulationDefaultsToLocalGuard(t *testing.T) {
-	assert.True(t, shouldHandleClaudeWebSearchEmulation(nil))
-	assert.True(t, shouldHandleClaudeWebSearchEmulation(&relaycommon.RelayInfo{}))
+	assert.False(t, shouldHandleClaudeWebSearchEmulation(nil))
+	assert.False(t, shouldHandleClaudeWebSearchEmulation(&relaycommon.RelayInfo{}))
 }

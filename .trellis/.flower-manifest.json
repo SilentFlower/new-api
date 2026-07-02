@@ -1,5 +1,5 @@
 {
-  "flowerVersion": "0.4.0-beta.4",
+  "flowerVersion": "0.4.0-beta.5",
   "variant": "0.6",
   "version": "0.6.5",
   "skills": [
@@ -17,6 +17,7 @@
     "trellis-verify-task",
     "trellis-visualize",
     "script:auto_loop.py",
+    "script:push_snapshot.py",
     "script:spec_router.py"
   ],
   "paths": [
@@ -47,6 +48,7 @@
     ".claude/skills/trellis-verify-task",
     ".claude/skills/trellis-visualize",
     ".trellis/scripts/auto_loop.py",
+    ".trellis/scripts/push_snapshot.py",
     ".trellis/scripts/spec_router.py"
   ]
 }

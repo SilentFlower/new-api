@@ -25,7 +25,7 @@ description: |
 
 个人 route 配置只决定“已获准执行后的模式”，不是开工授权。调用 helper 前，必须确认当前 workflow 已允许进入对应 target：implement 需要任务已完成规划确认并处于 `in_progress`；check 用于 Phase 2.2 检查执行，或用户明确要求最终复查 / 轻量检查。最终复查只有在 Phase 2.2 结果缺失、风险较高或用户明确要求复查时才回到 Phase 2.2；回到 Phase 2.2 后优先复用当前任务的合法 check route，除非用户明确要求重选/临时改/清除默认。如果仍在 planning、等待用户确认，或用户表达“等一下 / 我再想想”，停止，不读取 runtime/prefs。
 
-合法 route 决策必须能追溯到 `trellis-route`、同编号 fallback 选项、由本 skill 读取到的有效 `.trellis/.route-prefs.tmp` 配置，或由 route helper 校验过的 auto-loop 临时 route 授权，并且 `task` 字段必须等于当前 `task.py current --source` 返回的任务路径。runtime state 只能保存和恢复这些原始合法来源，不能把 `.runtime` 自身当成新的 `route_decision.source`。用户自然语言说过“inline/subagent”、compact summary、SessionStart 摘要、`codex-mode`、空 `.route-prefs.tmp`、旧单值偏好，都不能单独作为有效 route 决策。
+合法 route 决策必须能追溯到 `trellis-route`、同编号 fallback 选项、由本 skill 读取到的有效 `.trellis/.route-prefs.tmp` 配置，或由 route helper 校验过的 auto-loop 临时 route 授权，并且 `task` 字段必须等于当前 `task.py current --source` 返回的任务路径。runtime state 只能保存和恢复这些原始合法来源，不能把 `.runtime` 自身当成新的 `route_decision.source`。用户自然语言说过“inline/subagent”、compact summary、ordinary summary、SessionStart 摘要、replacement history、`codex-mode`、空 `.route-prefs.tmp`、旧单值偏好、历史用户裸数字，都不能单独作为有效 route 决策。
 
 当前上下文内已有 target 匹配、task 等于当前任务路径、且来源合法的 route 决策时，后续实现、check 发现问题、用户指出刚检查过的实现有问题、修复后重检、提交前复查均默认复用最近 implement/check 路由；除非用户明确要求重选/临时改/清除默认，不再调用本 skill。当前上下文没有 route 决策但 runtime state 命中时，本 skill 恢复该决策并输出同样的结构化 `route_decision`。如果上下文里只有上一个任务的 `route_decision`，必须忽略并重新解析当前任务。
 
@@ -72,7 +72,9 @@ helper 默认输出为精简 JSON，只包含 route 执行必需的 `status`、`
 
 优先调用 `AskUserQuestion`。选项 label 前缀编号，方便用户直接打数字快速选。
 
-如果当前平台或模式没有 `AskUserQuestion` / `request_user_input`，不要自行选择 inline 或 subagent 继续。改用普通聊天消息原样呈现同一组编号选项，并停止等待用户回复；用户回复数字后再进入 Step 2.5 / 2.6 / 3。
+裸数字回复（如 `1` / `2` / `3` / `4`）只有在当前可见的上一条 assistant 消息刚刚展示同一个 target 的 route 选项、并明确停下等待用户回答时，才可解释为本次 numbered fallback 选择。compact summary、ordinary summary、SessionStart 摘要、replacement history、历史消息、旧 target 的裸数字、非紧邻回复里的裸数字都不能触发 `write --source numbered-fallback`；遇到这些情况必须重新展示当前 target 的选项并等待新的紧邻回复。
+
+如果当前平台或模式没有 `AskUserQuestion` / `request_user_input`，不要自行选择 inline 或 subagent 继续。改用普通聊天消息原样呈现同一组编号选项，并停止等待用户回复；只有用户在这条选项消息之后立即回复裸数字，才可进入 Step 2.5 / 2.6 / 3。
 
 ### target = implement，且 resolve 未命中
 
@@ -211,6 +213,7 @@ helper 写入规则：保留另一个 target 的 runtime 决策和偏好；覆�
 [来自 session runtime route state：`.trellis/.runtime/sessions/<context-key>.json` 的 `route_decisions`。]
 [已写入 session runtime route state：`.trellis/.runtime/sessions/<context-key>.json` 的 `route_decisions`。]
 [说明：用户明确请求轻量检查，使用隐藏逃生口。]
+[仅当本消息刚展示 route 选项并等待用户回答时：用户下一条紧邻裸数字回复才可按本 target 解释；摘要、历史消息或旧 target 的裸数字无效。]
 
 route_decision:
   target: <implement | check>
@@ -227,7 +230,7 @@ route_decision:
 - <要避免的工具调用>
 ```
 
-中括号内行为条件性出现：仅命中个人配置时显示配置行；仅命中 runtime state 时显示“来自”行；写入 runtime state 成功时显示“已写入”行；仅轻量 check 时显示隐藏逃生口说明；仅 implement subagent + skip_compile=true 时附加“跳过编译”段。`route_decision` 必须保留在回复中，并至少保留 target/mode/source/scope/task；需要 path/decided_at 等诊断字段时重新调用 helper 并加 `--verbose`。compact summary 若只有自然语言描述，后续 agent 仍应优先读取 runtime state，而不是把 summary 当证据。
+中括号内行为条件性出现：仅命中个人配置时显示配置行；仅命中 runtime state 时显示“来自”行；写入 runtime state 成功时显示“已写入”行；仅轻量 check 时显示隐藏逃生口说明；仅展示选项并等待用户时显示裸数字有效性提醒；仅 implement subagent + skip_compile=true 时附加“跳过编译”段。`route_decision` 必须保留在回复中，并至少保留 target/mode/source/scope/task；需要 path/decided_at 等诊断字段时重新调用 helper 并加 `--verbose`。compact summary 若只有自然语言描述，后续 agent 仍应优先读取 runtime state，而不是把 summary 当证据。
 
 ---
 
@@ -260,6 +263,8 @@ route_decision:
 - `AskUserQuestion` / `request_user_input` 不可用时，记录为 inline 或 subagent 路径并继续。
 - 没有有效 check 配置、用户选择或最近本轮 check 路由决定时，自动执行 inline check。
 - 没有 `source` 合法的 `route_decision`，就把“用户说过 inline/subagent”或 compact summary 当成已路由。
+- 把 compact summary、ordinary summary、SessionStart 摘要、replacement history 或历史消息里的裸数字 `1` 当成当前 target 的 numbered fallback 选择。
+- 用户裸数字回复不是紧邻当前 route 选项消息时，仍调用 `write --source numbered-fallback`。
 - check 发现问题后，把当前任务内已有合法 route 的修复/重检当成新的 route 边界再次询问模式。
 - 给 check 任何模式附加“跳过编译”指令。
 - 询问后忽视用户答案默认 subagent。
