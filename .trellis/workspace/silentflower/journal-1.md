@@ -210,3 +210,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 7: 修复 Claude Code WebSearch 官渠透传
+
+**Date**: 2026-07-02
+**Task**: 修复 Claude Code WebSearch 官渠透传
+**Branch**: `build-bak`
+
+### Summary
+
+修复官方 Anthropic 渠道未启用本地 Claude Code WebSearch 模拟时被 400 拦截的问题，补充 relay 回归测试，同步 WebSearch 模拟契约，已通过 check-all 并完成 trellis-push。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ee7a0a55` | (see git log) |
+| `8ea1ae3e` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
