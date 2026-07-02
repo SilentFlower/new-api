@@ -59,7 +59,10 @@ func shouldSkipVisionAssistPreprocess(c *gin.Context, info *relaycommon.RelayInf
 	if info.RelayFormat == types.RelayFormatClaude {
 		return false
 	}
-	return info.RelayFormat != types.RelayFormatOpenAI || info.RelayMode != relayconstant.RelayModeChatCompletions
+	if info.RelayFormat == types.RelayFormatOpenAI && info.RelayMode == relayconstant.RelayModeChatCompletions {
+		return false
+	}
+	return info.RelayFormat != types.RelayFormatOpenAIResponses || info.RelayMode != relayconstant.RelayModeResponses
 }
 
 func callVisionAssistModel(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, images []service.VisionAssistImage) ([]service.VisionAssistResult, *types.NewAPIError) {

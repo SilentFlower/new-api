@@ -63,6 +63,21 @@ func TestApplyVisionAssistAfterModelMappingUsesFinalUpstreamModel(t *testing.T) 
 	assert.NotContains(t, common.GetJsonString(info.Request), "image_url")
 }
 
+func TestShouldSkipVisionAssistPreprocessAllowsOpenAIResponses(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	info := &relaycommon.RelayInfo{
+		RelayFormat: types.RelayFormatOpenAIResponses,
+		RelayMode:   relayconstant.RelayModeResponses,
+		ChannelMeta: &relaycommon.ChannelMeta{},
+	}
+
+	assert.False(t, shouldSkipVisionAssistPreprocess(c, info))
+
+	info.RelayMode = relayconstant.RelayModeResponsesCompact
+	assert.True(t, shouldSkipVisionAssistPreprocess(c, info))
+}
+
 func TestResolveVisionAssistEndpointMode(t *testing.T) {
 	tests := []struct {
 		name       string

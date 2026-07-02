@@ -539,6 +539,8 @@ func extractVisionAssistImages(request dto.Request) []VisionAssistImage {
 	switch req := request.(type) {
 	case *dto.GeneralOpenAIRequest:
 		return extractOpenAIVisionAssistImages(req)
+	case *dto.OpenAIResponsesRequest:
+		return extractOpenAIResponsesVisionAssistImages(req)
 	case *dto.ClaudeRequest:
 		return extractClaudeVisionAssistImages(req)
 	default:
@@ -568,6 +570,66 @@ func extractOpenAIVisionAssistImages(request *dto.GeneralOpenAIRequest) []Vision
 		}
 	}
 	return images
+}
+
+func extractOpenAIResponsesVisionAssistImages(request *dto.OpenAIResponsesRequest) []VisionAssistImage {
+	if request == nil || len(request.Input) == 0 || common.GetJsonType(request.Input) != "array" {
+		return nil
+	}
+	var inputItems []any
+	if err := common.Unmarshal(request.Input, &inputItems); err != nil {
+		return nil
+	}
+	images := make([]VisionAssistImage, 0)
+	for messageIndex, inputItemAny := range inputItems {
+		inputItem, ok := inputItemAny.(map[string]any)
+		if !ok {
+			continue
+		}
+		contentItems, ok := inputItem["content"].([]any)
+		if !ok {
+			continue
+		}
+		for _, contentItemAny := range contentItems {
+			contentItem, ok := contentItemAny.(map[string]any)
+			if !ok || common.Interface2String(contentItem["type"]) != "input_image" {
+				continue
+			}
+			imageURL, detail, mimeType := parseOpenAIResponsesVisionImage(contentItem)
+			if imageURL == "" {
+				continue
+			}
+			images = append(images, VisionAssistImage{
+				Index:        len(images) + 1,
+				MessageIndex: messageIndex,
+				Source:       types.NewFileSourceFromData(imageURL, mimeType),
+				Detail:       detail,
+				MimeType:     mimeType,
+			})
+		}
+	}
+	return images
+}
+
+func parseOpenAIResponsesVisionImage(contentItem map[string]any) (imageURL string, detail string, mimeType string) {
+	detail = common.Interface2String(contentItem["detail"])
+	mimeType = common.Interface2String(contentItem["mime_type"])
+	switch value := contentItem["image_url"].(type) {
+	case string:
+		imageURL = value
+	case map[string]any:
+		imageURL = common.Interface2String(value["url"])
+		if detail == "" {
+			detail = common.Interface2String(value["detail"])
+		}
+		if mimeType == "" {
+			mimeType = common.Interface2String(value["mime_type"])
+		}
+	}
+	if detail == "" {
+		detail = "high"
+	}
+	return imageURL, detail, mimeType
 }
 
 func extractClaudeVisionAssistImages(request *dto.ClaudeRequest) []VisionAssistImage {
@@ -670,6 +732,8 @@ func rewriteVisionAssistRequest(request dto.Request, results []VisionAssistResul
 	switch req := request.(type) {
 	case *dto.GeneralOpenAIRequest:
 		return rewriteOpenAIVisionAssistRequest(req, results, stripImage)
+	case *dto.OpenAIResponsesRequest:
+		return rewriteOpenAIResponsesVisionAssistRequest(req, results, stripImage)
 	case *dto.ClaudeRequest:
 		return rewriteClaudeVisionAssistRequest(req, results, stripImage)
 	default:
@@ -721,6 +785,63 @@ func rewriteOpenAIVisionAssistRequest(request *dto.GeneralOpenAIRequest, results
 			request.Messages[i].SetMediaContent(next)
 		}
 	}
+	return nil
+}
+
+func rewriteOpenAIResponsesVisionAssistRequest(request *dto.OpenAIResponsesRequest, results []VisionAssistResult, stripImage bool) error {
+	if request == nil || len(request.Input) == 0 || common.GetJsonType(request.Input) != "array" {
+		return nil
+	}
+	var inputItems []any
+	if err := common.Unmarshal(request.Input, &inputItems); err != nil {
+		return err
+	}
+	byMessage := groupVisionAssistResultsByMessage(results)
+	changed := false
+	for i, inputItemAny := range inputItems {
+		inputItem, ok := inputItemAny.(map[string]any)
+		if !ok {
+			continue
+		}
+		text := visionAssistText(byMessage[i])
+		if text == "" {
+			continue
+		}
+		contentItems, ok := inputItem["content"].([]any)
+		if !ok {
+			continue
+		}
+		next := make([]any, 0, len(contentItems)+1)
+		inserted := false
+		for _, contentItemAny := range contentItems {
+			contentItem, ok := contentItemAny.(map[string]any)
+			if ok && common.Interface2String(contentItem["type"]) == "input_image" {
+				if !inserted {
+					next = append(next, map[string]any{
+						"type": "input_text",
+						"text": text,
+					})
+					inserted = true
+				}
+				if stripImage {
+					continue
+				}
+			}
+			next = append(next, contentItemAny)
+		}
+		if inserted {
+			inputItem["content"] = next
+			changed = true
+		}
+	}
+	if !changed {
+		return nil
+	}
+	input, err := common.Marshal(inputItems)
+	if err != nil {
+		return err
+	}
+	request.Input = input
 	return nil
 }
 
