@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/relay-websearch-emulation.md", "reason": "实现 Claude Code WebSearch 本地模拟入口和透传边界必须遵守的契约"}
+{"file": ".trellis/spec/backend/index.md", "reason": "后端任务相关规范索引，用于选择质量、错误处理和目录约束"}

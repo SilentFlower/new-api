@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/relay-websearch-emulation.md", "reason": "检查 WebSearch 模拟、原生透传和错误矩阵是否符合既有契约"}
+{"file": ".trellis/spec/backend/index.md", "reason": "检查后端质量门和测试范围时使用的规范索引"}

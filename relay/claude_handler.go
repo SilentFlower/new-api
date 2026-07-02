@@ -140,7 +140,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 		}
 	}
 
-	if websearch.IsPureClaudeWebSearchRequest(request) {
+	if websearch.IsPureClaudeWebSearchRequest(request) && shouldHandleClaudeWebSearchEmulation(info) {
 		return handleClaudeWebSearchEmulation(c, info, request)
 	}
 
@@ -232,6 +232,27 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 	service.PostTextConsumeQuota(c, info, usage.(*dto.Usage), nil)
 	return nil
+}
+
+func shouldHandleClaudeWebSearchEmulation(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return true
+	}
+	if info.ChannelSetting.WebSearch.Enabled {
+		return true
+	}
+	return !supportsNativeClaudeWebSearch(info)
+}
+
+func supportsNativeClaudeWebSearch(info *relaycommon.RelayInfo) bool {
+	if info == nil || info.ChannelMeta == nil {
+		return false
+	}
+	if info.ChannelType != constant.ChannelTypeAnthropic {
+		return false
+	}
+	// 未启用本地模拟时，只有官方 Anthropic 上游可以依赖原生 WebSearch。
+	return strings.TrimRight(info.ChannelBaseUrl, "/") == constant.ChannelBaseURLs[constant.ChannelTypeAnthropic]
 }
 
 func handleClaudeWebSearchEmulation(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) *types.NewAPIError {
