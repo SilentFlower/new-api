@@ -22,5 +22,20 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-07-02T16:29:30+08:00",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "root": "ee7a0a55"
+    },
+    "completed_steps": [
+      "Phase 1：规划、brief、任务启动完成",
+      "Phase 2.1：实现官方 Anthropic 原生 WebSearch 透传例外",
+      "Phase 2.2：check-all 通过",
+      "Phase 3.3：WebSearch 契约规范已同步"
+    ],
+    "next_step": "Phase 3.5：push 后按需 finish-work / archive",
+    "notes": "默认 trellis-push：业务提交并推送后写入 snapshot"
+  }
 }
