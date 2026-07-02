@@ -22,5 +22,23 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-07-02T17:43:56+08:00",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "root": "aa6f84f8"
+    },
+    "push_mode": "push",
+    "completed_steps": [
+      "Step 1 梳理 Responses 输入解析",
+      "Step 2 增加 Responses 图片抽取",
+      "Step 3 增加 Responses 主请求改写",
+      "Step 4 放行 OpenAI Responses 视觉辅助预处理",
+      "Step 5 补单元测试",
+      "Step 6 运行验证"
+    ],
+    "next_step": "Phase 3.5 wrap-up / finish-work",
+    "notes": "已完成 /v1/responses 视觉辅助抽取、改写、relay 放行和测试覆盖；业务提交已推送到 origin/build-bak。"
+  }
 }
