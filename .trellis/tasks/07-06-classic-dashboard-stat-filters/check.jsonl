@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/api-contracts.md", "reason": "检查多值查询参数是否按项目契约兼容重复 key、括号数组和旧单值参数"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "检查统计和导出聚合查询是否跨 SQLite/MySQL/PostgreSQL 兼容"}
+{"file": ".trellis/tasks/07-06-classic-dashboard-stat-filters/prd.md", "reason": "检查实现是否覆盖搜索分组多选、令牌联动、多令牌查询和导出同条件"}
+{"file": ".trellis/tasks/07-06-classic-dashboard-stat-filters/design.md", "reason": "检查跨层数据流、参数传递和日志聚合路径是否闭环"}

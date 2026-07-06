@@ -22,6 +22,14 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { API, isAdmin, showError, timestamp2string } from '../../helpers';
 import { getDefaultTime, getInitialTimestamp } from '../../helpers/dashboard';
+import {
+  appendDashboardFilterParams,
+  buildDashboardTokenOptionValue,
+  extractDashboardTokenName,
+  filterDashboardTokenOptionsByGroups,
+  filterDashboardTokenValuesByGroups,
+  normalizeSelectValues,
+} from '../../helpers/dashboardFilters';
 import { TIME_OPTIONS } from '../../constants/dashboard.constants';
 import { useIsMobile } from '../common/useIsMobile';
 import { useMinimumLoadingTime } from '../common/useMinimumLoadingTime';
@@ -44,6 +52,8 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [inputs, setInputs] = useState({
     username: '',
     token_name: '',
+    token_names: [],
+    groups: [],
     model_name: '',
     start_timestamp: getInitialTimestamp(),
     end_timestamp: timestamp2string(new Date().getTime() / 1000 + 3600),
@@ -54,8 +64,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const [dataExportDefaultTime, setDataExportDefaultTime] =
     useState(getDefaultTime());
 
-  // ========== 令牌选项 ==========
-  const [tokenOptions, setTokenOptions] = useState([]);
+  // ========== 筛选选项 ==========
+  const [allTokenOptions, setAllTokenOptions] = useState([]);
+  const [groupOptions, setGroupOptions] = useState([]);
 
   // ========== 数据状态 ==========
   const [quotaData, setQuotaData] = useState([]);
@@ -113,6 +124,11 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     [t],
   );
 
+  const tokenOptions = useMemo(
+    () => filterDashboardTokenOptionsByGroups(allTokenOptions, inputs.groups),
+    [allTokenOptions, inputs.groups],
+  );
+
   const performanceMetrics = useMemo(() => {
     const { start_timestamp, end_timestamp } = inputs;
     const timeDiff =
@@ -146,14 +162,65 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   }, [t, userState?.user?.username]);
 
   // ========== 回调函数 ==========
-  const handleInputChange = useCallback((value, name) => {
-    if (name === 'data_export_default_time') {
-      setDataExportDefaultTime(value);
-      localStorage.setItem('data_export_default_time', value);
+  const handleInputChange = useCallback(
+    (value, name) => {
+      if (name === 'data_export_default_time') {
+        setDataExportDefaultTime(value);
+        localStorage.setItem('data_export_default_time', value);
+        return;
+      }
+      if (name === 'groups') {
+        const groups = normalizeSelectValues(value);
+        setInputs((inputs) => {
+          const tokenNames = filterDashboardTokenValuesByGroups(
+            inputs.token_names,
+            groups,
+            allTokenOptions,
+          );
+          return {
+            ...inputs,
+            groups,
+            token_names: tokenNames,
+            token_name:
+              tokenNames.length === 1
+                ? extractDashboardTokenName(tokenNames[0])
+                : '',
+          };
+        });
+        return;
+      }
+      if (name === 'token_names') {
+        const tokenNames = normalizeSelectValues(value);
+        setInputs((inputs) => ({
+          ...inputs,
+          token_names: tokenNames,
+          token_name:
+            tokenNames.length === 1
+              ? extractDashboardTokenName(tokenNames[0])
+              : '',
+        }));
+        return;
+      }
+      setInputs((inputs) => ({ ...inputs, [name]: value }));
+    },
+    [allTokenOptions],
+  );
+
+  const loadGroupOptions = useCallback(async () => {
+    if (!isAdminUser) {
+      setGroupOptions([]);
       return;
     }
-    setInputs((inputs) => ({ ...inputs, [name]: value }));
-  }, []);
+    try {
+      const res = await API.get('/api/group/');
+      const { success, data } = res.data;
+      if (success && Array.isArray(data)) {
+        setGroupOptions(data.map((group) => ({ value: group, label: group })));
+      }
+    } catch (err) {
+      console.error('Failed to load group options:', err);
+    }
+  }, [isAdminUser]);
 
   // 加载令牌列表用于下拉选择
   const loadTokenOptions = useCallback(async () => {
@@ -164,12 +231,16 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
         const res = await API.get('/api/data/token-names');
         const { success, data } = res.data;
         if (success && data) {
-          // 使用 "name\0username" 作为唯一 value，避免同名令牌冲突
           tokens = data.map((item) => ({
-            value: `${item.name}\0${item.username}`,
+            value: buildDashboardTokenOptionValue(
+              item.name,
+              item.username,
+              item.group,
+            ),
             label: item.username
-              ? `${item.name} (${item.username})`
+              ? `${item.name} (${item.username}${item.group ? ` / ${item.group}` : ''})`
               : item.name,
+            group: item.group || '',
           }));
         }
       } else {
@@ -183,33 +254,28 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
           }));
         }
       }
-      setTokenOptions(tokens);
+      setAllTokenOptions(tokens);
     } catch (err) {
       console.error('Failed to load token options:', err);
     }
   }, [isAdminUser]);
 
-  // 管理员选择令牌时联动设置 username，确保同名令牌能区分
   const handleTokenSelect = useCallback(
     (value) => {
-      if (!value) {
-        setInputs((prev) => ({ ...prev, token_name: '', username: '' }));
-        return;
-      }
-      if (isAdminUser && value.includes('\0')) {
-        const [tokenName, username] = value.split('\0');
-        setInputs((prev) => ({ ...prev, token_name: tokenName, username }));
-      } else {
-        setInputs((prev) => ({ ...prev, token_name: value }));
-      }
+      handleInputChange(value, 'token_names');
     },
-    [isAdminUser],
+    [handleInputChange],
   );
 
-  const showSearchModal = useCallback(() => {
+  const loadFilterOptions = useCallback(() => {
+    loadGroupOptions();
     loadTokenOptions();
+  }, [loadGroupOptions, loadTokenOptions]);
+
+  const showSearchModal = useCallback(() => {
+    loadFilterOptions();
     setSearchModalVisible(true);
-  }, [loadTokenOptions]);
+  }, [loadFilterOptions]);
 
   const handleCloseModal = useCallback(() => {
     setSearchModalVisible(false);
@@ -233,16 +299,29 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const loadQuotaData = useCallback(async () => {
     setLoading(true);
     try {
-      let url = '';
-      const { start_timestamp, end_timestamp, username, token_name } = inputs;
+      const { start_timestamp, end_timestamp, username, token_names, groups } =
+        inputs;
       let localStartTimestamp = Date.parse(start_timestamp) / 1000;
       let localEndTimestamp = Date.parse(end_timestamp) / 1000;
-
-      if (isAdminUser) {
-        url = `/api/data/?username=${username}&token_name=${token_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${dataExportDefaultTime}`;
-      } else {
-        url = `/api/data/self/?token_name=${token_name}&start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}&default_time=${dataExportDefaultTime}`;
+      const params = new URLSearchParams();
+      params.append('start_timestamp', localStartTimestamp);
+      params.append('end_timestamp', localEndTimestamp);
+      params.append('default_time', dataExportDefaultTime);
+      if (isAdminUser && username) {
+        params.append('username', username);
       }
+      appendDashboardFilterParams(
+        params,
+        'token_names',
+        token_names,
+        extractDashboardTokenName,
+      );
+      if (isAdminUser) {
+        appendDashboardFilterParams(params, 'groups', groups);
+      }
+      const url = isAdminUser
+        ? `/api/data/?${params.toString()}`
+        : `/api/data/self/?${params.toString()}`;
 
       const res = await API.get(url);
       const { success, message, data } = res.data;
@@ -290,10 +369,24 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
   const loadUserQuotaData = useCallback(async () => {
     if (!isAdminUser) return [];
     try {
-      const { start_timestamp, end_timestamp } = inputs;
+      const { start_timestamp, end_timestamp, username, token_names, groups } =
+        inputs;
       const localStartTimestamp = Date.parse(start_timestamp) / 1000;
       const localEndTimestamp = Date.parse(end_timestamp) / 1000;
-      const url = `/api/data/users?start_timestamp=${localStartTimestamp}&end_timestamp=${localEndTimestamp}`;
+      const params = new URLSearchParams();
+      params.append('start_timestamp', localStartTimestamp);
+      params.append('end_timestamp', localEndTimestamp);
+      if (username) {
+        params.append('username', username);
+      }
+      appendDashboardFilterParams(
+        params,
+        'token_names',
+        token_names,
+        extractDashboardTokenName,
+      );
+      appendDashboardFilterParams(params, 'groups', groups);
+      const url = `/api/data/users?${params.toString()}`;
       const res = await API.get(url);
       const { success, message, data } = res.data;
       if (success) {
@@ -338,16 +431,21 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
 
   // ========== 导出 Excel ==========
   const showExportModal = useCallback(() => {
-    loadTokenOptions();
+    loadFilterOptions();
     setExportModalVisible(true);
-  }, [loadTokenOptions]);
+  }, [loadFilterOptions]);
 
   const closeExportModal = useCallback(() => {
     setExportModalVisible(false);
   }, []);
 
   const exportExcel = useCallback(
-    async (startTime, endTime, selectedTokenValues = []) => {
+    async (
+      startTime,
+      endTime,
+      selectedTokenValues = [],
+      selectedGroups = [],
+    ) => {
       setExportLoading(true);
       try {
         let localStartTimestamp = Date.parse(startTime) / 1000;
@@ -356,16 +454,13 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
         params.append('start_timestamp', localStartTimestamp);
         params.append('end_timestamp', localEndTimestamp);
 
-        const tokenNames = Array.from(
-          new Set(
-            selectedTokenValues
-              .map((value) => String(value).split('\0')[0].trim())
-              .filter(Boolean),
-          ),
+        appendDashboardFilterParams(
+          params,
+          'token_names',
+          selectedTokenValues,
+          extractDashboardTokenName,
         );
-        tokenNames.forEach((tokenName) => {
-          params.append('token_names', tokenName);
-        });
+        appendDashboardFilterParams(params, 'groups', selectedGroups);
 
         const res = await API.get(`/api/data/export?${params.toString()}`, {
           responseType: 'blob',
@@ -441,7 +536,9 @@ export const useDashboardData = (userState, userDispatch, statusState) => {
     // 输入状态
     inputs,
     dataExportDefaultTime,
+    groupOptions,
     tokenOptions,
+    allTokenOptions,
 
     // 数据状态
     quotaData,

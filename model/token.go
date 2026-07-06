@@ -485,6 +485,7 @@ func GetTokenKeysByIds(ids []int, userId int) ([]Token, error) {
 type TokenNameOption struct {
 	Name     string `json:"name"`
 	Username string `json:"username"`
+	Group    string `json:"group"`
 }
 
 // GetAllTokenNames 获取所有令牌名称（去重），附带用户名
@@ -492,7 +493,7 @@ type TokenNameOption struct {
 func GetAllTokenNames() ([]*TokenNameOption, error) {
 	var options []*TokenNameOption
 	err := DB.Table("tokens").
-		Select("DISTINCT tokens.name, COALESCE(users.username, '') as username").
+		Select("DISTINCT tokens.name, COALESCE(users.username, '') as username, COALESCE(tokens." + commonGroupCol + ", '') as " + commonGroupCol).
 		Joins("LEFT JOIN users ON tokens.user_id = users.id").
 		Where("tokens.deleted_at IS NULL").
 		Order("tokens.name").

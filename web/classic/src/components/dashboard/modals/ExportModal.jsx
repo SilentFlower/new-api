@@ -17,9 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Modal, Form } from '@douyinfe/semi-ui';
 import { timestamp2string } from '../../../helpers';
+import {
+  filterDashboardTokenOptionsByGroups,
+  filterDashboardTokenValuesByGroups,
+} from '../../../helpers/dashboardFilters';
 
 const ExportModal = ({
   visible,
@@ -27,6 +31,7 @@ const ExportModal = ({
   onCancel,
   loading,
   isMobile,
+  groupOptions = [],
   tokenOptions = [],
   t,
 }) => {
@@ -41,9 +46,16 @@ const ExportModal = ({
     timestamp2string(now.getTime() / 1000 + 3600),
   );
   const [selectedTokenValues, setSelectedTokenValues] = useState([]);
+  const [selectedGroups, setSelectedGroups] = useState([]);
+
+  const filteredTokenOptions = useMemo(
+    () => filterDashboardTokenOptionsByGroups(tokenOptions, selectedGroups),
+    [tokenOptions, selectedGroups],
+  );
 
   useEffect(() => {
     if (visible) {
+      setSelectedGroups([]);
       setSelectedTokenValues([]);
     }
   }, [visible]);
@@ -57,7 +69,7 @@ const ExportModal = ({
   );
 
   const handleOk = () => {
-    onConfirm(startTime, endTime, selectedTokenValues);
+    onConfirm(startTime, endTime, selectedTokenValues, selectedGroups);
   };
 
   return (
@@ -95,12 +107,33 @@ const ExportModal = ({
         })}
 
         {createFormField(Form.Select, {
+          field: 'export_groups',
+          label: t('分组'),
+          value: selectedGroups,
+          placeholder: t('全部'),
+          name: 'export_groups',
+          optionList: groupOptions,
+          multiple: true,
+          filter: true,
+          showClear: true,
+          autoClearSearchValue: false,
+          searchPosition: 'dropdown',
+          onChange: (value) => {
+            const groups = Array.isArray(value) ? value : [];
+            setSelectedGroups(groups);
+            setSelectedTokenValues((tokens) =>
+              filterDashboardTokenValuesByGroups(tokens, groups, tokenOptions),
+            );
+          },
+        })}
+
+        {createFormField(Form.Select, {
           field: 'export_token_names',
           label: t('令牌名称'),
           value: selectedTokenValues,
           placeholder: t('全部'),
           name: 'export_token_names',
-          optionList: tokenOptions,
+          optionList: filteredTokenOptions,
           multiple: true,
           filter: true,
           showClear: true,

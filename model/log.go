@@ -526,6 +526,20 @@ type Stat struct {
 }
 
 func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string, channel int, group string) (stat Stat, err error) {
+	return SumUsedQuotaWithFilters(logType, startTimestamp, endTimestamp, modelName, username, singleValueSlice(tokenName), channel, singleValueSlice(group))
+}
+
+// SumUsedQuotaWithFilters 汇总消费额度和最近 60 秒 RPM/TPM，支持多令牌和多分组过滤。
+// @param logType 日志类型
+// @param startTimestamp 开始时间戳
+// @param endTimestamp 结束时间戳
+// @param modelName 模型名称过滤
+// @param username 用户名过滤
+// @param tokenNames API Key 名称过滤列表
+// @param channel 渠道 ID 过滤
+// @param groups 分组过滤列表
+// @return 统计结果和错误
+func SumUsedQuotaWithFilters(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenNames []string, channel int, groups []string) (stat Stat, err error) {
 	tx := LOG_DB.Table("logs").Select("sum(quota) quota")
 
 	// 为rpm和tpm创建单独的查询
@@ -537,10 +551,8 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	if rpmTpmQuery, err = applyExplicitLogTextFilter(rpmTpmQuery, "username", username); err != nil {
 		return stat, err
 	}
-	if tokenName != "" {
-		tx = tx.Where("token_name = ?", tokenName)
-		rpmTpmQuery = rpmTpmQuery.Where("token_name = ?", tokenName)
-	}
+	tx = applyLogTokenNamesFilter(tx, tokenNames)
+	rpmTpmQuery = applyLogTokenNamesFilter(rpmTpmQuery, tokenNames)
 	if startTimestamp != 0 {
 		tx = tx.Where("created_at >= ?", startTimestamp)
 	}
@@ -557,10 +569,8 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 		tx = tx.Where("channel_id = ?", channel)
 		rpmTpmQuery = rpmTpmQuery.Where("channel_id = ?", channel)
 	}
-	if group != "" {
-		tx = tx.Where(logGroupCol+" = ?", group)
-		rpmTpmQuery = rpmTpmQuery.Where(logGroupCol+" = ?", group)
-	}
+	tx = applyLogGroupsFilter(tx, groups)
+	rpmTpmQuery = applyLogGroupsFilter(rpmTpmQuery, groups)
 
 	tx = tx.Where("type = ?", LogTypeConsume)
 	rpmTpmQuery = rpmTpmQuery.Where("type = ?", LogTypeConsume)
@@ -619,14 +629,23 @@ func applyLogTokenNamesFilter(tx *gorm.DB, tokenNames []string) *gorm.DB {
 	return tx.Where("token_name IN ?", tokenNames)
 }
 
+// applyLogGroupsFilter 为日志查询追加分组过滤；空列表表示不过滤。
+func applyLogGroupsFilter(tx *gorm.DB, groups []string) *gorm.DB {
+	if len(groups) == 0 {
+		return tx
+	}
+	return tx.Where(logGroupCol+" IN ?", groups)
+}
+
 // GetLogSummaryByKey 从 logs 表按 token_name 分组聚合查询汇总数据（导出 Sheet 1）
 // 仅统计消费类型日志（type=2）
 // @param startTimestamp 开始时间戳
 // @param endTimestamp 结束时间戳
 // @param username 用户名过滤（可选）
 // @param tokenNames API Key 名称过滤列表（可选）
+// @param groups 分组过滤列表（可选）
 // @return 按 API Key 维度聚合的汇总数据
-func GetLogSummaryByKey(startTimestamp int64, endTimestamp int64, username string, tokenNames []string) ([]*LogSummaryByKey, error) {
+func GetLogSummaryByKey(startTimestamp int64, endTimestamp int64, username string, tokenNames []string, groups []string) ([]*LogSummaryByKey, error) {
 	var results []*LogSummaryByKey
 	tx := LOG_DB.Table("logs").
 		Select("token_name, username, count(*) as count, sum(prompt_tokens + completion_tokens) as token_used, sum(quota) as quota").
@@ -636,6 +655,7 @@ func GetLogSummaryByKey(startTimestamp int64, endTimestamp int64, username strin
 		tx = tx.Where("username = ?", username)
 	}
 	tx = applyLogTokenNamesFilter(tx, tokenNames)
+	tx = applyLogGroupsFilter(tx, groups)
 	err := tx.Group("token_name, username").Find(&results).Error
 	return results, err
 }
@@ -656,8 +676,9 @@ type LogDetailByKeyModel struct {
 // @param endTimestamp 结束时间戳
 // @param username 用户名过滤（可选）
 // @param tokenNames API Key 名称过滤列表（可选）
+// @param groups 分组过滤列表（可选）
 // @return 按 API Key + 模型维度聚合的明细数据
-func GetLogDetailByKeyModel(startTimestamp int64, endTimestamp int64, username string, tokenNames []string) ([]*LogDetailByKeyModel, error) {
+func GetLogDetailByKeyModel(startTimestamp int64, endTimestamp int64, username string, tokenNames []string, groups []string) ([]*LogDetailByKeyModel, error) {
 	var results []*LogDetailByKeyModel
 	tx := LOG_DB.Table("logs").
 		Select("token_name, username, model_name, count(*) as count, sum(prompt_tokens + completion_tokens) as token_used, sum(quota) as quota").
@@ -667,6 +688,7 @@ func GetLogDetailByKeyModel(startTimestamp int64, endTimestamp int64, username s
 		tx = tx.Where("username = ?", username)
 	}
 	tx = applyLogTokenNamesFilter(tx, tokenNames)
+	tx = applyLogGroupsFilter(tx, groups)
 	err := tx.Group("token_name, username, model_name").Find(&results).Error
 	return results, err
 }
@@ -681,8 +703,9 @@ const exportLogMaxRows = 500000
 // @param endTimestamp 结束时间戳
 // @param username 用户名过滤（可选）
 // @param tokenNames API Key 名称过滤列表（可选）
+// @param groups 分组过滤列表（可选）
 // @return 符合条件的日志列表
-func GetLogsForExport(startTimestamp int64, endTimestamp int64, username string, tokenNames []string) ([]*Log, error) {
+func GetLogsForExport(startTimestamp int64, endTimestamp int64, username string, tokenNames []string, groups []string) ([]*Log, error) {
 	var logs []*Log
 	tx := LOG_DB.Where("type = ?", LogTypeConsume)
 	if startTimestamp != 0 {
@@ -695,6 +718,7 @@ func GetLogsForExport(startTimestamp int64, endTimestamp int64, username string,
 		tx = tx.Where("username = ?", username)
 	}
 	tx = applyLogTokenNamesFilter(tx, tokenNames)
+	tx = applyLogGroupsFilter(tx, groups)
 	err := tx.Order("created_at asc").Limit(exportLogMaxRows).Find(&logs).Error
 	return logs, err
 }

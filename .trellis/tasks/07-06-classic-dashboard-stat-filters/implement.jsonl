@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/api-contracts.md", "reason": "管理 API 多值查询参数契约，覆盖 token_names/groups 的重复 key、括号数组、旧单值兼容和归一化规则"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "logs.group 是保留字列，统计和导出查询必须保持 SQLite/MySQL/PostgreSQL 兼容"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "后端 controller/model 分层、JSON 封装、测试和质量要求"}
+{"file": ".trellis/tasks/07-06-classic-dashboard-stat-filters/prd.md", "reason": "本任务的用户可见需求、范围边界和验收标准"}
+{"file": ".trellis/tasks/07-06-classic-dashboard-stat-filters/design.md", "reason": "前端搜索/导出到后端统计查询的数据流和接口设计"}

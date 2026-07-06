@@ -21,8 +21,9 @@ func GetAllQuotaDates(c *gin.Context) {
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
 	username := c.Query("username")
-	tokenName := c.Query("token_name")
-	dates, err := model.GetAllQuotaDates(startTimestamp, endTimestamp, username, tokenName)
+	tokenNames := parseDashboardTokenNames(c)
+	groups := parseDashboardGroups(c)
+	dates, err := model.GetAllQuotaDatesWithFilters(startTimestamp, endTimestamp, username, tokenNames, groups)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -43,7 +44,8 @@ func GetAllQuotaDates(c *gin.Context) {
 func ExportQuotaDataExcel(c *gin.Context) {
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
-	tokenNames := parseExportTokenNames(c)
+	tokenNames := parseDashboardTokenNames(c)
+	groups := parseDashboardGroups(c)
 
 	// 校验必填参数
 	if startTimestamp == 0 || endTimestamp == 0 {
@@ -52,21 +54,21 @@ func ExportQuotaDataExcel(c *gin.Context) {
 	}
 
 	// 查询 Sheet 1 数据：按 API Key 汇总（从 logs 表聚合）
-	summaryData, err := model.GetLogSummaryByKey(startTimestamp, endTimestamp, "", tokenNames)
+	summaryData, err := model.GetLogSummaryByKey(startTimestamp, endTimestamp, "", tokenNames, groups)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	// 查询 Sheet 2 数据：按 API Key + 模型明细（从 logs 表聚合）
-	detailData, err := model.GetLogDetailByKeyModel(startTimestamp, endTimestamp, "", tokenNames)
+	detailData, err := model.GetLogDetailByKeyModel(startTimestamp, endTimestamp, "", tokenNames, groups)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	// 查询 Sheet 3 数据：请求日志明细
-	logs, err := model.GetLogsForExport(startTimestamp, endTimestamp, "", tokenNames)
+	logs, err := model.GetLogsForExport(startTimestamp, endTimestamp, "", tokenNames, groups)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -245,29 +247,39 @@ func ExportQuotaDataExcel(c *gin.Context) {
 	}
 }
 
-// parseExportTokenNames 解析导出接口的令牌名称筛选参数，并兼容旧的 token_name 单值参数。
-func parseExportTokenNames(c *gin.Context) []string {
-	var rawTokenNames []string
-	tokenNames, hasTokenNames := c.GetQueryArray("token_names")
-	bracketTokenNames, hasBracketTokenNames := c.GetQueryArray("token_names[]")
-	rawTokenNames = append(rawTokenNames, tokenNames...)
-	rawTokenNames = append(rawTokenNames, bracketTokenNames...)
-	if !hasTokenNames && !hasBracketTokenNames {
-		rawTokenNames = append(rawTokenNames, c.Query("token_name"))
+// parseDashboardTokenNames 解析数据看板令牌筛选参数，并兼容旧的 token_name 单值参数。
+func parseDashboardTokenNames(c *gin.Context) []string {
+	return parseDashboardQueryValues(c, "token_names", "token_name")
+}
+
+// parseDashboardGroups 解析数据看板分组筛选参数，并兼容旧的 group 单值参数。
+func parseDashboardGroups(c *gin.Context) []string {
+	return parseDashboardQueryValues(c, "groups", "group")
+}
+
+// parseDashboardQueryValues 解析重复 key / 括号数组 / 旧单值查询参数，并做 trim、去空、去重。
+func parseDashboardQueryValues(c *gin.Context, multiName string, legacyName string) []string {
+	values, hasValues := c.GetQueryArray(multiName)
+	bracketValues, hasBracketValues := c.GetQueryArray(multiName + "[]")
+	rawValues := make([]string, 0, len(values)+len(bracketValues)+1)
+	rawValues = append(rawValues, values...)
+	rawValues = append(rawValues, bracketValues...)
+	if !hasValues && !hasBracketValues && legacyName != "" {
+		rawValues = append(rawValues, c.Query(legacyName))
 	}
 
-	seen := make(map[string]struct{}, len(rawTokenNames))
-	normalized := make([]string, 0, len(rawTokenNames))
-	for _, tokenName := range rawTokenNames {
-		tokenName = strings.TrimSpace(tokenName)
-		if tokenName == "" {
+	seen := make(map[string]struct{}, len(rawValues))
+	normalized := make([]string, 0, len(rawValues))
+	for _, value := range rawValues {
+		value = strings.TrimSpace(value)
+		if value == "" {
 			continue
 		}
-		if _, exists := seen[tokenName]; exists {
+		if _, exists := seen[value]; exists {
 			continue
 		}
-		seen[tokenName] = struct{}{}
-		normalized = append(normalized, tokenName)
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
 	}
 	return normalized
 }
@@ -329,7 +341,10 @@ func GetSystemStats(c *gin.Context) {
 func GetQuotaDatesByUser(c *gin.Context) {
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
-	dates, err := model.GetQuotaDataGroupByUser(startTimestamp, endTimestamp)
+	username := c.Query("username")
+	tokenNames := parseDashboardTokenNames(c)
+	groups := parseDashboardGroups(c)
+	dates, err := model.GetQuotaDataGroupByUserWithFilters(startTimestamp, endTimestamp, username, tokenNames, groups)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -345,7 +360,7 @@ func GetUserQuotaDates(c *gin.Context) {
 	userId := c.GetInt("id")
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
-	tokenName := c.Query("token_name")
+	tokenNames := parseDashboardTokenNames(c)
 	// 判断时间跨度是否超过 1 个月
 	if endTimestamp-startTimestamp > 2592000 {
 		c.JSON(http.StatusOK, gin.H{
@@ -354,7 +369,7 @@ func GetUserQuotaDates(c *gin.Context) {
 		})
 		return
 	}
-	dates, err := model.GetQuotaDataByUserId(userId, startTimestamp, endTimestamp, tokenName)
+	dates, err := model.GetQuotaDataByUserIdWithFilters(userId, startTimestamp, endTimestamp, tokenNames)
 	if err != nil {
 		common.ApiError(c, err)
 		return

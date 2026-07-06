@@ -31,6 +31,7 @@ const SearchModal = ({
   inputs,
   dataExportDefaultTime,
   timeOptions,
+  groupOptions,
   tokenOptions,
   handleInputChange,
   handleTokenSelect,
@@ -46,7 +47,13 @@ const SearchModal = ({
     <Component {...FORM_FIELD_PROPS} {...props} />
   );
 
-  const { start_timestamp, end_timestamp, username, token_name } = inputs;
+  const {
+    start_timestamp,
+    end_timestamp,
+    username,
+    token_names = [],
+    groups = [],
+  } = inputs;
 
   const handleQuickTimeRange = (rangeType) => {
     const range = getDashboardQuickTimeRange(rangeType);
@@ -55,13 +62,6 @@ const SearchModal = ({
     handleInputChange(range.start_timestamp, 'start_timestamp');
     handleInputChange(range.end_timestamp, 'end_timestamp');
   };
-
-  // 管理员模式下，根据 token_name + username 匹配下拉选中值
-  const selectedTokenValue =
-    isAdminUser && token_name
-      ? tokenOptions.find((opt) => opt.value === `${token_name}\0${username}`)
-          ?.value || undefined
-      : token_name || undefined;
 
   return (
     <Modal
@@ -137,16 +137,37 @@ const SearchModal = ({
             onChange: (value) => handleInputChange(value, 'username'),
           })}
 
+        {isAdminUser &&
+          createFormField(Form.Select, {
+            field: 'groups',
+            label: t('分组'),
+            value: groups,
+            placeholder: t('全部'),
+            name: 'groups',
+            optionList: groupOptions,
+            multiple: true,
+            filter: true,
+            showClear: true,
+            autoClearSearchValue: false,
+            searchPosition: 'dropdown',
+            onChange: (value) =>
+              handleInputChange(Array.isArray(value) ? value : [], 'groups'),
+          })}
+
         {createFormField(Form.Select, {
-          field: 'token_name',
+          field: 'token_names',
           label: t('令牌名称'),
-          value: selectedTokenValue,
-          placeholder: t('可选值'),
-          name: 'token_name',
+          value: token_names,
+          placeholder: t('全部'),
+          name: 'token_names',
           optionList: tokenOptions,
+          multiple: true,
           filter: true,
           showClear: true,
-          onChange: (value) => handleTokenSelect(value || ''),
+          autoClearSearchValue: false,
+          searchPosition: 'dropdown',
+          onChange: (value) =>
+            handleTokenSelect(Array.isArray(value) ? value : []),
         })}
       </Form>
     </Modal>

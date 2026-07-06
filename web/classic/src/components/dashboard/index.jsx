@@ -174,6 +174,7 @@ const Dashboard = () => {
         inputs={dashboardData.inputs}
         dataExportDefaultTime={dashboardData.dataExportDefaultTime}
         timeOptions={dashboardData.timeOptions}
+        groupOptions={dashboardData.groupOptions}
         tokenOptions={dashboardData.tokenOptions}
         handleInputChange={dashboardData.handleInputChange}
         handleTokenSelect={dashboardData.handleTokenSelect}
@@ -187,7 +188,8 @@ const Dashboard = () => {
           onCancel={dashboardData.closeExportModal}
           loading={dashboardData.exportLoading}
           isMobile={dashboardData.isMobile}
-          tokenOptions={dashboardData.tokenOptions}
+          groupOptions={dashboardData.groupOptions}
+          tokenOptions={dashboardData.allTokenOptions}
           t={dashboardData.t}
         />
       )}
