@@ -22,5 +22,22 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-07-06T03:00:56.218544+00:00",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "root": "be0c6d42"
+    },
+    "push_mode": "push",
+    "completed_steps": [
+      "后端参数归一化",
+      "后端 Model 查询",
+      "后端 Controller 接入",
+      "旧版 UI 数据看板",
+      "测试与验证"
+    ],
+    "next_step": "Phase 3.5 wrap-up / finish-work（提交推送后按需执行）",
+    "notes": "旧版 UI 数据看板搜索/导出已支持分组多选、令牌多选与联动；后端多值参数兼容旧单值；check-all 验证通过。"
+  }
 }
