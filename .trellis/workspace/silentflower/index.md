@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 7
-- **Last Active**: 2026-07-02
+- **Total Sessions**: 8
+- **Last Active**: 2026-07-06
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~246 | Active |
+| `journal-1.md` | ~280 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 8 | 2026-07-06 | 旧版数据看板统计筛选升级 | `be0c6d42`, `3f9f8f44` | `build-bak` |
 | 7 | 2026-07-02 | 修复 Claude Code WebSearch 官渠透传 | `ee7a0a55`, `8ea1ae3e` | `build-bak` |
 | 6 | 2026-07-02 | Claude Code WebSearch 渠道支持 | `e280416c`, `17ba4cc3` | `build-bak` |
 | 5 | 2026-06-18 | 收尾视觉辅助与上游模型计费任务 | `8106a70c`, `7cf45a50` | `build-bak` |

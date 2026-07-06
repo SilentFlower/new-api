@@ -244,3 +244,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 8: 旧版数据看板统计筛选升级
+
+**Date**: 2026-07-06
+**Task**: 旧版数据看板统计筛选升级
+**Branch**: `build-bak`
+
+### Summary
+
+完成旧版数据看板搜索与导出筛选升级：管理员分组多选、令牌多选与分组联动，后端多值参数兼容旧单值，导出三个 Sheet 同条件过滤；验证通过并已推送。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `be0c6d42` | (see git log) |
+| `3f9f8f44` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
