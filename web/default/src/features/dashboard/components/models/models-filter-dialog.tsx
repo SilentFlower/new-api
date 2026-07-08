@@ -22,6 +22,7 @@ import { useTranslation } from 'react-i18next'
 
 import { DateTimePicker } from '@/components/datetime-picker'
 import { Dialog } from '@/components/dialog'
+import { MultiSelect } from '@/components/multi-select'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -41,14 +42,16 @@ import {
 import {
   buildDefaultDashboardFilters,
   cleanFilters,
+  filterDashboardTokenOptionsByGroups,
+  filterDashboardTokenValuesByGroups,
 } from '@/features/dashboard/lib'
+import { useDashboardFilterOptions } from '@/features/dashboard/hooks/use-dashboard-filter-options'
 import type {
   DashboardChartPreferences,
   DashboardFilters,
 } from '@/features/dashboard/types'
 import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
 import { cn } from '@/lib/utils'
-import { useAuthStore } from '@/stores/auth-store'
 
 interface ModelsFilterProps {
   preferences: DashboardChartPreferences
@@ -59,6 +62,7 @@ interface ModelsFilterProps {
   onReset: () => void
   titleKey?: string
   descriptionKey?: string
+  enableTokenFilters?: boolean
 }
 
 // Quick-range presets imply a sensible granularity (matching the app's
@@ -98,11 +102,11 @@ const SectionDivider = ({ label }: { label: string }) => (
 
 export function ModelsFilter(props: ModelsFilterProps) {
   const { t } = useTranslation()
-  // 使用已缓存的用户数据，避免重复调用 API
-  const user = useAuthStore((state) => state.auth.user)
-  const isAdmin = user?.role && user.role >= 10
 
   const [open, setOpen] = useState(false)
+  const enableTokenFilters = props.enableTokenFilters ?? true
+  const { isAdmin, groupOptions, tokenOptions, isLoading } =
+    useDashboardFilterOptions(open && enableTokenFilters)
   const [filters, setFilters] = useState<DashboardFilters>(
     () =>
       props.currentFilters ?? buildDefaultDashboardFilters(props.preferences)
@@ -124,10 +128,13 @@ export function ModelsFilter(props: ModelsFilterProps) {
   }
 
   const handleApply = () => {
+    const nextFilters = enableTokenFilters
+      ? filters
+      : { ...filters, groups: undefined, token_names: undefined }
     props.onFilterChange(
       cleanFilters(
-        filters as unknown as Record<string, unknown>
-      ) as typeof filters
+        nextFilters as unknown as Record<string, unknown>
+      ) as typeof nextFilters
     )
     setOpen(false)
   }
@@ -147,11 +154,23 @@ export function ModelsFilter(props: ModelsFilterProps) {
 
   const handleChange = (
     field: keyof DashboardFilters,
-    value: Date | string | undefined
+    value: Date | string | string[] | undefined
   ) => {
     setFilters((prev) => ({ ...prev, [field]: value }))
     if (field === 'start_timestamp' || field === 'end_timestamp')
       setSelectedRange(null)
+  }
+
+  const handleGroupsChange = (groups: string[]) => {
+    setFilters((prev) => ({
+      ...prev,
+      groups,
+      token_names: filterDashboardTokenValuesByGroups(
+        prev.token_names,
+        groups,
+        tokenOptions
+      ),
+    }))
   }
 
   const handleQuickRange = (days: number) => {
@@ -297,7 +316,42 @@ export function ModelsFilter(props: ModelsFilterProps) {
                   onChange={(e) => handleChange('username', e.target.value)}
                 />
               </div>
+
+              {enableTokenFilters && (
+                <div className='grid gap-2'>
+                  <Label htmlFor='dashboard-groups'>{t('Groups')}</Label>
+                  <MultiSelect
+                    id='dashboard-groups'
+                    options={groupOptions}
+                    selected={filters.groups ?? []}
+                    onChange={handleGroupsChange}
+                    placeholder={isLoading ? t('Loading...') : t('All groups')}
+                    emptyText={t('No matching groups')}
+                    disabled={isLoading}
+                    maxVisibleChips={3}
+                  />
+                </div>
+              )}
             </>
+          )}
+
+          {enableTokenFilters && (
+            <div className='grid gap-2'>
+              <Label htmlFor='dashboard-token-names'>{t('API Keys')}</Label>
+              <MultiSelect
+                id='dashboard-token-names'
+                options={filterDashboardTokenOptionsByGroups(
+                  tokenOptions,
+                  filters.groups
+                )}
+                selected={filters.token_names ?? []}
+                onChange={(values) => handleChange('token_names', values)}
+                placeholder={isLoading ? t('Loading...') : t('All API keys')}
+                emptyText={t('No matching API keys')}
+                disabled={isLoading}
+                maxVisibleChips={3}
+              />
+            </div>
           )}
         </div>
       </ScrollArea>

@@ -29,9 +29,13 @@ import type {
   ConsumptionDistributionChartType,
   DashboardChartPreferences,
   DashboardFilters,
+  DashboardQueryParams,
+  DashboardTokenOption,
   ModelAnalyticsChartTab,
 } from '@/features/dashboard/types'
 import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
+
+const DASHBOARD_TOKEN_VALUE_SEPARATOR = '\u0000'
 
 function isTimeGranularity(value: unknown): value is TimeGranularity {
   return value === 'hour' || value === 'day' || value === 'week'
@@ -68,6 +72,19 @@ export function cleanFilters<T extends Record<string, unknown>>(
     if (typeof value === 'string') {
       const trimmed = value.trim()
       if (trimmed) cleaned[key as keyof T] = trimmed as T[keyof T]
+      continue
+    }
+    if (Array.isArray(value)) {
+      const normalized = Array.from(
+        new Set(
+          value
+            .map((item) => String(item).trim())
+            .filter((item) => item.length > 0)
+        )
+      )
+      if (normalized.length > 0) {
+        cleaned[key as keyof T] = normalized as T[keyof T]
+      }
       continue
     }
     cleaned[key as keyof T] = value as T[keyof T]
@@ -154,16 +171,107 @@ export function buildDefaultDashboardFilters(
 
 export function buildQueryParams(
   timeRange: { start_timestamp: number; end_timestamp: number },
-  filters?: { time_granularity?: TimeGranularity; username?: string }
-): {
-  start_timestamp: number
-  end_timestamp: number
-  default_time: string
-  username?: string
-} {
+  filters?: {
+    time_granularity?: TimeGranularity
+    username?: string
+    groups?: string[]
+    token_names?: string[]
+  }
+): DashboardQueryParams {
   return {
     ...timeRange,
     default_time: getSavedGranularity(filters?.time_granularity),
     ...(filters?.username && { username: filters.username }),
+    ...(filters?.groups?.length ? { groups: filters.groups } : {}),
+    ...(filters?.token_names?.length
+      ? { token_names: filters.token_names }
+      : {}),
   }
+}
+
+export function normalizeSelectValues(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).filter(Boolean)
+  }
+  if (value === undefined || value === null || value === '') {
+    return []
+  }
+  return [String(value)]
+}
+
+export function buildDashboardTokenOptionValue(
+  tokenName: string,
+  username = '',
+  group = ''
+): string {
+  return [tokenName || '', username || '', group || ''].join(
+    DASHBOARD_TOKEN_VALUE_SEPARATOR
+  )
+}
+
+export function extractDashboardTokenName(value: string): string {
+  return String(value || '').split(DASHBOARD_TOKEN_VALUE_SEPARATOR)[0].trim()
+}
+
+function getDashboardTokenOptionGroup(option: DashboardTokenOption): string {
+  if (option.group != null) return String(option.group)
+  return (
+    String(option.value || '').split(DASHBOARD_TOKEN_VALUE_SEPARATOR)[2] || ''
+  )
+}
+
+export function filterDashboardTokenOptionsByGroups(
+  options: DashboardTokenOption[],
+  groups: string[] | undefined
+): DashboardTokenOption[] {
+  const selectedGroups = normalizeSelectValues(groups)
+  if (selectedGroups.length === 0) return options
+  const groupSet = new Set(selectedGroups)
+  return options.filter((option) =>
+    groupSet.has(getDashboardTokenOptionGroup(option))
+  )
+}
+
+export function filterDashboardTokenValuesByGroups(
+  values: string[] | undefined,
+  groups: string[] | undefined,
+  options: DashboardTokenOption[]
+): string[] {
+  const selectedValues = normalizeSelectValues(values)
+  const selectedGroups = normalizeSelectValues(groups)
+  if (selectedGroups.length === 0) return selectedValues
+  const allowedValues = new Set(
+    filterDashboardTokenOptionsByGroups(options, selectedGroups).map(
+      (option) => option.value
+    )
+  )
+  return selectedValues.filter((value) => allowedValues.has(value))
+}
+
+export function appendDashboardFilterParams(
+  params: URLSearchParams,
+  name: 'groups' | 'token_names',
+  values: string[] | undefined
+): void {
+  const seen = new Set<string>()
+  for (const value of normalizeSelectValues(values)) {
+    const normalized =
+      name === 'token_names' ? extractDashboardTokenName(value) : value.trim()
+    if (!normalized || seen.has(normalized)) continue
+    seen.add(normalized)
+    params.append(name, normalized)
+  }
+}
+
+export function buildDashboardSearchParams(
+  params: DashboardQueryParams
+): URLSearchParams {
+  const searchParams = new URLSearchParams()
+  searchParams.set('start_timestamp', String(params.start_timestamp))
+  searchParams.set('end_timestamp', String(params.end_timestamp))
+  if (params.default_time) searchParams.set('default_time', params.default_time)
+  if (params.username?.trim()) searchParams.set('username', params.username)
+  appendDashboardFilterParams(searchParams, 'groups', params.groups)
+  appendDashboardFilterParams(searchParams, 'token_names', params.token_names)
+  return searchParams
 }

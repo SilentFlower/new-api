@@ -59,6 +59,19 @@ export interface ApiResponse<T = unknown> {
   data?: T
 }
 
+export interface ApiKeyMigrationResult {
+  token_id: number
+  token_name?: string
+  new_username?: string
+  new_user_id?: number
+  status: 'success' | 'failed'
+  error?: string
+}
+
+export interface ApiKeyMigrationResponse {
+  results: ApiKeyMigrationResult[]
+}
+
 export interface GetApiKeysParams {
   p?: number
   size?: number

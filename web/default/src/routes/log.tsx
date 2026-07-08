@@ -16,31 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-export {
-  cleanFilters,
-  buildQueryParams,
-  getSavedGranularity,
-  saveGranularity,
-  getDefaultDays,
-  getSavedChartPreferences,
-  saveChartPreferences,
-  buildDefaultDashboardFilters,
-  filterDashboardTokenOptionsByGroups,
-  filterDashboardTokenValuesByGroups,
-} from './filters'
-export {
-  getLatencyColorClass,
-  testUrlLatency,
-  openExternalSpeedTest,
-  getDefaultPingStatus,
-} from './api-info'
-export { processChartData, processUserChartData } from './charts'
-export {
-  buildDashboardFlowData,
-  buildFlowSankeySpec,
-  flowNodeFilterFromSankeyDatum,
-  flowSankeyDatumValue,
-  getFlowStages,
-} from './flow'
-export { safeDivide, calculateDashboardStats } from './stats'
-export { getPreviewText } from './text'
+import { createFileRoute } from '@tanstack/react-router'
+
+import { PublicTokenLogs } from '@/features/token-logs'
+
+export const Route = createFileRoute('/log')({
+  component: PublicTokenLogs,
+})

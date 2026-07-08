@@ -189,6 +189,29 @@ export interface DashboardFilters {
   end_timestamp?: Date
   time_granularity?: TimeGranularity
   username?: string
+  groups?: string[]
+  token_names?: string[]
+}
+
+export interface DashboardQueryParams {
+  start_timestamp: number
+  end_timestamp: number
+  default_time?: string
+  username?: string
+  groups?: string[]
+  token_names?: string[]
+}
+
+export interface DashboardTokenNameItem {
+  name: string
+  username?: string
+  group?: string
+}
+
+export interface DashboardTokenOption {
+  value: string
+  label: string
+  group?: string
 }
 
 export type ConsumptionDistributionChartType = 'bar' | 'area'

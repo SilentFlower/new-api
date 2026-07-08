@@ -90,3 +90,123 @@ if len(tokenNames) > 0 {
 }
 ```
 
+## 场景：渠道启停与编辑保存状态隔离
+
+### 1. Scope / Trigger
+
+- Trigger: 渠道状态字段 `status` 同时出现在创建表单、编辑表单、列表启停操作中，前端 payload 一旦混用会触发 `错误：无效的参数`，或导致禁用渠道在保存后被误改为启用。
+- 适用范围: `/api/channel` 管理接口、`web/default` 渠道表单、`web/classic` 渠道表单与列表操作。
+
+### 2. Signatures
+
+- 创建渠道可以携带初始状态：
+
+```typescript
+POST /api/channel
+type AddChannelRequest = {
+  channel: Partial<Channel> & { status?: number }
+}
+```
+
+- 编辑渠道必须使用普通更新接口，且 payload 中禁止出现 `status`：
+
+```typescript
+PUT /api/channel/
+type UpdateChannelPayload = Partial<Channel> & { id: number }
+```
+
+- 单个启停必须使用专用状态接口：
+
+```go
+type ChannelStatusRequest struct {
+	Status int `json:"status"`
+}
+
+func UpdateChannelStatus(c *gin.Context)
+```
+
+```text
+POST /api/channel/:id/status
+Body: {"status": 1 | 2}
+```
+
+- 批量启停必须使用批量状态接口：
+
+```go
+type ChannelStatusBatchRequest struct {
+	Ids    []int `json:"ids"`
+	Status int   `json:"status"`
+}
+
+func BatchUpdateChannelStatus(c *gin.Context)
+```
+
+```text
+POST /api/channel/status/batch
+Body: {"ids": [1, 2], "status": 1 | 2}
+```
+
+### 3. Contracts
+
+- 创建契约：
+  - `transformFormDataToCreatePayload()` 可以把 `formData.status` 写入 `channel.status`，作为新渠道初始状态。
+  - 后端创建接口按现有渠道创建逻辑处理初始状态。
+- 编辑契约：
+  - `transformFormDataToUpdatePayload()` 必须省略 `status`，即使表单状态字段存在也不能透传。
+  - 后端 `UpdateChannel` 会先读取原始 JSON body；只要 body 顶层存在 `status` key，就返回 `MsgInvalidParams`。
+  - 编辑保存只负责名称、模型、分组、密钥、配置等可编辑字段，不负责启停状态。
+- 启停契约：
+  - 单个启停只调用 `POST /api/channel/:id/status`。
+  - 批量启停只调用 `POST /api/channel/status/batch`。
+  - `status` 只允许 `common.ChannelStatusEnabled` (`1`) 或 `common.ChannelStatusManuallyDisabled` (`2`)。
+  - 状态变更成功后需要刷新渠道缓存并重置代理客户端缓存。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+|------|------|
+| `PUT /api/channel/` body 含有顶层 `status` | 返回 `{success:false,message:"无效的参数"}` 对应的 i18n 错误 |
+| `POST /api/channel/:id/status` 的 `id` 不是整数 | 返回 `MsgInvalidParams` |
+| 单个启停 body 缺少 `status` 或 JSON 无法绑定 | 返回 `MsgInvalidParams` |
+| 单个启停 `status` 不是 `1` 或 `2` | 返回 `MsgInvalidParams` |
+| 批量启停 `ids` 为空 | 返回 `MsgInvalidParams` |
+| 批量启停 `status` 不是 `1` 或 `2` | 返回 `MsgInvalidParams` |
+| 编辑保存禁用渠道 | 渠道保持禁用，不得因为表单默认值变成启用 |
+
+### 5. Good/Base/Bad Cases
+
+- Good: 用户在列表点击禁用，前端调用 `POST /api/channel/10/status` 且 body 为 `{"status":2}`，接口返回成功后列表刷新。
+- Base: 用户编辑一个已禁用渠道的模型或分组，前端调用 `PUT /api/channel/`，body 不含 `status`，保存后仍为禁用。
+- Bad: 用户编辑已禁用渠道时，前端把表单默认 `status:1` 一起提交到 `PUT /api/channel/`，会被后端拒绝或造成状态回退风险。
+
+### 6. Tests Required
+
+- Controller 测试：
+  - `UpdateChannel` 收到 `{"id":1,"status":2}` 时返回 `success:false`。
+  - `UpdateChannelStatus` 只接受 `1` 和 `2`，拒绝 `0`、`3`、缺失字段和非法 `id`。
+  - `BatchUpdateChannelStatus` 拒绝空 `ids`，并只接受 `1` 和 `2`。
+- 前端转换测试或审查点：
+  - `transformFormDataToCreatePayload()` 创建 payload 可包含 `channel.status`。
+  - `transformFormDataToUpdatePayload()` 更新 payload 不包含 `status`。
+  - 列表启停动作调用 `updateChannelStatus()` 或 `batchUpdateChannelStatus()`，不调用 `updateChannel()`。
+- 回归场景：
+  - 禁用渠道后打开编辑弹窗并保存非状态字段，渠道状态仍为禁用。
+  - 点击禁用按钮不会显示 `错误：无效的参数`。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+await updateChannel(channel.id, {
+  ...formPayload,
+  status: CHANNEL_STATUS.MANUALLY_DISABLED,
+})
+```
+
+#### Correct
+
+```typescript
+await updateChannel(channel.id, formPayload)
+await updateChannelStatus(channel.id, CHANNEL_STATUS.MANUALLY_DISABLED)
+```

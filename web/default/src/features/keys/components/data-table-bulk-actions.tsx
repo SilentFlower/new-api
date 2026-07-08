@@ -17,6 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { type Table } from '@tanstack/react-table'
+import { UserArrowLeftRightIcon } from '@hugeicons/core-free-icons'
+import { HugeiconsIcon } from '@hugeicons/react'
 import { Copy, Trash2, Loader2 } from 'lucide-react'
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -30,9 +32,12 @@ import {
   TooltipTrigger,
 } from '@/components/ui/tooltip'
 import { copyToClipboard } from '@/lib/copy-to-clipboard'
+import { ROLE } from '@/lib/roles'
+import { useAuthStore } from '@/stores/auth-store'
 
 import { type ApiKey } from '../types'
 import { ApiKeysMultiDeleteDialog } from './api-keys-multi-delete-dialog'
+import { ApiKeysMigrateToAccountsDialog } from './api-keys-migrate-to-accounts-dialog'
 import { useApiKeys } from './api-keys-provider'
 
 type DataTableBulkActionsProps<TData> = {
@@ -44,9 +49,12 @@ export function DataTableBulkActions<TData>({
 }: DataTableBulkActionsProps<TData>) {
   const { t } = useTranslation()
   const { resolveRealKeysBatch } = useApiKeys()
+  const userRole = useAuthStore((state) => state.auth.user?.role)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showMigrateConfirm, setShowMigrateConfirm] = useState(false)
   const [isCopying, setIsCopying] = useState(false)
   const selectedRows = table.getFilteredSelectedRowModel().rows
+  const isRoot = userRole === ROLE.SUPER_ADMIN
 
   const handleBatchCopy = useCallback(async () => {
     if (selectedRows.length === 0) return
@@ -107,6 +115,30 @@ export function DataTableBulkActions<TData>({
           </TooltipContent>
         </Tooltip>
 
+        {isRoot && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant='outline'
+                  size='icon'
+                  className='size-8'
+                  onClick={() => setShowMigrateConfirm(true)}
+                  aria-label={t('Migrate selected API keys to accounts')}
+                />
+              }
+            >
+              <HugeiconsIcon
+                icon={UserArrowLeftRightIcon}
+                strokeWidth={2}
+              />
+            </TooltipTrigger>
+            <TooltipContent>
+              <p>{t('Migrate selected API keys to accounts')}</p>
+            </TooltipContent>
+          </Tooltip>
+        )}
+
         <Tooltip>
           <TooltipTrigger
             render={
@@ -131,6 +163,11 @@ export function DataTableBulkActions<TData>({
       <ApiKeysMultiDeleteDialog
         open={showDeleteConfirm}
         onOpenChange={setShowDeleteConfirm}
+        table={table}
+      />
+      <ApiKeysMigrateToAccountsDialog
+        open={showMigrateConfirm}
+        onOpenChange={setShowMigrateConfirm}
         table={table}
       />
     </>

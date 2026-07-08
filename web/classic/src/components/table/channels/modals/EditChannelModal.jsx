@@ -2231,6 +2231,8 @@ const EditChannelModal = (props) => {
     delete localInputs.upstream_model_update_last_check_time;
     delete localInputs.upstream_model_update_last_detected_models;
     delete localInputs.upstream_model_update_ignored_models;
+    // 渠道启停状态只能通过专用状态接口修改，编辑保存不应隐式启用禁用渠道。
+    delete localInputs.status;
 
     let res;
     localInputs.auto_ban = localInputs.auto_ban ? 1 : 0;

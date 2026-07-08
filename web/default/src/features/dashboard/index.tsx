@@ -35,6 +35,7 @@ import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
 import { ModelsChartPreferences } from './components/models/models-chart-preferences'
+import { DashboardExportDialog } from './components/models/dashboard-export-dialog'
 import { ModelsFilter } from './components/models/models-filter-dialog'
 import { OverviewDashboard } from './components/overview/overview-dashboard'
 import { DEFAULT_TIME_GRANULARITY } from './constants'
@@ -238,6 +239,12 @@ export function Dashboard() {
   const modelActions =
     activeSection === 'models' ? (
       <>
+        {isAdmin && (
+          <DashboardExportDialog
+            preferences={chartPreferences}
+            currentFilters={modelFilters}
+          />
+        )}
         <ModelsChartPreferences
           preferences={chartPreferences}
           onPreferencesChange={handleChartPreferencesChange}
@@ -249,6 +256,17 @@ export function Dashboard() {
           onReset={handleResetFilters}
         />
       </>
+    ) : null
+  const userActions =
+    activeSection === 'users' && isAdmin ? (
+      <ModelsFilter
+        preferences={chartPreferences}
+        currentFilters={modelFilters}
+        onFilterChange={handleFilterChange}
+        onReset={handleResetFilters}
+        titleKey='User Analytics Filters'
+        descriptionKey='Filter the user analytics view by time range, groups, and API keys.'
+      />
     ) : null
   const flowActions =
     activeSection === 'flow' ? (
@@ -284,10 +302,12 @@ export function Dashboard() {
           onReset={handleResetFilters}
           titleKey='Flow Filters'
           descriptionKey='Filter the traffic flow view by time range and user.'
+          enableTokenFilters={false}
         />
       </>
     ) : null
   const sectionActions = modelActions ?? flowActions
+  const sectionActionsResolved = sectionActions ?? userActions
 
   return (
     <SectionPageLayout>
@@ -309,9 +329,9 @@ export function Dashboard() {
               ) : (
                 <div />
               )}
-              {sectionActions != null && (
+              {sectionActionsResolved != null && (
                 <div className='flex shrink-0 flex-wrap items-center gap-1.5 sm:gap-2'>
-                  {sectionActions}
+                  {sectionActionsResolved}
                 </div>
               )}
             </div>
@@ -367,6 +387,8 @@ export function Dashboard() {
               <Suspense fallback={<ModelChartsFallback />}>
                 <LazyUserCharts
                   filters={userChartsFilters}
+                  dashboardFilters={modelFilters}
+                  onDashboardFiltersChange={setModelFilters}
                   onFiltersChange={setUserChartsFilters}
                 />
               </Suspense>

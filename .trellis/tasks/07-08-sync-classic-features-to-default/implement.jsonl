@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/api-contracts.md","reason":"Dashboard 多值查询参数需要遵循重复 key、兼容旧单值和归一化契约。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"实现会触及前端构建、后端测试、受保护项目信息和 JSON/数据库规则，需要遵循质量标准。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"任务跨 default 前端、管理 API、Controller、Model 和日志/导出数据流，需要先映射跨层契约。"}
+{"file":".trellis/tasks/archive/2026-05/05-09-token-migrate-to-accounts/prd.md","reason":"令牌迁移到独立账号的业务规则、权限、响应结构和安全边界来源。"}
+{"file":".trellis/tasks/archive/2026-06/06-18-report-export-token-quick-date/prd.md","reason":"报表导出令牌筛选和快捷时间的原始验收条件来源。"}
+{"file":".trellis/tasks/archive/2026-07/07-06-classic-dashboard-stat-filters/prd.md","reason":"classic 数据看板分组/令牌筛选和后端多值过滤契约来源。"}
+{"file":".trellis/tasks/archive/2026-07/07-01-claude-code-websearch-channel-support/brief.md","reason":"WebSearch 渠道配置在 default 中应仅复核 parity，不重复设计核心能力。"}
+{"file":".trellis/tasks/archive/2026-06/06-17-upstream-model-billing-log/prd.md","reason":"映射后按上游模型计费的渠道开关需要在 default 中复核读写。"}

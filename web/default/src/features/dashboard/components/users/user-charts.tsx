@@ -32,14 +32,16 @@ import {
 } from '@/features/dashboard/constants'
 import {
   getDefaultDays,
+  buildQueryParams,
   saveGranularity,
   processUserChartData,
 } from '@/features/dashboard/lib'
 import type {
+  DashboardFilters,
   ProcessedUserChartData,
   UserChartsFilters,
 } from '@/features/dashboard/types'
-import { getRollingDateRange, type TimeGranularity } from '@/lib/time'
+import { computeTimeRange, getRollingDateRange, type TimeGranularity } from '@/lib/time'
 import { VCHART_OPTION } from '@/lib/vchart'
 
 let themeManagerPromise: Promise<
@@ -67,7 +69,15 @@ const TOP_USER_LIMIT_OPTIONS = [5, 10, 20, 50]
 
 interface UserChartsProps {
   filters: UserChartsFilters
+  dashboardFilters: DashboardFilters
   onFiltersChange: (filters: UserChartsFilters) => void
+  onDashboardFiltersChange: (filters: DashboardFilters) => void
+}
+
+function granularityForRangeDays(days: number): TimeGranularity {
+  if (days <= 1) return 'hour'
+  if (days >= 29) return 'week'
+  return 'day'
 }
 
 export function UserCharts(props: UserChartsProps) {
@@ -80,36 +90,64 @@ export function UserCharts(props: UserChartsProps) {
 
   // The selection is owned by the dashboard parent so it persists across
   // sub-section switches; the rolling window is derived from the chosen range.
-  const timeGranularity = props.filters.timeGranularity
+  const timeGranularity =
+    props.dashboardFilters.time_granularity ?? props.filters.timeGranularity
   const selectedRange = props.filters.selectedRange
   const topUserLimit = props.filters.topUserLimit
   const onFiltersChange = props.onFiltersChange
+  const dashboardFilters = props.dashboardFilters
+  const onDashboardFiltersChange = props.onDashboardFiltersChange
 
   const timeRange = useMemo(() => {
-    const { start, end } = getRollingDateRange(selectedRange)
-    return {
-      start_timestamp: Math.floor(start.getTime() / 1000),
-      end_timestamp: Math.floor(end.getTime() / 1000),
-    }
-  }, [selectedRange])
+    return computeTimeRange(
+      getDefaultDays(dashboardFilters.time_granularity ?? timeGranularity),
+      dashboardFilters.start_timestamp,
+      dashboardFilters.end_timestamp
+    )
+  }, [
+    dashboardFilters.start_timestamp,
+    dashboardFilters.end_timestamp,
+    dashboardFilters.time_granularity,
+    timeGranularity,
+  ])
 
   const handleRangeChange = useCallback(
     (days: number) => {
-      onFiltersChange({ ...props.filters, selectedRange: days })
+      const { start, end } = getRollingDateRange(days)
+      const granularity = granularityForRangeDays(days)
+      onFiltersChange({
+        ...props.filters,
+        selectedRange: days,
+        timeGranularity: granularity,
+      })
+      onDashboardFiltersChange({
+        ...dashboardFilters,
+        start_timestamp: start,
+        end_timestamp: end,
+        time_granularity: granularity,
+      })
     },
-    [onFiltersChange, props.filters]
+    [dashboardFilters, onDashboardFiltersChange, onFiltersChange, props.filters]
   )
 
   const handleGranularityChange = useCallback(
     (g: TimeGranularity) => {
+      const selectedRange = getDefaultDays(g)
+      const { start, end } = getRollingDateRange(selectedRange)
       saveGranularity(g)
       onFiltersChange({
         ...props.filters,
         timeGranularity: g,
-        selectedRange: getDefaultDays(g),
+        selectedRange,
+      })
+      onDashboardFiltersChange({
+        ...dashboardFilters,
+        start_timestamp: start,
+        end_timestamp: end,
+        time_granularity: g,
       })
     },
-    [onFiltersChange, props.filters]
+    [dashboardFilters, onDashboardFiltersChange, onFiltersChange, props.filters]
   )
 
   const handleTopUserLimitChange = useCallback(
@@ -136,8 +174,16 @@ export function UserCharts(props: UserChartsProps) {
   }, [resolvedTheme])
 
   const { data: userData, isLoading } = useQuery({
-    queryKey: ['dashboard', 'user-quota', timeRange],
-    queryFn: () => getUserQuotaDataByUsers(timeRange),
+    queryKey: [
+      'dashboard',
+      'user-quota',
+      timeRange,
+      dashboardFilters.username,
+      dashboardFilters.groups,
+      dashboardFilters.token_names,
+    ],
+    queryFn: () =>
+      getUserQuotaDataByUsers(buildQueryParams(timeRange, dashboardFilters)),
     select: (res) => (res.success ? res.data : []),
     staleTime: 60_000,
   })

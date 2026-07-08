@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/api-contracts.md","reason":"检查 Dashboard 多值参数是否按项目契约发送和解析。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"如实现暴露后端查询问题，检查必须确认 SQLite/MySQL/PostgreSQL 兼容。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"提交前检查构建、测试、受保护信息和代码质量标准。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查 API Keys 迁移、Dashboard 筛选导出、公共 LogViewer 的跨层数据流是否闭环。"}
+{"file":".trellis/tasks/archive/2026-05/05-09-token-migrate-to-accounts/prd.md","reason":"检查新 UI 迁移入口是否满足原 token migrate 验收标准。"}
+{"file":".trellis/tasks/archive/2026-07/07-06-classic-dashboard-stat-filters/prd.md","reason":"检查新 UI Dashboard 是否达到 classic 分组/令牌筛选能力。"}

@@ -25,6 +25,7 @@ import type {
   GetApiKeysResponse,
   SearchApiKeysParams,
   ApiKeyFormData,
+  ApiKeyMigrationResponse,
 } from './types'
 
 // ============================================================================
@@ -114,5 +115,13 @@ export async function fetchTokenKeysBatch(ids: number[]): Promise<{
   data?: { keys: Record<number, string> }
 }> {
   const res = await api.post('/api/token/batch/keys', { ids })
+  return res.data
+}
+
+// 将选中的 API Key 迁移到独立用户账号。
+export async function migrateApiKeysToAccounts(
+  tokenIds: number[]
+): Promise<ApiResponse<ApiKeyMigrationResponse>> {
+  const res = await api.post('/api/token/migrate', { token_ids: tokenIds })
   return res.data
 }

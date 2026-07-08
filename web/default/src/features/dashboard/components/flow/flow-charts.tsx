@@ -76,6 +76,7 @@ import {
 } from '@/features/dashboard/lib/flow-selection'
 import type {
   DashboardFilters,
+  DashboardQueryParams,
   FlowLinkSelection,
   FlowMetric,
   FlowNodeFilter,
@@ -114,6 +115,19 @@ const FLOW_METRIC_LABEL_KEYS: Record<FlowMetric, string> = {
 const FLOW_TOP_LIMIT_OPTIONS = [10, 20, 50, 100] as const
 
 const DEFAULT_FLOW_TOP_NODE_LIMIT = 50
+
+function buildFlowQueryParams(
+  timeRange: { start_timestamp: number; end_timestamp: number },
+  filters?: DashboardFilters
+): DashboardQueryParams {
+  const params = buildQueryParams(timeRange, filters)
+  return {
+    start_timestamp: params.start_timestamp,
+    end_timestamp: params.end_timestamp,
+    default_time: params.default_time,
+    username: params.username,
+  }
+}
 
 const FLOW_OVERFLOW_MODE_OPTIONS = [
   { value: 'aggregate', labelKey: 'Merge into Other' },
@@ -324,7 +338,7 @@ export function FlowCharts(props: FlowChartsProps) {
     ]
   )
   const flowQueryParams = useMemo(
-    () => buildQueryParams(timeRange, props.filters),
+    () => buildFlowQueryParams(timeRange, props.filters),
     [props.filters, timeRange]
   )
 
