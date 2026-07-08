@@ -345,3 +345,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 11: 优化 ai-fund 日志统计联动
+
+**Date**: 2026-07-09
+**Task**: 优化 ai-fund 日志统计联动
+**Branch**: `build-bak`
+
+### Summary
+
+完成公共 API Key 日志页统计性能优化与筛选联动：API Key 验证改用轻量 usage 接口，统计/图表/表格统一 type、model、request_id、时间筛选，修复模型分布点击筛选和消耗趋势横纵坐标展示；后端保留 Anthropic cache token 口径，新增日志表 token/time/type 复合索引迁移与 release 说明；已通过 go test -count=1 ./controller ./model 和 git diff --check，前端完整构建受当前环境缺少 bun/依赖阻塞。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c85c56b8` | (see git log) |
+| `42890235` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
