@@ -25,15 +25,12 @@ func setupRelayErrorLogTestDB(t *testing.T) *gorm.DB {
 
 	originalDB := model.DB
 	originalLogDB := model.LOG_DB
-	originalUsingSQLite := common.UsingSQLite
-	originalUsingMySQL := common.UsingMySQL
-	originalUsingPostgreSQL := common.UsingPostgreSQL
+	originalMainDatabaseType := common.MainDatabaseType()
+	originalLogDatabaseType := common.LogDatabaseType()
 	originalRedisEnabled := common.RedisEnabled
 
 	gin.SetMode(gin.TestMode)
-	common.UsingSQLite = true
-	common.UsingMySQL = false
-	common.UsingPostgreSQL = false
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	common.RedisEnabled = false
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
@@ -50,9 +47,7 @@ func setupRelayErrorLogTestDB(t *testing.T) *gorm.DB {
 		}
 		model.DB = originalDB
 		model.LOG_DB = originalLogDB
-		common.UsingSQLite = originalUsingSQLite
-		common.UsingMySQL = originalUsingMySQL
-		common.UsingPostgreSQL = originalUsingPostgreSQL
+		common.SetDatabaseTypes(originalMainDatabaseType, originalLogDatabaseType)
 		common.RedisEnabled = originalRedisEnabled
 	})
 

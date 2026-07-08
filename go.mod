@@ -13,6 +13,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.50.4
 	github.com/aws/smithy-go v1.24.2
 	github.com/bytedance/gopkg v0.1.3
+	github.com/casbin/casbin/v2 v2.135.0
 	github.com/gin-contrib/cors v1.7.2
 	github.com/gin-contrib/gzip v0.0.6
 	github.com/gin-contrib/sessions v0.0.5
@@ -46,22 +47,43 @@ require (
 	github.com/tidwall/gjson v1.18.0
 	github.com/tidwall/sjson v1.2.5
 	github.com/tiktoken-go/tokenizer v0.6.2
-	github.com/waffo-com/waffo-go v1.3.1
-	github.com/yapingcat/gomedia v0.0.0-20240906162731-17feea57090c
-	golang.org/x/crypto v0.45.0
-	golang.org/x/image v0.38.0
-	golang.org/x/net v0.47.0
-	golang.org/x/sync v0.20.0
-	golang.org/x/sys v0.38.0
-	golang.org/x/text v0.35.0
+	github.com/waffo-com/waffo-go v1.3.2
 	github.com/xuri/excelize/v2 v2.9.0
+	github.com/yapingcat/gomedia v0.0.0-20240906162731-17feea57090c
+	golang.org/x/crypto v0.51.0
+	golang.org/x/image v0.41.0
+	golang.org/x/net v0.55.0
+	golang.org/x/sync v0.20.0
+	golang.org/x/sys v0.45.0
+	golang.org/x/text v0.37.0
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.4.3
 	gorm.io/driver/postgres v1.5.2
 	gorm.io/gorm v1.25.2
 )
 
-require github.com/waffo-com/waffo-pancake-sdk-go v0.3.1
+require (
+	github.com/waffo-com/waffo-pancake-sdk-go v0.3.1
+	gorm.io/driver/clickhouse v0.6.0
+)
+
+require (
+	github.com/ClickHouse/ch-go v0.65.0 // indirect
+	github.com/ClickHouse/clickhouse-go/v2 v2.32.0 // indirect
+	github.com/bmatcuk/doublestar/v4 v4.6.1 // indirect
+	github.com/casbin/govaluate v1.10.0 // indirect
+	github.com/go-faster/city v1.0.1 // indirect
+	github.com/go-faster/errors v0.7.1 // indirect
+	github.com/hashicorp/go-version v1.7.0 // indirect
+	github.com/paulmach/orb v0.11.1 // indirect
+	github.com/pierrec/lz4/v4 v4.1.22 // indirect
+	github.com/rogpeppe/go-internal v1.13.1 // indirect
+	github.com/segmentio/asm v1.2.0 // indirect
+	go.opentelemetry.io/otel v1.34.0 // indirect
+	go.opentelemetry.io/otel/trace v1.34.0 // indirect
+)
+
+require github.com/Azure/go-ntlmssp v0.1.1
 
 require (
 	github.com/DmitriyVTitov/size v1.5.0 // indirect
@@ -113,9 +135,9 @@ require (
 	github.com/mewkiz/pkg v0.0.0-20250417130911-3f050ff8c56d // indirect
 	github.com/mewpkg/term v0.0.0-20241026122259-37a80af23985 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
-	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
+	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.1 // indirect

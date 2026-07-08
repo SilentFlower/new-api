@@ -226,3 +226,81 @@ func TestModelPriceHelperTieredUsesMappedUpstreamModelWhenChannelSettingEnabled(
 	require.Equal(t, "upstream-tiered-model", info.TieredBillingSnapshot.ModelName)
 	require.Equal(t, "upstream", info.TieredBillingSnapshot.EstimatedTier)
 }
+
+func TestModelPriceHelperTieredPreConsumeMaxTokensFallback(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	saved := map[string]string{}
+	require.NoError(t, config.GlobalConfig.SaveToDB(func(key, value string) error {
+		saved[key] = value
+		return nil
+	}))
+	t.Cleanup(func() {
+		require.NoError(t, config.GlobalConfig.LoadFromDB(saved))
+	})
+
+	require.NoError(t, config.GlobalConfig.LoadFromDB(map[string]string{
+		"billing_setting.billing_mode":    `{"tiered-fallback-model":"tiered_expr"}`,
+		"billing_setting.billing_expr":    `{"tiered-fallback-model":"tier(\"base\", p * 3 + c * 15)"}`,
+		"group_ratio_setting.group_ratio": `{"default":1,"free":0}`,
+	}))
+
+	const promptTokens = 1000
+
+	cases := []struct {
+		name      string
+		group     string
+		maxTokens int
+		expected  int
+	}{
+		{
+			// 付费分组未传 max_tokens 时，回退按 8192 个输出 token 预估。
+			// p*3 + c*15 = 1000*3 + 8192*15 = 125880，再换算为 62940 额度。
+			name:      "non-free group falls back to 8192 completion tokens",
+			group:     "default",
+			maxTokens: 0,
+			expected:  62940,
+		},
+		{
+			// 显式 max_tokens 必须原样使用，不触发回退估算。
+			// 1000*3 + 100*15 = 4500，再换算为 2250 额度。
+			name:      "explicit max_tokens is used verbatim",
+			group:     "default",
+			maxTokens: 100,
+			expected:  2250,
+		},
+		{
+			// 免费分组倍率为 0，预扣保持 0，不触发付费分组的回退估算。
+			name:      "free group stays zero without fallback",
+			group:     "free",
+			maxTokens: 0,
+			expected:  0,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			ctx, _ := gin.CreateTestContext(recorder)
+			req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+			req.Header.Set("Content-Type", "application/json")
+			ctx.Request = req
+			ctx.Set("group", tc.group)
+
+			info := &relaycommon.RelayInfo{
+				OriginModelName: "tiered-fallback-model",
+				UserGroup:       tc.group,
+				UsingGroup:      tc.group,
+				RequestHeaders:  map[string]string{"Content-Type": "application/json"},
+				BillingRequestInput: &billingexpr.RequestInput{
+					Headers: map[string]string{"Content-Type": "application/json"},
+					Body:    []byte(`{}`),
+				},
+			}
+
+			priceData, err := ModelPriceHelper(ctx, info, promptTokens, &types.TokenCountMeta{MaxTokens: tc.maxTokens})
+			require.NoError(t, err)
+			require.Equal(t, tc.expected, priceData.QuotaToPreConsume)
+		})
+	}
+}

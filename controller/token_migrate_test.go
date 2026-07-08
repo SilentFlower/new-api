@@ -19,14 +19,11 @@ func setupTokenMigrateControllerTestDB(t *testing.T) *gorm.DB {
 	originalDB := model.DB
 	originalLogDB := model.LOG_DB
 	originalRedisEnabled := common.RedisEnabled
-	originalUsingSQLite := common.UsingSQLite
-	originalUsingMySQL := common.UsingMySQL
-	originalUsingPostgreSQL := common.UsingPostgreSQL
+	originalMainDatabaseType := common.MainDatabaseType()
+	originalLogDatabaseType := common.LogDatabaseType()
 
 	common.RedisEnabled = false
-	common.UsingSQLite = true
-	common.UsingMySQL = false
-	common.UsingPostgreSQL = false
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
@@ -44,9 +41,7 @@ func setupTokenMigrateControllerTestDB(t *testing.T) *gorm.DB {
 		model.DB = originalDB
 		model.LOG_DB = originalLogDB
 		common.RedisEnabled = originalRedisEnabled
-		common.UsingSQLite = originalUsingSQLite
-		common.UsingMySQL = originalUsingMySQL
-		common.UsingPostgreSQL = originalUsingPostgreSQL
+		common.SetDatabaseTypes(originalMainDatabaseType, originalLogDatabaseType)
 	})
 
 	return db

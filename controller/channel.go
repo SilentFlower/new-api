@@ -12,11 +12,13 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
 	"github.com/QuantumNous/new-api/relay/channel/gemini"
 	"github.com/QuantumNous/new-api/relay/channel/ollama"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/authz"
 
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -247,6 +249,12 @@ func buildChannelListQuery(group string, statusFilter int, typeFilter int) *gorm
 		query = query.Where("type = ?", typeFilter)
 	}
 	return query
+}
+
+func GetChannelOps(c *gin.Context) {
+	common.ApiSuccess(c, gin.H{
+		"retry_times": common.RetryTimes,
+	})
 }
 
 func GetAllChannels(c *gin.Context) {
@@ -978,6 +986,11 @@ func EditTagChannels(c *gin.Context) {
 		})
 		return
 	}
+	if (channelTag.ParamOverride != nil || channelTag.HeaderOverride != nil) &&
+		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
+		return
+	}
 	if channelTag.ParamOverride != nil {
 		trimmed := strings.TrimSpace(*channelTag.ParamOverride)
 		if trimmed != "" && !json.Valid([]byte(trimmed)) {
@@ -1054,13 +1067,36 @@ type PatchChannel struct {
 	KeyMode      *string `json:"key_mode"` // 多key模式下密钥覆盖或者追加
 }
 
+type ChannelStatusRequest struct {
+	Status int `json:"status"`
+}
+
+type ChannelStatusBatchRequest struct {
+	Ids    []int `json:"ids"`
+	Status int   `json:"status"`
+}
+
 func UpdateChannel(c *gin.Context) {
 	channel := PatchChannel{}
-	err := c.ShouldBindJSON(&channel)
+	rawBody, err := c.GetRawData()
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
+	if err := common.Unmarshal(rawBody, &channel); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	var requestData map[string]any
+	if err := common.Unmarshal(rawBody, &requestData); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if _, ok := requestData["status"]; ok {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	clearChannelReadOnlyFields(&channel, requestData)
 
 	// 使用统一的校验函数
 	if err := validateChannel(&channel.Channel, false); err != nil {
@@ -1087,6 +1123,12 @@ func UpdateChannel(c *gin.Context) {
 			"success": false,
 			"message": err.Error(),
 		})
+		return
+	}
+
+	if channelHasSensitiveChanges(&channel, originChannel, requestData) &&
+		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
 	}
 
@@ -1184,9 +1226,6 @@ func UpdateChannel(c *gin.Context) {
 	service.ResetProxyClientCache()
 	// 记录变更的字段名（语言无关的字段标识），密钥仅记录"已更换"绝不记录内容。
 	changedFields := make([]string, 0)
-	if channel.Status != originChannel.Status {
-		changedFields = append(changedFields, "status")
-	}
 	if channel.Models != originChannel.Models {
 		changedFields = append(changedFields, "models")
 	}
@@ -1215,6 +1254,66 @@ func UpdateChannel(c *gin.Context) {
 		"data":    responseChannel,
 	})
 	return
+}
+
+func UpdateChannelStatus(c *gin.Context) {
+	id, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	req := ChannelStatusRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil || !isManageableChannelStatus(req.Status) {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	changed := model.UpdateChannelStatus(id, "", req.Status, "manual operation")
+	if changed {
+		model.InitChannelCache()
+		service.ResetProxyClientCache()
+	}
+	recordManageAudit(c, "channel.status_update", map[string]interface{}{
+		"id":      id,
+		"status":  req.Status,
+		"changed": changed,
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    changed,
+	})
+}
+
+func BatchUpdateChannelStatus(c *gin.Context) {
+	req := ChannelStatusBatchRequest{}
+	if err := c.ShouldBindJSON(&req); err != nil || len(req.Ids) == 0 || !isManageableChannelStatus(req.Status) {
+		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
+		return
+	}
+	changedCount := 0
+	for _, id := range req.Ids {
+		if model.UpdateChannelStatus(id, "", req.Status, "manual batch operation") {
+			changedCount++
+		}
+	}
+	if changedCount > 0 {
+		model.InitChannelCache()
+		service.ResetProxyClientCache()
+	}
+	recordManageAudit(c, "channel.status_update_batch", map[string]interface{}{
+		"count":  changedCount,
+		"total":  len(req.Ids),
+		"status": req.Status,
+	})
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "",
+		"data":    changedCount,
+	})
+}
+
+func isManageableChannelStatus(status int) bool {
+	return status == common.ChannelStatusEnabled || status == common.ChannelStatusManuallyDisabled
 }
 
 // equalStringPtr 比较两个 *string 是否相等（均为 nil 视为相等）。
@@ -1527,6 +1626,11 @@ func ManageMultiKeys(c *gin.Context) {
 			"success": false,
 			"message": "该渠道不是多密钥模式",
 		})
+		return
+	}
+	if multiKeyActionRequiresSensitiveWrite(request.Action) &&
+		!authz.Can(c.GetInt("id"), c.GetInt("role"), authz.ChannelSensitiveWrite) {
+		common.ApiErrorI18n(c, i18n.MsgAuthInsufficientPrivilege)
 		return
 	}
 
@@ -1971,6 +2075,10 @@ func ManageMultiKeys(c *gin.Context) {
 		})
 		return
 	}
+}
+
+func multiKeyActionRequiresSensitiveWrite(action string) bool {
+	return action == "delete_key" || action == "delete_disabled_keys"
 }
 
 // OllamaPullModel 拉取 Ollama 模型
