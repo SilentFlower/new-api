@@ -22,5 +22,24 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-07-08T21:57:37+08:00",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "root": "ac11f2f3"
+    },
+    "push_mode": "push",
+    "completed_steps": [
+      "渠道状态修复",
+      "API Keys 迁移入口",
+      "Dashboard 筛选与导出",
+      "公共 API Key LogViewer",
+      "i18n 同步",
+      "质量检查",
+      "spec update"
+    ],
+    "next_step": "wrap-up",
+    "notes": "已推送业务提交 ac11f2f3，commit message 带 [build] 触发构建。"
+  }
 }
