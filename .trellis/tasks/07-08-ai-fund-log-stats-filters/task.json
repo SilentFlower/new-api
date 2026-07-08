@@ -22,5 +22,25 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-07-08T17:53:41.689233+00:00",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "root": "c85c56b8"
+    },
+    "push_mode": "push",
+    "completed_steps": [
+      "后端公共日志筛选参数与统计口径优化",
+      "前端统计卡片、模型分布、消耗趋势和表格筛选联动",
+      "模型分布点击回填并自动查询",
+      "消耗趋势横纵坐标与时间聚合修复",
+      "API Key 验证改用 /api/usage/token/",
+      "日志统计复合索引迁移与发布说明",
+      "i18n 同步与后端目标测试",
+      "spec update"
+    ],
+    "next_step": "trellis-finish-work 归档任务",
+    "notes": "已推送业务提交 c85c56b8 feat(log): 优化公共日志统计联动 [build]。go test -count=1 ./controller ./model 与 git diff --check 已通过；前端完整构建受当前环境缺少 bun/依赖阻塞。"
+  }
 }
