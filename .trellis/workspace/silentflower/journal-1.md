@@ -278,3 +278,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 9: Anthropic 缓存 Token 统计收尾
+
+**Date**: 2026-07-08
+**Task**: Anthropic 缓存 Token 统计收尾
+**Branch**: `build-bak`
+
+### Summary
+
+完成总 Token 统计包含 Anthropic 缓存读写：新增统一统计 helper，修正日志聚合、quota_data 新写入与启动后台历史补算，更新旧 UI token 用量兜底；ai-fund 前端已独立提交并部署 Pages；复跑 go test ./...、关键 model 测试、ai-fund frontend build。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8471e8a6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

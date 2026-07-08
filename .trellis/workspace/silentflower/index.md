@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 8
-- **Last Active**: 2026-07-06
+- **Total Sessions**: 9
+- **Last Active**: 2026-07-08
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~280 | Active |
+| `journal-1.md` | ~313 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 9 | 2026-07-08 | Anthropic 缓存 Token 统计收尾 | `8471e8a6` | `build-bak` |
 | 8 | 2026-07-06 | 旧版数据看板统计筛选升级 | `be0c6d42`, `3f9f8f44` | `build-bak` |
 | 7 | 2026-07-02 | 修复 Claude Code WebSearch 官渠透传 | `ee7a0a55`, `8ea1ae3e` | `build-bak` |
 | 6 | 2026-07-02 | Claude Code WebSearch 渠道支持 | `e280416c`, `17ba4cc3` | `build-bak` |
