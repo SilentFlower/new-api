@@ -24,6 +24,7 @@ import type {
   TokenLogPageData,
   TokenLogQueryParams,
   TokenLogStat,
+  TokenUsageResponse,
 } from './types'
 
 /**
@@ -58,7 +59,7 @@ export function buildTokenLogSearchParams(
  */
 export async function getTokenLogStat(
   client: AxiosInstance,
-  params: Pick<TokenLogQueryParams, 'start_timestamp' | 'end_timestamp'> = {}
+  params: Omit<TokenLogQueryParams, 'p' | 'page_size'> = {}
 ): Promise<TokenLogApiResponse<TokenLogStat>> {
   const searchParams = buildTokenLogSearchParams(params)
   const suffix = searchParams.size > 0 ? `?${searchParams.toString()}` : ''
@@ -73,14 +74,22 @@ export async function getTokenLogStat(
  */
 export async function getTokenLogChartData(
   client: AxiosInstance,
-  params: Required<
-    Pick<TokenLogQueryParams, 'start_timestamp' | 'end_timestamp'>
-  >
+  params: Omit<TokenLogQueryParams, 'p' | 'page_size'>
 ): Promise<TokenLogApiResponse<TokenLogChartData>> {
   const searchParams = buildTokenLogSearchParams(params)
   const res = await client.get<TokenLogApiResponse<TokenLogChartData>>(
     `/api/log/token/data?${searchParams.toString()}`
   )
+  return res.data
+}
+
+/**
+ * 轻量查询当前 API Key 的基础使用信息，用于认证验证。
+ */
+export async function getTokenUsage(
+  client: AxiosInstance
+): Promise<TokenUsageResponse> {
+  const res = await client.get<TokenUsageResponse>('/api/usage/token/')
   return res.data
 }
 

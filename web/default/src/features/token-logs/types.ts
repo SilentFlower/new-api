@@ -81,6 +81,31 @@ export interface TokenLogApiResponse<T> {
 }
 
 /**
+ * 轻量 API Key 使用信息。
+ */
+export interface TokenUsageData {
+  object: string
+  name: string
+  total_granted: number
+  total_used: number
+  total_available: number
+  unlimited_quota: boolean
+  model_limits?: Record<string, unknown>
+  model_limits_enabled?: boolean
+  expires_at: number
+}
+
+/**
+ * Token usage 接口响应，后端使用 code 字段表示成功。
+ */
+export interface TokenUsageResponse {
+  code?: boolean
+  success?: boolean
+  message?: string
+  data?: TokenUsageData
+}
+
+/**
  * 分页日志数据。
  */
 export interface TokenLogPageData {

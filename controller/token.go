@@ -116,6 +116,19 @@ func GetTokenStatus(c *gin.Context) {
 }
 
 func GetTokenUsage(c *gin.Context) {
+	tokenId := c.GetInt("token_id")
+	userId := c.GetInt("id")
+	if tokenId != 0 && userId != 0 {
+		token, err := model.GetTokenByIds(tokenId, userId)
+		if err != nil {
+			common.SysError("failed to get token by id: " + err.Error())
+			common.ApiErrorI18n(c, i18n.MsgTokenGetInfoFailed)
+			return
+		}
+		responseTokenUsage(c, token)
+		return
+	}
+
 	authHeader := c.GetHeader("Authorization")
 	if authHeader == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{
@@ -134,14 +147,20 @@ func GetTokenUsage(c *gin.Context) {
 		return
 	}
 	tokenKey := parts[1]
+	tokenKey = strings.TrimPrefix(tokenKey, "sk-")
+	tokenKeyParts := strings.Split(tokenKey, "-")
+	tokenKey = tokenKeyParts[0]
 
-	token, err := model.GetTokenByKey(strings.TrimPrefix(tokenKey, "sk-"), false)
+	token, err := model.GetTokenByKey(tokenKey, false)
 	if err != nil {
 		common.SysError("failed to get token by key: " + err.Error())
 		common.ApiErrorI18n(c, i18n.MsgTokenGetInfoFailed)
 		return
 	}
+	responseTokenUsage(c, token)
+}
 
+func responseTokenUsage(c *gin.Context, token *model.Token) {
 	expiredAt := token.ExpiredTime
 	if expiredAt == -1 {
 		expiredAt = 0

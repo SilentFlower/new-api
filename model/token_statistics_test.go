@@ -167,6 +167,101 @@ func TestTokenQuotaDataIncludesAnthropicCacheTokens(t *testing.T) {
 	assert.Equal(t, 20, stat.CompletionTokens)
 }
 
+func TestTokenLogPublicFiltersUseConsumeUsageSubset(t *testing.T) {
+	truncateTables(t)
+
+	now := time.Now().Unix()
+	insertDashboardFilterLog(t, Log{
+		UserId:           1,
+		Username:         "alice",
+		TokenId:          88,
+		CreatedAt:        now,
+		Type:             LogTypeConsume,
+		TokenName:        "key-a",
+		ModelName:        "claude-sonnet",
+		RequestId:        "req-a",
+		Quota:            100,
+		PromptTokens:     10,
+		CompletionTokens: 20,
+		Other: statisticTestOther(map[string]interface{}{
+			"usage_semantic":        "anthropic",
+			"cache_tokens":          5,
+			"cache_creation_tokens": 7,
+		}),
+	})
+	insertDashboardFilterLog(t, Log{
+		UserId:           1,
+		Username:         "alice",
+		TokenId:          88,
+		CreatedAt:        now,
+		Type:             LogTypeError,
+		TokenName:        "key-a",
+		ModelName:        "claude-sonnet",
+		RequestId:        "req-a",
+		Quota:            999,
+		PromptTokens:     100,
+		CompletionTokens: 200,
+	})
+	insertDashboardFilterLog(t, Log{
+		UserId:           1,
+		Username:         "alice",
+		TokenId:          88,
+		CreatedAt:        now,
+		Type:             LogTypeConsume,
+		TokenName:        "key-a",
+		ModelName:        "gpt-4",
+		RequestId:        "req-b",
+		Quota:            200,
+		PromptTokens:     30,
+		CompletionTokens: 40,
+	})
+
+	params := TokenLogFilterParams{
+		TokenID:        88,
+		LogType:        LogTypeUnknown,
+		StartTimestamp: now - 60,
+		EndTimestamp:   now + 60,
+		ModelName:      "claude-sonnet",
+		RequestID:      "req-a",
+	}
+	stat, err := GetTokenLogStatWithFilters(params)
+	require.NoError(t, err)
+	assert.Equal(t, 2, stat.Count)
+	assert.Equal(t, 100, stat.Quota)
+	assert.Equal(t, 10, stat.PromptTokens)
+	assert.Equal(t, 20, stat.CompletionTokens)
+	assert.Equal(t, 42, stat.TotalTokens)
+	assert.Equal(t, 2, stat.Rpm)
+	assert.Equal(t, 42, stat.Tpm)
+
+	quotaRows, err := GetTokenQuotaDataWithFilters(params)
+	require.NoError(t, err)
+	require.Len(t, quotaRows, 1)
+	assert.Equal(t, 100, quotaRows[0].Quota)
+	assert.Equal(t, 42, quotaRows[0].TokenUsed)
+	assert.Equal(t, 1, quotaRows[0].Count)
+
+	errorParams := params
+	errorParams.LogType = LogTypeError
+	errorStat, err := GetTokenLogStatWithFilters(errorParams)
+	require.NoError(t, err)
+	assert.Equal(t, 1, errorStat.Count)
+	assert.Equal(t, 0, errorStat.Quota)
+	assert.Equal(t, 0, errorStat.TotalTokens)
+	assert.Equal(t, 1, errorStat.Rpm)
+	assert.Equal(t, 0, errorStat.Tpm)
+
+	modelRows, err := GetTokenModelStatsWithFilters(errorParams)
+	require.NoError(t, err)
+	require.Len(t, modelRows, 1)
+	assert.Equal(t, "claude-sonnet", modelRows[0].ModelName)
+	assert.Equal(t, 1, modelRows[0].Count)
+
+	emptyQuotaRows, err := GetTokenQuotaDataWithFilters(errorParams)
+	require.NoError(t, err)
+	assert.Empty(t, emptyQuotaRows)
+}
+
 func TestQuotaDataTokenUsedMigrationAddsCacheDeltaOnce(t *testing.T) {
 	truncateTables(t)
 	resetStatisticMigrationOption(t)

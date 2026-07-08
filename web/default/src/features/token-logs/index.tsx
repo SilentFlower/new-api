@@ -17,7 +17,11 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import type { AxiosError, AxiosInstance } from 'axios'
-import { Key02Icon, Logout02Icon, Search01Icon } from '@hugeicons/core-free-icons'
+import {
+  Key02Icon,
+  Logout02Icon,
+  Search01Icon,
+} from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
 import { useQuery } from '@tanstack/react-query'
 import type {
@@ -28,6 +32,7 @@ import type {
 } from '@tanstack/react-table'
 import {
   useCallback,
+  useEffect,
   useMemo,
   useState,
   type Dispatch,
@@ -44,11 +49,7 @@ import {
 import { PublicLayout } from '@/components/layout'
 import { LoadingState } from '@/components/loading-state'
 import { StatusBadge } from '@/components/status-badge'
-import {
-  Alert,
-  AlertDescription,
-  AlertTitle,
-} from '@/components/ui/alert'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -73,7 +74,10 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { LOG_TYPE_ENUM, LOG_TYPE_FILTERS } from '@/features/usage-logs/constants'
+import {
+  LOG_TYPE_ENUM,
+  LOG_TYPE_FILTERS,
+} from '@/features/usage-logs/constants'
 import { useCommonLogsColumns } from '@/features/usage-logs/components/columns/common-logs-columns'
 import { CompactDateTimeRangePicker } from '@/features/usage-logs/components/compact-date-time-range-picker'
 import {
@@ -95,12 +99,14 @@ import {
   getTokenLogChartData,
   getTokenLogs,
   getTokenLogStat,
+  getTokenUsage,
 } from './api'
 import {
+  buildTokenLogFilterParams,
   buildDefaultTokenLogFilters,
   buildTokenLogQueryParams,
-  buildTokenLogTimeParams,
   hasTokenLogFilters,
+  isTokenLogUsageStatAvailable,
 } from './lib'
 import type {
   TokenLogChartData,
@@ -144,6 +150,77 @@ const chartAccentClasses = [
   'bg-violet-500',
   'bg-cyan-500',
 ]
+
+const maxTrendBars = 48
+
+interface TrendDataPoint {
+  created_at: number
+  end_at: number
+  quota: number
+  token_used: number
+  count: number
+}
+
+function buildTrendDataPoints(
+  quotaData: TokenLogChartData['quota_data']
+): TrendDataPoint[] {
+  const rows = new Map<number, TrendDataPoint>()
+  quotaData.forEach((item) => {
+    const createdAt = item.created_at || 0
+    if (createdAt === 0) return
+    const row = rows.get(createdAt) ?? {
+      created_at: createdAt,
+      end_at: createdAt,
+      quota: 0,
+      token_used: 0,
+      count: 0,
+    }
+    row.quota += item.quota || 0
+    row.token_used += item.token_used || 0
+    row.count += item.count || 0
+    rows.set(createdAt, row)
+  })
+  const points = [...rows.values()].sort((a, b) => a.created_at - b.created_at)
+  if (points.length <= maxTrendBars) return points
+
+  const chunkSize = Math.ceil(points.length / maxTrendBars)
+  const compacted: TrendDataPoint[] = []
+  for (let i = 0; i < points.length; i += chunkSize) {
+    const chunk = points.slice(i, i + chunkSize)
+    compacted.push(
+      chunk.reduce<TrendDataPoint>(
+        (acc, item) => ({
+          created_at: acc.created_at,
+          end_at: item.end_at,
+          quota: acc.quota + item.quota,
+          token_used: acc.token_used + item.token_used,
+          count: acc.count + item.count,
+        }),
+        {
+          created_at: chunk[0]?.created_at ?? 0,
+          end_at: chunk[0]?.end_at ?? 0,
+          quota: 0,
+          token_used: 0,
+          count: 0,
+        }
+      )
+    )
+  }
+  return compacted
+}
+
+function getTrendLabelStep(count: number): number {
+  if (count <= 8) return 1
+  if (count <= 16) return 2
+  if (count <= 24) return 3
+  return Math.ceil(count / 8)
+}
+
+function formatTrendTimeRange(item: TrendDataPoint): string {
+  const start = formatTimestampToDate(item.created_at)
+  if (item.end_at === item.created_at) return start
+  return `${start} - ${formatTimestampToDate(item.end_at)}`
+}
 
 function resolveApiErrorMessage(
   error: unknown,
@@ -194,9 +271,13 @@ function StatBadgeCard(props: {
 function TokenLogStatsCards(props: {
   stat?: TokenLogStat
   isLoading: boolean
+  usageAvailable: boolean
 }) {
   const { t } = useTranslation()
   const stat = props.stat ?? DEFAULT_STAT
+  const usageDescription = props.usageAvailable
+    ? undefined
+    : t('Usage statistics are only available for consumption logs')
 
   if (props.isLoading) {
     return (
@@ -218,6 +299,7 @@ function TokenLogStatsCards(props: {
       <StatBadgeCard
         label={t('Usage')}
         value={formatLogQuota(stat.quota)}
+        description={usageDescription}
         accent='bg-sky-500/70'
       />
       <StatBadgeCard
@@ -225,12 +307,21 @@ function TokenLogStatsCards(props: {
         value={formatCompactNumber(
           stat.total_tokens || stat.prompt_tokens + stat.completion_tokens
         )}
-        description={`${formatCompactNumber(stat.prompt_tokens)} / ${formatCompactNumber(stat.completion_tokens)}`}
+        description={
+          props.usageAvailable
+            ? `${formatCompactNumber(stat.prompt_tokens)} / ${formatCompactNumber(stat.completion_tokens)}`
+            : usageDescription
+        }
         accent='bg-amber-500/75'
       />
       <StatBadgeCard
         label='RPM / TPM'
         value={`${formatCompactNumber(stat.rpm)} / ${formatCompactNumber(stat.tpm)}`}
+        description={
+          props.usageAvailable
+            ? undefined
+            : t('TPM only applies to consumption logs')
+        }
         accent='bg-violet-500/70'
       />
     </div>
@@ -240,6 +331,8 @@ function TokenLogStatsCards(props: {
 function TokenLogCharts(props: {
   data?: TokenLogChartData
   isLoading: boolean
+  usageAvailable: boolean
+  onSelectModel: (modelName: string) => void
 }) {
   const { t } = useTranslation()
   const data = props.data ?? DEFAULT_CHART_DATA
@@ -250,14 +343,13 @@ function TokenLogCharts(props: {
     0
   )
   const maxModelCount = Math.max(...modelStats.map((item) => item.count), 1)
-  const trendItems = quotaData
-    .slice()
-    .sort((a, b) => a.created_at - b.created_at)
-    .slice(-12)
+  const trendItems = buildTrendDataPoints(quotaData)
   const maxTrendQuota = Math.max(
     ...trendItems.map((item) => item.quota || 0),
     1
   )
+  const trendLabelStep = getTrendLabelStep(trendItems.length)
+  const yTicks = [1, 0.75, 0.5, 0.25, 0].map((ratio) => maxTrendQuota * ratio)
 
   if (props.isLoading) {
     return (
@@ -277,17 +369,18 @@ function TokenLogCharts(props: {
             {t('Total')}: {formatCompactNumber(totalModelCount)}
           </CardDescription>
         </CardHeader>
-        <CardContent className='space-y-2.5'>
+        <CardContent className='flex flex-col gap-2.5'>
           {modelStats.length === 0 ? (
             <p className='text-muted-foreground text-sm'>{t('No Data')}</p>
           ) : (
             modelStats.slice(0, 8).map((item, index) => {
               const percent = Math.round((item.count / maxModelCount) * 100)
-              return (
-                <div key={`${item.model_name}-${index}`} className='space-y-1'>
+              const modelName = item.model_name?.trim()
+              const rowContent = (
+                <>
                   <div className='flex items-center justify-between gap-3 text-xs'>
                     <span className='truncate font-medium'>
-                      {item.model_name || t('Unknown')}
+                      {modelName || t('Unknown')}
                     </span>
                     <span className='text-muted-foreground font-mono tabular-nums'>
                       {formatCompactNumber(item.count)}
@@ -302,7 +395,27 @@ function TokenLogCharts(props: {
                       style={{ width: `${Math.max(percent, 4)}%` }}
                     />
                   </div>
-                </div>
+                </>
+              )
+              if (!modelName) {
+                return (
+                  <div
+                    key={`${item.model_name}-${index}`}
+                    className='flex flex-col gap-1'
+                  >
+                    {rowContent}
+                  </div>
+                )
+              }
+              return (
+                <button
+                  key={`${item.model_name}-${index}`}
+                  type='button'
+                  className='w-full rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
+                  onClick={() => props.onSelectModel(modelName)}
+                >
+                  <div className='flex flex-col gap-1'>{rowContent}</div>
+                </button>
               )
             })
           )}
@@ -316,38 +429,86 @@ function TokenLogCharts(props: {
         </CardHeader>
         <CardContent>
           {trendItems.length === 0 ? (
-            <p className='text-muted-foreground text-sm'>{t('No Data')}</p>
+            <p className='text-muted-foreground text-sm'>
+              {props.usageAvailable
+                ? t('No Data')
+                : t('Usage statistics are only available for consumption logs')}
+            </p>
           ) : (
-            <div className='flex h-36 items-end gap-1.5'>
-              {trendItems.map((item, index) => {
-                const percent = Math.round(
-                  ((item.quota || 0) / maxTrendQuota) * 100
-                )
-                return (
-                  <Tooltip key={`${item.created_at}-${item.model_name}-${index}`}>
-                    <TooltipTrigger
-                      render={
-                        <div className='flex min-w-0 flex-1 flex-col items-center gap-1' />
-                      }
+            <div className='grid h-52 grid-cols-[4.5rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_2rem] gap-x-2 overflow-hidden'>
+              <div className='col-start-1 row-start-1 flex h-full flex-col justify-between py-1 text-right text-[10px] leading-none text-muted-foreground'>
+                {yTicks.map((tick, index) => (
+                  <span key={`${tick}-${index}`} className='truncate'>
+                    {formatLogQuota(tick)}
+                  </span>
+                ))}
+              </div>
+              <div className='relative col-start-2 row-start-1 min-w-0 overflow-hidden rounded-sm border-b border-l border-border/70 pl-2 pr-1 pt-1'>
+                <div className='pointer-events-none absolute inset-x-2 inset-y-1 flex flex-col justify-between'>
+                  {[0, 1, 2, 3, 4].map((line) => (
+                    <span
+                      key={line}
+                      className='border-t border-dashed border-border/70'
+                    />
+                  ))}
+                </div>
+                <div className='relative flex h-full items-end gap-1'>
+                  {trendItems.map((item, index) => {
+                    const percent = Math.round(
+                      (item.quota / maxTrendQuota) * 100
+                    )
+                    return (
+                      <Tooltip
+                        key={`${item.created_at}-${item.end_at}-${index}`}
+                      >
+                        <TooltipTrigger
+                          render={
+                            <div className='flex h-full min-w-0 flex-1 items-end' />
+                          }
+                        >
+                          <div
+                            className='min-h-1 w-full rounded-t-sm bg-sky-500/75'
+                            style={{ height: `${Math.max(percent, 3)}%` }}
+                          />
+                        </TooltipTrigger>
+                        <TooltipContent side='top' className='max-w-64'>
+                          <div className='flex flex-col gap-0.5 text-xs'>
+                            <p>{formatTrendTimeRange(item)}</p>
+                            <p>
+                              {t('Quota')}: {formatLogQuota(item.quota)}
+                            </p>
+                            <p>
+                              {t('Requests')}: {formatCompactNumber(item.count)}
+                            </p>
+                            <p>
+                              {t('Tokens')}:{' '}
+                              {formatCompactNumber(item.token_used)}
+                            </p>
+                          </div>
+                        </TooltipContent>
+                      </Tooltip>
+                    )
+                  })}
+                </div>
+              </div>
+              <div className='col-start-2 row-start-2 flex min-w-0 gap-1 pl-2 pr-1 pt-1'>
+                {trendItems.map((item, index) => {
+                  const showLabel =
+                    index === 0 ||
+                    index === trendItems.length - 1 ||
+                    index % trendLabelStep === 0
+                  return (
+                    <span
+                      key={`${item.created_at}-${index}`}
+                      className='min-w-0 flex-1 truncate text-center text-[10px] leading-tight text-muted-foreground'
                     >
-                      <div
-                        className='bg-sky-500/75 w-full min-w-2 rounded-t-sm'
-                        style={{ height: `${Math.max(percent, 4)}%` }}
-                      />
-                      <span className='text-muted-foreground w-full truncate text-center text-[10px]'>
-                        {formatTimestampToDate(item.created_at).slice(5, 16)}
-                      </span>
-                    </TooltipTrigger>
-                    <TooltipContent>
-                      <div className='space-y-0.5 text-xs'>
-                        <p>{formatTimestampToDate(item.created_at)}</p>
-                        <p>{item.model_name || t('Unknown')}</p>
-                        <p>{formatLogQuota(item.quota || 0)}</p>
-                      </div>
-                    </TooltipContent>
-                  </Tooltip>
-                )
-              })}
+                      {showLabel
+                        ? formatTimestampToDate(item.created_at).slice(5, 16)
+                        : ''}
+                    </span>
+                  )
+                })}
+              </div>
             </div>
           )}
         </CardContent>
@@ -544,6 +705,12 @@ function TokenLogsTable(props: {
     []
   )
 
+  useEffect(() => {
+    setPagination((previous) =>
+      previous.pageIndex === 0 ? previous : { ...previous, pageIndex: 0 }
+    )
+  }, [props.appliedFilters])
+
   const logsQuery = useQuery({
     queryKey: [
       'token-logs',
@@ -667,7 +834,7 @@ function AuthPanel(props: {
           {t('API Key Logs')}
         </CardTitle>
       </CardHeader>
-      <CardContent className='space-y-4'>
+      <CardContent className='flex flex-col gap-4'>
         <div className='grid gap-2'>
           <Label htmlFor='public-log-api-key'>{t('API Key')}</Label>
           <Input
@@ -723,15 +890,16 @@ function TokenLogsWorkspace(props: {
   const [appliedFilters, setAppliedFilters] = useState<TokenLogFilters>(() =>
     buildDefaultTokenLogFilters()
   )
-  const timeParams = useMemo(
-    () => buildTokenLogTimeParams(appliedFilters),
+  const filterParams = useMemo(
+    () => buildTokenLogFilterParams(appliedFilters),
     [appliedFilters]
   )
+  const usageAvailable = isTokenLogUsageStatAvailable(appliedFilters)
 
   const statsQuery = useQuery({
-    queryKey: ['token-logs', 'stat', timeParams],
+    queryKey: ['token-logs', 'stat', filterParams],
     queryFn: async () => {
-      const result = await getTokenLogStat(props.client, timeParams)
+      const result = await getTokenLogStat(props.client, filterParams)
       if (!result.success) {
         throw new Error(result.message || t('Failed to load statistics'))
       }
@@ -740,9 +908,9 @@ function TokenLogsWorkspace(props: {
     placeholderData: (previousData) => previousData,
   })
   const chartQuery = useQuery({
-    queryKey: ['token-logs', 'chart', timeParams],
+    queryKey: ['token-logs', 'chart', filterParams],
     queryFn: async () => {
-      const result = await getTokenLogChartData(props.client, timeParams)
+      const result = await getTokenLogChartData(props.client, filterParams)
       if (!result.success) {
         throw new Error(result.message || t('Failed to load chart data'))
       }
@@ -785,10 +953,26 @@ function TokenLogsWorkspace(props: {
       <TokenLogStatsCards
         stat={statsQuery.data}
         isLoading={statsQuery.isLoading}
+        usageAvailable={usageAvailable}
       />
       <TokenLogCharts
         data={chartQuery.data}
         isLoading={chartQuery.isLoading}
+        usageAvailable={usageAvailable}
+        onSelectModel={(modelName) => {
+          const nextModel = modelName.trim()
+          if (!nextModel) return
+          setDraftFilters((previous) =>
+            previous.model?.trim() === nextModel
+              ? previous
+              : { ...previous, model: nextModel }
+          )
+          setAppliedFilters((previous) =>
+            previous.model?.trim() === nextModel
+              ? previous
+              : { ...previous, model: nextModel }
+          )
+        }}
       />
       <TokenLogsTable
         client={props.client}
@@ -827,8 +1011,8 @@ function PublicTokenLogsContent() {
     setAuthError('')
     try {
       const nextClient = createTokenLogClient(normalizedKey)
-      const result = await getTokenLogStat(nextClient)
-      if (!result.success) {
+      const result = await getTokenUsage(nextClient)
+      if (result.code !== true) {
         setAuthError(result.message || t('Invalid API key'))
         return
       }

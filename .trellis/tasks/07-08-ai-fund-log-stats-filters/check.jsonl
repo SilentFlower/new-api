@@ -1,0 +1,6 @@
+{"file": ".trellis/spec/backend/api-contracts.md", "reason": "检查新增筛选参数是否在前端、Controller、Model 和旧调用兼容性上保持一致。"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "检查日志统计和聚合查询是否保持三库兼容，并避免数据库方言问题。"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "检查公共日志接口、token usage 验证和前端错误提示是否符合既有响应契约。"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "检查公共 API Key 日志页是否仍不暴露 channel、username、IP 等管理员敏感字段。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "检查实现是否符合项目质量规则、测试范围、Bun/i18n 流程和受保护信息要求。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "检查统计卡片、模型分布、趋势图和表格是否在相同筛选条件下完成跨层联动。"}

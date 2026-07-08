@@ -210,3 +210,128 @@ await updateChannel(channel.id, {
 await updateChannel(channel.id, formPayload)
 await updateChannelStatus(channel.id, CHANNEL_STATUS.MANUALLY_DISABLED)
 ```
+
+## 场景：公共 API Key 日志统计筛选联动
+
+### 1. Scope / Trigger
+
+- Trigger: 公共 API Key 日志页 `/log` 修改统计、图表、表格的查询参数或统计口径；或修改 `logs` 表索引来支撑公共日志统计性能。
+- 适用范围: `GET /api/log/token/stat`、`GET /api/log/token/data`、`GET /api/log/token`、`GET /api/usage/token/`，以及 `web/default/src/features/token-logs/*`。
+- 目标: 统计卡片、模型分布、消耗趋势和日志表格必须使用同一组筛选条件，且不能在 API Key 验证阶段触发全历史日志统计。
+
+### 2. Signatures
+
+- API Key 验证使用轻量只读接口：
+
+```text
+GET /api/usage/token/
+Authorization: Bearer <api-key>
+```
+
+- 公共日志统计和图表接口支持完整筛选参数：
+
+```text
+GET /api/log/token/stat?type=<int>&model_name=<string>&request_id=<string>&start_timestamp=<unix>&end_timestamp=<unix>
+GET /api/log/token/data?type=<int>&model_name=<string>&request_id=<string>&start_timestamp=<unix>&end_timestamp=<unix>
+```
+
+- Model 层使用统一筛选结构：
+
+```go
+type TokenLogFilterParams struct {
+	TokenID        int
+	LogType        int
+	StartTimestamp int64
+	EndTimestamp   int64
+	ModelName      string
+	RequestID      string
+}
+```
+
+- `logs` 表必须保留公共日志统计所需索引：
+
+```text
+idx_logs_token_created_at(token_id, created_at)
+idx_logs_token_type_created_at(token_id, type, created_at)
+```
+
+### 3. Contracts
+
+- 认证契约：
+  - `/log` 输入 API Key 后，前端只调用 `/api/usage/token/` 验证 Key 和读取基础 token 信息。
+  - `/api/usage/token/` 必须优先使用 `TokenAuthReadOnly` 写入的 `token_id` / `id` 上下文；只能把 `Authorization` header 作为兼容 fallback。
+  - `sk-xxx-suffix` 这类带后缀 Authorization 也必须由认证上下文稳定定位 token，不能在 usage 接口内重新做不完整解析。
+- 筛选契约：
+  - `type/model_name/request_id/start_timestamp/end_timestamp` 必须从前端一路传到 Controller 和 Model。
+  - `model_name` 沿用公共日志表格的安全 LIKE 语义；`request_id` 使用精确匹配。
+  - 旧调用方只传时间参数或不传新参数时必须继续可用。
+- 统计口径：
+  - `count/rpm` 跟随当前日志类型筛选；`type=0` 表示全部日志类型。
+  - `quota/prompt_tokens/completion_tokens/total_tokens/tpm` 只统计消费日志。
+  - Anthropic token 总量口径是 `prompt_tokens + completion_tokens + cache_read_input_tokens + cache_creation_input_tokens`。
+  - 非消费类型筛选时，用量类字段为 0，趋势图返回空态。
+- 索引契约：
+  - 普通 SQLite/MySQL/PostgreSQL 日志库通过 `AutoMigrate(&Log{})` 创建复合索引。
+  - 独立 `LOG_SQL_DSN` 日志库也必须走同一 `migrateLOGDB()` 路径。
+  - ClickHouse 日志库不通过 GORM 索引 tag 迁移，继续使用现有 MergeTree 表结构。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+|------|------|
+| API Key 无效、禁用或超限 | 保持现有认证错误提示，不调用全历史统计兜底 |
+| `type=0` 或缺省 | 请求数/RPM 覆盖全部日志类型，用量类指标只覆盖消费日志 |
+| `type` 是错误、退款、管理等非消费类型 | 请求数/RPM 正常联动，用量类指标为 0，趋势图显示消费日志空态 |
+| `model_name` 含 `%` 通配符 | 只使用现有安全 LIKE helper，避免未转义 LIKE |
+| `request_id` 为空 | 不增加请求 ID 过滤 |
+| `request_id` 非空 | 使用 `request_id = ?` 精确匹配 |
+| 时间范围为空 | 不在认证阶段使用统计接口；统计接口旧调用保持兼容 |
+| 日志表缺少复合索引 | 需要通过迁移或发布操作单补齐，避免大日志量下按单列 token 索引回表扫描 |
+
+### 5. Good/Base/Bad Cases
+
+- Good: 用户筛选 `type=2&model_name=claude%&request_id=req_1`，统计、模型分布、趋势图和表格都只反映该 API Key 下匹配消费日志。
+- Base: 用户只传 `start_timestamp/end_timestamp`，统计和图表保持旧时间筛选语义。
+- Bad: API Key 验证时调用 `/api/log/token/stat` 且不带时间范围，会扫描该 token 全历史日志。
+- Bad: `type=5` 错误日志筛选下仍计算 quota/tokens，会把非消费日志混入用量口径。
+
+### 6. Tests Required
+
+- Controller 测试：
+  - usage 接口能使用 `TokenAuthReadOnly` 上下文定位 token，兼容带后缀 Authorization。
+  - stat/data 接口解析 `type/model_name/request_id/start/end` 并传入 Model。
+- Model 测试：
+  - `type=0` 时 count 包含全部类型，用量只包含消费日志。
+  - 非消费 type 时用量为 0，且不扫描消费日志趋势。
+  - Anthropic cache token 口径包含 cache read 和 cache creation。
+  - AutoMigrate 会创建 `idx_logs_token_created_at` 和 `idx_logs_token_type_created_at`。
+- 前端验证：
+  - API Key 验证只调 `/api/usage/token/`。
+  - 统计、图表、表格请求参数和 React Query key 都包含完整筛选条件。
+  - 点击模型分布项会回填模型输入框并自动查询。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```typescript
+// 认证阶段不应调用统计接口；无时间范围会触发全历史日志扫描。
+await getTokenLogStat(client)
+```
+
+```go
+// 用量统计不能复用当前非消费类型筛选。
+tx := LOG_DB.Where("token_id = ? AND type = ?", tokenID, logType)
+```
+
+#### Correct
+
+```typescript
+await getTokenUsage(client)
+await getTokenLogStat(client, buildTokenLogQueryParams(appliedFilters))
+```
+
+```go
+usageParams := tokenLogFilterWithType(params, LogTypeConsume)
+usageQuery, err := applyTokenLogFilterParams(LOG_DB.Model(&Log{}), usageParams, true)
+```

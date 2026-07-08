@@ -177,6 +177,20 @@ func GetLogByKeyPaged(c *gin.Context) {
 	common.ApiSuccess(c, pageInfo)
 }
 
+func parseTokenLogFilterParams(c *gin.Context, tokenId int) model.TokenLogFilterParams {
+	logType, _ := strconv.Atoi(c.Query("type"))
+	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
+	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	return model.TokenLogFilterParams{
+		TokenID:        tokenId,
+		LogType:        logType,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		ModelName:      c.Query("model_name"),
+		RequestID:      c.Query("request_id"),
+	}
+}
+
 // GetLogStatByKey 按 API Key（token_id）查询统计数据（公共日志查看器统计卡片）
 // 返回使用次数、消耗额度、Token 用量、RPM、TPM
 func GetLogStatByKey(c *gin.Context) {
@@ -186,10 +200,7 @@ func GetLogStatByKey(c *gin.Context) {
 		return
 	}
 
-	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
-	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
-
-	stat, err := model.GetTokenLogStat(tokenId, startTimestamp, endTimestamp)
+	stat, err := model.GetTokenLogStatWithFilters(parseTokenLogFilterParams(c, tokenId))
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -206,24 +217,23 @@ func GetLogChartDataByKey(c *gin.Context) {
 		return
 	}
 
-	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
-	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
+	params := parseTokenLogFilterParams(c, tokenId)
 
 	// 时间跨度限制 1 个月
-	if endTimestamp-startTimestamp > 2592000 {
+	if params.EndTimestamp-params.StartTimestamp > 2592000 {
 		common.ApiErrorMsg(c, "时间跨度不能超过 1 个月")
 		return
 	}
 
 	// 查询模型调用分布数据（饼图）
-	modelStats, err := model.GetTokenModelStats(tokenId, startTimestamp, endTimestamp)
+	modelStats, err := model.GetTokenModelStatsWithFilters(params)
 	if err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
 	// 查询消耗趋势数据（折线图）
-	quotaData, err := model.GetTokenQuotaData(tokenId, startTimestamp, endTimestamp)
+	quotaData, err := model.GetTokenQuotaDataWithFilters(params)
 	if err != nil {
 		common.ApiError(c, err)
 		return

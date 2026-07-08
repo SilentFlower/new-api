@@ -1,0 +1,7 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "后端任务开发前索引，确认本任务需要遵循的 API、数据库、错误处理、日志和质量规范。"}
+{"file": ".trellis/spec/backend/api-contracts.md", "reason": "本任务扩展公共日志统计和图表查询参数，需要保证前端、Controller、Model 的查询契约一致且兼容旧调用。"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "日志统计和聚合查询必须兼容 SQLite、MySQL、PostgreSQL，并正确使用 LOG_DB/GORM 模式。"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "统计、图表和轻量 token usage 接口的错误响应格式不同，前后端需要按既有契约处理。"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "公共日志页涉及审计日志查询和敏感字段边界，必须避免泄露管理员敏感信息。"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "实现时需要遵守 Go/前端质量规则、JSON 封装、Bun 验证和测试要求。"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "本任务跨后端查询、API 响应、React Query 缓存和图表展示，需要显式检查跨层数据流。"}

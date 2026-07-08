@@ -282,6 +282,22 @@ func sumStatisticTokenUsedFromLogQuery(tx *gorm.DB) (int, error) {
 	return total, err
 }
 
+func sumStatisticCacheTokenDeltaFromLogQuery(tx *gorm.DB) (int, error) {
+	total := 0
+	batch := make([]Log, 0, statisticLogBatchSize)
+	err := tx.Session(&gorm.Session{}).
+		Select("id", "other").
+		Where("other <> ?", "").
+		Order("id asc").
+		FindInBatches(&batch, statisticLogBatchSize, func(tx *gorm.DB, batchNumber int) error {
+			for i := range batch {
+				total += statisticCacheTokenDeltaForLog(&batch[i])
+			}
+			return nil
+		}).Error
+	return total, err
+}
+
 func statisticLogQuery() *gorm.DB {
 	return LOG_DB.Model(&Log{}).Where("type = ?", LogTypeConsume)
 }

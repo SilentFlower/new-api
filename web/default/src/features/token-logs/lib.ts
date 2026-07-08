@@ -16,7 +16,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { LOG_TYPE_ALL_VALUE } from '@/features/usage-logs/constants'
+import {
+  LOG_TYPE_ALL_VALUE,
+  LOG_TYPE_ENUM,
+} from '@/features/usage-logs/constants'
 
 import type { TokenLogFilters, TokenLogQueryParams } from './types'
 
@@ -58,10 +61,21 @@ export function buildTokenLogQueryParams(
   page: number,
   pageSize: number
 ): TokenLogQueryParams {
-  const logType = Number(filters.type)
   return {
+    ...buildTokenLogFilterParams(filters),
     p: page,
     page_size: pageSize,
+  }
+}
+
+/**
+ * 将本地过滤状态转换为统计和图表共用的后端查询参数。
+ */
+export function buildTokenLogFilterParams(
+  filters: TokenLogFilters
+): Omit<TokenLogQueryParams, 'p' | 'page_size'> {
+  const logType = Number(filters.type)
+  return {
     type: Number.isFinite(logType) ? logType : 0,
     model_name: filters.model?.trim() || undefined,
     request_id: filters.requestId?.trim() || undefined,
@@ -71,15 +85,17 @@ export function buildTokenLogQueryParams(
 }
 
 /**
- * 构造公共日志统计和图表使用的时间参数。
+ * 判断当前日志类型筛选是否支持用量类统计。
  */
-export function buildTokenLogTimeParams(filters: TokenLogFilters): Required<
-  Pick<TokenLogQueryParams, 'start_timestamp' | 'end_timestamp'>
-> {
-  return {
-    start_timestamp: dateToTimestampSeconds(filters.startTime),
-    end_timestamp: dateToTimestampSeconds(filters.endTime),
-  }
+export function isTokenLogUsageStatAvailable(
+  filters: TokenLogFilters
+): boolean {
+  const logType = Number(filters.type)
+  return (
+    !Number.isFinite(logType) ||
+    logType === Number(LOG_TYPE_ALL_VALUE) ||
+    logType === LOG_TYPE_ENUM.CONSUME
+  )
 }
 
 /**
@@ -88,9 +104,9 @@ export function buildTokenLogTimeParams(filters: TokenLogFilters): Required<
 export function hasTokenLogFilters(filters: TokenLogFilters): boolean {
   return Boolean(
     filters.model?.trim() ||
-      filters.token?.trim() ||
-      filters.group?.trim() ||
-      filters.requestId?.trim() ||
-      filters.type !== LOG_TYPE_ALL_VALUE
+    filters.token?.trim() ||
+    filters.group?.trim() ||
+    filters.requestId?.trim() ||
+    filters.type !== LOG_TYPE_ALL_VALUE
   )
 }

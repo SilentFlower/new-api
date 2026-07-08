@@ -42,6 +42,23 @@ type tokenKeyResponse struct {
 	Key string `json:"key"`
 }
 
+type tokenUsageResponse struct {
+	Code    bool           `json:"code"`
+	Message string         `json:"message"`
+	Data    tokenUsageData `json:"data"`
+}
+
+type tokenUsageData struct {
+	Name            string `json:"name"`
+	TotalGranted    int    `json:"total_granted"`
+	TotalUsed       int    `json:"total_used"`
+	TotalAvailable  int    `json:"total_available"`
+	UnlimitedQuota  bool   `json:"unlimited_quota"`
+	ModelLimits     any    `json:"model_limits"`
+	ModelLimitsOpen bool   `json:"model_limits_enabled"`
+	ExpiresAt       int64  `json:"expires_at"`
+}
+
 type sqliteColumnInfo struct {
 	Name string `gorm:"column:name"`
 	Type string `gorm:"column:type"`
@@ -536,5 +553,29 @@ func TestGetTokenKeyRequiresOwnershipAndReturnsFullKey(t *testing.T) {
 	}
 	if strings.Contains(unauthorizedRecorder.Body.String(), token.Key) {
 		t.Fatalf("unauthorized key response leaked raw token key: %s", unauthorizedRecorder.Body.String())
+	}
+}
+
+func TestGetTokenUsageUsesAuthenticatedContextForSuffixedAuthorization(t *testing.T) {
+	db := setupTokenControllerTestDB(t)
+	token := seedToken(t, db, 1, "usage-token", "usage1234token5678")
+
+	ctx, recorder := newAuthenticatedContext(t, http.MethodGet, "/api/usage/token/", nil, 1)
+	ctx.Set("token_id", token.Id)
+	ctx.Request.Header.Set("Authorization", "Bearer sk-"+token.Key+"-client-suffix")
+	GetTokenUsage(ctx)
+
+	var response tokenUsageResponse
+	if err := common.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode token usage response: %v", err)
+	}
+	if !response.Code {
+		t.Fatalf("expected usage response to succeed, got message: %s", response.Message)
+	}
+	if response.Data.Name != token.Name {
+		t.Fatalf("expected token name %q, got %q", token.Name, response.Data.Name)
+	}
+	if response.Data.TotalAvailable != token.RemainQuota {
+		t.Fatalf("expected available quota %d, got %d", token.RemainQuota, response.Data.TotalAvailable)
 	}
 }

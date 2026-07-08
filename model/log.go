@@ -60,8 +60,8 @@ func sanitizeClickHouseLikePattern(input string) (string, error) {
 type Log struct {
 	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
 	UserId            int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
-	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type"`
-	Type              int    `json:"type" gorm:"index:idx_created_at_type"`
+	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type;index:idx_logs_token_created_at,priority:2;index:idx_logs_token_type_created_at,priority:3"`
+	Type              int    `json:"type" gorm:"index:idx_created_at_type;index:idx_logs_token_type_created_at,priority:2"`
 	Content           string `json:"content"`
 	Username          string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
 	TokenName         string `json:"token_name" gorm:"index;default:''"`
@@ -73,7 +73,7 @@ type Log struct {
 	IsStream          bool   `json:"is_stream"`
 	ChannelId         int    `json:"channel" gorm:"index"`
 	ChannelName       string `json:"channel_name" gorm:"->"`
-	TokenId           int    `json:"token_id" gorm:"default:0;index"`
+	TokenId           int    `json:"token_id" gorm:"default:0;index;index:idx_logs_token_created_at,priority:1;index:idx_logs_token_type_created_at,priority:1"`
 	Group             string `json:"group" gorm:"index"`
 	Ip                string `json:"ip" gorm:"index;default:''"`
 	RequestId         string `json:"request_id,omitempty" gorm:"type:varchar(64);index:idx_logs_request_id;default:''"`
@@ -838,6 +838,72 @@ type TokenLogStat struct {
 	Tpm              int `json:"tpm"`
 }
 
+// TokenLogFilterParams 表示公共 API Key 日志查看器的筛选条件。
+type TokenLogFilterParams struct {
+	TokenID        int
+	LogType        int
+	StartTimestamp int64
+	EndTimestamp   int64
+	ModelName      string
+	RequestID      string
+}
+
+type tokenLogUsageStat struct {
+	Quota            int `json:"quota"`
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+func tokenLogFilterWithType(params TokenLogFilterParams, logType int) TokenLogFilterParams {
+	params.LogType = logType
+	return params
+}
+
+func tokenLogUsageAvailable(params TokenLogFilterParams) bool {
+	return params.LogType == LogTypeUnknown || params.LogType == LogTypeConsume
+}
+
+func applyTokenLogFilterParams(tx *gorm.DB, params TokenLogFilterParams, includeTime bool) (*gorm.DB, error) {
+	tx = tx.Where("token_id = ?", params.TokenID)
+	if params.LogType != LogTypeUnknown {
+		tx = tx.Where("type = ?", params.LogType)
+	}
+	if includeTime {
+		if params.StartTimestamp != 0 {
+			tx = tx.Where("created_at >= ?", params.StartTimestamp)
+		}
+		if params.EndTimestamp != 0 {
+			tx = tx.Where("created_at <= ?", params.EndTimestamp)
+		}
+	}
+	if params.ModelName != "" {
+		var err error
+		if tx, err = applyExplicitLogTextFilter(tx, "model_name", params.ModelName); err != nil {
+			return nil, err
+		}
+	}
+	if params.RequestID != "" {
+		tx = tx.Where("request_id = ?", params.RequestID)
+	}
+	return tx, nil
+}
+
+func queryTokenUsageStat(tx *gorm.DB) (tokenLogUsageStat, error) {
+	var stat tokenLogUsageStat
+	if err := tx.Session(&gorm.Session{}).
+		Select("COALESCE(sum(quota), 0) as quota, COALESCE(sum(prompt_tokens), 0) as prompt_tokens, COALESCE(sum(completion_tokens), 0) as completion_tokens").
+		Scan(&stat).Error; err != nil {
+		return stat, err
+	}
+	cacheDelta, err := sumStatisticCacheTokenDeltaFromLogQuery(tx)
+	if err != nil {
+		return stat, err
+	}
+	stat.TotalTokens = stat.PromptTokens + stat.CompletionTokens + cacheDelta
+	return stat, nil
+}
+
 // GetTokenLogStat 按 token_id 聚合查询统计数据（公共 API Key 日志查看器）
 // 仅统计消费类型日志（type=2）
 // @param tokenId Token ID
@@ -845,45 +911,67 @@ type TokenLogStat struct {
 // @param endTimestamp 结束时间戳（可选，0 表示不限制）
 // @return 统计数据
 func GetTokenLogStat(tokenId int, startTimestamp int64, endTimestamp int64) (stat TokenLogStat, err error) {
-	baseQuery := LOG_DB.Model(&Log{}).
-		Where("token_id = ?", tokenId).
-		Where("type = ?", LogTypeConsume)
-	if startTimestamp != 0 {
-		baseQuery = baseQuery.Where("created_at >= ?", startTimestamp)
-	}
-	if endTimestamp != 0 {
-		baseQuery = baseQuery.Where("created_at <= ?", endTimestamp)
-	}
+	return GetTokenLogStatWithFilters(TokenLogFilterParams{
+		TokenID:        tokenId,
+		LogType:        LogTypeConsume,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+	})
+}
 
-	tx := baseQuery.Session(&gorm.Session{}).
-		Select("count(*) as count, COALESCE(sum(quota), 0) as quota, COALESCE(sum(prompt_tokens), 0) as prompt_tokens, COALESCE(sum(completion_tokens), 0) as completion_tokens")
-	if err := tx.Scan(&stat).Error; err != nil {
-		return stat, errors.New("查询统计数据失败")
-	}
-	totalTokens, err := sumStatisticTokenUsedFromLogQuery(baseQuery)
+// GetTokenLogStatWithFilters 按公共日志筛选条件聚合查询统计数据。
+// @param params 公共 API Key 日志筛选条件
+// @return 统计数据
+func GetTokenLogStatWithFilters(params TokenLogFilterParams) (stat TokenLogStat, err error) {
+	countQuery, err := applyTokenLogFilterParams(LOG_DB.Model(&Log{}), params, true)
 	if err != nil {
+		return stat, err
+	}
+	if err := countQuery.Select("count(*) as count").Scan(&stat).Error; err != nil {
 		return stat, errors.New("查询统计数据失败")
 	}
-	stat.TotalTokens = totalTokens
 
-	// 查询实时 RPM/TPM（最近 60 秒），使用独立变量避免覆盖已有统计字段
-	var rpmTpm struct {
+	rpmQuery, err := applyTokenLogFilterParams(LOG_DB.Model(&Log{}), params, false)
+	if err != nil {
+		return stat, err
+	}
+	rpmQuery = rpmQuery.Where("created_at >= ?", time.Now().Add(-60*time.Second).Unix())
+	var rpmStat struct {
 		Rpm int `json:"rpm"`
 	}
-	rpmTpmQuery := LOG_DB.Model(&Log{}).
-		Where("token_id = ?", tokenId).
-		Where("type = ?", LogTypeConsume).
-		Where("created_at >= ?", time.Now().Add(-60*time.Second).Unix())
-	if err := rpmTpmQuery.Select("count(*) as rpm").Scan(&rpmTpm).Error; err != nil {
+	if err := rpmQuery.Select("count(*) as rpm").Scan(&rpmStat).Error; err != nil {
 		return stat, errors.New("查询统计数据失败")
 	}
-	stat.Rpm = rpmTpm.Rpm
-	tpm, err := sumStatisticTokenUsedFromLogQuery(rpmTpmQuery)
+	stat.Rpm = rpmStat.Rpm
+
+	if !tokenLogUsageAvailable(params) {
+		return stat, nil
+	}
+
+	usageParams := tokenLogFilterWithType(params, LogTypeConsume)
+	usageQuery, err := applyTokenLogFilterParams(LOG_DB.Model(&Log{}), usageParams, true)
+	if err != nil {
+		return stat, err
+	}
+	usageStat, err := queryTokenUsageStat(usageQuery)
 	if err != nil {
 		return stat, errors.New("查询统计数据失败")
 	}
-	stat.Tpm = tpm
+	stat.Quota = usageStat.Quota
+	stat.PromptTokens = usageStat.PromptTokens
+	stat.CompletionTokens = usageStat.CompletionTokens
+	stat.TotalTokens = usageStat.TotalTokens
 
+	tpmQuery, err := applyTokenLogFilterParams(LOG_DB.Model(&Log{}), usageParams, false)
+	if err != nil {
+		return stat, err
+	}
+	tpmQuery = tpmQuery.Where("created_at >= ?", time.Now().Add(-60*time.Second).Unix())
+	tpmStat, err := queryTokenUsageStat(tpmQuery)
+	if err != nil {
+		return stat, errors.New("查询统计数据失败")
+	}
+	stat.Tpm = tpmStat.TotalTokens
 	return stat, nil
 }
 
@@ -900,18 +988,26 @@ type TokenModelStat struct {
 // @param endTimestamp 结束时间戳（可选）
 // @return 各模型的调用次数
 func GetTokenModelStats(tokenId int, startTimestamp int64, endTimestamp int64) ([]*TokenModelStat, error) {
+	return GetTokenModelStatsWithFilters(TokenLogFilterParams{
+		TokenID:        tokenId,
+		LogType:        LogTypeConsume,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+	})
+}
+
+// GetTokenModelStatsWithFilters 按公共日志筛选条件聚合查询模型调用统计。
+// @param params 公共 API Key 日志筛选条件
+// @return 各模型的调用次数
+func GetTokenModelStatsWithFilters(params TokenLogFilterParams) ([]*TokenModelStat, error) {
 	var results []*TokenModelStat
 	tx := LOG_DB.Table("logs").
-		Select("model_name, count(*) as count").
-		Where("token_id = ?", tokenId).
-		Where("type = ?", LogTypeConsume)
-	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
+		Select("model_name, count(*) as count")
+	var err error
+	if tx, err = applyTokenLogFilterParams(tx, params, true); err != nil {
+		return nil, err
 	}
-	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
-	}
-	err := tx.Group("model_name").Order("count desc").Find(&results).Error
+	err = tx.Group("model_name").Order("count desc").Find(&results).Error
 	return results, err
 }
 
@@ -922,10 +1018,26 @@ func GetTokenModelStats(tokenId int, startTimestamp int64, endTimestamp int64) (
 // @param endTimestamp 结束时间戳
 // @return 按时间和模型聚合的配额数据
 func GetTokenQuotaData(tokenId int, startTimestamp int64, endTimestamp int64) ([]*QuotaData, error) {
-	tx := LOG_DB.Model(&Log{}).
-		Where("token_id = ?", tokenId).
-		Where("type = ?", LogTypeConsume).
-		Where("created_at >= ? AND created_at <= ?", startTimestamp, endTimestamp)
+	return GetTokenQuotaDataWithFilters(TokenLogFilterParams{
+		TokenID:        tokenId,
+		LogType:        LogTypeConsume,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+	})
+}
+
+// GetTokenQuotaDataWithFilters 按公共日志筛选条件聚合查询消费趋势数据。
+// @param params 公共 API Key 日志筛选条件
+// @return 按时间和模型聚合的配额数据
+func GetTokenQuotaDataWithFilters(params TokenLogFilterParams) ([]*QuotaData, error) {
+	if !tokenLogUsageAvailable(params) {
+		return []*QuotaData{}, nil
+	}
+	usageParams := tokenLogFilterWithType(params, LogTypeConsume)
+	tx, err := applyTokenLogFilterParams(LOG_DB.Model(&Log{}), usageParams, true)
+	if err != nil {
+		return nil, err
+	}
 	return aggregateTokenQuotaDataFromLogQuery(tx)
 }
 
@@ -941,31 +1053,19 @@ func GetTokenQuotaData(tokenId int, startTimestamp int64, endTimestamp int64) ([
 // @param num 每页条数
 // @return 脱敏后的日志列表、总数、错误
 func GetLogsByTokenId(tokenId int, logType int, startTimestamp int64, endTimestamp int64, modelName string, requestId string, startIdx int, num int) (logs []*Log, total int64, err error) {
-	var tx *gorm.DB
-	if logType == LogTypeUnknown {
-		tx = LOG_DB.Where("token_id = ?", tokenId)
-	} else {
-		tx = LOG_DB.Where("token_id = ? AND type = ?", tokenId, logType)
+	tx, err := applyTokenLogFilterParams(LOG_DB.Model(&Log{}), TokenLogFilterParams{
+		TokenID:        tokenId,
+		LogType:        logType,
+		StartTimestamp: startTimestamp,
+		EndTimestamp:   endTimestamp,
+		ModelName:      modelName,
+		RequestID:      requestId,
+	}, true)
+	if err != nil {
+		return nil, 0, err
 	}
 
-	if modelName != "" {
-		modelNamePattern, err := sanitizeLikePattern(modelName)
-		if err != nil {
-			return nil, 0, err
-		}
-		tx = tx.Where("model_name LIKE ? ESCAPE '!'", modelNamePattern)
-	}
-	if requestId != "" {
-		tx = tx.Where("request_id = ?", requestId)
-	}
-	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
-	}
-	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
-	}
-
-	err = tx.Model(&Log{}).Limit(logSearchCountLimit).Count(&total).Error
+	err = tx.Limit(logSearchCountLimit).Count(&total).Error
 	if err != nil {
 		return nil, 0, errors.New("查询日志失败")
 	}
