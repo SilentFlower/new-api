@@ -311,3 +311,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 10: 迁移旧 UI 功能到新 UI
+
+**Date**: 2026-07-08
+**Task**: 迁移旧 UI 功能到新 UI
+**Branch**: `build-bak`
+
+### Summary
+
+完成 build-bak 旧 UI 独有功能迁移到 default 新 UI：补齐 API Keys 迁移入口、Dashboard 分组/令牌筛选与导出、公共 API Key 日志查看器，并修复渠道启停与编辑保存状态隔离；已完成检查、spec update、带 [build] 推送和任务快照。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `ac11f2f3` | (see git log) |
+| `bc25cbda` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
