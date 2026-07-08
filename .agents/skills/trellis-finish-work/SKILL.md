@@ -27,7 +27,7 @@ If no `release.md` exists:
 - High-confidence no release work exists after re-reading task files and git evidence: do not create `release.md`; mention in the final finish-work report that no release operations were identified.
 - Signals are uncertain but release risk exists: write `<task>/release.md` and mark the conclusion as `Needs human review`.
 
-Release-operation signals include SQL or migrations; configuration, environment variables, feature flags, permissions, secrets, or external endpoints; deployment scripts, one-off commands, data repair, scheduled task triggers, background job reruns, or other batch operations; and external systems or dependent platforms that must be released or coordinated, such as H0 API relay / gateway platforms, messaging platforms, or third-party admin consoles.
+Release-operation signals, with the `release.md` section each maps to: SQL or migrations (`SQL Changes`); configuration, environment variables, feature flags, permissions, secrets, or external endpoints (`Configuration Changes`); deployment scripts, one-off commands, data repair, scheduled task triggers, background job reruns, or other batch operations (`Batch / Deployment Scripts / Data Repair`); and external systems or dependent platforms outside the current repository that must be released or coordinated, such as H0 API relay / gateway platforms, messaging platforms, or third-party admin consoles (`External Systems / Dependent Platforms`).
 
 When writing or updating `release.md`, use this structure:
 
@@ -68,8 +68,6 @@ Rollback code only.
 ## Post-release Verification
 Verify according to task acceptance criteria.
 ```
-
-Classify deployment scripts, one-off commands, data repairs, scheduled task triggers, and job reruns under `Batch / Deployment Scripts / Data Repair`. Classify systems outside the current repository that need coordinated release, such as H0 API relay platforms, under `External Systems / Dependent Platforms`.
 
 Do not write `None`, `No release operations identified`, or `Rollback code only` out of habit. Use those defaults only after checking the task files and git evidence. If the task changed deployment scripts, configuration, SQL, external platforms, permissions, scheduled jobs, or data, record the concrete item and source.
 

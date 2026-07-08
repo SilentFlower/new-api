@@ -70,6 +70,41 @@ If you have not already loaded Trellis context this session, read the `trellis-s
 </trellis-bootstrap>"""
 
 
+def _codex_has_trellis_session_start(root: Path) -> bool:
+    """判断 Codex 主 SessionStart hook 是否已注册并可执行。
+
+    `trellis-start` bootstrap 是没有 SessionStart hook 时的兜底。flower-managed
+    Codex 项目会补 `.codex/hooks/session-start.py`,因此已注册时不应每轮重复提示。
+    读取失败时保守返回 False,继续保留兜底提示。
+    """
+    session_start = root / ".codex" / "hooks" / "session-start.py"
+    if not session_start.is_file():
+        return False
+
+    hooks_path = root / ".codex" / "hooks.json"
+    try:
+        config = json.loads(hooks_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return False
+    hooks_config = config.get("hooks")
+    if not isinstance(hooks_config, dict):
+        return False
+    groups = hooks_config.get("SessionStart")
+    if not isinstance(groups, list):
+        return False
+    for group in groups:
+        hooks = group.get("hooks") if isinstance(group, dict) else None
+        if not isinstance(hooks, list):
+            continue
+        for hook in hooks:
+            if not isinstance(hook, dict):
+                continue
+            command = hook.get("command")
+            if isinstance(command, str) and ".codex/hooks/session-start.py" in command:
+                return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # CWD-robust Trellis root discovery (fixes hook-path-robustness for this hook)
 # ---------------------------------------------------------------------------
@@ -373,7 +408,7 @@ def main() -> int:
         )
     if platform == "codex":
         parts: list[str] = []
-        if task is None:
+        if task is None and not _codex_has_trellis_session_start(root):
             parts.append(CODEX_NO_TASK_BOOTSTRAP_NOTICE)
         parts.append(_codex_mode_banner(config))
         parts.append(breadcrumb)
