@@ -111,9 +111,7 @@ func increaseQuotaData(userId int, username string, modelName string, tokenName 
 
 // getQuotaDataFromLogs 从 logs 表按筛选条件聚合查询配额数据。
 func getQuotaDataFromLogs(startTime int64, endTime int64, tokenNames []string, groups []string, userFilter string, userFilterValue interface{}, groupByUser bool) ([]*QuotaData, error) {
-	var quotaDatas []*QuotaData
-	tx := LOG_DB.Table("logs").
-		Select("model_name, token_name, sum(quota) as quota, count(*) as count, sum(prompt_tokens + completion_tokens) as token_used, (created_at - created_at % 3600) as created_at").
+	tx := LOG_DB.Model(&Log{}).
 		Where("type = ? and created_at >= ? and created_at <= ?", LogTypeConsume, startTime, endTime)
 	if userFilter != "" {
 		tx = tx.Where(userFilter, userFilterValue)
@@ -124,13 +122,7 @@ func getQuotaDataFromLogs(startTime int64, endTime int64, tokenNames []string, g
 	if len(groups) > 0 {
 		tx = tx.Where(logGroupCol+" IN ?", groups)
 	}
-	groupExpr := "model_name, token_name, (created_at - created_at % 3600)"
-	if groupByUser {
-		tx = tx.Select("user_id, username, model_name, token_name, sum(quota) as quota, count(*) as count, sum(prompt_tokens + completion_tokens) as token_used, (created_at - created_at % 3600) as created_at")
-		groupExpr = "user_id, username, model_name, token_name, (created_at - created_at % 3600)"
-	}
-	err := tx.Group(groupExpr).Find(&quotaDatas).Error
-	return quotaDatas, err
+	return aggregateQuotaDataFromLogQuery(tx, groupByUser)
 }
 
 // GetQuotaDataByUsername 按用户名查询配额数据，支持按 tokenName 过滤

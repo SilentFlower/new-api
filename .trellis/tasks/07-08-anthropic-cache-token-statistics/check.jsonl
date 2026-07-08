@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "检查管理接口和模型层错误传播是否符合项目规范。"}
+{"file": ".trellis/spec/backend/remote-token-operations-sop.md", "reason": "检查历史数据回算与 token 统计相关变更是否避免误伤运维/统计语义。"}

@@ -1,0 +1,2 @@
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "后台管理 API、导出和模型层错误处理需要保持项目统一错误返回约定。"}
+{"file": ".trellis/spec/backend/remote-token-operations-sop.md", "reason": "spec_router 高置信命中 token/聚合/统计相关 SOP；实现时需注意 token 统计语义与历史数据操作边界。"}

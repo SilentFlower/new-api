@@ -935,6 +935,7 @@ const LogViewer = () => {
       {
         title: t('Token 用量'),
         value: (
+          stat.total_tokens ??
           (stat.prompt_tokens || 0) + (stat.completion_tokens || 0)
         ).toLocaleString(),
         icon: <IconTextStroked />,

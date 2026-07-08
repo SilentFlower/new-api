@@ -337,8 +337,9 @@ func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
 		logger.LogError(c, "failed to record log: "+err.Error())
 	}
 	if common.DataExportEnabled {
+		tokenUsed := statisticTokenUsedFromOther(params.PromptTokens, params.CompletionTokens, params.Other)
 		gopool.Go(func() {
-			LogQuotaData(userId, username, params.ModelName, params.TokenName, params.Quota, common.GetTimestamp(), params.PromptTokens+params.CompletionTokens)
+			LogQuotaData(userId, username, params.ModelName, params.TokenName, params.Quota, common.GetTimestamp(), tokenUsed)
 		})
 	}
 }
@@ -542,8 +543,8 @@ func SumUsedQuota(logType int, startTimestamp int64, endTimestamp int64, modelNa
 func SumUsedQuotaWithFilters(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenNames []string, channel int, groups []string) (stat Stat, err error) {
 	tx := LOG_DB.Table("logs").Select("sum(quota) quota")
 
-	// 为rpm和tpm创建单独的查询
-	rpmTpmQuery := LOG_DB.Table("logs").Select("count(*) rpm, sum(prompt_tokens) + sum(completion_tokens) tpm")
+	// 为 RPM 和 TPM 创建单独的查询；TPM 需要按统一统计口径在 Go 侧补算 Anthropic 缓存 Token。
+	rpmTpmQuery := LOG_DB.Model(&Log{})
 
 	if tx, err = applyExplicitLogTextFilter(tx, "username", username); err != nil {
 		return stat, err
@@ -583,16 +584,26 @@ func SumUsedQuotaWithFilters(logType int, startTimestamp int64, endTimestamp int
 		common.SysError("failed to query log stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
-	if err := rpmTpmQuery.Scan(&stat).Error; err != nil {
+	var rpmStat struct {
+		Rpm int `json:"rpm"`
+	}
+	if err := rpmTpmQuery.Select("count(*) rpm").Scan(&rpmStat).Error; err != nil {
 		common.SysError("failed to query rpm/tpm stat: " + err.Error())
 		return stat, errors.New("查询统计数据失败")
 	}
+	stat.Rpm = rpmStat.Rpm
+	tpm, err := sumStatisticTokenUsedFromLogQuery(rpmTpmQuery)
+	if err != nil {
+		common.SysError("failed to query rpm/tpm token stat: " + err.Error())
+		return stat, errors.New("查询统计数据失败")
+	}
+	stat.Tpm = tpm
 
 	return stat, nil
 }
 
 func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelName string, username string, tokenName string) (token int) {
-	tx := LOG_DB.Table("logs").Select("ifnull(sum(prompt_tokens),0) + ifnull(sum(completion_tokens),0)")
+	tx := LOG_DB.Model(&Log{})
 	if username != "" {
 		tx = tx.Where("username = ?", username)
 	}
@@ -608,7 +619,8 @@ func SumUsedToken(logType int, startTimestamp int64, endTimestamp int64, modelNa
 	if modelName != "" {
 		tx = tx.Where("model_name = ?", modelName)
 	}
-	tx.Where("type = ?", LogTypeConsume).Scan(&token)
+	tx = tx.Where("type = ?", LogTypeConsume)
+	token, _ = sumStatisticTokenUsedFromLogQuery(tx)
 	return token
 }
 
@@ -646,9 +658,7 @@ func applyLogGroupsFilter(tx *gorm.DB, groups []string) *gorm.DB {
 // @param groups 分组过滤列表（可选）
 // @return 按 API Key 维度聚合的汇总数据
 func GetLogSummaryByKey(startTimestamp int64, endTimestamp int64, username string, tokenNames []string, groups []string) ([]*LogSummaryByKey, error) {
-	var results []*LogSummaryByKey
-	tx := LOG_DB.Table("logs").
-		Select("token_name, username, count(*) as count, sum(prompt_tokens + completion_tokens) as token_used, sum(quota) as quota").
+	tx := LOG_DB.Model(&Log{}).
 		Where("type = ?", LogTypeConsume).
 		Where("created_at >= ? AND created_at <= ?", startTimestamp, endTimestamp)
 	if username != "" {
@@ -656,7 +666,7 @@ func GetLogSummaryByKey(startTimestamp int64, endTimestamp int64, username strin
 	}
 	tx = applyLogTokenNamesFilter(tx, tokenNames)
 	tx = applyLogGroupsFilter(tx, groups)
-	err := tx.Group("token_name, username").Find(&results).Error
+	results, _, err := aggregateLogSummariesFromLogQuery(tx, false)
 	return results, err
 }
 
@@ -679,9 +689,7 @@ type LogDetailByKeyModel struct {
 // @param groups 分组过滤列表（可选）
 // @return 按 API Key + 模型维度聚合的明细数据
 func GetLogDetailByKeyModel(startTimestamp int64, endTimestamp int64, username string, tokenNames []string, groups []string) ([]*LogDetailByKeyModel, error) {
-	var results []*LogDetailByKeyModel
-	tx := LOG_DB.Table("logs").
-		Select("token_name, username, model_name, count(*) as count, sum(prompt_tokens + completion_tokens) as token_used, sum(quota) as quota").
+	tx := LOG_DB.Model(&Log{}).
 		Where("type = ?", LogTypeConsume).
 		Where("created_at >= ? AND created_at <= ?", startTimestamp, endTimestamp)
 	if username != "" {
@@ -689,7 +697,7 @@ func GetLogDetailByKeyModel(startTimestamp int64, endTimestamp int64, username s
 	}
 	tx = applyLogTokenNamesFilter(tx, tokenNames)
 	tx = applyLogGroupsFilter(tx, groups)
-	err := tx.Group("token_name, username, model_name").Find(&results).Error
+	_, results, err := aggregateLogSummariesFromLogQuery(tx, true)
 	return results, err
 }
 
@@ -730,6 +738,7 @@ type TokenLogStat struct {
 	Quota            int `json:"quota"`
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
 	Rpm              int `json:"rpm"`
 	Tpm              int `json:"tpm"`
 }
@@ -741,35 +750,44 @@ type TokenLogStat struct {
 // @param endTimestamp 结束时间戳（可选，0 表示不限制）
 // @return 统计数据
 func GetTokenLogStat(tokenId int, startTimestamp int64, endTimestamp int64) (stat TokenLogStat, err error) {
-	tx := LOG_DB.Table("logs").
-		Select("count(*) as count, COALESCE(sum(quota), 0) as quota, COALESCE(sum(prompt_tokens), 0) as prompt_tokens, COALESCE(sum(completion_tokens), 0) as completion_tokens").
+	baseQuery := LOG_DB.Model(&Log{}).
 		Where("token_id = ?", tokenId).
 		Where("type = ?", LogTypeConsume)
 	if startTimestamp != 0 {
-		tx = tx.Where("created_at >= ?", startTimestamp)
+		baseQuery = baseQuery.Where("created_at >= ?", startTimestamp)
 	}
 	if endTimestamp != 0 {
-		tx = tx.Where("created_at <= ?", endTimestamp)
+		baseQuery = baseQuery.Where("created_at <= ?", endTimestamp)
 	}
+
+	tx := baseQuery.Session(&gorm.Session{}).
+		Select("count(*) as count, COALESCE(sum(quota), 0) as quota, COALESCE(sum(prompt_tokens), 0) as prompt_tokens, COALESCE(sum(completion_tokens), 0) as completion_tokens")
 	if err := tx.Scan(&stat).Error; err != nil {
 		return stat, errors.New("查询统计数据失败")
 	}
+	totalTokens, err := sumStatisticTokenUsedFromLogQuery(baseQuery)
+	if err != nil {
+		return stat, errors.New("查询统计数据失败")
+	}
+	stat.TotalTokens = totalTokens
 
 	// 查询实时 RPM/TPM（最近 60 秒），使用独立变量避免覆盖已有统计字段
 	var rpmTpm struct {
 		Rpm int `json:"rpm"`
-		Tpm int `json:"tpm"`
 	}
-	rpmTpmQuery := LOG_DB.Table("logs").
-		Select("count(*) as rpm, COALESCE(sum(prompt_tokens), 0) + COALESCE(sum(completion_tokens), 0) as tpm").
+	rpmTpmQuery := LOG_DB.Model(&Log{}).
 		Where("token_id = ?", tokenId).
 		Where("type = ?", LogTypeConsume).
 		Where("created_at >= ?", time.Now().Add(-60*time.Second).Unix())
-	if err := rpmTpmQuery.Scan(&rpmTpm).Error; err != nil {
+	if err := rpmTpmQuery.Select("count(*) as rpm").Scan(&rpmTpm).Error; err != nil {
 		return stat, errors.New("查询统计数据失败")
 	}
 	stat.Rpm = rpmTpm.Rpm
-	stat.Tpm = rpmTpm.Tpm
+	tpm, err := sumStatisticTokenUsedFromLogQuery(rpmTpmQuery)
+	if err != nil {
+		return stat, errors.New("查询统计数据失败")
+	}
+	stat.Tpm = tpm
 
 	return stat, nil
 }
@@ -809,14 +827,11 @@ func GetTokenModelStats(tokenId int, startTimestamp int64, endTimestamp int64) (
 // @param endTimestamp 结束时间戳
 // @return 按时间和模型聚合的配额数据
 func GetTokenQuotaData(tokenId int, startTimestamp int64, endTimestamp int64) ([]*QuotaData, error) {
-	var quotaDatas []*QuotaData
-	tx := LOG_DB.Table("logs").
-		Select("model_name, sum(quota) as quota, count(*) as count, sum(prompt_tokens + completion_tokens) as token_used, (created_at - created_at % 3600) as created_at").
+	tx := LOG_DB.Model(&Log{}).
 		Where("token_id = ?", tokenId).
 		Where("type = ?", LogTypeConsume).
 		Where("created_at >= ? AND created_at <= ?", startTimestamp, endTimestamp)
-	err := tx.Group("model_name, (created_at - created_at % 3600)").Find(&quotaDatas).Error
-	return quotaDatas, err
+	return aggregateTokenQuotaDataFromLogQuery(tx)
 }
 
 // GetLogsByTokenId 按 token_id 分页查询日志（公共 API Key 日志查看器）
