@@ -22,5 +22,24 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-07-08T07:17:50.000719Z",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "new-api": "8471e8a6"
+    },
+    "push_mode": "push",
+    "completed_steps": [
+      "Step 1",
+      "Step 2",
+      "Step 3",
+      "Step 4",
+      "Step 5",
+      "Step 6",
+      "Step 7"
+    ],
+    "next_step": "部署 new-api，观察 quota_data 历史迁移日志与 ai-fund 顶部缓存统计",
+    "notes": "已提交并推送总 Token 统计包含 Anthropic 缓存的实现；旧 UI 构建未跑，环境缺少 bun。"
+  }
 }
