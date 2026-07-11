@@ -14,11 +14,11 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
-	"github.com/QuantumNous/new-api/relay/channel/claude"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/service/relayconvert"
 	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
@@ -144,7 +144,7 @@ func prepareVisionAssistRequest(c *gin.Context, parent *relaycommon.RelayInfo, r
 		}
 		return &visionAssistPreparedRequest{info: assistInfo, req: responsesRequest, mode: mode}, nil
 	case service.VisionAssistEndpointModeAnthropicMessages:
-		claudeRequest, err := claude.RequestOpenAI2ClaudeMessage(c, *request)
+		claudeRequest, err := relayconvert.OpenAIChatRequestToClaudeMessages(c, *request)
 		if err != nil {
 			return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 		}
