@@ -335,3 +335,101 @@ await getTokenLogStat(client, buildTokenLogQueryParams(appliedFilters))
 usageParams := tokenLogFilterWithType(params, LogTypeConsume)
 usageQuery, err := applyTokenLogFilterParams(LOG_DB.Model(&Log{}), usageParams, true)
 ```
+
+## 场景：数据看板 Excel 分组导出与大数据量生成
+
+### 1. Scope / Trigger
+
+- 适用于数据看板的 Excel 导出接口，以及复用同一日志筛选条件的导出聚合逻辑。
+- 当导出列、聚合维度、明细行上限或日志遍历方式发生变化时，必须同步检查本契约。
+- 日志库可能是独立 ClickHouse，不能假设日志表存在可靠的自增主键。
+
+### 2. Signatures
+
+```http
+GET /api/data/export?start_timestamp=<秒>&end_timestamp=<秒>&username=<用户>&token_name=<API Key>&group=<分组>
+Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+```
+
+```go
+func ProcessLogsForExport(
+    ctx context.Context,
+    startTimestamp int64,
+    endTimestamp int64,
+    username string,
+    tokenNames []string,
+    groups []string,
+    handleDetail func(log *Log, cacheReadTokens int, cacheCreationTokens int) error,
+) ([]LogSummaryByKey, []LogDetailByKeyModel, error)
+```
+
+### 3. Contracts
+
+- `start_timestamp`、`end_timestamp` 必填且必须为合法整数；`group`、`token_name` 支持重复查询参数并按集合筛选。
+- “汇总统计”列固定为：`分组`、`API Key 名称`、`请求次数`、`请求 Token 数`、`请求额度`，聚合维度为分组、API Key、用户名。
+- “模型明细”聚合维度为分组、API Key、用户名、模型；标题必须同时展示分组和 API Key，小计不能跨分组合并。
+- “请求日志”列固定为：`时间`、`分组`、`API Key 名称`、`模型`、`输入 Token`、`输出 Token`、`请求额度`、`用时`、`流式`、`渠道`、`请求 ID`。
+- “请求日志”只写入按 `created_at` 升序排列的前 500000 条，保持既有静默截断行为，不新增拒绝或告警文案；“汇总统计”和“模型明细”仍覆盖筛选范围内的全部日志。
+- Anthropic 输入 Token 展示与聚合必须包含 cache read 和 cache creation Token，且同一行的 `other` 字段只解析一次。
+- 历史日志的空分组保持为空字符串，不能擅自映射为默认分组或其他展示值。
+- 数据库日志只能遍历一次：同一次遍历完成全量聚合，并通过回调流式写入限定数量的请求明细。
+- 数据库读取必须使用带请求上下文的 `Rows()`、最小字段选择和稳定排序；三个工作表均使用 `excelize.StreamWriter`，写入完成后必须全部 `Flush()` 再返回文件。
+
+### 4. Validation / Error Matrix
+
+| 条件 | 行为 |
+|---|---|
+| 缺少开始或结束时间 | 返回参数错误，不执行日志扫描 |
+| 时间参数无法解析为整数 | 返回参数错误，不生成工作簿 |
+| 数据库查询、扫描或遍历结束检查失败 | 终止导出并返回服务端错误 |
+| 明细回调或工作表流式写入失败 | 立即停止遍历并返回服务端错误 |
+| 请求上下文取消 | 数据库遍历尽快终止，不能继续生成完整文件 |
+| 日志超过 500000 条 | 明细保留前 500000 条，汇总继续处理全部日志 |
+| 筛选结果为空 | 返回包含三张工作表和表头的有效工作簿 |
+
+### 5. Good / Base / Bad Cases
+
+- Good: 同一 API Key 在两个分组均有日志时，汇总和模型小计分别展示，请求日志逐行保留原始分组。
+- Good: 筛选结果超过 500000 条时，前 500000 条请求日志按时间升序写入，后续日志只参与全量汇总。
+- Base: 历史日志分组为空，三张工作表对应分组单元格为空，其他统计不受影响。
+- Bad: 为生成三张工作表分别查询日志库，造成三次大范围扫描和重复 JSON 解析。
+- Bad: 使用依赖 `id` 游标的批量遍历读取 ClickHouse 日志，导致默认 `id=0` 的记录遗漏或循环异常。
+- Bad: 为减少内存而让汇总也只统计前 500000 条，改变既有数据口径。
+
+### 6. Tests Required
+
+- Model 测试：验证相同 API Key 的不同分组分别聚合，汇总与模型明细包含分组，明细回调保持时间顺序。
+- Model 测试：验证回调错误和已取消上下文会向调用方返回错误。
+- Controller 测试：生成真实工作簿后重新打开，验证三张工作表、表头、筛选结果、分组列和 Anthropic cache Token 展示。
+- 回归测试：原有公开聚合方法必须保持可用，并复用新的单次遍历实现。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+// ClickHouse 日志的 id 可能全部为 0，不能依赖主键游标推进批次。
+LOG_DB.Where(filters).FindInBatches(&logs, 1000, processBatch)
+```
+
+```go
+// 三张工作表不能分别扫描同一批日志。
+summary := GetLogSummaryByKey(...)
+details := GetLogDetailByKeyModel(...)
+logs := GetLogsForExport(...)
+```
+
+#### Correct
+
+```go
+summary, details, err := ProcessLogsForExport(
+    request.Context(), start, end, username, tokenNames, groups, writeDetailRow,
+)
+```
+
+```go
+rows, err := query.WithContext(ctx).
+    Select("created_at, username, token_name, model_name, group, prompt_tokens, completion_tokens, quota, use_time, is_stream, channel_id, request_id, other").
+    Order("created_at asc").
+    Rows()
+```

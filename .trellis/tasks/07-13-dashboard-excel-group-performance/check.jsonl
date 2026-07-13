@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"检查查询字段、group 保留字、Rows 遍历和日志库路径的跨数据库兼容性。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查实现可读性、公共 API 中文注释和有业务价值的回归测试。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查查询、流式写入、Flush 和最终响应的错误传播是否正确。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"反向核对 group 从日志模型到三个 Excel Sheet 的字段流和筛选一致性。"}
+{"file":".trellis/tasks/07-13-dashboard-excel-group-performance/research/export-history.md","reason":"验证原始 Sheet、筛选、500000 行上限和缓存 Token 统计契约没有回退。"}

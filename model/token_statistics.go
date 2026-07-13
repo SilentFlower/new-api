@@ -26,12 +26,6 @@ type quotaDataAggregateKey struct {
 	CreatedAt int64
 }
 
-type logSummaryAggregateKey struct {
-	TokenName string
-	Username  string
-	ModelName string
-}
-
 func logStatisticOtherInt(other map[string]interface{}, key string) int {
 	if other == nil {
 		return 0
@@ -211,67 +205,6 @@ func aggregateTokenQuotaDataFromLogQuery(tx *gorm.DB) ([]*QuotaData, error) {
 		return nil, err
 	}
 	return quotaDataRowsFromAggregate(rowsMap), nil
-}
-
-func aggregateLogSummariesFromLogQuery(tx *gorm.DB, groupByModel bool) ([]*LogSummaryByKey, []*LogDetailByKeyModel, error) {
-	rowsMap := make(map[logSummaryAggregateKey]*LogDetailByKeyModel)
-	err := iterateStatisticLogs(tx, func(log *Log) {
-		key := logSummaryAggregateKey{
-			TokenName: log.TokenName,
-			Username:  log.Username,
-		}
-		if groupByModel {
-			key.ModelName = log.ModelName
-		}
-		row, ok := rowsMap[key]
-		if !ok {
-			row = &LogDetailByKeyModel{
-				TokenName: key.TokenName,
-				Username:  key.Username,
-				ModelName: key.ModelName,
-			}
-			rowsMap[key] = row
-		}
-		row.Count++
-		row.Quota += log.Quota
-		row.TokenUsed += statisticTokenUsedForLog(log)
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	if groupByModel {
-		detailRows := make([]*LogDetailByKeyModel, 0, len(rowsMap))
-		for _, row := range rowsMap {
-			detailRows = append(detailRows, row)
-		}
-		sort.Slice(detailRows, func(i, j int) bool {
-			if detailRows[i].TokenName != detailRows[j].TokenName {
-				return detailRows[i].TokenName < detailRows[j].TokenName
-			}
-			if detailRows[i].Username != detailRows[j].Username {
-				return detailRows[i].Username < detailRows[j].Username
-			}
-			return detailRows[i].ModelName < detailRows[j].ModelName
-		})
-		return nil, detailRows, nil
-	}
-	summaryRows := make([]*LogSummaryByKey, 0, len(rowsMap))
-	for _, row := range rowsMap {
-		summaryRows = append(summaryRows, &LogSummaryByKey{
-			TokenName: row.TokenName,
-			Username:  row.Username,
-			Count:     row.Count,
-			TokenUsed: row.TokenUsed,
-			Quota:     row.Quota,
-		})
-	}
-	sort.Slice(summaryRows, func(i, j int) bool {
-		if summaryRows[i].TokenName != summaryRows[j].TokenName {
-			return summaryRows[i].TokenName < summaryRows[j].TokenName
-		}
-		return summaryRows[i].Username < summaryRows[j].Username
-	})
-	return summaryRows, nil, nil
 }
 
 func sumStatisticTokenUsedFromLogQuery(tx *gorm.DB) (int, error) {

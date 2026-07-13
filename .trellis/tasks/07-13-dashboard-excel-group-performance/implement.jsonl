@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"导出日志查询必须兼容 SQLite、MySQL、PostgreSQL，并正确处理 group 保留字。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"实现和测试需遵循后端代码质量、注释、测试断言及差异控制要求。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"导出查询和 Excel 流式写入失败时需保持管理 API 错误响应约定。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"需要核对日志字段、Model 聚合、Controller Excel 列和下载响应的完整数据流。"}
+{"file":".trellis/tasks/07-13-dashboard-excel-group-performance/research/export-history.md","reason":"汇总原始 Sheet 契约、分组筛选语义、500000 行行为和 Anthropic 缓存 Token 口径。"}

@@ -138,6 +138,36 @@ tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&chunk)
 tx.Set("gorm:query_option", "FOR UPDATE").Where("trade_no = ?", ref).First(topUp)
 ```
 
+### 独立 ClickHouse 日志库的顺序遍历
+
+独立 ClickHouse 日志表的 `id` 可能使用默认值 `0`，完整顺序遍历时不能使用依赖自增主键游标的 `FindInBatches`。导出、离线聚合等场景应使用带上下文的 `Rows()`，只选择需要的字段，并显式指定稳定排序：
+
+```go
+rows, err := LOG_DB.Model(&Log{}).
+    WithContext(ctx).
+    Select("created_at, username, token_name, model_name, group, prompt_tokens, completion_tokens").
+    Order("created_at asc").
+    Rows()
+if err != nil {
+    return err
+}
+defer rows.Close()
+
+for rows.Next() {
+    var log Log
+    if err = LOG_DB.ScanRows(rows, &log); err != nil {
+        return err
+    }
+    // 在单次遍历中完成聚合或流式消费，避免重复扫描大日志范围。
+}
+return rows.Err()
+```
+
+- 查询必须调用 `WithContext(ctx)`，让请求取消可以终止长时间扫描。
+- 必须检查查询错误、逐行扫描错误和 `rows.Err()`，任一错误都不能返回部分成功结果。
+- 若明细存在数量上限但汇总要求全量，达到明细上限后只停止明细回调，仍需继续遍历完成汇总。
+- 只有在确认目标日志表主键会严格递增且各数据库实现一致时，才允许使用主键游标批处理。
+
 ---
 
 ## 多数据库兼容性 [!] 关键

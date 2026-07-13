@@ -1,6 +1,8 @@
 package model
 
 import (
+	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -188,6 +190,7 @@ func TestLogExportQueriesUseSameTokenAndGroupFilters(t *testing.T) {
 	summaryRows, err := GetLogSummaryByKey(start, end, "", []string{"key-a"}, []string{"vip"})
 	require.NoError(t, err)
 	require.Len(t, summaryRows, 1)
+	assert.Equal(t, "vip", summaryRows[0].Group)
 	assert.Equal(t, "key-a", summaryRows[0].TokenName)
 	assert.Equal(t, "alice", summaryRows[0].Username)
 	assert.Equal(t, 100, summaryRows[0].Quota)
@@ -197,6 +200,7 @@ func TestLogExportQueriesUseSameTokenAndGroupFilters(t *testing.T) {
 	detailRows, err := GetLogDetailByKeyModel(start, end, "", []string{"key-a"}, []string{"vip"})
 	require.NoError(t, err)
 	require.Len(t, detailRows, 1)
+	assert.Equal(t, "vip", detailRows[0].Group)
 	assert.Equal(t, "key-a", detailRows[0].TokenName)
 	assert.Equal(t, "gpt-a", detailRows[0].ModelName)
 	assert.Equal(t, 100, detailRows[0].Quota)
@@ -209,6 +213,96 @@ func TestLogExportQueriesUseSameTokenAndGroupFilters(t *testing.T) {
 	assert.Equal(t, "key-a", logRows[0].TokenName)
 	assert.Equal(t, "vip", logRows[0].Group)
 	assert.Equal(t, 100, logRows[0].Quota)
+}
+
+func TestProcessLogsForExportSeparatesGroupsAndKeepsDetailOrder(t *testing.T) {
+	truncateTables(t)
+
+	start := time.Now().Unix() - 3600
+	end := time.Now().Unix() + 3600
+	insertDashboardFilterLog(t, Log{
+		UserId:           1,
+		Username:         "alice",
+		CreatedAt:        start + 180,
+		Type:             LogTypeConsume,
+		TokenName:        "key-a",
+		ModelName:        "gpt-b",
+		Quota:            300,
+		PromptTokens:     50,
+		CompletionTokens: 60,
+		Group:            "vip",
+		RequestId:        "req-3",
+	})
+	insertDashboardFilterLog(t, Log{
+		UserId:           1,
+		Username:         "alice",
+		CreatedAt:        start + 60,
+		Type:             LogTypeConsume,
+		TokenName:        "key-a",
+		ModelName:        "gpt-a",
+		Quota:            100,
+		PromptTokens:     10,
+		CompletionTokens: 20,
+		Group:            "default",
+		RequestId:        "req-1",
+	})
+	insertDashboardFilterLog(t, Log{
+		UserId:           1,
+		Username:         "alice",
+		CreatedAt:        start + 120,
+		Type:             LogTypeConsume,
+		TokenName:        "key-a",
+		ModelName:        "gpt-a",
+		Quota:            200,
+		PromptTokens:     30,
+		CompletionTokens: 40,
+		Group:            "vip",
+		RequestId:        "req-2",
+	})
+
+	var detailRequestIds []string
+	summaryRows, detailRows, err := ProcessLogsForExport(context.Background(), start, end, "", nil, nil, func(log *Log, cacheRead int, cacheWrite int) error {
+		detailRequestIds = append(detailRequestIds, log.RequestId)
+		return nil
+	})
+
+	require.NoError(t, err)
+	require.Len(t, summaryRows, 2)
+	assert.Equal(t, "default", summaryRows[0].Group)
+	assert.Equal(t, 100, summaryRows[0].Quota)
+	assert.Equal(t, "vip", summaryRows[1].Group)
+	assert.Equal(t, 500, summaryRows[1].Quota)
+	require.Len(t, detailRows, 3)
+	assert.Equal(t, "default", detailRows[0].Group)
+	assert.Equal(t, "gpt-a", detailRows[0].ModelName)
+	assert.Equal(t, "vip", detailRows[1].Group)
+	assert.Equal(t, "gpt-a", detailRows[1].ModelName)
+	assert.Equal(t, "vip", detailRows[2].Group)
+	assert.Equal(t, "gpt-b", detailRows[2].ModelName)
+	assert.Equal(t, []string{"req-1", "req-2", "req-3"}, detailRequestIds)
+}
+
+func TestProcessLogsForExportPropagatesCallbackAndContextErrors(t *testing.T) {
+	truncateTables(t)
+
+	now := time.Now().Unix()
+	insertDashboardFilterLog(t, Log{
+		CreatedAt: now,
+		Type:      LogTypeConsume,
+		TokenName: "key-a",
+		Group:     "vip",
+	})
+
+	callbackErr := errors.New("写入明细失败")
+	_, _, err := ProcessLogsForExport(context.Background(), now-1, now+1, "", nil, nil, func(log *Log, cacheRead int, cacheWrite int) error {
+		return callbackErr
+	})
+	assert.ErrorIs(t, err, callbackErr)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _, err = ProcessLogsForExport(ctx, now-1, now+1, "", nil, nil, nil)
+	assert.ErrorIs(t, err, context.Canceled)
 }
 
 func TestGetAllTokenNamesIncludesTokenGroup(t *testing.T) {

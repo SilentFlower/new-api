@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
 
 	"github.com/gin-gonic/gin"
@@ -56,9 +57,11 @@ func GetAllQuotaDates(c *gin.Context) {
 
 // ExportQuotaDataExcel 导出数据看板 Excel 报表（管理员接口）
 // 生成包含三个 Sheet 的 Excel 文件：
-// - Sheet 1：按 API Key 汇总统计
-// - Sheet 2：按 API Key + 模型明细
+// - Sheet 1：按分组 + API Key 汇总统计
+// - Sheet 2：按分组 + API Key + 模型明细
 // - Sheet 3：请求日志明细
+// @param c Gin 请求上下文
+// @return 无返回值，成功时直接写入 Excel 文件响应
 func ExportQuotaDataExcel(c *gin.Context) {
 	startTimestamp, _ := strconv.ParseInt(c.Query("start_timestamp"), 10, 64)
 	endTimestamp, _ := strconv.ParseInt(c.Query("end_timestamp"), 10, 64)
@@ -71,182 +74,179 @@ func ExportQuotaDataExcel(c *gin.Context) {
 		return
 	}
 
-	// 查询 Sheet 1 数据：按 API Key 汇总（从 logs 表聚合）
-	summaryData, err := model.GetLogSummaryByKey(startTimestamp, endTimestamp, "", tokenNames, groups)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-
-	// 查询 Sheet 2 数据：按 API Key + 模型明细（从 logs 表聚合）
-	detailData, err := model.GetLogDetailByKeyModel(startTimestamp, endTimestamp, "", tokenNames, groups)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-
-	// 查询 Sheet 3 数据：请求日志明细
-	logs, err := model.GetLogsForExport(startTimestamp, endTimestamp, "", tokenNames, groups)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-
-	// 创建 Excel 文件
 	f := excelize.NewFile()
 	defer f.Close()
 
-	// ========== Sheet 1：汇总统计 ==========
 	sheet1Name := "汇总统计"
-	// 默认 Sheet 名为 "Sheet1"，重命名为汇总统计
-	f.SetSheetName("Sheet1", sheet1Name)
-	sheet1Headers := []string{"API Key 名称", "请求次数", "请求 Token 数", "请求额度"}
-	for i, header := range sheet1Headers {
-		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
-		f.SetCellValue(sheet1Name, cell, header)
+	if err := f.SetSheetName("Sheet1", sheet1Name); err != nil {
+		common.ApiError(c, err)
+		return
 	}
-	for rowIdx, item := range summaryData {
-		row := rowIdx + 2 // 从第2行开始写数据
-		f.SetCellValue(sheet1Name, cellName(1, row), item.TokenName)
-		f.SetCellValue(sheet1Name, cellName(2, row), item.Count)
-		f.SetCellValue(sheet1Name, cellName(3, row), item.TokenUsed)
-		f.SetCellValue(sheet1Name, cellName(4, row), formatQuotaValue(item.Quota))
-	}
-
-	// ========== Sheet 2：模型明细（按 Key 分组） ==========
 	sheet2Name := "模型明细"
-	f.NewSheet(sheet2Name)
-	sheet2Headers := []string{"模型名称", "请求次数", "请求 Token 数", "请求额度"}
-
-	// 按 token_name 分组
-	keyGroups := make(map[string][]*model.LogDetailByKeyModel)
-	var keyOrder []string
-	for _, item := range detailData {
-		if _, exists := keyGroups[item.TokenName]; !exists {
-			keyOrder = append(keyOrder, item.TokenName)
-		}
-		keyGroups[item.TokenName] = append(keyGroups[item.TokenName], item)
+	if _, err := f.NewSheet(sheet2Name); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	sheet3Name := "请求日志"
+	if _, err := f.NewSheet(sheet3Name); err != nil {
+		common.ApiError(c, err)
+		return
 	}
 
-	// 创建加粗样式用于分组标题和小计行
-	boldStyle, _ := f.NewStyle(&excelize.Style{
+	boldStyle, err := f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Bold: true},
 	})
-
-	row := 1
-	for _, keyName := range keyOrder {
-		items := keyGroups[keyName]
-
-		// 分组标题行：API Key 名称
-		f.SetCellValue(sheet2Name, cellName(1, row), "API Key: "+keyName)
-		f.SetCellStyle(sheet2Name, cellName(1, row), cellName(1, row), boldStyle)
-		row++
-
-		// 表头行
-		for i, header := range sheet2Headers {
-			f.SetCellValue(sheet2Name, cellName(i+1, row), header)
-			f.SetCellStyle(sheet2Name, cellName(i+1, row), cellName(i+1, row), boldStyle)
-		}
-		row++
-
-		// 数据行 + 累计小计
-		var totalCount, totalTokenUsed, totalQuota int
-		for _, item := range items {
-			f.SetCellValue(sheet2Name, cellName(1, row), item.ModelName)
-			f.SetCellValue(sheet2Name, cellName(2, row), item.Count)
-			f.SetCellValue(sheet2Name, cellName(3, row), item.TokenUsed)
-			f.SetCellValue(sheet2Name, cellName(4, row), formatQuotaValue(item.Quota))
-			totalCount += item.Count
-			totalTokenUsed += item.TokenUsed
-			totalQuota += item.Quota
-			row++
-		}
-
-		// 小计行
-		f.SetCellValue(sheet2Name, cellName(1, row), "小计")
-		f.SetCellValue(sheet2Name, cellName(2, row), totalCount)
-		f.SetCellValue(sheet2Name, cellName(3, row), totalTokenUsed)
-		f.SetCellValue(sheet2Name, cellName(4, row), formatQuotaValue(totalQuota))
-		f.SetCellStyle(sheet2Name, cellName(1, row), cellName(4, row), boldStyle)
-		row++
-
-		// 空行分隔
-		row++
+	if err != nil {
+		common.ApiError(c, err)
+		return
 	}
 
-	// ========== Sheet 3：请求日志 ==========
-	sheet3Name := "请求日志"
-	f.NewSheet(sheet3Name)
-	sheet3Headers := []string{"时间", "API Key", "模型", "输入 Tokens", "输出 Tokens", "额度消耗", "耗时(s)", "是否流式", "渠道 ID", "请求 ID"}
-	for i, header := range sheet3Headers {
-		cell, _ := excelize.CoordinatesToCellName(i+1, 1)
-		f.SetCellValue(sheet3Name, cell, header)
+	sheet1Writer, err := f.NewStreamWriter(sheet1Name)
+	if err != nil {
+		common.ApiError(c, err)
+		return
 	}
-	for rowIdx, logItem := range logs {
-		row := rowIdx + 2
-		// 将时间戳格式化为可读时间
-		timeStr := time.Unix(logItem.CreatedAt, 0).Format("2006-01-02 15:04:05")
+	sheet2Writer, err := f.NewStreamWriter(sheet2Name)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	sheet3Writer, err := f.NewStreamWriter(sheet3Name)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	if err := setStreamColumnWidths(sheet1Writer, []float64{18, 30, 12, 16, 14}); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := setStreamColumnWidths(sheet2Writer, []float64{42, 12, 16, 14}); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := setStreamColumnWidths(sheet3Writer, []float64{20, 18, 24, 28, 22, 14, 12, 10, 10, 10, 38}); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	sheet3Headers := []interface{}{"时间", "分组", "API Key", "模型", "输入 Tokens", "输出 Tokens", "额度消耗", "耗时(s)", "是否流式", "渠道 ID", "请求 ID"}
+	if err := sheet3Writer.SetRow("A1", sheet3Headers); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	sheet3Row := 2
+	summaryData, detailData, err := model.ProcessLogsForExport(c.Request.Context(), startTimestamp, endTimestamp, "", tokenNames, groups, func(logItem *model.Log, cacheRead int, cacheWrite int) error {
 		isStreamStr := "否"
 		if logItem.IsStream {
 			isStreamStr = "是"
 		}
-		// 解析 Other JSON 获取缓存信息，对齐日志表展示方式
-		inputDisplay := fmt.Sprintf("%d", logItem.PromptTokens)
-		if logItem.Other != "" {
-			if otherMap, err := common.StrToMap(logItem.Other); err == nil {
-				cacheRead := getOtherInt(otherMap, "cache_tokens")
-				// 缓存写入：优先使用分时段值之和，回退到总值
-				cacheWrite5m := getOtherInt(otherMap, "cache_creation_tokens_5m")
-				cacheWrite1h := getOtherInt(otherMap, "cache_creation_tokens_1h")
-				cacheWrite := cacheWrite5m + cacheWrite1h
-				if cacheWrite == 0 {
-					cacheWrite = getOtherInt(otherMap, "cache_creation_tokens")
-				}
-				if cacheRead > 0 && cacheWrite > 0 {
-					inputDisplay = fmt.Sprintf("%d (缓存读 %d · 写 %d)", logItem.PromptTokens, cacheRead, cacheWrite)
-				} else if cacheRead > 0 {
-					inputDisplay = fmt.Sprintf("%d (缓存读 %d)", logItem.PromptTokens, cacheRead)
-				} else if cacheWrite > 0 {
-					inputDisplay = fmt.Sprintf("%d (缓存写 %d)", logItem.PromptTokens, cacheWrite)
-				}
-			}
+		values := []interface{}{
+			time.Unix(logItem.CreatedAt, 0).Format("2006-01-02 15:04:05"),
+			logItem.Group,
+			logItem.TokenName,
+			logItem.ModelName,
+			formatExportInputTokens(logItem.PromptTokens, cacheRead, cacheWrite),
+			logItem.CompletionTokens,
+			formatQuotaValue(logItem.Quota),
+			logItem.UseTime,
+			isStreamStr,
+			logItem.ChannelId,
+			logItem.RequestId,
 		}
-		f.SetCellValue(sheet3Name, cellName(1, row), timeStr)
-		f.SetCellValue(sheet3Name, cellName(2, row), logItem.TokenName)
-		f.SetCellValue(sheet3Name, cellName(3, row), logItem.ModelName)
-		f.SetCellValue(sheet3Name, cellName(4, row), inputDisplay)
-		f.SetCellValue(sheet3Name, cellName(5, row), logItem.CompletionTokens)
-		f.SetCellValue(sheet3Name, cellName(6, row), formatQuotaValue(logItem.Quota))
-		f.SetCellValue(sheet3Name, cellName(7, row), logItem.UseTime)
-		f.SetCellValue(sheet3Name, cellName(8, row), isStreamStr)
-		f.SetCellValue(sheet3Name, cellName(9, row), logItem.ChannelId)
-		f.SetCellValue(sheet3Name, cellName(10, row), logItem.RequestId)
+		if err := sheet3Writer.SetRow(cellName(1, sheet3Row), values); err != nil {
+			return err
+		}
+		sheet3Row++
+		return nil
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := sheet3Writer.Flush(); err != nil {
+		common.ApiError(c, err)
+		return
 	}
 
-	// ========== 设置列宽 ==========
-	// Sheet 1：汇总统计 — API Key 名称, 请求次数, 请求 Token 数, 请求额度
-	f.SetColWidth(sheet1Name, "A", "A", 30) // API Key 名称
-	f.SetColWidth(sheet1Name, "B", "B", 12) // 请求次数
-	f.SetColWidth(sheet1Name, "C", "C", 16) // 请求 Token 数
-	f.SetColWidth(sheet1Name, "D", "D", 14) // 请求额度
+	sheet1Headers := []interface{}{"分组", "API Key 名称", "请求次数", "请求 Token 数", "请求额度"}
+	if err := sheet1Writer.SetRow("A1", sheet1Headers); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	for rowIdx, item := range summaryData {
+		values := []interface{}{item.Group, item.TokenName, item.Count, item.TokenUsed, formatQuotaValue(item.Quota)}
+		if err := sheet1Writer.SetRow(cellName(1, rowIdx+2), values); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
+	if err := sheet1Writer.Flush(); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 
-	// Sheet 2：模型明细 — 模型名称, 请求次数, 请求 Token 数, 请求额度
-	f.SetColWidth(sheet2Name, "A", "A", 30) // 模型名称 / API Key 分组标题
-	f.SetColWidth(sheet2Name, "B", "B", 12) // 请求次数
-	f.SetColWidth(sheet2Name, "C", "C", 16) // 请求 Token 数
-	f.SetColWidth(sheet2Name, "D", "D", 14) // 请求额度
+	sheet2Headers := []interface{}{"模型名称", "请求次数", "请求 Token 数", "请求额度"}
+	sheet2Row := 1
+	currentGroup := ""
+	currentTokenName := ""
+	hasCurrentGroup := false
+	var totalCount, totalTokenUsed, totalQuota int
+	for index, item := range detailData {
+		groupChanged := !hasCurrentGroup || item.Group != currentGroup || item.TokenName != currentTokenName
+		if groupChanged {
+			if hasCurrentGroup {
+				values := []interface{}{"小计", totalCount, totalTokenUsed, formatQuotaValue(totalQuota)}
+				if err := sheet2Writer.SetRow(cellName(1, sheet2Row), values, excelize.RowOpts{StyleID: boldStyle}); err != nil {
+					common.ApiError(c, err)
+					return
+				}
+				sheet2Row += 2
+			}
 
-	// Sheet 3：请求日志 — 时间, API Key, 模型, 输入 Tokens, 输出 Tokens, 额度消耗, 耗时(s), 是否流式, 渠道 ID, 请求 ID
-	f.SetColWidth(sheet3Name, "A", "A", 20) // 时间
-	f.SetColWidth(sheet3Name, "B", "B", 24) // API Key
-	f.SetColWidth(sheet3Name, "C", "C", 28) // 模型
-	f.SetColWidth(sheet3Name, "D", "D", 14) // 输入 Tokens
-	f.SetColWidth(sheet3Name, "E", "E", 14) // 输出 Tokens
-	f.SetColWidth(sheet3Name, "F", "F", 12) // 额度消耗
-	f.SetColWidth(sheet3Name, "G", "G", 10) // 耗时(s)
-	f.SetColWidth(sheet3Name, "H", "H", 10) // 是否流式
-	f.SetColWidth(sheet3Name, "I", "I", 10) // 渠道 ID
-	f.SetColWidth(sheet3Name, "J", "J", 38) // 请求 ID
+			currentGroup = item.Group
+			currentTokenName = item.TokenName
+			hasCurrentGroup = true
+			totalCount = 0
+			totalTokenUsed = 0
+			totalQuota = 0
+
+			title := fmt.Sprintf("分组: %s / API Key: %s", currentGroup, currentTokenName)
+			if err := sheet2Writer.SetRow(cellName(1, sheet2Row), []interface{}{title}, excelize.RowOpts{StyleID: boldStyle}); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			sheet2Row++
+			if err := sheet2Writer.SetRow(cellName(1, sheet2Row), sheet2Headers, excelize.RowOpts{StyleID: boldStyle}); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			sheet2Row++
+		}
+
+		values := []interface{}{item.ModelName, item.Count, item.TokenUsed, formatQuotaValue(item.Quota)}
+		if err := sheet2Writer.SetRow(cellName(1, sheet2Row), values); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		sheet2Row++
+		totalCount += item.Count
+		totalTokenUsed += item.TokenUsed
+		totalQuota += item.Quota
+
+		if index == len(detailData)-1 {
+			values := []interface{}{"小计", totalCount, totalTokenUsed, formatQuotaValue(totalQuota)}
+			if err := sheet2Writer.SetRow(cellName(1, sheet2Row), values, excelize.RowOpts{StyleID: boldStyle}); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+		}
+	}
+	if err := sheet2Writer.Flush(); err != nil {
+		common.ApiError(c, err)
+		return
+	}
 
 	// 生成文件名，包含时间范围
 	startDate := time.Unix(startTimestamp, 0).Format("20060102")
@@ -260,7 +260,7 @@ func ExportQuotaDataExcel(c *gin.Context) {
 	c.Header("Cache-Control", "no-cache")
 
 	if err := f.Write(c.Writer); err != nil {
-		common.SysLog(fmt.Sprintf("导出 Excel 文件失败: %s", err.Error()))
+		logger.LogError(c.Request.Context(), fmt.Sprintf("导出 Excel 文件失败: %s", err.Error()))
 		return
 	}
 }
@@ -308,14 +308,27 @@ func cellName(col, row int) string {
 	return name
 }
 
-// getOtherInt 从 Other JSON map 中安全提取整数值
-func getOtherInt(m map[string]interface{}, key string) int {
-	if v, ok := m[key]; ok {
-		if f, ok := v.(float64); ok {
-			return int(f)
+func setStreamColumnWidths(writer *excelize.StreamWriter, widths []float64) error {
+	for index, width := range widths {
+		column := index + 1
+		if err := writer.SetColWidth(column, column, width); err != nil {
+			return err
 		}
 	}
-	return 0
+	return nil
+}
+
+func formatExportInputTokens(promptTokens int, cacheRead int, cacheWrite int) string {
+	if cacheRead > 0 && cacheWrite > 0 {
+		return fmt.Sprintf("%d (缓存读 %d · 写 %d)", promptTokens, cacheRead, cacheWrite)
+	}
+	if cacheRead > 0 {
+		return fmt.Sprintf("%d (缓存读 %d)", promptTokens, cacheRead)
+	}
+	if cacheWrite > 0 {
+		return fmt.Sprintf("%d (缓存写 %d)", promptTokens, cacheWrite)
+	}
+	return fmt.Sprintf("%d", promptTokens)
 }
 
 // formatQuotaValue 将 quota 原始值转换为美元单位
