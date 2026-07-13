@@ -229,13 +229,19 @@ At Phase 2.1/2.2, this gate overrides lower "Active Task Routing" rows that say 
 
 After `trellis-check` or `trellis-check-all` finishes, stop and report the result. If checks pass, the next allowed workflow steps are Phase 3.3 `trellis-update-spec` and Phase 3.4 `trellis-push`/commit confirmation (commit-only when needed); do not archive the task or imply it is ready to wrap up solely because checks passed. `/trellis:finish-work` is explicit-only: run it only after Phase 3.4 is complete and the user asks to wrap up, archive, or finish the task.
 
+The ordinary post-check report may contain only check dimensions/results, executed validations, residual risks, the conclusion, and the next-step pointer. It must not draft a commit message, show `Proposed commits` or planned/staged files, choose commit-only, ask the user to reply `ok` to commit, or perform Phase 3.3/3.4 work. Stop after the report and wait for the user to continue.
+
 During a running `trellis-auto-loop`, the runner's `record` + `next` replaces the post-check stop gate: after a check pass, record the result, then continue to spec update / commit-only according to `.trellis/scripts/auto_loop.py`. Outside auto-loop, keep the normal stop gate.
 
 #### Code Commit Confirmation Gate
 
 Code commit/push belongs only to Phase 3.4 and must go through `trellis-push`; the main session must not run bare `git commit` / `git push` for code.
 
-`trellis-push` confirmation must show both the exact file list to stage and the drafted commit message. Before the user approves that concrete list + message, do not `git add`, commit, or push; never use `git add -A` / `git add .`.
+Entering Phase 3.4 means loading and following `trellis-push`; drafting a commit message or a file plan outside that skill is not an equivalent substitute. Ordinary `trellis-push` defaults to commit + push. Use commit-only only when the user explicitly asks for commit without push, or when a running auto-loop satisfies the dedicated commit-only preauthorization gate.
+
+This gate fully supersedes the lower Phase 3.4 walkthrough that drafts `Proposed commits`, runs local commits directly, or says never to push. Under skill-garden, treat that lower walkthrough as inactive; do not mix any of its plan, confirmation, or execution steps with `trellis-push`.
+
+`trellis-push` confirmation must be backed by an exact file set and include the drafted commit message. For each repository, display all planned files when there are at most 8; above 8, group the ordinary planned files by directory in at most 12 file-summary lines and offer `展开文件` to show the same exact set. Unrecognized dirty, staged, conflicted, cross-task, and other risk files must always be shown individually and never folded. Before the user approves that concrete scope + message, do not `git add`, commit, or push; never use `git add -A` / `git add .`.
 
 For "commit now, push later", use `trellis-push` commit-only mode; the later push still goes through `trellis-push`. `session_auto_commit` never authorizes code commits; it only affects bookkeeping commits below.
 
@@ -382,9 +388,10 @@ At project-local knowledge boundaries, run `python3 ./.trellis/scripts/spec_rout
 Phase 2.1/2.2: reuse only explicit target-matched `route_decision`; otherwise invoke `trellis-route`. If skill invocation is unavailable, read local `trellis-route/SKILL.md`, show numbered choices, and wait.
 Summaries, preferences, `codex-mode`, raw `.runtime`, and empty/stale prefs are not route evidence unless `trellis-route` validates them; user reselect/override wins.
 Ignore lower direct-dispatch shortcuts. Do not spawn `trellis-implement` or `trellis-check*` unless route selected subagent. If route cannot be resolved, do not default inline.
-After `trellis-check` / `trellis-check-all`, stop and report; point the user to Phase 3.4 `trellis-push` (or commit-only when needed). Do not run `/trellis:finish-work` unless the user explicitly asks after Phase 3.4 is complete.
+After `trellis-check` / `trellis-check-all`, stop and report only check results, validations, residual risks, conclusion, and next steps; do not draft commit messages/files or ask for commit confirmation. Point the user to the existing Phase 3.3 flow and then Phase 3.4 `trellis-push`. Do not run `/trellis:finish-work` unless the user explicitly asks after Phase 3.4 is complete.
 This guard overrides any lower `Flow: ... -> /trellis:finish-work` line in this state block.
-At Phase 3.4, code commit/push goes through `trellis-push` (commit-only mode for commit-without-push); never bare `git commit`/`git push` on code (hub: Code Commit Confirmation Gate).
+At Phase 3.4, load `trellis-push`; ordinary mode defaults to commit + push, and commit-only requires explicit user intent or valid auto-loop preauthorization. Never synthesize a substitute commit plan or run bare `git commit`/`git push` on code (hub: Code Commit Confirmation Gate).
+This guard fully disables the lower Phase 3.4 `Proposed commits` / local-only / no-push walkthrough; do not reuse any part of it.
 Push snapshot recovery: follow the hub; use `push_snapshot.py status --json` only when needed.
 <!-- END skill-garden workflow-state in_progress v0.6 -->
 
@@ -409,9 +416,10 @@ At project-local knowledge boundaries, run `python3 ./.trellis/scripts/spec_rout
 Inline workflow-state is not an inline route decision. Phase 2.1/2.2 must reuse explicit target-matched `route_decision`; otherwise invoke `trellis-route`. If unavailable, read local `trellis-route/SKILL.md`, show numbered choices, and wait.
 Summaries, preferences, `codex-mode`, raw `.runtime`, and empty/stale prefs are not route evidence unless `trellis-route` validates them; user reselect/override wins.
 Ignore lower direct-edit/check shortcuts. Do not default inline just because this state is inline or helper is unavailable. Dispatch subagents only when route selected subagent.
-After `trellis-check` / `trellis-check-all`, stop and report; point the user to Phase 3.4 `trellis-push` (or commit-only when needed). Do not run `/trellis:finish-work` unless the user explicitly asks after Phase 3.4 is complete.
+After `trellis-check` / `trellis-check-all`, stop and report only check results, validations, residual risks, conclusion, and next steps; do not draft commit messages/files or ask for commit confirmation. Point the user to the existing Phase 3.3 flow and then Phase 3.4 `trellis-push`. Do not run `/trellis:finish-work` unless the user explicitly asks after Phase 3.4 is complete.
 This guard overrides any lower `Flow: ... -> /trellis:finish-work` line in this state block.
-At Phase 3.4, code commit/push goes through `trellis-push` (commit-only mode for commit-without-push); never bare `git commit`/`git push` on code (hub: Code Commit Confirmation Gate).
+At Phase 3.4, load `trellis-push`; ordinary mode defaults to commit + push, and commit-only requires explicit user intent or valid auto-loop preauthorization. Never synthesize a substitute commit plan or run bare `git commit`/`git push` on code (hub: Code Commit Confirmation Gate).
+This guard fully disables the lower Phase 3.4 `Proposed commits` / local-only / no-push walkthrough; do not reuse any part of it.
 Push snapshot recovery: follow the hub; use `push_snapshot.py status --json` only when needed.
 <!-- END skill-garden workflow-state in_progress_inline v0.6 -->
 

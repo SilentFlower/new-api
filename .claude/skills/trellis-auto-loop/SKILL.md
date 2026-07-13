@@ -15,6 +15,7 @@ description: "启动、恢复和推进 Trellis 自动任务循环。用于用户
 - run 进入 `blocked` 后不要用 `start --force` 新建 run 来纠正参数；先补齐缺失 route/context，然后用 `retry-blocked` 在同一个 run 内恢复。
 - runner 默认输出是紧凑 JSON，只包含当前 action、队列计数、简短 blocked/pending/completed 列表和最近少量决策摘要；排障时才给 `status` / `resume` / `next` / `record` / `retry-blocked` 加 `--verbose` 读取完整 item、blocked detail 和 decision data。
 - 默认 profile 是 `commit-only`：自动推进到本地 commit，不 push、不发布、不归档。
+- 普通 `trellis-push` 默认 commit + push 不改变 auto-loop 的授权边界；auto-loop 始终只走专用 commit-only 预授权，不得因普通流程文案而推送远端。
 - 多任务只按用户显式给出的任务顺序执行；同一 worktree 不并发。
 - 启动 runner 前先完成 route 准备度判断：已有当前任务 runtime route 决策或个人 `.trellis/.route-prefs.tmp` 时可启动；没有时先进入 `trellis-route` 正常询问 / fallback，写入真实决策后再启动。
 - auto-loop 不默认写 `route_authorization`；只有用户本次明确给出的临时 route 策略，才能通过 `--route-implement` / `--route-check` 传给 runner，且不能当成模型真实执行结果。

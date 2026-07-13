@@ -298,6 +298,20 @@ git log --oneline -10
 
 ---
 
+## Post-check 停止边界
+
+汇总报告输出后立即停止，等待用户继续。普通流程的本轮输出只允许包含：
+
+- 各检查维度的状态与问题数
+- 已执行的验证命令和结果
+- 未覆盖的环境验证或剩余风险
+- 总体结论
+- 下一步指向现有 Phase 3.3，再到 Phase 3.4 `trellis-push`
+
+本轮禁止出现 commit message、`Proposed commits`、拟提交/暂存文件、commit-only 决策或“回复 `ok` 执行提交”。这些内容属于后续 Phase 3.4，并且只能由 `trellis-push` 生成。运行中的 auto-loop 仍按 runner 的 `record` + `next` 规则继续，不受普通 post-check stop 影响。
+
+---
+
 ## 修复问题（需用户确认）
 
 如果发现问题，**先展示报告，获得用户确认后再修复**。
@@ -340,3 +354,4 @@ git log --oneline -10
 - ❌ 委派给子 agent 跑各 Step（见执行模式段）
 - ❌ Complex 任务下只对照 PRD，忽略 `design.md` / `implement.md`（三层都要查）
 - ❌ 把 `implement.md` 的 validation commands 真跑算到 Step 1（Step 1 是静态对照；真跑归 Step 3 或用户执行）
+- ❌ 汇总报告后自行草拟 commit message / `Proposed commits` / 文件提交计划，或要求用户回复 `ok` 提交
