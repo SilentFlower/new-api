@@ -22,5 +22,23 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "last_push_snapshot": {
+    "snapshot_at": "2026-07-14T00:19:43+08:00",
+    "branch": "build-bak",
+    "pushed_commits": {
+      "root": "2b573cbf8"
+    },
+    "push_mode": "push",
+    "completed_steps": [
+      "Step 1",
+      "Step 2",
+      "Step 3",
+      "Step 4",
+      "Step 5",
+      "Step 6"
+    ],
+    "next_step": "Phase 3.5：任务收尾与归档",
+    "notes": "Excel 三 Sheet 完整美化、条件 Token 样式与回归测试已完成；Check All、全仓 Go 测试、局部 vet、格式及差异检查通过；预览 xlsx 未纳入提交。"
+  }
 }
