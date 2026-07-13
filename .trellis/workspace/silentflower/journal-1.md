@@ -379,3 +379,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 12: 数据看板 Excel 导出完整美化
+
+**Date**: 2026-07-14
+**Task**: 数据看板 Excel 导出完整美化
+**Branch**: `build-bak`
+
+### Summary
+
+完成三张 Excel 工作表的青绿样式、元信息、冻结与筛选、Sheet1 SUBTOTAL 合计、Sheet2 分段小计和数字格式；修复无缓存输入 Token 的数值样式并同步 API 契约。Check All、go vet、全仓 go test 均通过；交互式 Sheet2 方案仅做临时预览并已清理，正式实现保持原分段结构。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `2b573cbf8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
