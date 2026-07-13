@@ -55,10 +55,45 @@ func GetAllQuotaDates(c *gin.Context) {
 	return
 }
 
+// 导出 Excel 青绿专业色板（与 PRD 方案 2 一致）。
+const (
+	exportColorHeader   = "0F766E"
+	exportColorHeaderFG = "FFFFFF"
+	exportColorGroup    = "E6F4F1"
+	exportColorSubtotal = "F0FDFA"
+	exportColorTotal    = "ECFDF5"
+	exportColorBorder   = "CCE3DE"
+	exportColorMeta     = "64748B"
+	exportColorTitle    = "0F766E"
+	exportColorText     = "111827"
+)
+
+// 每个 Sheet 的固定版式：R1 标题 / R2 元信息 / R3 空白 / R4 起业务内容。
+const exportContentHeaderRow = 4
+
+// exportExcelStyles 导出工作簿复用的样式 ID 集合。
+type exportExcelStyles struct {
+	title          int
+	meta           int
+	header         int
+	text           int
+	number         int
+	money          int
+	duration       int
+	center         int
+	groupTitle     int
+	subtotalText   int
+	subtotalNumber int
+	subtotalMoney  int
+	totalText      int
+	totalNumber    int
+	totalMoney     int
+}
+
 // ExportQuotaDataExcel 导出数据看板 Excel 报表（管理员接口）
 // 生成包含三个 Sheet 的 Excel 文件：
-// - Sheet 1：按分组 + API Key 汇总统计
-// - Sheet 2：按分组 + API Key + 模型明细
+// - Sheet 1：按分组 + API Key 汇总统计（含筛选感知合计）
+// - Sheet 2：按分组 + API Key + 模型明细分段表
 // - Sheet 3：请求日志明细
 // @param c Gin 请求上下文
 // @return 无返回值，成功时直接写入 Excel 文件响应
@@ -93,9 +128,7 @@ func ExportQuotaDataExcel(c *gin.Context) {
 		return
 	}
 
-	boldStyle, err := f.NewStyle(&excelize.Style{
-		Font: &excelize.Font{Bold: true},
-	})
+	styles, err := newExportExcelStyles(f)
 	if err != nil {
 		common.ApiError(c, err)
 		return
@@ -117,43 +150,75 @@ func ExportQuotaDataExcel(c *gin.Context) {
 		return
 	}
 
-	if err := setStreamColumnWidths(sheet1Writer, []float64{18, 30, 12, 16, 14}); err != nil {
+	if err := setStreamColumnWidths(sheet1Writer, []float64{14, 18, 12, 16, 16}); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if err := setStreamColumnWidths(sheet2Writer, []float64{42, 12, 16, 14}); err != nil {
+	if err := setStreamColumnWidths(sheet2Writer, []float64{24, 12, 16, 16}); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	if err := setStreamColumnWidths(sheet3Writer, []float64{20, 18, 24, 28, 22, 14, 12, 10, 10, 10, 38}); err != nil {
-		common.ApiError(c, err)
-		return
-	}
-
-	sheet3Headers := []interface{}{"时间", "分组", "API Key", "模型", "输入 Tokens", "输出 Tokens", "额度消耗", "耗时(s)", "是否流式", "渠道 ID", "请求 ID"}
-	if err := sheet3Writer.SetRow("A1", sheet3Headers); err != nil {
+	if err := setStreamColumnWidths(sheet3Writer, []float64{20, 12, 14, 18, 28, 12, 14, 10, 10, 10, 22}); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	sheet3Row := 2
+	// 冻结到数据表头行，滚动时保留标题/元信息/表头。
+	if err := setExportFreezePanes(sheet1Writer, exportContentHeaderRow); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := setExportFreezePanes(sheet2Writer, 3); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := setExportFreezePanes(sheet3Writer, exportContentHeaderRow); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	metaText := formatExportMetaSummary(startTimestamp, endTimestamp, groups, tokenNames)
+	if err := writeExportSheetPreamble(sheet1Writer, 5, "数据看板导出 · 汇总统计", metaText, styles); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := writeExportSheetPreamble(sheet2Writer, 4, "数据看板导出 · 模型明细", metaText, styles); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	if err := writeExportSheetPreamble(sheet3Writer, 11, "数据看板导出 · 请求日志", metaText, styles); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	sheet3Headers := []interface{}{"时间", "分组", "API Key", "模型", "输入 Tokens", "输出 Tokens", "额度消耗 (USD)", "耗时(s)", "是否流式", "渠道 ID", "请求 ID"}
+	if err := writeExportHeaderRow(sheet3Writer, exportContentHeaderRow, sheet3Headers, styles.header); err != nil {
+		common.ApiError(c, err)
+		return
+	}
+
+	sheet3Row := exportContentHeaderRow + 1
 	summaryData, detailData, err := model.ProcessLogsForExport(c.Request.Context(), startTimestamp, endTimestamp, "", tokenNames, groups, func(logItem *model.Log, cacheRead int, cacheWrite int) error {
 		isStreamStr := "否"
 		if logItem.IsStream {
 			isStreamStr = "是"
 		}
+		inputTokenCell := styledCell(styles.number, logItem.PromptTokens)
+		if cacheRead > 0 || cacheWrite > 0 {
+			inputTokenCell = styledCell(styles.text, formatExportInputTokens(logItem.PromptTokens, cacheRead, cacheWrite))
+		}
 		values := []interface{}{
-			time.Unix(logItem.CreatedAt, 0).Format("2006-01-02 15:04:05"),
-			logItem.Group,
-			logItem.TokenName,
-			logItem.ModelName,
-			formatExportInputTokens(logItem.PromptTokens, cacheRead, cacheWrite),
-			logItem.CompletionTokens,
-			formatQuotaValue(logItem.Quota),
-			logItem.UseTime,
-			isStreamStr,
-			logItem.ChannelId,
-			logItem.RequestId,
+			styledCell(styles.text, time.Unix(logItem.CreatedAt, 0).Format("2006-01-02 15:04:05")),
+			styledCell(styles.text, logItem.Group),
+			styledCell(styles.text, logItem.TokenName),
+			styledCell(styles.text, logItem.ModelName),
+			inputTokenCell,
+			styledCell(styles.number, logItem.CompletionTokens),
+			styledCell(styles.money, formatQuotaValue(logItem.Quota)),
+			styledCell(styles.duration, logItem.UseTime),
+			styledCell(styles.center, isStreamStr),
+			styledCell(styles.number, logItem.ChannelId),
+			styledCell(styles.text, logItem.RequestId),
 		}
 		if err := sheet3Writer.SetRow(cellName(1, sheet3Row), values); err != nil {
 			return err
@@ -165,19 +230,53 @@ func ExportQuotaDataExcel(c *gin.Context) {
 		common.ApiError(c, err)
 		return
 	}
+	if sheet3Row > exportContentHeaderRow+1 {
+		if err := addExportDataTable(sheet3Writer, "ExportLogs", 1, 11, exportContentHeaderRow, sheet3Row-1); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+	}
 	if err := sheet3Writer.Flush(); err != nil {
 		common.ApiError(c, err)
 		return
 	}
 
-	sheet1Headers := []interface{}{"分组", "API Key 名称", "请求次数", "请求 Token 数", "请求额度"}
-	if err := sheet1Writer.SetRow("A1", sheet1Headers); err != nil {
+	sheet1Headers := []interface{}{"分组", "API Key 名称", "请求次数", "请求 Token 数", "请求额度 (USD)"}
+	if err := writeExportHeaderRow(sheet1Writer, exportContentHeaderRow, sheet1Headers, styles.header); err != nil {
 		common.ApiError(c, err)
 		return
 	}
-	for rowIdx, item := range summaryData {
-		values := []interface{}{item.Group, item.TokenName, item.Count, item.TokenUsed, formatQuotaValue(item.Quota)}
-		if err := sheet1Writer.SetRow(cellName(1, rowIdx+2), values); err != nil {
+	sheet1DataStart := exportContentHeaderRow + 1
+	sheet1Row := sheet1DataStart
+	for _, item := range summaryData {
+		values := []interface{}{
+			styledCell(styles.text, item.Group),
+			styledCell(styles.text, item.TokenName),
+			styledCell(styles.number, item.Count),
+			styledCell(styles.number, item.TokenUsed),
+			styledCell(styles.money, formatQuotaValue(item.Quota)),
+		}
+		if err := sheet1Writer.SetRow(cellName(1, sheet1Row), values); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		sheet1Row++
+	}
+	sheet1DataEnd := sheet1Row - 1
+	if len(summaryData) > 0 {
+		if err := addExportDataTable(sheet1Writer, "ExportSummary", 1, 5, exportContentHeaderRow, sheet1DataEnd); err != nil {
+			common.ApiError(c, err)
+			return
+		}
+		// 合计行放在筛选范围外，使用 SUBTOTAL 随 AutoFilter 可见行变化。
+		totalValues := []interface{}{
+			styledCell(styles.totalText, "合计"),
+			styledCell(styles.totalText, ""),
+			excelize.Cell{StyleID: styles.totalNumber, Formula: fmt.Sprintf("SUBTOTAL(109,C%d:C%d)", sheet1DataStart, sheet1DataEnd)},
+			excelize.Cell{StyleID: styles.totalNumber, Formula: fmt.Sprintf("SUBTOTAL(109,D%d:D%d)", sheet1DataStart, sheet1DataEnd)},
+			excelize.Cell{StyleID: styles.totalMoney, Formula: fmt.Sprintf("SUBTOTAL(109,E%d:E%d)", sheet1DataStart, sheet1DataEnd)},
+		}
+		if err := sheet1Writer.SetRow(cellName(1, sheet1Row), totalValues); err != nil {
 			common.ApiError(c, err)
 			return
 		}
@@ -187,8 +286,8 @@ func ExportQuotaDataExcel(c *gin.Context) {
 		return
 	}
 
-	sheet2Headers := []interface{}{"模型名称", "请求次数", "请求 Token 数", "请求额度"}
-	sheet2Row := 1
+	sheet2Headers := []interface{}{"模型名称", "请求次数", "请求 Token 数", "请求额度 (USD)"}
+	sheet2Row := exportContentHeaderRow
 	currentGroup := ""
 	currentTokenName := ""
 	hasCurrentGroup := false
@@ -197,8 +296,7 @@ func ExportQuotaDataExcel(c *gin.Context) {
 		groupChanged := !hasCurrentGroup || item.Group != currentGroup || item.TokenName != currentTokenName
 		if groupChanged {
 			if hasCurrentGroup {
-				values := []interface{}{"小计", totalCount, totalTokenUsed, formatQuotaValue(totalQuota)}
-				if err := sheet2Writer.SetRow(cellName(1, sheet2Row), values, excelize.RowOpts{StyleID: boldStyle}); err != nil {
+				if err := writeExportSheet2Subtotal(sheet2Writer, sheet2Row, totalCount, totalTokenUsed, totalQuota, styles); err != nil {
 					common.ApiError(c, err)
 					return
 				}
@@ -213,19 +311,33 @@ func ExportQuotaDataExcel(c *gin.Context) {
 			totalQuota = 0
 
 			title := fmt.Sprintf("分组: %s / API Key: %s", currentGroup, currentTokenName)
-			if err := sheet2Writer.SetRow(cellName(1, sheet2Row), []interface{}{title}, excelize.RowOpts{StyleID: boldStyle}); err != nil {
+			if err := sheet2Writer.MergeCell(cellName(1, sheet2Row), cellName(4, sheet2Row)); err != nil {
+				common.ApiError(c, err)
+				return
+			}
+			if err := sheet2Writer.SetRow(cellName(1, sheet2Row), []interface{}{
+				styledCell(styles.groupTitle, title),
+				styledCell(styles.groupTitle, ""),
+				styledCell(styles.groupTitle, ""),
+				styledCell(styles.groupTitle, ""),
+			}); err != nil {
 				common.ApiError(c, err)
 				return
 			}
 			sheet2Row++
-			if err := sheet2Writer.SetRow(cellName(1, sheet2Row), sheet2Headers, excelize.RowOpts{StyleID: boldStyle}); err != nil {
+			if err := writeExportHeaderRow(sheet2Writer, sheet2Row, sheet2Headers, styles.header); err != nil {
 				common.ApiError(c, err)
 				return
 			}
 			sheet2Row++
 		}
 
-		values := []interface{}{item.ModelName, item.Count, item.TokenUsed, formatQuotaValue(item.Quota)}
+		values := []interface{}{
+			styledCell(styles.text, item.ModelName),
+			styledCell(styles.number, item.Count),
+			styledCell(styles.number, item.TokenUsed),
+			styledCell(styles.money, formatQuotaValue(item.Quota)),
+		}
 		if err := sheet2Writer.SetRow(cellName(1, sheet2Row), values); err != nil {
 			common.ApiError(c, err)
 			return
@@ -236,8 +348,7 @@ func ExportQuotaDataExcel(c *gin.Context) {
 		totalQuota += item.Quota
 
 		if index == len(detailData)-1 {
-			values := []interface{}{"小计", totalCount, totalTokenUsed, formatQuotaValue(totalQuota)}
-			if err := sheet2Writer.SetRow(cellName(1, sheet2Row), values, excelize.RowOpts{StyleID: boldStyle}); err != nil {
+			if err := writeExportSheet2Subtotal(sheet2Writer, sheet2Row, totalCount, totalTokenUsed, totalQuota, styles); err != nil {
 				common.ApiError(c, err)
 				return
 			}
@@ -316,6 +427,248 @@ func setStreamColumnWidths(writer *excelize.StreamWriter, widths []float64) erro
 		}
 	}
 	return nil
+}
+
+// setExportFreezePanes 冻结到指定表头行，使滚动时保留上方内容。
+func setExportFreezePanes(writer *excelize.StreamWriter, headerRow int) error {
+	return writer.SetPanes(&excelize.Panes{
+		Freeze:      true,
+		Split:       false,
+		XSplit:      0,
+		YSplit:      headerRow,
+		TopLeftCell: cellName(1, headerRow+1),
+		ActivePane:  "bottomLeft",
+	})
+}
+
+// writeExportSheetPreamble 写入标题、元信息与空白分隔行。
+func writeExportSheetPreamble(writer *excelize.StreamWriter, colCount int, title string, metaText string, styles exportExcelStyles) error {
+	if colCount < 1 {
+		colCount = 1
+	}
+	if err := writer.MergeCell(cellName(1, 1), cellName(colCount, 1)); err != nil {
+		return err
+	}
+	titleRow := make([]interface{}, colCount)
+	titleRow[0] = styledCell(styles.title, title)
+	for i := 1; i < colCount; i++ {
+		titleRow[i] = styledCell(styles.title, "")
+	}
+	if err := writer.SetRow(cellName(1, 1), titleRow); err != nil {
+		return err
+	}
+
+	if err := writer.MergeCell(cellName(1, 2), cellName(colCount, 2)); err != nil {
+		return err
+	}
+	metaRow := make([]interface{}, colCount)
+	metaRow[0] = styledCell(styles.meta, metaText)
+	for i := 1; i < colCount; i++ {
+		metaRow[i] = styledCell(styles.meta, "")
+	}
+	if err := writer.SetRow(cellName(1, 2), metaRow); err != nil {
+		return err
+	}
+
+	// 第 3 行空白，业务表头从第 4 行开始。
+	return writer.SetRow(cellName(1, 3), []interface{}{""})
+}
+
+// writeExportHeaderRow 写入统一样式的数据表头行。
+func writeExportHeaderRow(writer *excelize.StreamWriter, row int, headers []interface{}, styleID int) error {
+	values := make([]interface{}, len(headers))
+	for i, header := range headers {
+		values[i] = styledCell(styleID, header)
+	}
+	return writer.SetRow(cellName(1, row), values)
+}
+
+// writeExportSheet2Subtotal 写入模型明细的静态小计行。
+func writeExportSheet2Subtotal(writer *excelize.StreamWriter, row int, count int, tokenUsed int, quota int, styles exportExcelStyles) error {
+	values := []interface{}{
+		styledCell(styles.subtotalText, "小计"),
+		styledCell(styles.subtotalNumber, count),
+		styledCell(styles.subtotalNumber, tokenUsed),
+		styledCell(styles.subtotalMoney, formatQuotaValue(quota)),
+	}
+	return writer.SetRow(cellName(1, row), values)
+}
+
+// addExportDataTable 为连续数据区添加带筛选的 Table（范围含表头，不含合计行）。
+func addExportDataTable(writer *excelize.StreamWriter, name string, startCol int, endCol int, headerRow int, lastDataRow int) error {
+	if lastDataRow < headerRow {
+		return nil
+	}
+	ref := fmt.Sprintf("%s:%s", cellName(startCol, headerRow), cellName(endCol, lastDataRow))
+	disableStripes := false
+	return writer.AddTable(&excelize.Table{
+		Range:          ref,
+		Name:           name,
+		StyleName:      "TableStyleMedium2",
+		ShowRowStripes: &disableStripes,
+	})
+}
+
+// formatExportMetaSummary 生成导出元信息文案。
+func formatExportMetaSummary(startTimestamp int64, endTimestamp int64, groups []string, tokenNames []string) string {
+	timeRange := fmt.Sprintf("%s ~ %s",
+		time.Unix(startTimestamp, 0).Format("2006-01-02 15:04:05"),
+		time.Unix(endTimestamp, 0).Format("2006-01-02 15:04:05"),
+	)
+	return fmt.Sprintf("时间范围：%s | 分组：%s | API Key：%s",
+		timeRange,
+		formatExportFilterSummary(groups),
+		formatExportFilterSummary(tokenNames),
+	)
+}
+
+// formatExportFilterSummary 将筛选列表格式化为摘要；空列表表示全部。
+func formatExportFilterSummary(values []string) string {
+	if len(values) == 0 {
+		return "全部"
+	}
+	return strings.Join(values, ",")
+}
+
+// styledCell 构造带样式的流式单元格。
+func styledCell(styleID int, value interface{}) excelize.Cell {
+	return excelize.Cell{StyleID: styleID, Value: value}
+}
+
+// newExportExcelStyles 预创建导出所需样式。
+func newExportExcelStyles(f *excelize.File) (exportExcelStyles, error) {
+	var styles exportExcelStyles
+	var err error
+
+	thinBorder := []excelize.Border{
+		{Type: "left", Color: exportColorBorder, Style: 1},
+		{Type: "right", Color: exportColorBorder, Style: 1},
+		{Type: "top", Color: exportColorBorder, Style: 1},
+		{Type: "bottom", Color: exportColorBorder, Style: 1},
+	}
+	numberFmt := "#,##0"
+	moneyFmt := "$#,##0.00"
+	durationFmt := "0.00"
+
+	if styles.title, err = f.NewStyle(&excelize.Style{
+		Font:      &excelize.Font{Bold: true, Size: 14, Color: exportColorTitle},
+		Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"},
+	}); err != nil {
+		return styles, err
+	}
+	if styles.meta, err = f.NewStyle(&excelize.Style{
+		Font:      &excelize.Font{Size: 9, Color: exportColorMeta},
+		Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"},
+	}); err != nil {
+		return styles, err
+	}
+	if styles.header, err = f.NewStyle(&excelize.Style{
+		Font:      &excelize.Font{Bold: true, Color: exportColorHeaderFG},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{exportColorHeader}, Pattern: 1},
+		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center", WrapText: true},
+		Border:    thinBorder,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.text, err = f.NewStyle(&excelize.Style{
+		Font:      &excelize.Font{Color: exportColorText},
+		Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"},
+		Border:    thinBorder,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.number, err = f.NewStyle(&excelize.Style{
+		Font:         &excelize.Font{Color: exportColorText},
+		Alignment:    &excelize.Alignment{Horizontal: "right", Vertical: "center"},
+		Border:       thinBorder,
+		CustomNumFmt: &numberFmt,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.money, err = f.NewStyle(&excelize.Style{
+		Font:         &excelize.Font{Color: exportColorText},
+		Alignment:    &excelize.Alignment{Horizontal: "right", Vertical: "center"},
+		Border:       thinBorder,
+		CustomNumFmt: &moneyFmt,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.duration, err = f.NewStyle(&excelize.Style{
+		Font:         &excelize.Font{Color: exportColorText},
+		Alignment:    &excelize.Alignment{Horizontal: "right", Vertical: "center"},
+		Border:       thinBorder,
+		CustomNumFmt: &durationFmt,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.center, err = f.NewStyle(&excelize.Style{
+		Font:      &excelize.Font{Color: exportColorText},
+		Alignment: &excelize.Alignment{Horizontal: "center", Vertical: "center"},
+		Border:    thinBorder,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.groupTitle, err = f.NewStyle(&excelize.Style{
+		Font:      &excelize.Font{Bold: true, Color: exportColorText},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{exportColorGroup}, Pattern: 1},
+		Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"},
+		Border:    thinBorder,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.subtotalText, err = f.NewStyle(&excelize.Style{
+		Font:      &excelize.Font{Bold: true, Color: exportColorText},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{exportColorSubtotal}, Pattern: 1},
+		Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"},
+		Border:    thinBorder,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.subtotalNumber, err = f.NewStyle(&excelize.Style{
+		Font:         &excelize.Font{Bold: true, Color: exportColorText},
+		Fill:         excelize.Fill{Type: "pattern", Color: []string{exportColorSubtotal}, Pattern: 1},
+		Alignment:    &excelize.Alignment{Horizontal: "right", Vertical: "center"},
+		Border:       thinBorder,
+		CustomNumFmt: &numberFmt,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.subtotalMoney, err = f.NewStyle(&excelize.Style{
+		Font:         &excelize.Font{Bold: true, Color: exportColorText},
+		Fill:         excelize.Fill{Type: "pattern", Color: []string{exportColorSubtotal}, Pattern: 1},
+		Alignment:    &excelize.Alignment{Horizontal: "right", Vertical: "center"},
+		Border:       thinBorder,
+		CustomNumFmt: &moneyFmt,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.totalText, err = f.NewStyle(&excelize.Style{
+		Font:      &excelize.Font{Bold: true, Color: exportColorText},
+		Fill:      excelize.Fill{Type: "pattern", Color: []string{exportColorTotal}, Pattern: 1},
+		Alignment: &excelize.Alignment{Horizontal: "left", Vertical: "center"},
+		Border:    thinBorder,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.totalNumber, err = f.NewStyle(&excelize.Style{
+		Font:         &excelize.Font{Bold: true, Color: exportColorText},
+		Fill:         excelize.Fill{Type: "pattern", Color: []string{exportColorTotal}, Pattern: 1},
+		Alignment:    &excelize.Alignment{Horizontal: "right", Vertical: "center"},
+		Border:       thinBorder,
+		CustomNumFmt: &numberFmt,
+	}); err != nil {
+		return styles, err
+	}
+	if styles.totalMoney, err = f.NewStyle(&excelize.Style{
+		Font:         &excelize.Font{Bold: true, Color: exportColorText},
+		Fill:         excelize.Fill{Type: "pattern", Color: []string{exportColorTotal}, Pattern: 1},
+		Alignment:    &excelize.Alignment{Horizontal: "right", Vertical: "center"},
+		Border:       thinBorder,
+		CustomNumFmt: &moneyFmt,
+	}); err != nil {
+		return styles, err
+	}
+	return styles, nil
 }
 
 func formatExportInputTokens(promptTokens int, cacheRead int, cacheWrite int) string {

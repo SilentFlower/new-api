@@ -366,14 +366,17 @@ func ProcessLogsForExport(
 ### 3. Contracts
 
 - `start_timestamp`、`end_timestamp` 必填且必须为合法整数；`group`、`token_name` 支持重复查询参数并按集合筛选。
-- “汇总统计”列固定为：`分组`、`API Key 名称`、`请求次数`、`请求 Token 数`、`请求额度`，聚合维度为分组、API Key、用户名。
-- “模型明细”聚合维度为分组、API Key、用户名、模型；标题必须同时展示分组和 API Key，小计不能跨分组合并。
-- “请求日志”列固定为：`时间`、`分组`、`API Key 名称`、`模型`、`输入 Token`、`输出 Token`、`请求额度`、`用时`、`流式`、`渠道`、`请求 ID`。
+- 每个 Sheet 顶部包含标题与导出元信息（时间范围、分组/API Key 筛选摘要）；业务数据表头不保证位于第 1 行。
+- “汇总统计”数据列表固定为：`分组`、`API Key 名称`、`请求次数`、`请求 Token 数`、`请求额度 (USD)`，聚合维度为分组、API Key、用户名；有数据时底部合计行使用 `SUBTOTAL` 公式且位于筛选范围之外。
+- “模型明细”保持分段表：分组标题 + 段内表头 + 模型数据 + 静态小计；聚合维度为分组、API Key、用户名、模型；标题必须同时展示分组和 API Key，小计不能跨分组合并；不做整表分组下拉筛选。
+- “请求日志”数据列表固定为：`时间`、`分组`、`API Key`、`模型`、`输入 Tokens`、`输出 Tokens`、`额度消耗 (USD)`、`耗时(s)`、`是否流式`、`渠道 ID`、`请求 ID`。
+- “请求日志”的输入 Token 单元格必须按内容选择样式：存在 cache read 或 cache creation 说明时写文本并左对齐；没有缓存说明时写数值并使用 `#,##0`、右对齐。不能仅把数值放入文本样式，否则千分位和数值对齐会失效。
 - “请求日志”只写入按 `created_at` 升序排列的前 500000 条，保持既有静默截断行为，不新增拒绝或告警文案；“汇总统计”和“模型明细”仍覆盖筛选范围内的全部日志。
 - Anthropic 输入 Token 展示与聚合必须包含 cache read 和 cache creation Token，且同一行的 `other` 字段只解析一次。
 - 历史日志的空分组保持为空字符串，不能擅自映射为默认分组或其他展示值。
 - 数据库日志只能遍历一次：同一次遍历完成全量聚合，并通过回调流式写入限定数量的请求明细。
 - 数据库读取必须使用带请求上下文的 `Rows()`、最小字段选择和稳定排序；三个工作表均使用 `excelize.StreamWriter`，写入完成后必须全部 `Flush()` 再返回文件。
+- Sheet1/Sheet3 可对数据区启用筛选/Table 与冻结窗格；样式与数字格式属于展示层增强，不得改变聚合口径或导出上限。
 
 ### 4. Validation / Error Matrix
 
@@ -391,6 +394,7 @@ func ProcessLogsForExport(
 
 - Good: 同一 API Key 在两个分组均有日志时，汇总和模型小计分别展示，请求日志逐行保留原始分组。
 - Good: 筛选结果超过 500000 条时，前 500000 条请求日志按时间升序写入，后续日志只参与全量汇总。
+- Good: 无缓存说明的输入 Token `3000` 作为数值单元格显示为 `3,000`；存在缓存说明时显示为 `3000 (缓存读 100)` 等文本。
 - Base: 历史日志分组为空，三张工作表对应分组单元格为空，其他统计不受影响。
 - Bad: 为生成三张工作表分别查询日志库，造成三次大范围扫描和重复 JSON 解析。
 - Bad: 使用依赖 `id` 游标的批量遍历读取 ClickHouse 日志，导致默认 `id=0` 的记录遗漏或循环异常。
@@ -400,7 +404,7 @@ func ProcessLogsForExport(
 
 - Model 测试：验证相同 API Key 的不同分组分别聚合，汇总与模型明细包含分组，明细回调保持时间顺序。
 - Model 测试：验证回调错误和已取消上下文会向调用方返回错误。
-- Controller 测试：生成真实工作簿后重新打开，验证三张工作表、表头、筛选结果、分组列和 Anthropic cache Token 展示。
+- Controller 测试：生成真实工作簿后重新打开，验证三张工作表、元信息、数据表头、筛选结果、分组列、Anthropic cache Token 文本展示、无缓存输入 Token 的 `#,##0` 数值样式，以及汇总合计 `SUBTOTAL` 公式。
 - 回归测试：原有公开聚合方法必须保持可用，并复用新的单次遍历实现。
 
 ### 7. Wrong vs Correct
@@ -432,4 +436,20 @@ rows, err := query.WithContext(ctx).
     Select("created_at, username, token_name, model_name, group, prompt_tokens, completion_tokens, quota, use_time, is_stream, channel_id, request_id, other").
     Order("created_at asc").
     Rows()
+```
+
+#### Wrong
+
+```go
+// 无条件使用文本样式会让纯数字 Token 失去千分位格式和右对齐。
+inputTokenCell := styledCell(styles.text, formatExportInputTokens(promptTokens, cacheRead, cacheWrite))
+```
+
+#### Correct
+
+```go
+inputTokenCell := styledCell(styles.number, promptTokens)
+if cacheRead > 0 || cacheWrite > 0 {
+    inputTokenCell = styledCell(styles.text, formatExportInputTokens(promptTokens, cacheRead, cacheWrite))
+}
 ```
