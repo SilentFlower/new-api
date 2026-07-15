@@ -22,5 +22,16 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-07-15T21:19:34+08:00",
+    "completedSteps": [
+      "新增并验证 /v1/alpha/search 上游透传、重试和纯工具计费",
+      "补全 /v1/responses/compact 官方字段并完成回归验证",
+      "同步 Relay Alpha Search 与 Responses Compact code-spec"
+    ],
+    "partialStep": null,
+    "nextStep": "归档任务并记录会话进度",
+    "notes": "业务提交已推送；全量测试与任务相关 race 通过，全仓 vet/race 仍有既有基线告警。"
+  }
 }
