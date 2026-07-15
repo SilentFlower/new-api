@@ -22,5 +22,17 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-07-15T18:27:24+08:00",
+    "completedSteps": [
+      "支持 function_call_output 与 custom_tool_call_output 图片触发视觉辅助",
+      "按工具输出类型写回识图文本并保持 strip_image 语义",
+      "补齐工具输出、无图片与重复图片回归测试并通过 Check-All",
+      "更新 Relay 视觉辅助后端规范"
+    ],
+    "partialStep": null,
+    "nextStep": "执行 Phase 3.5 finish-work 归档与会话记录",
+    "notes": "go test ./...、go vet ./service ./relay 与 git diff --check 均通过。"
+  }
 }
