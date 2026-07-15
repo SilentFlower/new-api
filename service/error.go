@@ -84,6 +84,18 @@ func ClaudeErrorWrapperLocal(err error, code string, statusCode int) *dto.Claude
 }
 
 func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool) (newApiErr *types.NewAPIError) {
+	return relayErrorHandler(ctx, resp, showBodyWhenFail, true)
+}
+
+// RelayErrorHandlerWithoutBodyLog 解析上游错误，但不把无法解析的响应 body 写入日志。
+// @param ctx 当前请求上下文。
+// @param resp 上游 HTTP 错误响应。
+// @return 解析后的统一 Relay 错误。
+func RelayErrorHandlerWithoutBodyLog(ctx context.Context, resp *http.Response) *types.NewAPIError {
+	return relayErrorHandler(ctx, resp, false, false)
+}
+
+func relayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFail bool, logBodyWhenFail bool) (newApiErr *types.NewAPIError) {
 	newApiErr = types.InitOpenAIError(types.ErrorCodeBadResponseStatusCode, resp.StatusCode)
 
 	responseBody, err := io.ReadAll(resp.Body)
@@ -105,8 +117,10 @@ func RelayErrorHandler(ctx context.Context, resp *http.Response, showBodyWhenFai
 	if err != nil {
 		if showBodyWhenFail {
 			newApiErr.Err = buildErrWithBody("")
-		} else {
+		} else if logBodyWhenFail {
 			logger.LogError(ctx, fmt.Sprintf("bad response status code %d, body: %s", resp.StatusCode, responseBodyPreview))
+			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
+		} else {
 			newApiErr.Err = fmt.Errorf("bad response status code %d", resp.StatusCode)
 		}
 		return

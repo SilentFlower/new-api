@@ -48,6 +48,7 @@ func TestSupportsNonStreamKeepAlive(t *testing.T) {
 		{name: "moderations", info: &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAI, RelayMode: relayconstant.RelayModeModerations}, allows: true},
 		{name: "responses", info: &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAIResponses, RelayMode: relayconstant.RelayModeResponses}, allows: true},
 		{name: "responses compaction", info: &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAIResponsesCompaction, RelayMode: relayconstant.RelayModeResponsesCompact}, allows: true},
+		{name: "alpha search", info: &relaycommon.RelayInfo{RelayFormat: types.RelayFormatOpenAIAlphaSearch, RelayMode: relayconstant.RelayModeAlphaSearch}, allows: true},
 		{name: "claude messages", info: &relaycommon.RelayInfo{RelayFormat: types.RelayFormatClaude, RelayMode: relayconstant.RelayModeUnknown}, allows: true},
 		{name: "gemini", info: &relaycommon.RelayInfo{RelayFormat: types.RelayFormatGemini, RelayMode: relayconstant.RelayModeGemini}, allows: true},
 		{name: "embedding", info: &relaycommon.RelayInfo{RelayFormat: types.RelayFormatEmbedding, RelayMode: relayconstant.RelayModeEmbeddings}, allows: true},

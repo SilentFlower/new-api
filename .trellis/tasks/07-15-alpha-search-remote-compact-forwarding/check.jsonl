@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查 JSON API、max token 上限、Checked quota、testify 断言和完整测试门。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查非 2xx、网络错误、最终错误响应和渠道重试行为。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"检查消费日志字段完整且不泄露搜索查询、压缩输入、响应体或凭证。"}
+{"file":".trellis/spec/backend/relay-nonstream-keepalive.md","reason":"检查成功响应、错误响应、响应头复制和响应提交后的不可重试边界。"}
+{"file":".trellis/spec/backend/relay-websearch-emulation.md","reason":"检查 standalone search、hosted WebSearch 和 Claude 本地模拟三条链路互不干扰。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"反向扫描路由到计费日志的完整链路，并验证普通 Responses 与 Compact 的分支隔离。"}
+{"file":".trellis/tasks/07-15-alpha-search-remote-compact-forwarding/research.md","reason":"核对实现是否满足已验证的官方路径、字段演进、渠道选择和计费决策。"}

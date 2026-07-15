@@ -19,6 +19,7 @@
 | [数据库规范](./database-guidelines.md) | GORM 用法、查询模式、迁移、多数据库兼容性 | 已完成 |
 | [API 契约规范](./api-contracts.md) | 管理 API 查询参数、跨层契约和边界行为 | 已完成 |
 | [Relay 视觉辅助契约](./relay-vision-assist.md) | 视觉辅助请求构造、端点模式、Gemini Native 边界行为 | 已完成 |
+| [Relay Alpha Search 与 Responses Compact 契约](./relay-alpha-search-compact.md) | standalone Search 透明转发、重试、纯工具计费与 Compact 字段映射 | 已完成 |
 | [Relay WebSearch 模拟契约](./relay-websearch-emulation.md) | Claude Code 纯 WebSearch 渠道级模拟、provider、密钥脱敏和请求体稳定性 | 已完成 |
 | [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) | JSON 空白心跳、响应提交、重试、错误体、响应头和并发 writer 生命周期 | 已完成 |
 | [错误处理](./error-handling.md) | 错误类型、传播流程、API 响应格式 | 已完成 |
@@ -54,6 +55,10 @@
 ### 涉及 Relay 视觉辅助
 
 - [Relay 视觉辅助契约](./relay-vision-assist.md) — 辅助请求构造、端点模式、Gemini Native 转换边界
+
+### 涉及 Alpha Search 或 Responses Compact
+
+- [Relay Alpha Search 与 Responses Compact 契约](./relay-alpha-search-compact.md) — standalone Search 上游路径、原始请求体、重试、纯工具计费和 Compact 字段映射
 
 ### 涉及 Claude Code WebSearch 模拟
 

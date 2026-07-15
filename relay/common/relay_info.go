@@ -61,6 +61,22 @@ type ResponsesUsageInfo struct {
 	BuiltInTools map[string]*BuildInToolInfo
 }
 
+// ToolCallItem 描述一项冻结的工具调用费用明细。
+type ToolCallItem struct {
+	Name       string  `json:"name"`
+	CallCount  int     `json:"call_count"`
+	PricePer1K float64 `json:"price_per_1k"`
+	TotalPrice float64 `json:"total_price"`
+	Quota      int     `json:"quota"`
+}
+
+// ToolCallResult 描述预扣阶段冻结的工具调用费用结果。
+type ToolCallResult struct {
+	TotalQuota int                `json:"total_quota"`
+	Items      []ToolCallItem     `json:"items,omitempty"`
+	QuotaClamp *common.QuotaClamp `json:"-"`
+}
+
 type ChannelMeta struct {
 	ChannelType          int
 	ChannelId            int
@@ -163,6 +179,8 @@ type RelayInfo struct {
 	UpstreamRequestBodySize int64
 
 	PriceData types.PriceData
+	// ToolCallBilling 保存最终渠道尝试在预扣阶段冻结的工具调用费用。
+	ToolCallBilling *ToolCallResult
 	// ResolvedBillingModelName 是本次价格计算成功时冻结的计费模型名。
 	// 上游响应可能返回资源路径形式的实际模型名，不能反向影响本次结算。
 	ResolvedBillingModelName string
@@ -631,6 +649,14 @@ func GenRelayInfo(c *gin.Context, relayFormat types.RelayFormat, request dto.Req
 			return GenRelayInfoResponsesCompaction(c, request), nil
 		}
 		return nil, errors.New("request is not a OpenAIResponsesCompactionRequest")
+	case types.RelayFormatOpenAIAlphaSearch:
+		if request, ok := request.(*dto.AlphaSearchRequest); ok {
+			info = genBaseRelayInfo(c, request)
+			info.RelayMode = relayconstant.RelayModeAlphaSearch
+			info.RelayFormat = types.RelayFormatOpenAIAlphaSearch
+			break
+		}
+		err = errors.New("request is not an AlphaSearchRequest")
 	case types.RelayFormatTask:
 		info = genBaseRelayInfo(c, nil)
 		info.TaskRelayInfo = &TaskRelayInfo{}

@@ -22,3 +22,18 @@ func TestSetRelayRouterRegistersClaudeCountTokensRoute(t *testing.T) {
 	}
 	t.Fatalf("expected POST /v1/messages/count_tokens to be registered")
 }
+
+func TestSetRelayRouterRegistersAlphaSearchRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+
+	SetRelayRouter(engine)
+
+	for _, route := range engine.Routes() {
+		if route.Method == http.MethodPost && route.Path == "/v1/alpha/search" {
+			require.Contains(t, route.Handler, "SetRelayRouter")
+			return
+		}
+	}
+	t.Fatal("expected POST /v1/alpha/search to be registered")
+}

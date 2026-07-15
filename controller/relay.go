@@ -49,6 +49,8 @@ func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIErro
 		err = relay.EmbeddingHelper(c, info)
 	case relayconstant.RelayModeResponses, relayconstant.RelayModeResponsesCompact:
 		err = relay.ResponsesHelper(c, info)
+	case relayconstant.RelayModeAlphaSearch:
+		err = relay.AlphaSearchHelper(c, info)
 	default:
 		err = relay.TextHelper(c, info)
 	}
@@ -133,14 +135,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	mainBillingPrepared := false
 	defer func() {
-		// 只有当前尝试已完成主请求预扣费且最终失败时，才退还主请求预扣费。
-		if mainBillingPrepared && newAPIError != nil {
-			newAPIError = service.NormalizeViolationFeeError(newAPIError)
-			if relayInfo.Billing != nil {
-				relayInfo.Billing.Refund(c)
-			}
-			service.ChargeViolationFeeIfNeeded(c, relayInfo, newAPIError)
-		}
+		newAPIError = finalizeMainRelayBilling(c, relayInfo, mainBillingPrepared, newAPIError)
 	}()
 
 	retryParam := &service.RetryParam{
@@ -178,7 +173,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			recordRelayErrorLog(c, newAPIError)
 			break
 		}
-		newAPIError = prepareMainRelayBilling(c, relayInfo)
+		if relayFormat == types.RelayFormatOpenAIAlphaSearch {
+			newAPIError = prepareAlphaSearchBilling(c, relayInfo)
+		} else {
+			newAPIError = prepareMainRelayBilling(c, relayInfo)
+		}
 		if newAPIError != nil {
 			break
 		}
@@ -231,6 +230,19 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 	}
+}
+
+func finalizeMainRelayBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo, billingPrepared bool, apiErr *types.NewAPIError) *types.NewAPIError {
+	if !billingPrepared || apiErr == nil {
+		return apiErr
+	}
+	// 只有最终失败才退还跨重试复用的主请求预扣费，成功请求由对应 Relay handler 结算。
+	apiErr = service.NormalizeViolationFeeError(apiErr)
+	if relayInfo.Billing != nil {
+		relayInfo.Billing.Refund(c)
+	}
+	service.ChargeViolationFeeIfNeeded(c, relayInfo, apiErr)
+	return apiErr
 }
 
 var upgrader = websocket.Upgrader{
@@ -287,6 +299,9 @@ func cloneRelayRequest(request dto.Request) (dto.Request, error) {
 			return nil, err
 		}
 		return &cloned, nil
+	case *dto.AlphaSearchRequest:
+		cloned := *req
+		return &cloned, nil
 	case *dto.ClaudeRequest:
 		data, err := common.Marshal(req)
 		if err != nil {
@@ -305,6 +320,7 @@ func cloneRelayRequest(request dto.Request) (dto.Request, error) {
 func resetMainRelayAttemptBillingFields(relayInfo *relaycommon.RelayInfo) {
 	relayInfo.FinalPreConsumedQuota = 0
 	relayInfo.SubscriptionPostDelta = 0
+	relayInfo.ToolCallBilling = nil
 	relayInfo.ClearBillingModelName()
 }
 
@@ -353,6 +369,47 @@ func prepareMainRelayBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo) *
 		return nil
 	}
 	return service.PreConsumeBilling(c, priceData.QuotaToPreConsume, relayInfo)
+}
+
+func prepareAlphaSearchBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
+	billingModelName := relayInfo.ResolveBillingModelName()
+	relayInfo.FreezeBillingModelName(billingModelName)
+	groupRatioInfo := helper.HandleGroupRatio(c, relayInfo)
+	result := service.ComputeToolCallQuota(service.ToolCallUsage{
+		ModelName:         billingModelName,
+		WebSearchCalls:    1,
+		WebSearchToolName: service.ToolNameWebSearch,
+	}, groupRatioInfo.GroupRatio)
+
+	relayInfo.PriceData.GroupRatioInfo = groupRatioInfo
+	relayInfo.PriceData.Quota = result.TotalQuota
+	relayInfo.PriceData.QuotaToPreConsume = result.TotalQuota
+	relayInfo.QuotaClamp = result.QuotaClamp
+	relayInfo.ToolCallBilling = &result
+
+	if result.QuotaClamp != nil {
+		return types.NewErrorWithStatusCode(
+			result.QuotaClamp,
+			types.ErrorCodeModelPriceError,
+			http.StatusBadRequest,
+			types.ErrOptionWithSkipRetry(),
+		)
+	}
+
+	if result.TotalQuota == 0 {
+		if relayInfo.Billing != nil {
+			relayInfo.FinalPreConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
+		}
+		return nil
+	}
+	if relayInfo.Billing != nil {
+		if err := relayInfo.Billing.Reserve(result.TotalQuota); err != nil {
+			return types.NewError(err, types.ErrorCodePreConsumeTokenQuotaFailed, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())
+		}
+		relayInfo.FinalPreConsumedQuota = relayInfo.Billing.GetPreConsumedQuota()
+		return nil
+	}
+	return service.PreConsumeBilling(c, result.TotalQuota, relayInfo)
 }
 
 func getChannel(c *gin.Context, info *relaycommon.RelayInfo, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError) {

@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"约束 JSON 封装、可选标量、计费边界、测试质量和受保护项目信息。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"新增 Relay 端点必须沿用 NewAPIError、状态码映射、重试和上游错误脱敏契约。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"透传搜索与压缩请求时不得记录查询、上下文、响应体或凭证，只记录安全元数据。"}
+{"file":".trellis/spec/backend/relay-nonstream-keepalive.md","reason":"两个端点均为非流式 JSON，需要遵守响应提交、Header、错误体和重试边界。"}
+{"file":".trellis/spec/backend/relay-websearch-emulation.md","reason":"确保 standalone alpha/search 不误入 Claude WebSearch 本地模拟，并保持已有工具计费不回归。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"改动横跨 Router、Middleware、Relay、Adaptor、Billing 和日志，需要核对完整数据流。"}
+{"file":".trellis/tasks/07-15-alpha-search-remote-compact-forwarding/research.md","reason":"提供官方 Codex 请求契约、当前代码缺口、sub2api 对照和已确认产品决策。"}

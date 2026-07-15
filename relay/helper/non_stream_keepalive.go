@@ -60,6 +60,8 @@ func supportsNonStreamKeepAlive(info *relaycommon.RelayInfo) bool {
 		return info.RelayMode == relayconstant.RelayModeResponses
 	case types.RelayFormatOpenAIResponsesCompaction:
 		return info.RelayMode == relayconstant.RelayModeResponsesCompact
+	case types.RelayFormatOpenAIAlphaSearch:
+		return info.RelayMode == relayconstant.RelayModeAlphaSearch
 	case types.RelayFormatOpenAIImage:
 		return info.RelayMode == relayconstant.RelayModeImagesGenerations ||
 			info.RelayMode == relayconstant.RelayModeImagesEdits ||
