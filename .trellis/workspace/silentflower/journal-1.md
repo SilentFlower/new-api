@@ -19,7 +19,9 @@
 
 ### Main Changes
 
-(Add details)
+- 新增 `POST /v1/alpha/search` 路由、原始请求体透传、模型映射，以及 Codex / Advanced Custom / 普通渠道上游路径。
+- 增加一次 `web_search` 的冻结计费快照、Checked quota 饱和保护、跨渠道重试结算和最终失败退款。
+- 补全 Responses Compact 的 `tools`、`reasoning`、`text` 字段，并记录对应 Relay code-spec。
 
 ### Git Commits
 
@@ -404,6 +406,41 @@
 ### Testing
 
 - [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 13: 补全 Alpha Search 与远程压缩上游透传
+
+**Date**: 2026-07-15
+**Task**: 补全 Alpha Search 与远程压缩上游透传
+**Branch**: `build-bak`
+
+### Summary
+
+新增 /v1/alpha/search 上游透传、重试与纯工具计费，补全 /v1/responses/compact 官方字段，沉淀 Relay code-spec 并完成全量与定向验证。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `66928c467` | feat(relay): 支持 Alpha Search 与 Compact 字段透传 [build] |
+
+### Testing
+
+- [OK] `go test -count=1 ./...`
+- [OK] 变更范围 `go vet`、任务相关定向 `-race`、`git diff --check`
+- [NOTE] 全仓 `go vet ./...` 与宽范围 race 仍有任务外既有基线告警
 
 ### Status
 
