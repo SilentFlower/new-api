@@ -95,6 +95,7 @@ const schema = z.object({
   }),
   general_setting: z.object({
     ping_interval_enabled: z.boolean(),
+    non_stream_keepalive_enabled: z.boolean(),
     ping_interval_seconds: z.coerce.number().min(1),
   }),
 })
@@ -107,6 +108,7 @@ type FlatGlobalModelSettings = {
   'global.thinking_model_blacklist': string
   'global.chat_completions_to_responses_policy': string
   'general_setting.ping_interval_enabled': boolean
+  'general_setting.non_stream_keepalive_enabled': boolean
   'general_setting.ping_interval_seconds': number
 }
 
@@ -125,6 +127,8 @@ const flattenGlobalValues = (
   ),
   'general_setting.ping_interval_enabled':
     values.general_setting.ping_interval_enabled,
+  'general_setting.non_stream_keepalive_enabled':
+    values.general_setting.non_stream_keepalive_enabled,
   'general_setting.ping_interval_seconds':
     values.general_setting.ping_interval_seconds,
 })
@@ -155,7 +159,11 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
     form.reset(defaultValues as GlobalModelSettingsFormInput)
   }, [defaultValues, form])
 
-  const pingEnabled = form.watch('general_setting.ping_interval_enabled')
+  const streamPingEnabled = form.watch('general_setting.ping_interval_enabled')
+  const nonStreamKeepAliveEnabled = form.watch(
+    'general_setting.non_stream_keepalive_enabled'
+  )
+  const keepAliveEnabled = streamPingEnabled || nonStreamKeepAliveEnabled
 
   const formatJsonField = (
     field:
@@ -377,6 +385,40 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
 
           <FormField
             control={form.control}
+            name='general_setting.non_stream_keepalive_enabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Non-stream Keep-alive')}</FormLabel>
+                  <FormDescription>
+                    {t(
+                      'Periodically send JSON whitespace to keep long-running non-streaming responses active.'
+                    )}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          {nonStreamKeepAliveEnabled && (
+            <Alert>
+              <AlertTitle>{t('Warning')}</AlertTitle>
+              <AlertDescription>
+                {t(
+                  'After the first keep-alive is sent, the HTTP status remains 200. If all retries fail, the error is returned in the JSON body, and later provider response headers cannot be forwarded.'
+                )}
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <FormField
+            control={form.control}
             name='general_setting.ping_interval_seconds'
             render={({ field }) => (
               <FormItem>
@@ -385,7 +427,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                   <Input
                     type='number'
                     min={1}
-                    disabled={!pingEnabled}
+                    disabled={!keepAliveEnabled}
                     className='w-24'
                     value={
                       field.value === undefined || field.value === null
@@ -399,9 +441,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                   />
                 </FormControl>
                 <FormDescription>
-                  {t(
-                    'Recommended to keep this high to avoid upstream throttling.'
-                  )}
+                  {t('Set this below the idle timeout of your reverse proxy.')}
                 </FormDescription>
                 <FormMessage />
               </FormItem>

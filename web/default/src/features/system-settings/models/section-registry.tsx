@@ -58,6 +58,8 @@ const MODELS_SECTIONS = [
           general_setting: {
             ping_interval_enabled:
               settings['general_setting.ping_interval_enabled'],
+            non_stream_keepalive_enabled:
+              settings['general_setting.non_stream_keepalive_enabled'],
             ping_interval_seconds:
               settings['general_setting.ping_interval_seconds'],
           },

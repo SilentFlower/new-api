@@ -13,8 +13,19 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type committedImageKeepAliveWriter struct {
+	gin.ResponseWriter
+}
+
+func (w *committedImageKeepAliveWriter) BeginFinalResponse() {}
+
+func (w *committedImageKeepAliveWriter) NonStreamKeepAliveWritten() bool {
+	return true
+}
 
 func newImageTestContext(t *testing.T, body, contentType string, isStream bool) (*gin.Context, *httptest.ResponseRecorder, *http.Response, *relaycommon.RelayInfo) {
 	t.Helper()
@@ -64,6 +75,46 @@ func TestOpenaiImageDoResponseUsesInfoIsStream(t *testing.T) {
 		require.Contains(t, recorder.Body.String(), `event: image_generation.completed`)
 		require.Contains(t, recorder.Body.String(), `data: [DONE]`)
 	})
+}
+
+func TestOpenaiImageHandlerPreservesJSONAfterKeepAlive(t *testing.T) {
+	oldMode := gin.Mode()
+	gin.SetMode(gin.TestMode)
+	t.Cleanup(func() { gin.SetMode(oldMode) })
+
+	body := `{"created":1710000000,"data":[{"url":"https://example.com/image.png"},{"b64_json":"image-data"}]}`
+	tests := []struct {
+		name string
+		path string
+		mode int
+	}{
+		{name: "image generation", path: "/v1/images/generations", mode: relayconstant.RelayModeImagesGenerations},
+		{name: "image edit", path: "/v1/images/edits", mode: relayconstant.RelayModeImagesEdits},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			c, recorder, resp, info := newImageTestContext(t, body, "application/json", false)
+			c.Request = httptest.NewRequest(http.MethodPost, test.path, nil)
+			info.RelayMode = test.mode
+			resp.StatusCode = http.StatusCreated
+			resp.Header.Set("X-Provider-Request-Id", "late-provider-id")
+			c.Writer.Header().Set("Content-Type", "application/json")
+			_, err := c.Writer.Write([]byte("\n"))
+			require.NoError(t, err)
+			c.Writer = &committedImageKeepAliveWriter{ResponseWriter: c.Writer}
+
+			usage, newAPIError := OpenaiImageHandler(c, info, resp)
+
+			require.Nil(t, newAPIError)
+			require.NotNil(t, usage)
+			assert.Equal(t, http.StatusOK, recorder.Code)
+			assert.Empty(t, recorder.Header().Get("Content-Length"))
+			assert.Empty(t, recorder.Header().Get("X-Provider-Request-Id"))
+			assert.True(t, strings.HasPrefix(recorder.Body.String(), "\n"))
+			assert.JSONEq(t, body, recorder.Body.String())
+		})
+	}
 }
 
 // TestOpenaiImageStreamHandlerForwardsSSEAndUsage covers the core SSE path:

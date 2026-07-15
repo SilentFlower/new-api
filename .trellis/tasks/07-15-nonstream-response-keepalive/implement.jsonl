@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"约束后端 JSON、测试质量、代码风格和前端 Bun 验证要求。"}
+{"file":".trellis/tasks/07-15-nonstream-response-keepalive/research.md","reason":"提供现有 relay 数据流、响应写入、协议允许列表、配置与前端入口的代码证据。"}
+{"file":"web/default/AGENTS.md","reason":"约束 web/default 的 React、表单、i18n、类型检查、lint 与构建实现。"}

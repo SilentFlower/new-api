@@ -128,6 +128,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		newAPIError = types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 		return
 	}
+	stopNonStreamKeepAlive := helper.StartNonStreamKeepAlive(c, relayInfo)
+	defer stopNonStreamKeepAlive()
 
 	mainBillingPrepared := false
 	defer func() {

@@ -20,6 +20,7 @@
 | [API 契约规范](./api-contracts.md) | 管理 API 查询参数、跨层契约和边界行为 | 已完成 |
 | [Relay 视觉辅助契约](./relay-vision-assist.md) | 视觉辅助请求构造、端点模式、Gemini Native 边界行为 | 已完成 |
 | [Relay WebSearch 模拟契约](./relay-websearch-emulation.md) | Claude Code 纯 WebSearch 渠道级模拟、provider、密钥脱敏和请求体稳定性 | 已完成 |
+| [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) | JSON 空白心跳、响应提交、重试、错误体、响应头和并发 writer 生命周期 | 已完成 |
 | [错误处理](./error-handling.md) | 错误类型、传播流程、API 响应格式 | 已完成 |
 | [代码质量标准](./quality-guidelines.md) | 禁止模式、必需模式、测试、构建流程 | 已完成 |
 | [日志规范](./logging-guidelines.md) | 日志层级、格式、敏感数据处理 | 已完成 |
@@ -57,6 +58,10 @@
 ### 涉及 Claude Code WebSearch 模拟
 
 - [Relay WebSearch 模拟契约](./relay-websearch-emulation.md) — 纯 WebSearch 识别、渠道配置、provider 调用、密钥脱敏、请求体稳定性和计费
+
+### 涉及 Relay 非流式响应保活
+
+- [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) — JSON 允许列表、Flush、状态码提交、渠道重试、响应头和 writer 并发清理
 
 ### 涉及新渠道适配器
 

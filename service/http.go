@@ -47,6 +47,14 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 	}
 
 	body := io.NopCloser(bytes.NewBuffer(data))
+	keepAliveWritten := false
+	if writer, ok := c.Writer.(interface {
+		BeginFinalResponse()
+		NonStreamKeepAliveWritten() bool
+	}); ok {
+		writer.BeginFinalResponse()
+		keepAliveWritten = writer.NonStreamKeepAliveWritten()
+	}
 
 	// We shouldn't set the header before we parse the response body, because the parse part may fail.
 	// And then we will have to send an error response, but in this case, the header has already been set.
@@ -57,18 +65,22 @@ func IOCopyBytesGracefully(c *gin.Context, src *http.Response, data []byte) {
 			if !ShouldCopyUpstreamHeader(c, k, v) {
 				continue
 			}
-			c.Writer.Header().Set(k, v[0])
+			if !keepAliveWritten {
+				c.Writer.Header().Set(k, v[0])
+			}
 		}
 	}
 
-	// set Content-Length header manually BEFORE calling WriteHeader
-	c.Writer.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
+	if !keepAliveWritten {
+		// set Content-Length header manually BEFORE calling WriteHeader
+		c.Writer.Header().Set("Content-Length", fmt.Sprintf("%d", len(data)))
 
-	// Write header with status code (this sends the headers)
-	if src != nil {
-		c.Writer.WriteHeader(src.StatusCode)
-	} else {
-		c.Writer.WriteHeader(http.StatusOK)
+		// Write header with status code (this sends the headers)
+		if src != nil {
+			c.Writer.WriteHeader(src.StatusCode)
+		} else {
+			c.Writer.WriteHeader(http.StatusOK)
+		}
 	}
 
 	_, err := io.Copy(c.Writer, body)

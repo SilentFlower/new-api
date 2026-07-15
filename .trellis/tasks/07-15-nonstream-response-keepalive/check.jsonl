@@ -1,0 +1,3 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查 JSON 使用、确定性测试、跨层质量门槛和无关改动。"}
+{"file":".trellis/tasks/07-15-nonstream-response-keepalive/research.md","reason":"核对允许列表、心跳生命周期、Content-Length、状态码、响应头和图片路径假设。"}
+{"file":"web/default/AGENTS.md","reason":"检查设置表单、可访问性、i18n、类型、lint 和生产构建结果。"}
