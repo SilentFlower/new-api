@@ -586,7 +586,12 @@ func extractOpenAIResponsesVisionAssistImages(request *dto.OpenAIResponsesReques
 		if !ok {
 			continue
 		}
-		contentItems, ok := inputItem["content"].([]any)
+		contentKey := "content"
+		switch common.Interface2String(inputItem["type"]) {
+		case "function_call_output", "custom_tool_call_output":
+			contentKey = "output"
+		}
+		contentItems, ok := inputItem[contentKey].([]any)
 		if !ok {
 			continue
 		}
@@ -797,47 +802,76 @@ func rewriteOpenAIResponsesVisionAssistRequest(request *dto.OpenAIResponsesReque
 		return err
 	}
 	byMessage := groupVisionAssistResultsByMessage(results)
+	rewrittenItems := make([]any, 0, len(inputItems))
 	changed := false
 	for i, inputItemAny := range inputItems {
 		inputItem, ok := inputItemAny.(map[string]any)
 		if !ok {
+			rewrittenItems = append(rewrittenItems, inputItemAny)
 			continue
 		}
 		text := visionAssistText(byMessage[i])
 		if text == "" {
+			rewrittenItems = append(rewrittenItems, inputItemAny)
 			continue
 		}
-		contentItems, ok := inputItem["content"].([]any)
+		itemType := common.Interface2String(inputItem["type"])
+		contentKey := "content"
+		customToolOutput := false
+		switch itemType {
+		case "function_call_output":
+			contentKey = "output"
+		case "custom_tool_call_output":
+			contentKey = "output"
+			customToolOutput = true
+		}
+		contentItems, ok := inputItem[contentKey].([]any)
 		if !ok {
+			rewrittenItems = append(rewrittenItems, inputItemAny)
 			continue
 		}
 		next := make([]any, 0, len(contentItems)+1)
-		inserted := false
+		foundImage := false
 		for _, contentItemAny := range contentItems {
 			contentItem, ok := contentItemAny.(map[string]any)
 			if ok && common.Interface2String(contentItem["type"]) == "input_image" {
-				if !inserted {
+				if !foundImage && !customToolOutput {
 					next = append(next, map[string]any{
 						"type": "input_text",
 						"text": text,
 					})
-					inserted = true
 				}
+				foundImage = true
 				if stripImage {
 					continue
 				}
 			}
 			next = append(next, contentItemAny)
 		}
-		if inserted {
-			inputItem["content"] = next
-			changed = true
+		if !foundImage {
+			rewrittenItems = append(rewrittenItems, inputItemAny)
+			continue
 		}
+		inputItem[contentKey] = next
+		rewrittenItems = append(rewrittenItems, inputItem)
+		if customToolOutput {
+			rewrittenItems = append(rewrittenItems, map[string]any{
+				"type": "message",
+				"role": "user",
+				"content": []any{
+					map[string]any{
+						"type": "input_text",
+						"text": text,
+					},
+				},
+			})
+		}
+		changed = true
 	}
 	if !changed {
 		return nil
 	}
-	input, err := common.Marshal(inputItems)
+	input, err := common.Marshal(rewrittenItems)
 	if err != nil {
 		return err
 	}

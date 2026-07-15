@@ -199,6 +199,50 @@ func TestRewriteOpenAIResponsesVisionAssistRequestKeepImage(t *testing.T) {
 	assert.Equal(t, "input_image", imageItem["type"])
 }
 
+func TestRewriteOpenAIResponsesVisionAssistRequestKeepsCustomToolImage(t *testing.T) {
+	input, err := common.Marshal([]any{
+		map[string]any{
+			"type":    "custom_tool_call_output",
+			"call_id": "call_view",
+			"output": []any{
+				map[string]any{"type": "input_text", "text": "工具输出"},
+				map[string]any{"type": "input_image", "image_url": "https://example.com/a.png"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	request := &dto.OpenAIResponsesRequest{Input: input}
+	results := []VisionAssistResult{{
+		Image: VisionAssistImage{Index: 1, MessageIndex: 0},
+		Text:  "保留工具图片",
+	}}
+
+	err = rewriteOpenAIResponsesVisionAssistRequest(request, results, false)
+
+	require.NoError(t, err)
+	var rewritten []map[string]any
+	require.NoError(t, common.Unmarshal(request.Input, &rewritten))
+	require.Len(t, rewritten, 2)
+	assert.Equal(t, "custom_tool_call_output", rewritten[0]["type"])
+	output, ok := rewritten[0]["output"].([]any)
+	require.True(t, ok)
+	require.Len(t, output, 2)
+	textOutput, ok := output[0].(map[string]any)
+	require.True(t, ok)
+	imageOutput, ok := output[1].(map[string]any)
+	require.True(t, ok)
+	assert.Equal(t, "input_text", textOutput["type"])
+	assert.Equal(t, "input_image", imageOutput["type"])
+	assert.Equal(t, "message", rewritten[1]["type"])
+	assert.Equal(t, "user", rewritten[1]["role"])
+	content, ok := rewritten[1]["content"].([]any)
+	require.True(t, ok)
+	require.Len(t, content, 1)
+	textContent, ok := content[0].(map[string]any)
+	require.True(t, ok)
+	assert.Contains(t, common.Interface2String(textContent["text"]), "保留工具图片")
+}
+
 func TestExtractAndRewriteClaudeVisionAssistImages(t *testing.T) {
 	request := &dto.ClaudeRequest{
 		Model: "claude-text",
@@ -383,6 +427,202 @@ func TestApplyVisionAssistRewritesOpenAIResponsesRequest(t *testing.T) {
 	body := common.GetJsonString(info.Request)
 	assert.Contains(t, body, "Responses 图片描述")
 	assert.Contains(t, body, "input_text")
+	assert.NotContains(t, body, "input_image")
+}
+
+func TestApplyVisionAssistRewritesOpenAIResponsesToolOutputs(t *testing.T) {
+	tests := []struct {
+		name             string
+		assistModel      string
+		inputItem        map[string]any
+		expectedDetail   string
+		expectedMimeType string
+		expectedSource   string
+		expectedItems    int
+	}{
+		{
+			name:        "function call output",
+			assistModel: "vision-function-output-test",
+			inputItem: map[string]any{
+				"type":    "function_call_output",
+				"call_id": "call_function",
+				"output": []any{
+					map[string]any{"type": "input_image", "image_url": "https://example.com/function.png"},
+				},
+			},
+			expectedDetail: "high",
+			expectedSource: "https://example.com/function.png",
+			expectedItems:  1,
+		},
+		{
+			name:        "custom tool output",
+			assistModel: "vision-custom-output-test",
+			inputItem: map[string]any{
+				"type":    "custom_tool_call_output",
+				"call_id": "call_custom",
+				"output": []any{
+					map[string]any{"type": "input_text", "text": "Script completed"},
+					map[string]any{
+						"type": "input_image",
+						"image_url": map[string]any{
+							"url":       "data:image/png;base64,custom-tool",
+							"detail":    "low",
+							"mime_type": "image/png",
+						},
+					},
+				},
+			},
+			expectedDetail:   "low",
+			expectedMimeType: "image/png",
+			expectedSource:   "data:image/png;base64,custom-tool",
+			expectedItems:    2,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			require.NoError(t, getVisionAssistCache().Purge())
+			strip := true
+			setting := dto.ChannelSettings{VisionAssist: dto.ChannelVisionAssistSettings{
+				Enabled:         true,
+				AssistChannelId: 18,
+				AssistModel:     tt.assistModel,
+				StripImage:      &strip,
+			}}
+			input, err := common.Marshal([]any{tt.inputItem})
+			require.NoError(t, err)
+			request := &dto.OpenAIResponsesRequest{Model: "target", Input: input}
+			info := &relaycommon.RelayInfo{
+				Request:         request,
+				OriginModelName: "target",
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelId:         3,
+					UpstreamModelName: "target",
+					ChannelSetting:    setting,
+				},
+			}
+			callCount := 0
+			caller := func(ctx *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, images []VisionAssistImage) ([]VisionAssistResult, *types.NewAPIError) {
+				callCount++
+				require.Len(t, images, 1)
+				assert.Equal(t, tt.expectedDetail, images[0].Detail)
+				assert.Equal(t, tt.expectedMimeType, images[0].MimeType)
+				assert.Equal(t, tt.expectedSource, images[0].Source.GetRawData())
+				return []VisionAssistResult{{Image: images[0], Text: "工具图片描述"}}, nil
+			}
+
+			err = ApplyVisionAssist(c, info, caller)
+
+			require.Nil(t, err)
+			assert.Equal(t, 1, callCount)
+			var rewritten []map[string]any
+			require.NoError(t, common.Unmarshal(request.Input, &rewritten))
+			require.Len(t, rewritten, tt.expectedItems)
+			body := common.GetJsonString(info.Request)
+			assert.Contains(t, body, "工具图片描述")
+			assert.NotContains(t, body, "input_image")
+			output, ok := rewritten[0]["output"].([]any)
+			require.True(t, ok)
+			require.Len(t, output, 1)
+			outputContent, ok := output[0].(map[string]any)
+			require.True(t, ok)
+			if tt.expectedItems == 1 {
+				assert.Equal(t, "input_text", outputContent["type"])
+				assert.Contains(t, common.Interface2String(outputContent["text"]), "工具图片描述")
+			} else {
+				assert.Equal(t, "Script completed", outputContent["text"])
+				assert.Equal(t, "message", rewritten[1]["type"])
+				assert.Equal(t, "user", rewritten[1]["role"])
+			}
+		})
+	}
+}
+
+func TestApplyVisionAssistSkipsOpenAIResponsesToolOutputWithoutImage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	setting := dto.ChannelSettings{VisionAssist: dto.ChannelVisionAssistSettings{
+		Enabled:         true,
+		AssistChannelId: 19,
+		AssistModel:     "vision-no-tool-image-test",
+	}}
+	input, err := common.Marshal([]any{
+		map[string]any{
+			"type":    "custom_tool_call_output",
+			"call_id": "call_text",
+			"output": []any{
+				map[string]any{"type": "input_text", "text": "纯文本工具结果"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	request := &dto.OpenAIResponsesRequest{Model: "target", Input: input}
+	info := &relaycommon.RelayInfo{
+		Request:         request,
+		OriginModelName: "target",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "target",
+			ChannelSetting:    setting,
+		},
+	}
+	callCount := 0
+	caller := func(ctx *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, images []VisionAssistImage) ([]VisionAssistResult, *types.NewAPIError) {
+		callCount++
+		return nil, nil
+	}
+
+	apiErr := ApplyVisionAssist(c, info, caller)
+
+	require.Nil(t, apiErr)
+	assert.Equal(t, 0, callCount)
+	assert.Equal(t, string(input), string(request.Input))
+}
+
+func TestApplyVisionAssistReusesDuplicateOpenAIResponsesToolImages(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	require.NoError(t, getVisionAssistCache().Purge())
+	strip := true
+	setting := dto.ChannelSettings{VisionAssist: dto.ChannelVisionAssistSettings{
+		Enabled:         true,
+		AssistChannelId: 20,
+		AssistModel:     "vision-duplicate-tool-output-test",
+		StripImage:      &strip,
+	}}
+	image := map[string]any{"type": "input_image", "image_url": "data:image/png;base64,duplicate-tool"}
+	input, err := common.Marshal([]any{
+		map[string]any{
+			"type":    "custom_tool_call_output",
+			"call_id": "call_duplicate",
+			"output":  []any{image, image},
+		},
+	})
+	require.NoError(t, err)
+	request := &dto.OpenAIResponsesRequest{Model: "target", Input: input}
+	info := &relaycommon.RelayInfo{
+		Request:         request,
+		OriginModelName: "target",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: "target",
+			ChannelSetting:    setting,
+		},
+	}
+	callCount := 0
+	caller := func(ctx *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, images []VisionAssistImage) ([]VisionAssistResult, *types.NewAPIError) {
+		callCount++
+		require.Len(t, images, 1)
+		return []VisionAssistResult{{Image: images[0], Text: "重复工具图片"}}, nil
+	}
+
+	apiErr := ApplyVisionAssist(c, info, caller)
+
+	require.Nil(t, apiErr)
+	assert.Equal(t, 1, callCount)
+	body := common.GetJsonString(info.Request)
+	assert.Contains(t, body, "图片 1：重复工具图片")
+	assert.Contains(t, body, "图片 2：重复工具图片")
 	assert.NotContains(t, body, "input_image")
 }
 

@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/relay-vision-assist.md", "reason": "视觉辅助在 dto、service、relay 之间的图片抽取、请求构造、端点模式和回归测试契约"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "后端 JSON 封装、测试质量、错误处理和受保护信息约束"}
+{"file": ".trellis/spec/guides/cross-layer-thinking-guide.md", "reason": "Responses 工具输出图片从原始输入、辅助改写到目标协议转换的跨层数据流检查方法"}

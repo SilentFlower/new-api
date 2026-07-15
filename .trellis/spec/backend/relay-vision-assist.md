@@ -132,3 +132,125 @@ return &dto.GeminiChatRequest{
     }},
 }, nil
 ```
+
+## 场景：Responses 工具输出视觉辅助
+
+### 1. Scope / Trigger
+
+- Trigger: 修改 `/v1/responses` 视觉辅助的图片抽取、工具输出解析、识图文本写回或 `strip_image` 行为。
+- 适用范围: Responses 普通消息 `content`，以及 `function_call_output` / `custom_tool_call_output` 的 `output` 数组。
+- 风险背景: Codex `view_image` 不一定追加普通用户图片消息；直接工具调用会把图片放进 `function_call_output.output`，统一工具执行会放进 `custom_tool_call_output.output`。只扫描 `content` 会导致视觉辅助完全不触发。
+
+### 2. Signatures
+
+- Responses 图片抽取与请求改写：
+
+```go
+func extractOpenAIResponsesVisionAssistImages(request *dto.OpenAIResponsesRequest) []VisionAssistImage
+func rewriteOpenAIResponsesVisionAssistRequest(request *dto.OpenAIResponsesRequest, results []VisionAssistResult, stripImage bool) error
+```
+
+- Responses 输入 DTO 保持原始 JSON 契约：
+
+```go
+type OpenAIResponsesRequest struct {
+    Input json.RawMessage `json:"input,omitempty"`
+}
+```
+
+- 需要识别的工具输出结构：
+
+```json
+{
+  "type": "function_call_output | custom_tool_call_output",
+  "call_id": "call_xxx",
+  "output": [
+    {"type": "input_text", "text": "可选的原工具文本"},
+    {"type": "input_image", "image_url": "data:image/png;base64,...", "detail": "high"}
+  ]
+}
+```
+
+### 3. Contracts
+
+- 普通 Responses 消息继续扫描 `content` 数组；`function_call_output` 和 `custom_tool_call_output` 必须扫描 `output` 数组。
+- 触发依据是工具输出数组中存在有效的 `type=input_image`，不能依赖工具名、`call_id` 或相邻工具调用项。
+- `image_url` 必须兼容字符串和对象 `{url, detail, mime_type}`；解析继续复用 Responses 现有图片字段规则。
+- `VisionAssistImage.MessageIndex` 表示改写前的顶层输入项索引；插入新消息时不得改变后续结果与原输入项的对应关系。
+- `function_call_output` 的识图文本必须在原 `output` 首张图片前写成 `input_text`。
+- `custom_tool_call_output` 的图片按 `strip_image` 删除或保留，识图文本必须写进紧邻其后的普通 `type=message, role=user` 消息。部分目标转换器会过滤自定义工具项，只写回原 `output` 会让识图文本再次丢失。
+- 所有非图片输出项及其相对顺序必须保留；同一顶层工具输出的多张图片只生成一条汇总识图文本。
+- `strip_image=true` 删除已识别的 `input_image`；`strip_image=false` 保留图片并仍注入识图文本。
+- 工具输出不含有效图片时不得调用辅助模型，也不得重新序列化 `request.Input`。
+- JSON 解析和序列化只能使用 `common.Unmarshal` / `common.Marshal`。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+|------|------|
+| `request` 为 `nil`、`input` 为空或不是数组 | 返回空图片集合；改写直接返回 `nil` |
+| 顶层输入项不是对象 | 跳过该项并保留原值 |
+| 普通消息 `content` 或工具输出 `output` 不是数组 | 跳过该项，不触发视觉辅助 |
+| `input_image` 缺少有效 `image_url` | 跳过该图片 |
+| 工具输出只有文本或其他非图片内容 | caller 调用次数为 `0`，`Input` 字节保持不变 |
+| 改写时 JSON 解析或序列化失败 | 返回错误，由现有 `failure_policy` 决定中止或跳过 |
+| `strip_image=false` | 保留原图片，同时注入识图文本 |
+
+### 5. Good/Base/Bad Cases
+
+- Good: Codex 直接调用 `view_image`，请求包含 `function_call_output.output=[input_image]`；系统调用辅助模型，并把描述作为同一 `output` 的 `input_text` 转发。
+- Good: Codex 通过统一 `exec` 查看图片，`custom_tool_call_output.output` 同时包含执行文本和图片；系统保留执行文本、按配置处理图片，并在下一条普通用户消息写入描述。
+- Good: 同一工具输出两次返回相同图片；请求级去重只调用一次辅助模型，但描述保留图片 1、图片 2 的编号结果。
+- Base: 历史 Codex 客户端仍追加普通 `role=user` 的 `content[].input_image`；继续走既有消息改写分支。
+- Base: 工具输出只有 `input_text`；请求不触发视觉辅助且不被重写。
+- Bad: 只读取 `inputItem["content"]`，遗漏工具 `output` 中的图片。
+- Bad: 把 `custom_tool_call_output` 的识图文本只写回原 `output`，导致目标转换器过滤自定义工具项时同时丢掉描述。
+
+### 6. Tests Required
+
+- `TestApplyVisionAssistRewritesOpenAIResponsesToolOutputs`:
+  - `function_call_output` 字符串 `image_url` 能触发 caller，识图文本写回原 `output`。
+  - `custom_tool_call_output` 对象 `image_url` 的 detail/MIME 能传入 caller；原 `input_text` 保留，描述进入紧邻用户消息。
+- `TestRewriteOpenAIResponsesVisionAssistRequestKeepsCustomToolImage`: `strip_image=false` 时保留自定义工具图片和原文本，并插入描述消息。
+- `TestApplyVisionAssistSkipsOpenAIResponsesToolOutputWithoutImage`: 纯文本工具输出不调用 caller，原始 `Input` 不变。
+- `TestApplyVisionAssistReusesDuplicateOpenAIResponsesToolImages`: 重复图片只调用一次 caller，两个编号结果都写入描述。
+- 回归命令：
+  - `go test ./dto ./service ./relay`
+  - `go test ./...`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+contentItems, ok := inputItem["content"].([]any)
+if !ok {
+    continue
+}
+```
+
+问题：工具结果的图片位于 `output`，该实现会返回空图片集合，辅助识图接口永远不会触发。
+
+#### Correct
+
+```go
+contentKey := "content"
+switch common.Interface2String(inputItem["type"]) {
+case "function_call_output", "custom_tool_call_output":
+    contentKey = "output"
+}
+contentItems, ok := inputItem[contentKey].([]any)
+```
+
+对于自定义工具输出，图片处理完成后还必须追加普通用户描述消息：
+
+```go
+rewrittenItems = append(rewrittenItems, inputItem)
+rewrittenItems = append(rewrittenItems, map[string]any{
+    "type": "message",
+    "role": "user",
+    "content": []any{
+        map[string]any{"type": "input_text", "text": text},
+    },
+})
+```
