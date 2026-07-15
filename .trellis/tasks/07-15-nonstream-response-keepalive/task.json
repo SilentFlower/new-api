@@ -22,5 +22,17 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-07-15T10:50:00+08:00",
+    "completedSteps": [
+      "实现非流式 JSON 响应空白心跳、显式协议允许列表和请求级 writer 生命周期",
+      "接入管理端配置、风险提示和七种语言翻译",
+      "补齐图片、错误语义、取消清理、请求 ID、历史配置和 race 回归测试",
+      "完成 Check-All 并新增 Relay 非流式 JSON 响应保活后端规范"
+    ],
+    "partialStep": null,
+    "nextStep": "归档任务并完成会话收尾",
+    "notes": "全仓 lint/format 仍受未修改文件的既有基线问题阻断；本任务变更文件定向检查通过。"
+  }
 }
