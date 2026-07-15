@@ -3,9 +3,12 @@ name: trellis-release
 description: "核对并汇总 Trellis 任务 release.md，生成版本或上线批次操作单。用于正式上线前整理 SQL、配置、批处理、外部系统、回滚、验证事项和文档漂移风险。"
 ---
 
-# 上线操作单汇总
+# Trellis Release
 
-核对并汇总一组 Trellis 任务的上线事项，生成版本 / 上线批次操作单：`.trellis/releases/<release-file>.md`。
+本 skill 有两个明确分离的模式：
+
+- 默认批次模式：核对并汇总一组任务，生成 `.trellis/releases/<release-file>.md`，写盘前需要用户确认。
+- 内部 `audit-current`：只核对当前活动任务，为 finish-work 维护单任务 `release.md`，不需要额外确认。
 
 本 skill 只整理和核对上线事项，不执行上线、不提交代码、不推送代码。
 
@@ -22,6 +25,95 @@ description: "核对并汇总 Trellis 任务 release.md，生成版本或上线�
 - **文件证据优先**：即使刚经历上下文压缩、会话恢复或你“记得”之前做过什么，也必须重新读取本地文件和 git 证据。
 - **不静默相信旧文档**：已有 `release.md` 只能作为输入之一。发现缺失、冲突、过期或证据不足时，在批次上线单里标记 `Needs human review`。
 - **保留来源引用**：每条上线事项都要标注任务来源，例如 `[06-17-example-task]`。
+
+## 内部模式：audit-current
+
+`trellis-release audit-current` 只供 finish-work 或用户明确要求核对当前任务时使用。它不进入后续批次 Step 1-6。
+
+### 输入与证据
+
+先用 `task.py current --source` 确定唯一活动任务，再读取该任务可用的：
+
+- `task.json`、`prd.md`、`design.md`、`implement.md`。
+- `implement.jsonl`、`check.jsonl`、现有 `release.md`。
+- 当前 `git status --porcelain`、相关 diff、近期 commit 文件列表，以及 task.json 中可确认的工作提交。
+
+发生上下文压缩、恢复或中断后仍必须重新读取文件证据，不能依赖记忆。核对信号与默认批次模式一致：SQL/迁移、配置/环境变量/权限、批处理/部署脚本/数据修复、外部系统协调、特殊上线顺序、回滚与验证。
+
+### 判定与写入
+
+只允许返回三类结论：
+
+- `no-op`：高置信没有上线操作；不存在 `release.md` 时不创建文件，已有准确文件时保持不变。
+- `written`：高置信存在上线操作，或现有文件有明确漂移；创建或更新 `<task>/release.md`。
+- `needs-review`：存在可信风险但证据不足；创建或更新 `<task>/release.md`，并在 Conclusion 和不确定项中标记 `Needs human review`。
+
+已有 `release.md` 时必须先比较任务材料与 Git 证据。只在有明确新增事项、明确漂移或需保留不确定风险时更新，不能为格式统一而改写准确内容。
+
+写入结构：
+
+```markdown
+# Release Operations
+
+## Conclusion
+Release operations exist. / Needs human review.
+
+## Evidence Checked
+- task.json
+- prd.md
+- design.md / implement.md / implement.jsonl / check.jsonl
+- release.md
+- git commits / changed files
+
+## Drift Check
+Existing release.md is accurate. / Missing release.md. / Drift suspected. / Needs human review.
+
+## SQL Changes
+None
+
+## Configuration Changes
+None
+
+## Batch / Deployment Scripts / Data Repair
+None
+
+## External Systems / Dependent Platforms
+None
+
+## Release Order
+No special order.
+
+## Rollback Notes
+Rollback code only.
+
+## Post-release Verification
+Verify according to task acceptance criteria.
+```
+
+`None`、`No special order` 和 `Rollback code only` 只能在核对证据后使用。存在具体事项时写明动作、来源与人工责任边界。
+
+### 边界与结果
+
+- 不创建 `.trellis/releases/` 批次文件。
+- 不询问确认，不执行 SQL、脚本、部署或外部系统操作。
+- 多个任务即将归档时仍只处理当前活动任务。
+- dirty path 只能作为风险证据，不能直接当作已完成上线内容。
+
+返回结构化结果，供 finish-work 使用：
+
+```json
+{
+  "status": "no-op | written | needs-review",
+  "task": ".trellis/tasks/<task>",
+  "path": ".trellis/tasks/<task>/release.md | null",
+  "summary": "<核对结论>",
+  "evidence": ["<已读取证据>"]
+}
+```
+
+`audit-current` 写入任务文件后即返回；不提交、不推送、不归档。
+
+## 默认模式：批次上线操作单
 
 ## Step 1: 确定任务集合与 release 文件名
 
@@ -88,7 +180,7 @@ release 文件名生成规则：
 处理规则：
 
 - 缺失 `release.md` 时，在汇总中列入“未记录上线事项的任务”，并写明从其他证据核对出的事项或风险。
-- 不要自动为这些任务生成单任务 `release.md`；单任务记录由 finish-work skill override 注入块负责。
+- 不要自动为这些任务生成单任务 `release.md`；单任务记录由 `audit-current` 模式负责。
 - 已有 `release.md` 发生漂移时，不要静默改写原任务文件；在批次上线单的“风险标记 / 需人工复核”中记录差异。
 - 如果无法高置信判断某项是否需要上线操作，保留为 `Needs human review`，不要写成“无”。
 

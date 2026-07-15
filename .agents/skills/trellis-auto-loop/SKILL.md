@@ -20,7 +20,7 @@ description: "启动、恢复和推进 Trellis 自动任务循环。用于用户
 - 启动 runner 前先完成 route 准备度判断：已有当前任务 runtime route 决策或个人 `.trellis/.route-prefs.tmp` 时可启动；没有时先进入 `trellis-route` 正常询问 / fallback，写入真实决策后再启动。
 - auto-loop 不默认写 `route_authorization`；只有用户本次明确给出的临时 route 策略，才能通过 `--route-implement` / `--route-check` 传给 runner，且不能当成模型真实执行结果。
 - auto-loop 启动前若 implement 与 check 都缺 route，优先展示 auto-loop 专用的合并选择，不要把 `trellis-route` 的两套完整 fallback 原样贴给用户。仍允许用户回复高级格式 `implement 1, check 1`。
-- 代码提交必须走 `trellis-push` 的 commit-only 语义；不要裸 `git commit` / `git push`。
+- 代码提交必须复用 `trellis-push` 的内部 commit-only 执行能力；auto-loop 自己负责预授权校验和 runner 回写，不要裸 `git commit` / `git push`。
 
 ## 启动
 
@@ -109,7 +109,7 @@ python3 ./.trellis/scripts/auto_loop.py next
 | `run_fix` | 根据 `last_failure` 修复，复用当前任务 implement route | `record --action run_fix --result ok --route-mode <mode> --route-source <source>` |
 | `run_recheck` | 复用当前任务 check route，重新 check-all | `record --action run_recheck --result ok --route-mode <mode> --route-source <source>` |
 | `run_spec_update` | 有代码/测试证据时用 `trellis-update-spec`；无必要更新也 record ok | `record --action run_spec_update --result ok` |
-| `commit_only` | 进入 `trellis-push` commit-only 语义：先由 AI 基于 task artifacts 与 git diff 生成提交计划，只提交当前任务可归属文件 | 执行成功后 `record --action commit_only --result ok --commit <hash>` |
+| `commit_only` | 校验本 run 的预授权与文件归属，再把 exact files/message 交给 `trellis-push` 内部 commit-only 执行 | auto-loop 执行 `record --action commit_only --result ok --commit <hash>` |
 
 失败时写回：
 
@@ -142,18 +142,30 @@ route action 成功回写时必须带上 `trellis-route` 输出里的真实 `mod
 
 ## Commit-Only 预授权
 
-auto-loop 的 `commit-only` profile 是用户对“当前 run 内任务相关本地提交”的一次性预授权。只有同时满足这些条件时，`trellis-push` 可以跳过二次聊天确认：
+auto-loop 的 `commit-only` profile 是用户对“当前 run 内任务相关本地提交”的一次性预授权。预授权判断和 runner 状态写回全部由本 skill 负责，不能下放给 `trellis-push`。
 
-- `.trellis/scripts/auto_loop.py status` 显示当前 `run_status=running`，且 `outstanding_action.action=commit_only`、`outstanding_action.task` 等于当前活动任务。
-- profile 是 `commit-only`。
-- 模式是 commit-only，不 push、不 merge、不发布、不归档。
-- AI 已基于当前任务 artifacts、`git status`、`git diff` 和必要的文件内容生成提交计划，并能说明每个 planned file 为什么属于当前任务。
-- 提交计划只包含当前任务可归属文件；未识别 dirty 文件保留未提交并写入结果摘要。
-- 执行前复核 git 状态仍与计划一致。
+收到 `commit_only` action 后，按顺序执行：
 
-如果计划包含未识别 staged 文件、冲突、push/merge/release/archive、真实外部系统或生产数据效果，停止并把当前任务记为 blocked。
+1. 读取 `auto_loop.py status`，确认 `run_status=running`、profile 为 `commit-only`，且 `outstanding_action.action/task` 与本次 action 和活动任务一致。
+2. 读取当前任务 artifacts、`git status`、`git diff` 和必要文件内容，由 AI 生成 exact files、commit message 与逐文件归属理由。
+3. 确认 staged 区为空、没有冲突或未完成的 Git 集成状态，所有 planned files 均属于当前任务，且不包含 `.trellis/.runtime/`、`.trellis/.route-prefs.tmp`、其他任务目录或未解释文件。
+4. 调用 `trellis-push` 内部 commit-only，只传 exact files 与 message。该调用只执行精确本地提交，不读取 auto-loop 状态、不 push、不写任务进度。
+5. 提交成功后，本 skill 执行：
 
-不要用脚本基于时间差或 dirty baseline 猜测文件归属；语义归属由 AI 负责判断，`trellis-push` 负责展示/复核计划、精确暂存 planned files、执行本地 commit，并把 commit hash 回写 runner。预检不安全时只把当前队列项记为 blocked/skipped，并让 auto-loop 可继续后续任务。
+```bash
+python3 ./.trellis/scripts/auto_loop.py record \
+  --action commit_only \
+  --result ok \
+  --commit <hash> \
+  --files <exact files> \
+  --commit-message "<message>"
+```
+
+6. `record` 成功后立即再次调用 `next`。
+
+如果预检或内部提交失败，由本 skill 使用匹配的 action 写回 `failed` 或 `blocked`，并保留未识别 dirty 文件。不要用时间差或 dirty baseline 猜测文件归属。普通 dirty 文件不自动纳入提交；未识别 staged 文件、冲突、远端推送、上线/归档动作、真实外部系统或生产数据效果都必须阻止本次 commit-only。
+
+`trellis-push` 在这个路径中只是精确提交执行器，不得自行调用 `status`、`record` 或决定队列项是 blocked/skipped。当前 item 失败后的继续、跳过或停止仍由 runner 的既有预算和 `next` 结果决定。
 
 ## 状态与停止
 

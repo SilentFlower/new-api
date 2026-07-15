@@ -200,9 +200,30 @@ helper 写入规则：保留另一个 target 的 runtime 决策和偏好；覆�
 | `inline implement` | `Skill({skill: "trellis-before-dev"})` 加载 spec → 读任务文档 → 主线程实施 → 跑必要验证 |
 | `subagent implement` | `Agent({subagent_type: "trellis-implement"})`；若 `subagent_skip_compile=true`，dispatch prompt 附加“跳过 mvn install / npm run build / tsc 等耗时编译类检查（已由主 agent 验证或最终统一执行）” |
 | `inline check-all` | `Skill({skill: "trellis-check-all"})` |
-| `subagent check-all` | 优先 `Agent({subagent_type: "trellis-check-all"})`；不存在时 fallback `Agent({subagent_type: "trellis-check"})` + dispatch prompt 含 trellis-check-all 全流程要求（PRD 对照 → 5 维断言 → 跨层 → 委托 trellis-check 收尾） |
+| `subagent check-all` | 优先使用明确 audit-only 的 `trellis-check-all` agent；不存在时使用平台通用 subagent，并用下方 dispatch 契约执行本地 `trellis-check-all`。禁止 fallback 到会直接修改工作区的 `trellis-check` agent；无兼容 subagent 时停止并请用户改选 inline |
 | `inline check` | 仅轻量检查隐藏逃生口；`Skill({skill: "trellis-check"})` |
 | `subagent check` | 仅轻量检查隐藏逃生口；`Agent({subagent_type: "trellis-check"})` |
+
+### Subagent Check-All Dispatch 契约
+
+使用专用或通用 subagent 时，dispatch prompt 第一行必须是当前任务路径，并包含以下完整边界：
+
+```text
+Active task: <task path from task.py current>
+
+执行本项目 0.6 `trellis-check-all` 的 audit-only collect-all 全流程。
+
+必须：
+1. 读取 <task>/check.jsonl 及其列出的文件，再读取 prd.md、design.md（若存在）、implement.md（若存在）。
+2. 读取并遵循本地 trellis-check-all/SKILL.md；完成三件套实现、实现假设、完整性与规范三个维度。
+3. 收集全部可继续问题，使用稳定 CHK-* ID、P0/P1/P2 和统一报告结构。
+4. 只读审查；禁止编辑、写文件、补测试或自修复。Step 3 只复用 trellis-check 的检查清单，忽略其自动修复指令。
+5. 真正阻塞条件返回主会话，不替用户选择业务行为或修复范围。
+
+返回：统一 Check-All 结果、已执行验证和剩余风险。不要输出 commit/push 计划。
+```
+
+平台存在专用 `trellis-check-all` agent 时，也必须先确认其角色说明明确 audit-only；名称相同但带自修复语义的 agent 不可使用。平台没有专用或通用 subagent 时，不得静默改成 inline，也不得使用 `trellis-check` 代替；停止并让用户重新选择 check route。
 
 ### 输出模板
 
@@ -245,9 +266,10 @@ route_decision:
 7. **当前任务复用路由**：当前任务内已有合法来源的最近 implement/check 路由时，后续实现、修复、重检和复查默认沿用，不再次询问模式。
 8. **check 默认全面检查**：普通 check 路由只展示 `check-all` inline/subagent，不推荐轻量 `trellis-check`。
 9. **轻量 check 是隐藏逃生口**：只有用户明确请求 `light check` / `轻量检查` 时才可走轻量 `trellis-check`。
-10. **决策与执行分离**：本 skill 只输出指令，下一轮由主 agent 调工具。
-11. **严格执行用户选择**：路由结论一旦输出，主 agent 必须按指令执行，不可“出于谨慎”再换路径。
-12. **Codex inline 不裁剪选项**：Codex inline 是默认执行模式，不是只能 inline 的强制模式；route 明确选中 subagent 时，本步骤可按 subagent 路径执行。
+10. **check-all subagent 保持只读**：不得 fallback 到强制自修复的 `trellis-check` agent；不兼容时显式阻塞并让用户重选。
+11. **决策与执行分离**：本 skill 只输出指令，下一轮由主 agent 调工具。
+12. **严格执行用户选择**：路由结论一旦输出，主 agent 必须按指令执行，不可“出于谨慎”再换路径。
+13. **Codex inline 不裁剪选项**：Codex inline 是默认执行模式，不是只能 inline 的强制模式；route 明确选中 subagent 时，本步骤可按 subagent 路径执行。
 
 ---
 
@@ -260,6 +282,8 @@ route_decision:
 - runtime state 的 task/target/source/mode 不匹配时仍复用。
 - 在普通 check 选项里展示 `Check inline` / `Check subagent`。
 - 没有用户明确请求时，把 check 降级到轻量 `trellis-check`。
+- check-all subagent 不存在专用 agent 时，fallback 到带自修复语义的 `trellis-check` agent。
+- 平台没有兼容的 audit-only subagent 时，静默改成 inline 或继续执行。
 - `AskUserQuestion` / `request_user_input` 不可用时，记录为 inline 或 subagent 路径并继续。
 - 没有有效 check 配置、用户选择或最近本轮 check 路由决定时，自动执行 inline check。
 - 没有 `source` 合法的 `route_decision`，就把“用户说过 inline/subagent”或 compact summary 当成已路由。
