@@ -36,13 +36,14 @@
   "notes": "",
   "meta": {},
   "progress": {
-    "updatedAt": "2026-07-16T16:12:41+08:00",
+    "updatedAt": "2026-07-16T20:44:33+08:00",
     "completedSteps": [
       "完成 OpenAI Compact V1/V2 HTTP/SSE 与 Responses WebSocket 对齐",
-      "完成最终 Check-All 并同步后端 code-spec"
+      "修复 Compact V2 基础模型渠道选择、重试与计费后缀分离",
+      "完成 Default/Classic 前端构建、全仓测试和最终 Check-All"
     ],
     "partialStep": null,
-    "nextStep": "等待执行 trellis-finish-work 归档任务并记录会话",
-    "notes": "真实 OpenAI/sub2api 环境联调未覆盖；源码契约、本地模拟与任务定向验证已完成。"
+    "nextStep": "等待真实 OpenAI/sub2api 环境联调或执行任务归档",
+    "notes": "go test ./... 通过；相关包 go vet 和 race 通过；全仓 go vet 仅剩未修改文件中的既有告警。真实 OpenAI/sub2api 环境联调未覆盖。"
   }
 }
