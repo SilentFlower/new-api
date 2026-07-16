@@ -22,5 +22,15 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-07-16T21:18:18+08:00",
+    "completedSteps": [
+      "完成 Anthropic Reasoning Effort 日志适配与回归验证",
+      "同步后端日志 code-spec"
+    ],
+    "partialStep": null,
+    "nextStep": "等待执行 trellis-finish-work 归档任务并记录会话",
+    "notes": "未进行真实 Anthropic 请求和浏览器日志页面联调；源码链路、Relay 全包测试、Service 测试、定向 race、定向 vet 与 diff 检查已通过。"
+  }
 }
