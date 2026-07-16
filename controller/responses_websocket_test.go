@@ -179,7 +179,7 @@ func TestParseResponsesWebSocketTurnDetectsCompactV2(t *testing.T) {
 	require.Nil(t, apiErr)
 	require.NotNil(t, turn)
 	assert.Equal(t, "gpt-5", turn.baseModel)
-	assert.Equal(t, ratio_setting.WithCompactModelSuffix("gpt-5"), turn.selectionModel)
+	assert.Equal(t, "gpt-5", turn.selectionModel)
 	assert.Equal(t, relayconstant.ResponsesCompactModeV2WebSocket, turn.compactMode)
 }
 

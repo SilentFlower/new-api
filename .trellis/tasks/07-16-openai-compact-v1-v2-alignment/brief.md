@@ -7,6 +7,7 @@
 ## Scope
 
 - 建立统一 Compact 模式：V1 path、历史 V1 body bridge、V2 HTTP、V2 WebSocket，并贯穿分发、RelayInfo、模型映射、计费和日志。
+- 修复首轮实现的 V2 分发回归：V1/V1 bridge 保持 Compact 专用渠道，V2 HTTP/WS 使用基础模型完成权限、亲和性、渠道选择和重试，仅在映射后的计费模型上追加 Compact 后缀。
 - 校准 V1 `/v1/responses/compact` canonical body、安全 Codex 请求头、OpenAI/Codex/Azure URL、JSON 响应、usage/cache usage 和计费。
 - 保持 V2 原生 `/v1/responses` 流式协议，完整转发 `compaction_trigger`、beta feature、原始 compaction item、`encrypted_content` 和 `response.completed`。
 - 为没有 V2 feature 的历史 body-signal 请求提供 unary Compact 到 Responses SSE 的桥接、心跳和失败终态。
@@ -25,8 +26,9 @@
 
 ## Key Context
 
-- 当前 new-api 只有 `/v1/realtime` WebSocket，没有 `GET /v1/responses`；现有 WS 渠道选择依赖 query model，而 Responses WS 的 model 位于首个 `response.create` 帧。
+- 首轮实现已增加 `GET /v1/responses` WebSocket，并在首个 `response.create` 帧读取模型；本轮重点修正该入口及 HTTP V2 的模型分发语义。
 - Compact 本地价格模型使用 `-openai-compact` 后缀；V2 上游仍是普通 `/responses`，必须把“上游路径”和“Compact 计费标记”分离，禁止后缀泄漏上游。
+- 真实 Codex Remote Compact 已证明 V2 若用后缀模型选渠道，会在只配置 `gpt-5.6-sol` 的 `vip` 分组中以 `No available channel for model gpt-5.6-sol-openai-compact` 返回 `503`；V2 必须复用基础模型渠道。
 - 当前默认请求头不转发 `x-codex-beta-features`；sub2api 上游需要 `OpenAI-Beta: responses_websockets=2026-02-06` 及 beta/turn/session 元数据。
 - 历史 bridge 的 SSE 心跳不能复用 JSON 空白保活；心跳提交 200 后只能用 `response.failed` 表达失败。
 - WS 多轮必须每轮清理模型、Compact 模式和 BillingSession；已写业务帧后切换渠道会产生不可合并的双流。
@@ -36,6 +38,7 @@
 
 - V1 canonical 字段、必要请求头、URL、原始 JSON、usage/cache usage 和 Compact 计费在 OpenAI/Codex/Azure 链路中不丢失。
 - V2 HTTP/SSE 保持原生 `/responses`，`compaction_trigger`、`remote_compaction_v2`、compaction item 和 `response.completed` 可端到端通过。
+- V2 HTTP/WS 在分组和渠道只配置基础模型时仍可完成首次选择、后续 turn 和 failover；渠道查询不使用 Compact 后缀，结算继续使用 Compact 价格模型。
 - `GET /v1/responses` 能完成 new-api 鉴权和首帧分发，并将 WS 安全转发到 sub2api；认证被替换，beta/turn/session 元数据和多轮语义保持。
 - 普通与 Compact WS turn 可在同一连接顺序执行并分别计费；握手失败只在首个业务事件前切换 WS 渠道，取消/失败/断连不会重复结算。
 - 历史 body-signal 客户端获得合法 SSE 终态，不因 JSON/SSE 错配无限重连。
@@ -44,4 +47,4 @@
 
 ## Next Step
 
-- 用户确认 planning artifacts 与本 brief 后，运行 `task.py start` 激活任务；随后必须通过 `trellis-route(implement)` 选择实现执行方式，不能直接修改代码。
+- 任务已重新绑定；通过 `trellis-route(implement)` 进入修复实现，随后执行定向验证和最终 Check-All。

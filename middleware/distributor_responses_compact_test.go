@@ -33,12 +33,12 @@ func TestGetModelRequestMarksResponsesCompactModes(t *testing.T) {
 			expectedModel: ratio_setting.WithCompactModelSuffix("gpt-5"),
 		},
 		{
-			name:          "v2 http",
+			name:          "v2 http reuses base model channel",
 			path:          "/v1/responses",
 			body:          `{"model":"gpt-5","stream":true,"input":[{"type":"compaction_trigger"}]}`,
 			betaFeatures:  "remote_compaction_v2",
 			expectedMode:  relayconstant.ResponsesCompactModeV2HTTP,
-			expectedModel: ratio_setting.WithCompactModelSuffix("gpt-5"),
+			expectedModel: "gpt-5",
 		},
 		{
 			name:          "legacy bridge",

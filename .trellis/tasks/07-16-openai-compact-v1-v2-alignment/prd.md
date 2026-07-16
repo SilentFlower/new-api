@@ -21,6 +21,7 @@
 - sub2api 已区分原生 V2 与历史 body-signal：原生 V2 保持 `/responses` 流式链路；非 V2 body-signal 可提升为 `/responses/compact`，必要时把 unary JSON 合成为 Responses SSE。
 - 实际部署拓扑包含 `Codex 客户端 -> new-api -> sub2api`：new-api 不仅要接受 Responses WebSocket，还要把所选渠道的上游连接建立到 sub2api 的 Responses WebSocket 端点；当前 new-api 只有 `/v1/realtime` WebSocket，尚无 `GET /v1/responses` 支持。
 - 已归档的 `07-15-alpha-search-remote-compact-forwarding` 任务只补齐 V1 字段映射，并明确不重做 Compact 路由、响应和计费，本任务是后续完整协议对齐。
+- 首轮实现把所有 Compact 模式统一追加 `-openai-compact` 后缀用于渠道选择，导致仅配置基础模型 `gpt-5.6-sol` 的普通 Responses 渠道无法承接 V2，请求在分发阶段以 `No available channel for model gpt-5.6-sol-openai-compact` 返回 `503`。这与 V2 复用普通 Responses 能力的要求冲突。
 
 ## Requirements
 
@@ -45,7 +46,7 @@
 - 原生 V2 必须保持 `/v1/responses` 上游路径和流式请求，不得重写为 `/v1/responses/compact`，不得删除 `stream`、`compaction_trigger`、`client_metadata`、`include`、`tool_choice`、`prompt_cache_key` 等正常 Responses 字段。
 - 默认安全转发 `x-codex-beta-features` 及经确认的 Codex turn/session 元数据头，不要求管理员为官方客户端手工配置 Header Override。
 - 上游 SSE 事件必须保留原始 JSON item，尤其是 `response.output_item.done.item.type=compaction`、`encrypted_content` 和 `response.completed`；不得因本地 DTO 缺少字段而丢失内容。
-- V2 识别结果必须进入 RelayInfo，使渠道选择、模型映射、Compact 专用价格键、日志和测试可以区分普通 Responses 与远端压缩请求，同时上游模型名不得携带本地计费后缀。
+- V2 识别结果必须进入 RelayInfo，使模型映射、Compact 专用价格键、日志和测试可以区分普通 Responses 与远端压缩请求；V2 的权限校验、渠道亲和性、首次选择和重试使用基础模型，上游模型名不得携带本地计费后缀。
 - 客户端取消、上游断流、缺少 `response.completed`、零个或多个 `compaction` 输出项必须有明确的转发/日志契约；网关不得制造成功结果或无限重试。
 
 ### R4. V2 Responses-over-WebSocket
@@ -55,6 +56,7 @@
 - WebSocket 握手必须复用现有 Token 鉴权、模型限制、分组和渠道选择语义，并安全替换上游认证；不得透传客户端 `Authorization`、Cookie 或 hop-by-hop 握手凭证。
 - `response.create` payload 中的 `stream:true`、`input[].type=compaction_trigger`、`client_metadata` 和其他 Responses 字段必须原样保留；V2 识别结果应与 HTTP/SSE 使用同一套协议判定和 Compact 计费标记。
 - new-api 必须在完成客户端 WS Upgrade 后限时读取并校验首个 `response.create` 帧，从中取得 `model` 和 V2 Compact 信号，再执行令牌模型权限、渠道选择、模型映射和预扣；不能沿用 Realtime 在 Upgrade 前从 query 读取模型的假设。
+- WebSocket V2 的令牌模型权限、渠道亲和性、首次选择、连接内后续 turn 能力校验和 failover 重试均使用 `response.create.model` 的基础模型；Compact 后缀只能在 RelayInfo 内形成计费模型，不能参与渠道可用性判断。
 - 所选渠道指向 sub2api 时，上游使用 `ws://`/`wss://` 对应 scheme 连接其 `GET /v1/responses`（或渠道显式配置的等价 Responses WS 路径），并以渠道 API Key 替换客户端凭证。
 - 对 sub2api 必须转发或补齐 `x-codex-beta-features`、`OpenAI-Beta: responses_websockets=2026-02-06`、turn state、turn metadata、originator、session/thread 等经证实需要的安全元数据；上游返回的新 turn state 等允许头必须回传或用于连接内后续帧。
 - 入站 WebSocket 到上游 WebSocket 的消息、控制帧、关闭码、取消和错误终态必须有明确映射；不能把普通 Responses WebSocket 错误包装成成功 compaction。
@@ -72,8 +74,9 @@
 
 ### R6. 渠道、模型映射与计费
 
-- V1 继续只选择支持 OpenAI Responses Compact 的 OpenAI/Codex 渠道；V2 复用普通 Responses 能力，但必须确保所选渠道能正确接收 Codex V2 元数据和 compaction item。
-- V1/V2 的本地计费模型名使用统一 Compact 价格后缀或等价价格解析规则；上游请求中的模型保持映射后的真实模型名。
+- `v1_path` 与 `v1_body_bridge` 继续使用带 `-openai-compact` 后缀的选择模型，只选择支持 `/responses/compact` 的 OpenAI/Codex 渠道。
+- `v2_http` 与 `v2_websocket` 复用基础模型的普通 Responses 渠道；令牌模型权限、渠道亲和性、首次选择和跨渠道重试必须始终使用同一个基础模型名，不能要求管理员在渠道模型列表中额外配置 `*-openai-compact`。
+- V1/V2 的本地计费模型名使用统一 Compact 价格后缀或等价价格解析规则；模型映射完成后，`UpstreamModelName` 保持真实模型名，冻结计费模型使用映射结果对应的 Compact 后缀。
 - 预扣与结算必须覆盖输入、输出、缓存读取和缓存写入 token，继续使用现有 Checked quota helper 与饱和审计。
 - WebSocket 连接允许多轮 `response.create`；每轮独立提取终态 usage 并结算，但复用同一客户端连接、上游连接和粘性渠道。Compact 与普通 Responses 帧必须按各轮实际信号选择对应计费模型，禁止沿用上一轮状态。
 - 跨渠道重试不得重复预扣；流式响应已经写出业务事件后不得切换渠道。
@@ -84,6 +87,7 @@
 - V1 覆盖 canonical 字段、兼容字段策略、OpenAI/Codex/Azure URL、请求头、模型映射、非流式响应、usage/cache usage 和计费。
 - V2 覆盖严格识别条件、逗号分隔 beta features、原生路径保持、请求体字段保持、请求头转发、SSE compaction item 原样输出、completed 终态、usage 和 Compact 计费。
 - WebSocket 覆盖握手鉴权、`response.create` V2 识别、双向消息、控制帧、关闭码、取消、上游失败、粘性状态、HTTP/SSE 回退边界和计费只结算一次。
+- V2 HTTP/WS 必须覆盖“分组和渠道仅配置基础模型、未配置 Compact 后缀模型”的真实分发形态，并验证首次选择、token model limit、亲和性、后续 turn 和 retry 均不会查询后缀模型。
 - 历史 body-signal 覆盖 unary 提升、流式桥接、心跳前后错误、缺失/重复 compaction item、客户端取消和响应写入并发。
 - 覆盖普通 `/v1/responses` 不误判、普通流式 Responses 不回归、V1/V2 不互相污染模型后缀和计费。
 - 定向测试必须包含 `go test` 和关键 writer/流式路径的 `-race`；最终执行 `go test ./...`、`go vet ./...` 与 `git diff --check`。
@@ -92,6 +96,7 @@
 
 - [ ] 当前 OpenAI Codex 的 V1 `/responses/compact` 请求可以通过 new-api 到达 OpenAI、Codex 和 Azure 对应上游，canonical 字段、必要请求头、响应 body、usage 和计费均不丢失。
 - [ ] 当前 OpenAI Codex 的 V2 请求保持普通 `/responses` 流式协议，`compaction_trigger`、beta feature、compaction 输出项和 `response.completed` 能端到端通过。
+- [ ] 当 `vip` 等分组只为渠道配置 `gpt-5.6-sol` 时，V2 HTTP/WS Remote Compact 能正常选择和重试该渠道，不再因查询 `gpt-5.6-sol-openai-compact` 返回 `503`；结算仍使用 Compact 价格模型。
 - [ ] Responses-over-WebSocket 的 V2 Compact 请求可以经过 new-api 完成鉴权、渠道选择、上游转发、终态回传和计费；上游握手失败时只在首个业务事件前切换支持 WS 的渠道，不执行 WS 到单次 HTTP 的协议降级。
 - [ ] 当渠道 Base URL 指向 sub2api 时，new-api 能连接 sub2api 的 Responses WS 入口，替换认证并保持 beta/turn/session 元数据和多轮 `response.create` 语义。
 - [ ] V2 不再依赖管理员手工 Header Override 才能工作，且客户端认证信息不会被透传到上游。

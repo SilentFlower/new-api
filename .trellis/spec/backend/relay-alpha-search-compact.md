@@ -230,7 +230,9 @@ func ClearResponsesCompactAudit(ctx *gin.Context)
 
 #### 模型、请求体与计费标记
 
-- 所有 Compact 模式的渠道选择与本地计费模型使用 `-openai-compact` 后缀；模型映射前必须移除后缀，上游 body 中只能出现映射后的真实模型名。
+- `v1_path` 与 `v1_body_bridge` 的渠道选择和本地计费模型使用 `-openai-compact` 后缀，用于隔离仅支持 `/responses/compact` 的渠道能力。
+- `v2_http` 与 `v2_websocket` 的 token 模型权限、渠道亲和性、首次选择、后续 WebSocket turn 能力校验和跨渠道重试使用基础模型，复用普通 Responses 渠道；管理员不需要在渠道模型列表中额外配置 `*-openai-compact`。
+- 所有 Compact 模式在模型映射完成后都使用最终映射模型对应的 `-openai-compact` 计费名；`UpstreamModelName` 和上游 body 中只能出现无后缀的真实模型名。
 - V1 上游只发送当前 Codex canonical 字段：`model`、`input`、`instructions`、`tools`、`parallel_tool_calls`、`reasoning`、`service_tier`、`prompt_cache_key`、`text`。
 - `v1_path` 和 `v1_body_bridge` 使用 `/responses/compact`；`v2_http` 和 `v2_websocket` 必须保持普通 `/responses`，不得因为本地计费后缀改写路径。
 - V2 HTTP 的 Responses SSE data 和 WebSocket payload 原样写回；本地 DTO 解析只用于 usage、终态和 compaction item 观测，不能重组或丢弃 `encrypted_content` 等未知字段。
@@ -272,6 +274,7 @@ func ClearResponsesCompactAudit(ctx *gin.Context)
 | 条件 | 行为 |
 | --- | --- |
 | 普通 HTTP/WS Responses 不满足 Compact 信号 | mode=`none`，路径、模型价格和既有行为不变 |
+| V2 HTTP/WS 的分组和渠道只配置基础模型 | 使用基础模型完成权限校验、渠道选择与重试；不得因查询 `*-openai-compact` 返回 `503`，结算仍使用 Compact 价格模型 |
 | 非 Upgrade `GET /v1/responses` | `400 invalid_request`，提示需要 WebSocket Upgrade |
 | 首帧不是 JSON `response.create` 或 model 为空 | WebSocket error event + policy close，不选择渠道 |
 | Responses max-tokens 字段超过统一上限 | `400 invalid_request`，不得预扣或发送上游 |
@@ -286,19 +289,20 @@ func ClearResponsesCompactAudit(ctx *gin.Context)
 
 ### 5. Good / Base / Bad Cases
 
-- Good：Codex V2 HTTP 请求保持 `/v1/responses` 和原始 SSE，模型后缀只用于本地选择/计费，`compaction` item 与 `response.completed` 原样到达客户端。
+- Good：Codex V2 HTTP 请求保持 `/v1/responses` 和原始 SSE，基础模型用于渠道选择，Compact 后缀只用于映射后的本地计费，`compaction` item 与 `response.completed` 原样到达客户端。
 - Good：Codex 客户端只发送 `session-id`，new-api 到 sub2api 的握手同时带 `session-id` 和 `session_id`，且客户端 Authorization 被 Channel API Key 替换。
 - Good：同一 WS 连接依次执行普通、Compact、普通 turn；三轮独立计费，第三轮消费日志不继承第二轮 `responses_compact` 审计。
 - Base：普通 `/v1/responses` HTTP/SSE 或 WS 请求没有 `compaction_trigger`；detector 返回 `none`，继续原有 Responses 行为。
 - Base：历史 body-signal 客户端请求 `stream:true` 但不声明 V2 beta；上游 unary Compact，客户端收到合法 SSE 终态。
 - Bad：看到 `compaction_trigger` 就把原生 V2 改写到 `/responses/compact`。
+- Bad：对 V2 使用 `mode.IsCompact()` 追加选择后缀，导致仅配置基础模型的普通 Responses 渠道在分发阶段返回 `No available channel for model ...-openai-compact`。
 - Bad：把 `-openai-compact` 后缀写入上游 model，或让 Compact 标记跨 WS turn 复用。
 - Bad：通配复制客户端 header/query，导致 Authorization、Cookie 或 credential 泄露到上游。
 
 ### 6. Tests Required
 
 - detector：覆盖 V1 path、V1 body bridge、V2 HTTP、V2 WS、普通 Responses、多 header value、逗号 token 和 substring 误匹配。
-- 模型与 HTTP：覆盖 Compact 后缀不泄漏、V2 保持 `/responses`、V1 canonical allowlist、OpenAI/Codex/Azure URL、usage/cache token 和普通 Responses 隔离。
+- 模型与 HTTP：覆盖 V1/V1 bridge 使用 Compact 选择后缀、V2 使用基础模型完成 token 权限/渠道选择/retry、映射后 Compact 计费、后缀不泄漏、V2 保持 `/responses`、V1 canonical allowlist、OpenAI/Codex/Azure URL、usage/cache token 和普通 Responses 隔离。
 - header 与握手：使用真实 `httptest` WebSocket server 断言 path、query 合并、Channel Authorization、OpenAI-Beta、两组 session/thread 别名、turn state 回收和客户端凭证过滤。
 - bridge：覆盖 object/scalar output、连续 `output_index`、缺失/null/不完整 usage、心跳前后错误、取消、并发 writer 和停止幂等。
 - WebSocket：覆盖首帧鉴权、单 active turn、首个业务错误前 failover、输出后不重试、cancel/pong/close、多轮普通/Compact 交替、缺失 usage 退款和计费只结算一次。
@@ -324,6 +328,13 @@ if strings.Contains(string(body), "compaction_trigger") {
 ```
 
 ```go
+// 错误：V2 也会进入该分支，导致渠道查询使用本地计费后缀。
+if mode.IsCompact() {
+	selectionModel = ratio_setting.WithCompactModelSuffix(modelName)
+}
+```
+
+```go
 // 错误：通配复制会泄露客户端认证和握手凭证。
 for key, values := range c.Request.Header {
 	targetHeader[key] = values
@@ -340,9 +351,14 @@ mode := helper.DetectResponsesCompactMode(
 	body,
 	helper.ResponsesTransportHTTP,
 )
-if mode.IsCompact() {
+if mode.UsesCompactEndpoint() {
 	selectionModel = ratio_setting.WithCompactModelSuffix(modelName)
 }
+```
+
+```go
+// V2 使用基础模型选择普通 Responses 渠道，映射后由 RelayInfo 形成 Compact 计费名。
+selectionModel = modelName
 ```
 
 ```go

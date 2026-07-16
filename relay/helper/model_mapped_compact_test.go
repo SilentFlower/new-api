@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestModelMappedHelperResponsesCompactV2KeepsSuffixOutOfUpstream(t *testing.T) {
+func TestModelMappedHelperResponsesCompactV2BuildsBillingSuffixAfterMapping(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Set("model_mapping", `{"gpt-5":"gpt-5.1"}`)
@@ -22,9 +22,9 @@ func TestModelMappedHelperResponsesCompactV2KeepsSuffixOutOfUpstream(t *testing.
 	info := &relaycommon.RelayInfo{
 		RelayMode:            relayconstant.RelayModeResponses,
 		ResponsesCompactMode: relayconstant.ResponsesCompactModeV2HTTP,
-		OriginModelName:      ratio_setting.WithCompactModelSuffix("gpt-5"),
+		OriginModelName:      "gpt-5",
 		ChannelMeta: &relaycommon.ChannelMeta{
-			UpstreamModelName: ratio_setting.WithCompactModelSuffix("gpt-5"),
+			UpstreamModelName: "gpt-5",
 		},
 	}
 
@@ -43,9 +43,9 @@ func TestModelMappedHelperResponsesCompactSelfMappingIsNotMapping(t *testing.T) 
 	info := &relaycommon.RelayInfo{
 		RelayMode:            relayconstant.RelayModeResponses,
 		ResponsesCompactMode: relayconstant.ResponsesCompactModeV2HTTP,
-		OriginModelName:      ratio_setting.WithCompactModelSuffix("gpt-5"),
+		OriginModelName:      "gpt-5",
 		ChannelMeta: &relaycommon.ChannelMeta{
-			UpstreamModelName: ratio_setting.WithCompactModelSuffix("gpt-5"),
+			UpstreamModelName: "gpt-5",
 		},
 	}
 

@@ -17,8 +17,8 @@ go test ./relay/helper ./relay/constant ./relay/common
 
 ## 2. HTTP 分发、模型映射与计费标记
 
-- [ ] 在 `middleware.getModelRequest` 中调用 detector，并为所有 Compact 模式追加本地价格后缀。
-- [ ] 保证 token 模型限制、渠道能力、渠道亲和性和 retry model 使用相同的 Compact 选择模型。
+- [ ] 在 `middleware.getModelRequest` 中调用 detector；仅 `v1_path` 与 `v1_body_bridge` 追加 Compact 选择后缀，`v2_http` 保持基础选择模型。
+- [ ] 保证 V2 token 模型限制、渠道能力、渠道亲和性和 retry model 始终使用同一个基础模型；V1 保持 Compact 专用选择模型。
 - [ ] 修改 `GenRelayInfoResponses`/`GenRelayInfoResponsesCompaction` 读取 Compact 模式。
 - [ ] 修改 `ModelMappedHelper`：所有 Compact 模式都先去除本地后缀再映射，但 V2 保持普通 Responses URL。
 - [ ] 补充模型映射、循环映射、上游模型计费开关、Compact wildcard price 和后缀不泄漏测试。
@@ -50,6 +50,7 @@ go test ./dto ./relay ./relay/channel/openai ./relay/channel/codex ./relay/helpe
 - [ ] 在 Responses SSE handler 中增加 V2 终态观测，不重新 marshal 原始 item。
 - [ ] 确认 `encrypted_content`、未知 compaction 字段和 `response.completed` 原样写回。
 - [ ] V2 使用 Compact 价格模型结算，普通 Responses 仍使用基础模型价格。
+- [ ] 增加仅配置基础模型渠道的 V2 HTTP 回归，断言分发和重试不查询 `*-openai-compact`，映射后计费仍使用 Compact 价格模型。
 - [ ] 覆盖客户端取消、上游 EOF、无 completed、零/多个 compaction item 和已写流后不重试。
 
 验证：
@@ -81,7 +82,8 @@ go test -race ./relay ./relay/helper
 - [ ] 注册 `GET /v1/responses`，复用认证、性能检查和请求限流，但不使用 Upgrade 前的 `Distribute`。
 - [ ] 新增 `RelayResponsesWebSocket` 控制器：Upgrade 校验、读限制、首帧超时、JSON/type/model 校验。
 - [ ] 从 `middleware.Distribute` 抽取可复用的 token 模型权限和首次渠道选择能力，HTTP 与 WS 共用。
-- [ ] 首帧识别 V2 Compact、追加选择/计费后缀、初始化 Channel context 和 RelayInfo。
+- [ ] 首帧识别 V2 Compact，使用基础模型完成权限、渠道选择和 retry；在 RelayInfo 映射后单独形成 Compact 计费模型。
+- [ ] 覆盖仅配置基础模型渠道的 V2 WS 首轮、后续 turn、当前渠道能力校验和 failover，禁止查询 `*-openai-compact`。
 - [ ] Upgrade 前后的错误分别使用 OpenAI HTTP JSON 与 WS error/close code。
 
 验证：
@@ -125,6 +127,7 @@ go test -race ./controller ./relay ./service
 ## 9. 全链路回归与规范更新
 
 - [ ] 增加真实 HTTP server 场景：V1 JSON、V2 SSE、V1 body bridge SSE、Responses WS 到模拟 sub2api。
+- [ ] 增加用户报告回归：`gpt-5.6-sol` V2 Remote Compact 在只配置基础模型的分组中可完成首次选择与重试，不返回 `No available channel for model gpt-5.6-sol-openai-compact`。
 - [ ] 验证普通 `/v1/responses`、Chat Completions via Responses、视觉辅助、非流式 JSON 保活和 Realtime WS 不回归。
 - [ ] 更新 `.trellis/spec/backend/relay-alpha-search-compact.md`，扩展 V1/V2/WS 契约；必要时拆出专门 Responses WS spec 并更新 index。
 - [ ] 执行实现现实检查，验证 OpenAI commit、sub2api path/header、Gorilla writer 生命周期和历史记录兼容假设。

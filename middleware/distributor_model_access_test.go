@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
@@ -30,6 +31,26 @@ func TestValidateTokenModelAccessUsesCompactSelectionModel(t *testing.T) {
 
 	require.Nil(t, ValidateTokenModelAccess(c, compactModel))
 	require.NotNil(t, ValidateTokenModelAccess(c, "gpt-4.1"))
+}
+
+func TestResponsesCompactV2UsesBaseModelForTokenAccess(t *testing.T) {
+	require.NoError(t, appI18n.Init())
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.6-sol","stream":true,"input":[{"type":"compaction_trigger"}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Request.Header.Set("X-Codex-Beta-Features", "remote_compaction_v2")
+	common.SetContextKey(c, constant.ContextKeyTokenModelLimitEnabled, true)
+	common.SetContextKey(c, constant.ContextKeyTokenModelLimit, map[string]bool{
+		"gpt-5.6-sol": true,
+	})
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+
+	request, shouldSelect, err := getModelRequest(c)
+	require.NoError(t, err)
+	require.True(t, shouldSelect)
+	require.Equal(t, "gpt-5.6-sol", request.Model)
+	require.Nil(t, ValidateTokenModelAccess(c, request.Model))
 }
 
 func TestAbortWithDistributorErrorPreservesHTTPErrorCodeContract(t *testing.T) {

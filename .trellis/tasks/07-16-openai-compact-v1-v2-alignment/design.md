@@ -7,7 +7,7 @@
 核心不变量：
 
 1. Compact 协议版本不能只靠路径判断。
-2. 本地 Compact 价格后缀只能用于渠道选择和计费，不能发给上游。
+2. 本地 Compact 价格后缀用于 V1 能力选择和所有 Compact 计费；V2 渠道选择必须使用基础模型，后缀不能发给上游。
 3. V2 原生请求必须保持普通 `/responses` 流式协议。
 4. WebSocket 在读取首个 `response.create` 前不能选择渠道。
 5. 已向客户端写出业务事件后不能切换渠道。
@@ -55,8 +55,9 @@ beta feature 必须按多个 header value 和逗号拆分后 trim 精确匹配�
 `middleware.getModelRequest` 已读取可复用 BodyStorage。其返回前执行 Compact 检测：
 
 - 将模式写入 context。
-- V1/V2 Compact 的渠道选择模型统一追加 `-openai-compact`。
-- token 模型限制和渠道能力继续按现有 Compact 后缀契约执行。
+- `v1_path` 与 `v1_body_bridge` 的渠道选择模型追加 `-openai-compact`，继续表达 `/responses/compact` 专用能力。
+- `v2_http` 的 token 模型限制、渠道亲和性、首次选择和 retry model 使用请求中的基础模型，复用普通 Responses 渠道。
+- V2 Compact 后缀只在 RelayInfo 的映射和计费阶段形成，禁止要求渠道模型列表额外声明该后缀。
 - 普通 Responses 不加后缀。
 
 为避免 detector、controller 和 relay 重复解析，context 只保存枚举结果，不保存请求体或对话内容。
@@ -71,6 +72,8 @@ beta feature 必须按多个 header value 和逗号拆分后 trim 精确匹配�
 - 链式模型映射使用真实模型名。
 - `UpstreamModelName` 保持真实模型名。
 - `OriginModelName`/冻结计费模型保持 Compact 后缀。
+
+对 V2，分发 context 中的初始 `OriginModelName` 是基础模型；`ModelMappedHelper` 根据 Compact mode 在映射完成后把最终映射模型转换为 Compact 计费名。HTTP 重试参数始终保存基础选择模型，每次 attempt 重置后再执行当前渠道自己的模型映射，避免第二次选择退回后缀模型。
 
 V2 的 URL 仍由 `RelayModeResponses` 决定，不能因计费标记改成 `/responses/compact`。
 
@@ -178,7 +181,7 @@ func RelayResponsesWebSocket(c *gin.Context)
 1. 校验 Upgrade。
 2. Upgrade 客户端连接并设置读大小和首帧超时。
 3. 读取首个 text/binary JSON 帧，要求 `type=response.create` 和非空 model。
-4. 检查 token 模型权限、分组、渠道亲和性和 Compact 后缀。
+4. 使用基础模型检查 token 模型权限、分组和渠道亲和性；Compact 后缀只在后续 RelayInfo 计费准备中形成。
 5. 选择并初始化 Channel context。
 6. 建立上游 WS，转发保留的首帧。
 
@@ -261,6 +264,8 @@ Responses WS 使用 `dto.Usage` 和现有文本计费，不使用 Realtime audio
 
 普通 Responses turn 使用基础模型价格；只有该 turn 同时满足 V2 Compact 信号时才使用 Compact 后缀。连接级状态不能把 Compact 标记泄漏到下一轮。
 
+V2 WebSocket 的 `selectionModel` 固定为 `baseModel`；首轮选择、后续 turn 的 token 权限与当前渠道能力校验、以及握手/首帧失败后的 retry 都使用该基础模型。`prepareResponsesWebSocketTurnAttempt` 仍根据 Compact mode 生成映射后的 Compact 计费模型。
+
 ## 7. 错误与日志
 
 - Upgrade 前错误使用 OpenAI JSON 和真实 HTTP 状态。
@@ -280,7 +285,7 @@ Responses WS 使用 `dto.Usage` 和现有文本计费，不使用 Realtime audio
 ## 9. 主要风险
 
 1. 分发时序：WS model 在首帧，必须避免绕过 token 模型限制和渠道亲和性。
-2. 模型后缀泄漏：V2 path 是普通 `/responses`，但价格是 Compact；模型映射必须分离两者。
+2. 模型后缀泄漏：V2 path 和渠道能力都是普通 Responses，但价格是 Compact；分发、重试、模型映射和计费必须分离，任何 V2 渠道查询都不能使用后缀模型。
 3. writer 提交：历史 bridge 心跳提交 200 后只能使用 SSE 终态表达失败。
 4. 多轮计费：连接级变量若未按 turn 清理，会重复结算或把 Compact 价格带入普通请求。
 5. failover 边界：任何业务帧写出后重试都会形成两个不可合并的上游流。

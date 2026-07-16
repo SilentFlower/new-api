@@ -195,10 +195,10 @@ func TestFinalizeMainRelayBillingOnlyRefundsFinalFailure(t *testing.T) {
 	})
 }
 
-func TestCompactRetryUsesEachChannelsOwnModelMapping(t *testing.T) {
+func TestResponsesCompactV2RetryUsesBaseSelectionAndEachChannelsOwnModelMapping(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	selectionModel := ratio_setting.WithCompactModelSuffix("gpt-5")
+	selectionModel := "gpt-5"
 	info := &relaycommon.RelayInfo{
 		RelayMode:            relayconstant.RelayModeResponses,
 		ResponsesCompactMode: relayconstant.ResponsesCompactModeV2HTTP,
@@ -212,6 +212,7 @@ func TestCompactRetryUsesEachChannelsOwnModelMapping(t *testing.T) {
 	firstRequest := &dto.OpenAIResponsesRequest{Model: "gpt-5"}
 	require.NoError(t, relayhelper.ModelMappedHelper(c, info, firstRequest))
 	require.Equal(t, "gpt-5.1", info.UpstreamModelName)
+	require.Equal(t, ratio_setting.WithCompactModelSuffix("gpt-5.1"), info.OriginModelName)
 
 	resetMainRelayAttemptFields(info, selectionModel)
 	info.ChannelMeta = &relaycommon.ChannelMeta{UpstreamModelName: selectionModel}
