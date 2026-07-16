@@ -8,7 +8,88 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
+
+func TestSyncAnthropicReasoningEffort(t *testing.T) {
+	tests := []struct {
+		name          string
+		channelType   int
+		initialEffort string
+		outputConfig  string
+		want          string
+	}{
+		{
+			name:         "记录 Anthropic output_config effort",
+			channelType:  constant.ChannelTypeAnthropic,
+			outputConfig: `{"effort":"high"}`,
+			want:         "high",
+		},
+		{
+			name:          "缺失 effort 时清空旧值",
+			channelType:   constant.ChannelTypeAnthropic,
+			initialEffort: "high",
+			outputConfig:  `{}`,
+			want:          "",
+		},
+		{
+			name:          "不修改非 Anthropic 渠道",
+			channelType:   constant.ChannelTypeOpenAI,
+			initialEffort: "medium",
+			outputConfig:  `{"effort":"xhigh"}`,
+			want:          "medium",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{
+				ReasoningEffort: tt.initialEffort,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType: tt.channelType,
+				},
+			}
+
+			syncAnthropicReasoningEffort(info, []byte(tt.outputConfig))
+
+			assert.Equal(t, tt.want, info.ReasoningEffort)
+		})
+	}
+}
+
+func TestSyncAnthropicReasoningEffortUsesParamOverrideResult(t *testing.T) {
+	info := &relaycommon.RelayInfo{
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelType: constant.ChannelTypeAnthropic,
+			ParamOverride: map[string]interface{}{
+				"operations": []interface{}{
+					map[string]interface{}{
+						"path":  "output_config.effort",
+						"mode":  "set",
+						"value": "xhigh",
+						"conditions": []interface{}{
+							map[string]interface{}{
+								"path":  "output_config.effort",
+								"mode":  "full",
+								"value": "max",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	requestBody, err := relaycommon.ApplyParamOverrideWithRelayInfo(
+		[]byte(`{"output_config":{"effort":"max"}}`),
+		info,
+	)
+	require.NoError(t, err)
+
+	syncAnthropicReasoningEffortFromRequestBody(info, requestBody)
+
+	assert.Equal(t, "xhigh", info.ReasoningEffort)
+}
 
 func TestShouldHandleClaudeWebSearchEmulation(t *testing.T) {
 	tests := []struct {

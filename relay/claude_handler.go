@@ -22,7 +22,28 @@ import (
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
+
+// syncAnthropicReasoningEffort 从 Anthropic output_config 同步日志字段。
+func syncAnthropicReasoningEffort(info *relaycommon.RelayInfo, outputConfig []byte) {
+	if info == nil || info.ChannelMeta == nil || info.ChannelType != constant.ChannelTypeAnthropic {
+		return
+	}
+
+	effort := gjson.GetBytes(outputConfig, "effort")
+	if effort.Type != gjson.String {
+		info.ReasoningEffort = ""
+		return
+	}
+	info.ReasoningEffort = effort.String()
+}
+
+// syncAnthropicReasoningEffortFromRequestBody 从最终上游请求体同步参数覆盖后的日志字段。
+func syncAnthropicReasoningEffortFromRequestBody(info *relaycommon.RelayInfo, requestBody []byte) {
+	outputConfig := gjson.GetBytes(requestBody, "output_config")
+	syncAnthropicReasoningEffort(info, []byte(outputConfig.Raw))
+}
 
 func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 
@@ -167,6 +188,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 
 	var requestBody io.Reader
 	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+		syncAnthropicReasoningEffort(info, request.OutputConfig)
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
@@ -197,6 +219,7 @@ func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *typ
 				return newAPIErrorFromParamOverride(err)
 			}
 		}
+		syncAnthropicReasoningEffortFromRequestBody(info, jsonData)
 
 		logger.LogDebug(c, "requestBody: %s", jsonData)
 		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)

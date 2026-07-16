@@ -1,0 +1,4 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"约束 Go 后端 JSON 封装、测试断言和最小改动质量要求。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"确认 Anthropic 适配逻辑应留在 relay/channel/claude 与现有 Relay 边界内。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"约束数据库消费日志字段和敏感请求体不得进入日志。"}
+{"file":".trellis/spec/backend/relay-websearch-emulation.md","reason":"确认 Claude 原生请求在 ConvertClaudeRequest、参数覆盖和上游发送之间的既有执行顺序。"}

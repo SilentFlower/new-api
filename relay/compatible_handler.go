@@ -177,6 +177,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 				return newAPIErrorFromParamOverride(err)
 			}
 		}
+		syncAnthropicReasoningEffortFromRequestBody(info, jsonData)
 
 		logger.LogDebug(c, "text request body: %s", jsonData)
 

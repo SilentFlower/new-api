@@ -218,3 +218,105 @@ logger.LogDebug(ctx, fmt.Sprintf("Redis GET: key=%s, value=%s", key, value))
 3. **过度使用 FatalLog**：`FatalLog` 会调用 `os.Exit(1)` 终止进程，仅用于启动阶段的致命错误
 4. **忘记区分日志数据库**：日志模型操作应使用 `LOG_DB`，支持独立日志数据库
 5. **调试信息不加条件**：高频调试信息应使用 `LogDebug`（受 `DebugEnabled` 控制），避免生产环境产生大量无用日志
+
+## 场景：Anthropic Reasoning Effort 消费日志
+
+### 1. Scope / Trigger
+
+- Trigger：修改 Anthropic/Claude 最终请求体、`output_config.effort`、参数覆盖、请求体透传、`RelayInfo.ReasoningEffort` 或消费日志 `other.reasoning_effort`。
+- 目标是让消费日志记录实际发送给 Anthropic 上游的明确 effort 字符串，同时避免记录请求体、对话或凭证。
+
+### 2. Signatures
+
+```go
+type RelayInfo struct {
+	ReasoningEffort string
+}
+
+func syncAnthropicReasoningEffort(info *relaycommon.RelayInfo, outputConfig []byte)
+func syncAnthropicReasoningEffortFromRequestBody(info *relaycommon.RelayInfo, requestBody []byte)
+```
+
+请求与日志字段：
+
+```json
+{
+  "output_config": {
+    "effort": "xhigh"
+  }
+}
+```
+
+```json
+{
+  "reasoning_effort": "xhigh"
+}
+```
+
+### 3. Contracts
+
+- 仅 `constant.ChannelTypeAnthropic` 同步该字段；其他渠道的 `RelayInfo.ReasoningEffort` 不得被 Anthropic 逻辑修改。
+- 非透传请求必须在 `RemoveDisabledFields` 和 `ApplyParamOverrideWithRelayInfo` 之后，从最终上游 JSON 的 `output_config.effort` 同步日志字段。
+- 请求体透传会跳过最终 JSON 重建和参数覆盖；此时从已解析的 `dto.ClaudeRequest.OutputConfig` 提取 effort，不得为了日志再次读取或复制完整请求体。
+- 只接受 JSON string。字段缺失、空值或非字符串时清空 Anthropic 渠道的旧值，使消费日志省略 `reasoning_effort`，避免跨重试残留。
+- 不根据 `thinking.budget_tokens` 反推 low、medium 或 high；没有明确 effort 就不记录。
+- 日志生成继续由 `GenerateTextOtherInfo` 把非空 `RelayInfo.ReasoningEffort` 写入 `other.reasoning_effort`；前端只消费该既有字段。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 日志行为 |
+|------|----------|
+| Anthropic `output_config.effort` 是非空字符串 | 写入相同字符串 |
+| 参数覆盖把 `max` 改为 `xhigh` | 写入覆盖后的 `xhigh` |
+| Anthropic 请求体透传且 DTO 中存在 effort | 写入 DTO 中的字符串 |
+| effort 缺失、空值或非字符串 | 清空旧值，不写 `other.reasoning_effort` |
+| 仅存在 `thinking.budget_tokens` | 不推断，不写日志字段 |
+| 非 Anthropic 渠道出现同名 JSON 字段 | 不修改该渠道的日志上下文 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：最终 Anthropic 请求经参数覆盖变为 `output_config.effort=xhigh`，消费日志显示 `xhigh`。
+- Good：渠道开启请求体透传，已解析 Claude DTO 中 effort 为 `high`，消费日志显示 `high`，且没有额外读取完整 body。
+- Base：请求没有 `output_config.effort`，日志详情不展示 Reasoning Effort。
+- Bad：在参数覆盖前保存 `max`，导致上游实际使用 `xhigh` 而日志仍显示 `max`。
+- Bad：从 `thinking.budget_tokens=4096` 猜测 `high`，把预算值误当成明确的上游 effort。
+- Bad：为提取 effort 把完整请求体写入数据库日志或普通应用日志。
+
+### 6. Tests Required
+
+- 表驱动测试覆盖 Anthropic 字符串、字段缺失清空旧值、非 Anthropic 隔离。
+- 使用真实 `ApplyParamOverrideWithRelayInfo` 覆盖 `max -> xhigh`，断言同步的是修改后的请求体结果。
+- 透传路径必须复用同一 output config 提取函数，避免透传与非透传语义漂移。
+- 回归命令：
+  - `go test ./relay/... -count=1`
+  - `go test ./service -count=1`
+  - `go test -race ./relay -run '^TestSyncAnthropicReasoningEffort' -count=1`
+  - `go vet ./relay ./relay/channel/claude ./service`
+  - `git diff --check`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+// 错误：参数覆盖随后可能改变 effort，日志会记录旧值。
+info.ReasoningEffort = request.GetEfforts()
+jsonData, _ = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+```
+
+#### Correct
+
+```go
+jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+if err != nil {
+	return newAPIErrorFromParamOverride(err)
+}
+syncAnthropicReasoningEffortFromRequestBody(info, jsonData)
+```
+
+请求体透传时：
+
+```go
+// 透传不执行参数覆盖，已解析 DTO 就是安全且足够的字段来源。
+syncAnthropicReasoningEffort(info, request.OutputConfig)
+```
