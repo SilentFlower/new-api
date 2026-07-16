@@ -1,0 +1,7 @@
+{"file":".trellis/tasks/07-16-openai-compact-v1-v2-alignment/research/openai-compact-protocols.md","reason":"锁定 OpenAI Codex V1/V2/WS 协议事实、new-api 缺口、sub2api 上游契约和选定架构"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"现有 Responses Compact 路由、字段、URL、usage 与计费契约"}
+{"file":".trellis/spec/backend/relay-nonstream-keepalive.md","reason":"V1 unary 等待、响应提交、重试和 writer 生命周期约束；用于区分 JSON keepalive 与 SSE bridge"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"JSON wrapper、可选字段零值、测试和代码质量要求"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"HTTP、流式和渠道重试错误传播规范"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"WS/Compact 日志和敏感数据保护要求"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"Router、Controller、Service、Relay 分层与新文件放置规范"}

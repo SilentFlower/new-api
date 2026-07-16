@@ -10,9 +10,11 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	appconstant "github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -191,4 +193,33 @@ func TestFinalizeMainRelayBillingOnlyRefundsFinalFailure(t *testing.T) {
 		assert.Same(t, expectedErr, apiErr)
 		assert.True(t, billing.refunded)
 	})
+}
+
+func TestCompactRetryUsesEachChannelsOwnModelMapping(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	selectionModel := ratio_setting.WithCompactModelSuffix("gpt-5")
+	info := &relaycommon.RelayInfo{
+		RelayMode:            relayconstant.RelayModeResponses,
+		ResponsesCompactMode: relayconstant.ResponsesCompactModeV2HTTP,
+		OriginModelName:      selectionModel,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			UpstreamModelName: selectionModel,
+		},
+	}
+
+	c.Set("model_mapping", `{"gpt-5":"gpt-5.1"}`)
+	firstRequest := &dto.OpenAIResponsesRequest{Model: "gpt-5"}
+	require.NoError(t, relayhelper.ModelMappedHelper(c, info, firstRequest))
+	require.Equal(t, "gpt-5.1", info.UpstreamModelName)
+
+	resetMainRelayAttemptFields(info, selectionModel)
+	info.ChannelMeta = &relaycommon.ChannelMeta{UpstreamModelName: selectionModel}
+	c.Set("model_mapping", `{"gpt-5":"gpt-5.2"}`)
+	secondRequest := &dto.OpenAIResponsesRequest{Model: "gpt-5"}
+	require.NoError(t, relayhelper.ModelMappedHelper(c, info, secondRequest))
+
+	assert.Equal(t, "gpt-5.2", info.UpstreamModelName)
+	assert.Equal(t, "gpt-5.2", secondRequest.Model)
+	assert.Equal(t, ratio_setting.WithCompactModelSuffix("gpt-5.2"), info.OriginModelName)
 }

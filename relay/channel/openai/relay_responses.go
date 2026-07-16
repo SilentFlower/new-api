@@ -69,6 +69,11 @@ func OaiResponsesHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http
 	return &usage, nil
 }
 
+// OaiResponsesStreamHandler 原样转发 Responses SSE，并提取 usage、工具调用和 Compact V2 终态观测。
+// @param c 当前 Gin 请求上下文。
+// @param info 当前 Relay 请求信息。
+// @param resp 上游 HTTP 响应。
+// @return 归一化 usage 和流式响应处理错误。
 func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
 	if resp == nil || resp.Body == nil {
 		logger.LogError(c, "invalid response or response body")
@@ -90,6 +95,22 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			return
 		}
 		sendResponsesStreamData(c, streamResponse, data)
+		if info != nil && info.IsResponsesCompactV2() && info.ResponsesUsageInfo != nil {
+			switch streamResponse.Type {
+			case "response.completed":
+				info.ResponsesUsageInfo.ResponseCompleted = true
+				info.ResponsesUsageInfo.TerminalEventType = streamResponse.Type
+				service.SetResponsesCompactAudit(c, info, "completed")
+			case "response.failed", "response.error", "response.incomplete":
+				info.ResponsesUsageInfo.TerminalEventType = streamResponse.Type
+				service.SetResponsesCompactAudit(c, info, streamResponse.Type)
+			case dto.ResponsesOutputTypeItemDone:
+				info.ResponsesUsageInfo.OutputItemDoneCount++
+				if streamResponse.Item != nil && streamResponse.Item.Type == "compaction" {
+					info.ResponsesUsageInfo.CompactionOutputItemCount++
+				}
+			}
+		}
 		switch streamResponse.Type {
 		case "response.completed":
 			if streamResponse.Response != nil {
@@ -131,6 +152,18 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
+
+	if info != nil && info.IsResponsesCompactV2() && info.ResponsesUsageInfo != nil {
+		observed := info.ResponsesUsageInfo
+		if !observed.ResponseCompleted || observed.CompactionOutputItemCount != 1 {
+			logger.LogWarn(c, fmt.Sprintf(
+				"Responses Compact V2 终态异常: completed=%t, output_item_done=%d, compaction_items=%d",
+				observed.ResponseCompleted,
+				observed.OutputItemDoneCount,
+				observed.CompactionOutputItemCount,
+			))
+		}
+	}
 
 	if usage.CompletionTokens == 0 {
 		// 计算输出文本的 token 数量

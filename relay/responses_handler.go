@@ -11,7 +11,6 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/logger"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
@@ -20,9 +19,13 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ResponsesHelper 转发 OpenAI Responses、Compact V1 和历史 body bridge 请求。
+// @param c 当前 Gin 请求上下文。
+// @param info 当前 Relay 请求信息。
+// @return 请求转换、上游调用、响应处理或计费错误。
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
-	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+	if info.UsesResponsesCompactEndpoint() {
 		switch info.ApiType {
 		case appconstant.APITypeOpenAI, appconstant.APITypeCodex:
 		default:
@@ -54,6 +57,9 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if err != nil {
 		return types.NewError(fmt.Errorf("failed to copy request to GeneralOpenAIRequest: %w", err), types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
+	if info.UsesResponsesCompactEndpoint() {
+		request = responsesRequestForCompaction(request)
+	}
 
 	err = helper.ModelMappedHelper(c, info, request)
 	if err != nil {
@@ -66,7 +72,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 	adaptor.Init(info)
 	var requestBody io.Reader
-	if model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled {
+	if (model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled) && !info.UsesResponsesCompactEndpoint() {
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
@@ -97,7 +103,11 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			}
 		}
 
-		logger.LogDebug(c, "requestBody: %s", jsonData)
+		if info.IsResponsesCompact() {
+			logger.LogDebug(c, "Responses Compact upstream request prepared, bytes=%d", len(jsonData))
+		} else {
+			logger.LogDebug(c, "requestBody: %s", jsonData)
+		}
 		body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
@@ -135,7 +145,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	}
 
 	usageDto := usage.(*dto.Usage)
-	if info.RelayMode == relayconstant.RelayModeResponsesCompact {
+	if info.UsesResponsesCompactEndpoint() {
 		originModelName := info.OriginModelName
 		originPriceData := info.PriceData
 		originBillingModelName := info.ResolvedBillingModelName
@@ -147,6 +157,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 			info.ResolvedBillingModelName = originBillingModelName
 			return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry(), types.ErrOptionWithStatusCode(http.StatusBadRequest))
 		}
+		service.SetResponsesCompactAudit(c, info, "completed")
 		service.PostTextConsumeQuota(c, info, usageDto, nil)
 
 		info.OriginModelName = originModelName
@@ -158,24 +169,50 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if strings.HasPrefix(info.OriginModelName, "gpt-4o-audio") {
 		service.PostAudioConsumeQuota(c, info, usageDto, "")
 	} else {
+		outcome := "completed"
+		if info.IsResponsesCompactV2() && info.ResponsesUsageInfo != nil {
+			if info.ResponsesUsageInfo.TerminalEventType != "" {
+				outcome = info.ResponsesUsageInfo.TerminalEventType
+			} else if !info.ResponsesUsageInfo.ResponseCompleted {
+				outcome = "stream_incomplete"
+			}
+		}
+		service.SetResponsesCompactAudit(c, info, outcome)
 		service.PostTextConsumeQuota(c, info, usageDto, nil)
 	}
 	return nil
 }
 
 func responsesRequestFromCompaction(req *dto.OpenAIResponsesCompactionRequest) *dto.OpenAIResponsesRequest {
+	if req == nil {
+		return nil
+	}
 	return &dto.OpenAIResponsesRequest{
-		Model:                req.Model,
-		Input:                req.Input,
-		Instructions:         req.Instructions,
-		PreviousResponseID:   req.PreviousResponseID,
-		Tools:                req.Tools,
-		ParallelToolCalls:    req.ParallelToolCalls,
-		Reasoning:            req.Reasoning,
-		ServiceTier:          req.ServiceTier,
-		PromptCacheKey:       req.PromptCacheKey,
-		PromptCacheOptions:   req.PromptCacheOptions,
-		PromptCacheRetention: req.PromptCacheRetention,
-		Text:                 req.Text,
+		Model:             req.Model,
+		Input:             req.Input,
+		Instructions:      req.Instructions,
+		Tools:             req.Tools,
+		ParallelToolCalls: req.ParallelToolCalls,
+		Reasoning:         req.Reasoning,
+		ServiceTier:       req.ServiceTier,
+		PromptCacheKey:    req.PromptCacheKey,
+		Text:              req.Text,
+	}
+}
+
+func responsesRequestForCompaction(req *dto.OpenAIResponsesRequest) *dto.OpenAIResponsesRequest {
+	if req == nil {
+		return nil
+	}
+	return &dto.OpenAIResponsesRequest{
+		Model:             req.Model,
+		Input:             req.Input,
+		Instructions:      req.Instructions,
+		Tools:             req.Tools,
+		ParallelToolCalls: req.ParallelToolCalls,
+		Reasoning:         req.Reasoning,
+		ServiceTier:       req.ServiceTier,
+		PromptCacheKey:    req.PromptCacheKey,
+		Text:              req.Text,
 	}
 }

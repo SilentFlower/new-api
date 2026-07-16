@@ -13,7 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestResponsesRequestFromCompactionForwardsOfficialFields(t *testing.T) {
+func TestResponsesRequestFromCompactionUsesCanonicalFields(t *testing.T) {
 	reasoning := &dto.Reasoning{Effort: "high", Summary: "auto"}
 	request := &dto.OpenAIResponsesCompactionRequest{
 		Model:                "gpt-5",
@@ -35,15 +35,42 @@ func TestResponsesRequestFromCompactionForwardsOfficialFields(t *testing.T) {
 	assert.Equal(t, request.Model, converted.Model)
 	assert.JSONEq(t, string(request.Input), string(converted.Input))
 	assert.JSONEq(t, string(request.Instructions), string(converted.Instructions))
-	assert.Equal(t, request.PreviousResponseID, converted.PreviousResponseID)
+	assert.Empty(t, converted.PreviousResponseID)
 	assert.JSONEq(t, string(request.Tools), string(converted.Tools))
 	assert.JSONEq(t, string(request.ParallelToolCalls), string(converted.ParallelToolCalls))
 	assert.Same(t, reasoning, converted.Reasoning)
 	assert.Equal(t, request.ServiceTier, converted.ServiceTier)
 	assert.JSONEq(t, string(request.PromptCacheKey), string(converted.PromptCacheKey))
-	assert.JSONEq(t, string(request.PromptCacheOptions), string(converted.PromptCacheOptions))
-	assert.JSONEq(t, string(request.PromptCacheRetention), string(converted.PromptCacheRetention))
+	assert.Empty(t, converted.PromptCacheOptions)
+	assert.Empty(t, converted.PromptCacheRetention)
 	assert.JSONEq(t, string(request.Text), string(converted.Text))
+}
+
+func TestResponsesRequestForCompactionDropsResponsesOnlyFields(t *testing.T) {
+	stream := true
+	request := &dto.OpenAIResponsesRequest{
+		Model:              "gpt-5",
+		Input:              json.RawMessage(`[{"type":"compaction_trigger"}]`),
+		Instructions:       json.RawMessage(`"compact carefully"`),
+		Include:            json.RawMessage(`["reasoning.encrypted_content"]`),
+		PreviousResponseID: "resp_1",
+		Store:              json.RawMessage(`false`),
+		Stream:             &stream,
+		ClientMetadata:     json.RawMessage(`{"session":"s1"}`),
+		PromptCacheOptions: json.RawMessage(`{"scope":"24h"}`),
+	}
+
+	converted := responsesRequestForCompaction(request)
+
+	require.NotNil(t, converted)
+	assert.Equal(t, request.Model, converted.Model)
+	assert.JSONEq(t, string(request.Input), string(converted.Input))
+	assert.Empty(t, converted.Include)
+	assert.Empty(t, converted.PreviousResponseID)
+	assert.Empty(t, converted.Store)
+	assert.Nil(t, converted.Stream)
+	assert.Empty(t, converted.ClientMetadata)
+	assert.Empty(t, converted.PromptCacheOptions)
 }
 
 func TestResponsesCompactRequestURLForSupportedChannels(t *testing.T) {
@@ -85,6 +112,48 @@ func TestResponsesCompactRequestURLForSupportedChannels(t *testing.T) {
 			info: &relaycommon.RelayInfo{
 				RequestURLPath: "/v1/responses/compact",
 				RelayMode:      relayconstant.RelayModeResponsesCompact,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType:    appconstant.ChannelTypeAzure,
+					ChannelBaseUrl: "https://azure.example",
+				},
+			},
+			expected: "https://azure.example/openai/v1/responses/compact?api-version=preview",
+		},
+		{
+			name:    "OpenAI 历史 body bridge",
+			apiType: appconstant.APITypeOpenAI,
+			info: &relaycommon.RelayInfo{
+				RequestURLPath:       "/v1/responses",
+				RelayMode:            relayconstant.RelayModeResponses,
+				ResponsesCompactMode: relayconstant.ResponsesCompactModeV1BodyBridge,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType:    appconstant.ChannelTypeOpenAI,
+					ChannelBaseUrl: "https://openai.example",
+				},
+			},
+			expected: "https://openai.example/v1/responses/compact",
+		},
+		{
+			name:    "Codex 历史 body bridge",
+			apiType: appconstant.APITypeCodex,
+			info: &relaycommon.RelayInfo{
+				RequestURLPath:       "/v1/responses",
+				RelayMode:            relayconstant.RelayModeResponses,
+				ResponsesCompactMode: relayconstant.ResponsesCompactModeV1BodyBridge,
+				ChannelMeta: &relaycommon.ChannelMeta{
+					ChannelType:    appconstant.ChannelTypeCodex,
+					ChannelBaseUrl: "https://chatgpt.com",
+				},
+			},
+			expected: "https://chatgpt.com/backend-api/codex/responses/compact",
+		},
+		{
+			name:    "Azure 历史 body bridge",
+			apiType: appconstant.APITypeOpenAI,
+			info: &relaycommon.RelayInfo{
+				RequestURLPath:       "/v1/responses",
+				RelayMode:            relayconstant.RelayModeResponses,
+				ResponsesCompactMode: relayconstant.ResponsesCompactModeV1BodyBridge,
 				ChannelMeta: &relaycommon.ChannelMeta{
 					ChannelType:    appconstant.ChannelTypeAzure,
 					ChannelBaseUrl: "https://azure.example",

@@ -42,6 +42,10 @@ func applyUpstreamContentLength(req *http.Request, info *common.RelayInfo) {
 	}
 }
 
+// SetupApiRequestHeader 设置 HTTP/SSE 上游请求的基础内容协商请求头。
+// @param info 当前 Relay 请求信息。
+// @param c 当前 Gin 请求上下文。
+// @param req 即将发送给上游的请求头。
 func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Header) {
 	if info.RelayMode == constant.RelayModeAudioTranscription || info.RelayMode == constant.RelayModeAudioTranslation {
 		// multipart/form-data
@@ -50,7 +54,7 @@ func SetupApiRequestHeader(info *common.RelayInfo, c *gin.Context, req *http.Hea
 	} else {
 		req.Set("Content-Type", c.Request.Header.Get("Content-Type"))
 		req.Set("Accept", c.Request.Header.Get("Accept"))
-		if info.IsStream && c.Request.Header.Get("Accept") == "" {
+		if info.UsesUpstreamStream() && c.Request.Header.Get("Accept") == "" {
 			req.Set("Accept", "text/event-stream")
 		}
 	}
@@ -314,6 +318,7 @@ func DoApiRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBody
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
+	info.UpstreamRequestURLPath = req.URL.EscapedPath()
 	applyUpstreamContentLength(req, info)
 	headers := req.Header
 	err = a.SetupRequestHeader(c, &headers, info)
@@ -344,6 +349,7 @@ func DoFormRequest(a Adaptor, c *gin.Context, info *common.RelayInfo, requestBod
 	if err != nil {
 		return nil, fmt.Errorf("new request failed: %w", err)
 	}
+	info.UpstreamRequestURLPath = req.URL.EscapedPath()
 	applyUpstreamContentLength(req, info)
 	// set form data
 	req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))
@@ -498,7 +504,7 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo, logReq
 
 	var stopPinger context.CancelFunc
 	var pingerDone <-chan struct{}
-	if info.IsStream {
+	if info.UsesUpstreamStream() {
 		helper.SetEventStreamHeaders(c)
 		// 处理流式请求的 ping 保活
 		generalSettings := operation_setting.GetGeneralSetting()
@@ -527,7 +533,11 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo, logReq
 		return nil, errors.New("resp is nil")
 	}
 
-	if upID := resp.Header.Get(common2.RequestIdKey); upID != "" {
+	upID := strings.TrimSpace(resp.Header.Get("X-Request-Id"))
+	if upID == "" {
+		upID = strings.TrimSpace(resp.Header.Get(common2.RequestIdKey))
+	}
+	if upID != "" {
 		c.Set(common2.UpstreamRequestIdKey, upID)
 	}
 

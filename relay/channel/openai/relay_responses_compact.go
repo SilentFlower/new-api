@@ -6,13 +6,20 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
 
-func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Usage, *types.NewAPIError) {
+// OaiResponsesCompactionHandler 处理 unary Compact JSON，并按需桥接为 Responses SSE。
+// @param c 当前 Gin 请求上下文。
+// @param resp 上游 HTTP 响应。
+// @param info 当前 Relay 请求信息；历史 body bridge 依赖其中的客户端流式标记。
+// @return 归一化 usage 和响应处理错误。
+func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response, info *relaycommon.RelayInfo) (*dto.Usage, *types.NewAPIError) {
 	defer service.CloseResponseBodyGracefully(resp)
 
 	responseBody, err := io.ReadAll(resp.Body)
@@ -28,7 +35,13 @@ func OaiResponsesCompactionHandler(c *gin.Context, resp *http.Response) (*dto.Us
 		return nil, types.WithOpenAIError(*oaiError, resp.StatusCode)
 	}
 
-	service.IOCopyBytesGracefully(c, resp, responseBody)
+	if info != nil && info.ResponsesClientStream {
+		if err := helper.WriteResponsesCompactSSECompleted(c, responseBody, compactResp.Output); err != nil {
+			return nil, types.NewOpenAIError(err, types.ErrorCodeBadResponse, http.StatusInternalServerError)
+		}
+	} else {
+		service.IOCopyBytesGracefully(c, resp, responseBody)
+	}
 
 	usage := dto.Usage{}
 	if compactResp.Usage != nil {

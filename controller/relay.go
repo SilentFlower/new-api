@@ -92,6 +92,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			if active, committed := helper.PrepareResponsesCompactSSEFinal(c); active && committed {
+				if err := helper.WriteResponsesCompactSSEFailed(c, newAPIError.ToOpenAIError()); err != nil {
+					logger.LogError(c, "write Responses Compact SSE failure event failed: "+err.Error())
+				}
+				return
+			}
 			switch relayFormat {
 			case types.RelayFormatOpenAIRealtime:
 				helper.WssError(c, ws, newAPIError.ToOpenAIError())
@@ -132,6 +138,8 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	stopNonStreamKeepAlive := helper.StartNonStreamKeepAlive(c, relayInfo)
 	defer stopNonStreamKeepAlive()
+	stopResponsesCompactSSEBridge := helper.StartResponsesCompactSSEBridge(c, relayInfo)
+	defer stopResponsesCompactSSEBridge()
 
 	mainBillingPrepared := false
 	defer func() {
@@ -157,7 +165,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		relayInfo.Request = attemptRequest
 		relayInfo.ChannelMeta = nil
-		resetMainRelayAttemptBillingFields(relayInfo)
+		resetMainRelayAttemptFields(relayInfo, retryParam.ModelName)
 		common.SetContextKey(c, constant.ContextKeyVisionAssistPrepared, false)
 
 		channel, channelErr := getChannel(c, relayInfo, retryParam)
@@ -212,6 +220,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		newAPIError = service.NormalizeViolationFeeError(newAPIError)
 		relayInfo.LastError = newAPIError
+		service.SetResponsesCompactAudit(c, relayInfo, "failed")
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
@@ -317,7 +326,8 @@ func cloneRelayRequest(request dto.Request) (dto.Request, error) {
 	}
 }
 
-func resetMainRelayAttemptBillingFields(relayInfo *relaycommon.RelayInfo) {
+func resetMainRelayAttemptFields(relayInfo *relaycommon.RelayInfo, originModelName string) {
+	relayInfo.OriginModelName = originModelName
 	relayInfo.FinalPreConsumedQuota = 0
 	relayInfo.SubscriptionPostDelta = 0
 	relayInfo.ToolCallBilling = nil
@@ -511,11 +521,6 @@ func recordRelayErrorLog(c *gin.Context, err *types.NewAPIError) {
 	other["channel_id"] = channelId
 	other["channel_name"] = c.GetString("channel_name")
 	other["channel_type"] = c.GetInt("channel_type")
-	if logOther, ok := common.GetContextKeyType[map[string]interface{}](c, constant.ContextKeyLogOther); ok {
-		for key, value := range logOther {
-			other[key] = value
-		}
-	}
 	adminInfo := make(map[string]interface{})
 	adminInfo["use_channel"] = c.GetStringSlice("use_channel")
 	isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
@@ -525,6 +530,7 @@ func recordRelayErrorLog(c *gin.Context, err *types.NewAPIError) {
 	}
 	service.AppendChannelAffinityAdminInfo(c, adminInfo)
 	other["admin_info"] = adminInfo
+	service.MergeContextLogOther(c, other)
 	startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 	if startTime.IsZero() {
 		startTime = time.Now()

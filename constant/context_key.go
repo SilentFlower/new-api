@@ -60,6 +60,7 @@ const (
 	ContextKeyVisionAssistPrepared     ContextKey = "vision_assist_prepared"
 	ContextKeyVisionAssistEndpointMode ContextKey = "vision_assist_endpoint_mode"
 	ContextKeyLogOther                 ContextKey = "log_other"
+	ContextKeyResponsesCompactMode     ContextKey = "responses_compact_mode"
 
 	// ContextKeyFileSourcesToCleanup stores file sources that need cleanup when request ends
 	ContextKeyFileSourcesToCleanup ContextKey = "file_sources_to_cleanup"

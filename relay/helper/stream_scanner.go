@@ -249,7 +249,11 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 
 			ticker.Reset(streamingTimeout)
 			data := scanner.Text()
-			logger.LogDebug(c, "stream scanner data: %s", data)
+			if info != nil && info.IsResponsesCompactV2() {
+				logger.LogDebug(c, "Responses Compact V2 stream event received, bytes=%d", len(data))
+			} else {
+				logger.LogDebug(c, "stream scanner data: %s", data)
+			}
 
 			if len(data) < 6 {
 				continue

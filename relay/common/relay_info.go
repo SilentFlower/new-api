@@ -57,8 +57,13 @@ type BuildInToolInfo struct {
 	SearchContextSize string
 }
 
+// ResponsesUsageInfo 记录 Responses 工具调用和 Compact 流式终态观测。
 type ResponsesUsageInfo struct {
-	BuiltInTools map[string]*BuildInToolInfo
+	BuiltInTools              map[string]*BuildInToolInfo
+	OutputItemDoneCount       int
+	CompactionOutputItemCount int
+	ResponseCompleted         bool
+	TerminalEventType         string
 }
 
 // ToolCallItem 描述一项冻结的工具调用费用明细。
@@ -119,8 +124,11 @@ type RelayInfo struct {
 	IsPlayground           bool
 	UsePrice               bool
 	RelayMode              int
+	ResponsesCompactMode   relayconstant.ResponsesCompactMode
+	ResponsesClientStream  bool
 	OriginModelName        string
 	RequestURLPath         string
+	UpstreamRequestURLPath string
 	RequestHeaders         map[string]string
 	ShouldIncludeUsage     bool
 	DisablePing            bool // 是否禁止向下游发送自定义 Ping
@@ -266,6 +274,36 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	if info.Request != nil {
 		info.Request.SetModelName(info.OriginModelName)
 	}
+}
+
+// IsResponsesCompact 判断当前请求是否属于任一 Responses Compact 协议。
+// @return 属于 Compact 模式或旧版 Compact relay mode 时返回 true。
+func (info *RelayInfo) IsResponsesCompact() bool {
+	if info == nil {
+		return false
+	}
+	return info.ResponsesCompactMode.IsCompact() || info.RelayMode == relayconstant.RelayModeResponsesCompact
+}
+
+// IsResponsesCompactV2 判断当前请求是否属于原生 Responses Compact V2。
+// @return HTTP 或 WebSocket V2 模式返回 true。
+func (info *RelayInfo) IsResponsesCompactV2() bool {
+	return info != nil && info.ResponsesCompactMode.IsV2()
+}
+
+// UsesResponsesCompactEndpoint 判断当前请求上游是否应使用 /responses/compact。
+// @return V1 path、历史 body bridge 或旧版 Compact relay mode 返回 true。
+func (info *RelayInfo) UsesResponsesCompactEndpoint() bool {
+	if info == nil {
+		return false
+	}
+	return info.ResponsesCompactMode.UsesCompactEndpoint() || info.RelayMode == relayconstant.RelayModeResponsesCompact
+}
+
+// UsesUpstreamStream 判断当前渠道请求是否实际使用流式上游协议。
+// @return 原生流式请求返回 true；历史 Compact SSE bridge 的 unary 上游返回 false。
+func (info *RelayInfo) UsesUpstreamStream() bool {
+	return info != nil && info.IsStream && !info.UsesResponsesCompactEndpoint()
 }
 
 // ShouldUseUpstreamModelForBilling 判断当前请求是否应按最终上游模型计费。
@@ -540,6 +578,11 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 	if reqId == "" {
 		reqId = common.NewRequestId()
 	}
+	compactMode, _ := common.GetContextKeyType[relayconstant.ResponsesCompactMode](c, constant.ContextKeyResponsesCompactMode)
+	if compactMode == relayconstant.ResponsesCompactModeNone && relayconstant.Path2RelayMode(c.Request.URL.Path) == relayconstant.RelayModeResponsesCompact {
+		compactMode = relayconstant.ResponsesCompactModeV1Path
+	}
+
 	info := &RelayInfo{
 		Request: request,
 
@@ -550,7 +593,9 @@ func genBaseRelayInfo(c *gin.Context, request dto.Request) *RelayInfo {
 		UserQuota:  common.GetContextKeyInt(c, constant.ContextKeyUserQuota),
 		UserEmail:  common.GetContextKeyString(c, constant.ContextKeyUserEmail),
 
-		OriginModelName: common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		OriginModelName:       common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		ResponsesCompactMode:  compactMode,
+		ResponsesClientStream: compactMode == relayconstant.ResponsesCompactModeV1BodyBridge && isStream,
 
 		TokenId:        common.GetContextKeyInt(c, constant.ContextKeyTokenId),
 		TokenKey:       common.GetContextKeyString(c, constant.ContextKeyTokenKey),

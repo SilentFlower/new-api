@@ -485,11 +485,7 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if tieredBillingApplied {
 		InjectTieredBillingInfo(other, relayInfo, tieredResult)
 	}
-	if logOther, ok := common.GetContextKeyType[map[string]interface{}](ctx, constant.ContextKeyLogOther); ok {
-		for key, value := range logOther {
-			other[key] = value
-		}
-	}
+	MergeContextLogOther(ctx, other)
 
 	attachQuotaSaturation(ctx, relayInfo, other)
 

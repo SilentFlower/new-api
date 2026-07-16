@@ -37,3 +37,18 @@ func TestSetRelayRouterRegistersAlphaSearchRoute(t *testing.T) {
 	}
 	t.Fatal("expected POST /v1/alpha/search to be registered")
 }
+
+func TestSetRelayRouterRegistersResponsesWebSocketRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	engine := gin.New()
+
+	SetRelayRouter(engine)
+
+	for _, route := range engine.Routes() {
+		if route.Method == http.MethodGet && route.Path == "/v1/responses" {
+			require.Contains(t, route.Handler, "RelayResponsesWebSocket")
+			return
+		}
+	}
+	t.Fatal("expected GET /v1/responses to be registered")
+}

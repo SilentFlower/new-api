@@ -1,0 +1,6 @@
+{"file":".trellis/tasks/07-16-openai-compact-v1-v2-alignment/research/openai-compact-protocols.md","reason":"复核实现是否符合锁定的官方协议、sub2api WS 上游 wire 和明确排除项"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"检查 V1 字段、URL、usage、计费和普通 Responses 隔离"}
+{"file":".trellis/spec/backend/relay-nonstream-keepalive.md","reason":"检查 bridge 心跳、响应提交、重试、取消和并发 writer 正确性"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查 JSON API、DTO 零值、testify 和全量验证要求"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查 Upgrade 前后错误、failover 边界和 OpenAI 错误格式"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"检查请求体、压缩密文、凭证和 URL/query 不进入日志"}

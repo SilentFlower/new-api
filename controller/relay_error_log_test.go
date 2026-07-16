@@ -12,6 +12,9 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -116,4 +119,66 @@ func TestRecordRelayErrorLogRespectsGlobalSwitchForNormalErrors(t *testing.T) {
 	var count int64
 	require.NoError(t, db.Model(&model.Log{}).Count(&count).Error)
 	assert.EqualValues(t, 0, count)
+}
+
+func TestResponsesWebSocketBusinessErrorPersistsCompactAudit(t *testing.T) {
+	db := setupRelayErrorLogTestDB(t)
+	originalErrorLogEnabled := constant.ErrorLogEnabled
+	constant.ErrorLogEnabled = true
+	t.Cleanup(func() {
+		constant.ErrorLogEnabled = originalErrorLogEnabled
+	})
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses?api_key=client-secret", nil)
+	c.Set("id", 8)
+	c.Set("username", "ws-tester")
+	c.Set("token_name", "ws-token")
+	c.Set("original_model", "gpt-5-openai-compact")
+	c.Set("token_id", 12)
+	c.Set("group", "default")
+	c.Set("channel_id", 23)
+	c.Set("channel_name", "ws-channel")
+	c.Set("channel_type", constant.ChannelTypeOpenAI)
+	c.Set(common.RequestIdKey, "request-responses-ws-failed")
+	c.Set(common.UpstreamRequestIdKey, "standard-upstream-request-id")
+	c.Set("use_channel", []string{"23"})
+	common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
+	turn := &responsesWebSocketTurn{
+		info: &relaycommon.RelayInfo{
+			ResponsesCompactMode:   relayconstant.ResponsesCompactModeV2WebSocket,
+			RequestURLPath:         "/v1/responses",
+			UpstreamRequestURLPath: "https://upstream.example/v1/responses?credential=secret",
+			ChannelMeta: &relaycommon.ChannelMeta{
+				ChannelId:   23,
+				ChannelType: constant.ChannelTypeOpenAI,
+			},
+		},
+	}
+	service.SetResponsesCompactAudit(c, turn.info, "response.failed")
+	channel := &model.Channel{Id: 23, Type: constant.ChannelTypeOpenAI, Name: "ws-channel", AutoBan: common.GetPointer(0)}
+	apiErr := types.WithOpenAIError(types.OpenAIError{
+		Message: "upstream overloaded",
+		Type:    "server_error",
+		Code:    "server_is_overloaded",
+	}, http.StatusServiceUnavailable)
+
+	processResponsesWebSocketChannelError(c, turn, channel, apiErr, "response.failed")
+
+	var logs []model.Log
+	require.NoError(t, db.Find(&logs).Error)
+	require.Len(t, logs, 1)
+	assert.Equal(t, "standard-upstream-request-id", logs[0].UpstreamRequestId)
+	other, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	audit, ok := adminInfo["responses_compact"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, string(relayconstant.ResponsesCompactModeV2WebSocket), audit["mode"])
+	assert.Equal(t, "/v1/responses", audit["inbound_path"])
+	assert.Equal(t, "/v1/responses", audit["upstream_path"])
+	assert.Equal(t, "response.failed", audit["outcome"])
+	assert.Equal(t, "standard-upstream-request-id", audit["upstream_request_id"])
+	assert.NotContains(t, logs[0].Other, "secret")
 }
