@@ -34,5 +34,15 @@
     "service/text_quota.go"
   ],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-07-16T16:12:41+08:00",
+    "completedSteps": [
+      "完成 OpenAI Compact V1/V2 HTTP/SSE 与 Responses WebSocket 对齐",
+      "完成最终 Check-All 并同步后端 code-spec"
+    ],
+    "partialStep": null,
+    "nextStep": "等待执行 trellis-finish-work 归档任务并记录会话",
+    "notes": "真实 OpenAI/sub2api 环境联调未覆盖；源码契约、本地模拟与任务定向验证已完成。"
+  }
 }
