@@ -449,3 +449,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 14: 归档非流式保活与 Responses 视觉辅助任务
+
+**Date**: 2026-07-16
+**Task**: 归档非流式保活与 Responses 视觉辅助任务
+**Branch**: `build-bak`
+
+### Summary
+
+完成两个已验收任务的 release 审计、归档和会话收尾；非流式保活补充可选启用与回滚操作，视觉辅助无需额外上线操作。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `538dc0893` | (see git log) |
+| `0e8e7e92d` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
