@@ -505,7 +505,7 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	savedModelRatios := ratio_setting.ModelRatio2JSONString()
 	modelRatios, err := common.Marshal(map[string]float64{
 		"ws-model-a": 0,
-		ratio_setting.WithCompactModelSuffix("ws-model-b"): 0,
+		"ws-model-b": 0,
 		"ws-model-c": 0,
 	})
 	require.NoError(t, err)
@@ -562,6 +562,7 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 		Models:  "ws-model-a,ws-model-b,ws-model-c",
 		Group:   "default",
 	}
+	channel.SetSetting(dto.ChannelSettings{ResponsesCompactPassthroughEnabled: true})
 	proxyResults := make(chan error, 1)
 	logOtherResults := make(chan map[string]interface{}, 1)
 	engine := gin.New()

@@ -3896,6 +3896,8 @@
     "无加密": "No encryption",
     "旧版前端即将停止维护": "Classic frontend maintenance will end soon",
     "该条历史记录缺少审计字段。当前版本已支持记录服务器 IP、回调 IP、支付方式与系统版本等审计信息；这些字段仅会写入后续新产生的记录，历史记录无法自动补齐。": "This historical record predates audit-info tracking and cannot be backfilled. The current instance already records server IP, callback IP, payment method, and system version for new top-ups going forward.",
-    "请选择一种 SMTP 传输加密方式": "Please select one SMTP transport security mode"
+    "请选择一种 SMTP 传输加密方式": "Please select one SMTP transport security mode",
+    "启用 Responses Compact 透传": "Enable Responses Compact passthrough",
+    "完成常规渠道选择和亲和性命中后，将 Compact 请求透传到此渠道": "Forward Compact requests to this channel after normal routing and affinity selection."
   }
 }

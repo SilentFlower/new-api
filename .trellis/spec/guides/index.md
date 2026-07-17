@@ -21,12 +21,22 @@ These guides help you **ask the right questions before coding**.
 
 | Guide | Purpose | When to Use |
 |-------|---------|-------------|
+| **[Build 分支上游同步友好定制指南](./build-upstream-friendly-customization.md)** | **最高优先级：定制逻辑独立、旧代码最薄接入、降低上游同步冲突** | **build 分支新增或接入任何上游没有的能力时必须阅读** |
 | [Code Reuse Thinking Guide](./code-reuse-thinking-guide.md) | Identify patterns and reduce duplication | When you notice repeated patterns |
 | [Cross-Layer Thinking Guide](./cross-layer-thinking-guide.md) | Think through data flow across layers | Features spanning multiple layers |
 
 ---
 
 ## Quick Reference: Thinking Triggers
+
+### Build 分支定制（最高优先级）
+
+- [ ] 正在增加上游仓库没有的能力
+- [ ] 需要修改上游核心文件才能接入本地实现
+- [ ] 后续还要持续同步上游更新
+- [ ] 当前方案为了复用准备重构、移动或抽取旧代码
+
+→ 必须先读 [Build 分支上游同步友好定制指南](./build-upstream-friendly-customization.md)
 
 ### When to Think About Cross-Layer Issues
 

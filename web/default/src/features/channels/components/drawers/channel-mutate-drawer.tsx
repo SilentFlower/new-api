@@ -190,6 +190,7 @@ import {
   ChannelEditorLoadingState,
   ChannelModelsSection,
 } from './sections'
+import { ResponsesCompactPassthroughField } from './sections/responses-compact-passthrough-field'
 
 type ChannelMutateDrawerProps = {
   open: boolean
@@ -285,6 +286,7 @@ const SENSITIVE_FORM_FIELDS = [
   'thinking_to_content',
   'proxy',
   'pass_through_body_enabled',
+  'responses_compact_passthrough_enabled',
   'system_prompt',
   'system_prompt_override',
   'allow_service_tier',
@@ -338,6 +340,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.force_format ||
     values.thinking_to_content ||
     values.pass_through_body_enabled ||
+    values.responses_compact_passthrough_enabled ||
     values.use_upstream_model_for_billing ||
     values.system_prompt_override ||
     values.vision_assist_enabled ||
@@ -752,6 +755,9 @@ export function ChannelMutateDrawer({
   const currentForceFormat = form.watch('force_format')
   const currentThinkingToContent = form.watch('thinking_to_content')
   const currentPassThroughBodyEnabled = form.watch('pass_through_body_enabled')
+  const currentResponsesCompactPassthroughEnabled = form.watch(
+    'responses_compact_passthrough_enabled'
+  )
   const currentDisableTaskPollingSleep = form.watch(
     'disable_task_polling_sleep'
   )
@@ -1019,6 +1025,7 @@ export function ChannelMutateDrawer({
     currentForceFormat ||
     currentThinkingToContent ||
     currentPassThroughBodyEnabled ||
+    currentResponsesCompactPassthroughEnabled ||
     currentDisableTaskPollingSleep ||
     currentProxy?.trim() ||
     currentSystemPrompt?.trim() ||
@@ -4143,6 +4150,8 @@ export function ChannelMutateDrawer({
                                   </FormItem>
                                 )}
                               />
+
+                              <ResponsesCompactPassthroughField />
 
                               <FormField
                                 control={form.control}

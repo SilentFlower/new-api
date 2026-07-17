@@ -467,9 +467,6 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 			relayhelper.ResponsesTransportHTTP,
 		)
 		common.SetContextKey(c, constant.ContextKeyResponsesCompactMode, compactMode)
-		if compactMode.UsesCompactEndpoint() && modelRequest.Model != "" {
-			modelRequest.Model = ratio_setting.WithCompactModelSuffix(modelRequest.Model)
-		}
 	}
 	return &modelRequest, shouldSelectChannel, nil
 }

@@ -1,14 +1,13 @@
 # Relay Alpha Search 与 Responses Compact 契约
 
-> 记录 standalone Alpha Search 的透明上游转发、重试、纯工具计费和日志安全，以及 OpenAI Responses Compact V1/V2、历史 SSE bridge 和 Responses WebSocket 契约。
+> 记录 standalone Alpha Search 的透明上游转发、重试、纯工具计费和日志安全，以及 Responses Compact 基础模型选渠、渠道能力门禁、原始透传、计费和 WebSocket 契约。
 
-## 场景：Alpha Search 上游透传与 Compact 字段转发
+## 场景：Alpha Search 上游透传
 
 ### 1. Scope / Trigger
 
-- Trigger：修改 `POST /v1/alpha/search` 的路由、请求校验、渠道分发、上游 URL、响应处理、重试、工具计费，或修改 `POST /v1/responses/compact` 的请求字段转换。
+- Trigger：修改 `POST /v1/alpha/search` 的路由、请求校验、渠道分发、上游 URL、响应处理、重试或工具计费。
 - Alpha Search 是 Codex standalone Search 上游协议；它不等于 Responses hosted `web_search` tool，也不等于 Claude WebSearch 本地模拟。
-- Responses Compact 已有独立路由、渠道限制、上游 URL、usage 解析和文本计费；新增字段时只扩展请求映射，不重做整条链路。
 
 ### 2. Signatures
 
@@ -32,14 +31,6 @@ func AlphaSearchHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAP
 ```go
 func ComputeToolCallQuota(usage ToolCallUsage, groupRatio float64) ToolCallResult
 func PostToolCallConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo)
-```
-
-- Compact 请求转换：
-
-```go
-POST /v1/responses/compact
-
-func responsesRequestFromCompaction(req *dto.OpenAIResponsesCompactionRequest) *dto.OpenAIResponsesRequest
 ```
 
 ### 3. Contracts
@@ -74,13 +65,6 @@ func responsesRequestFromCompaction(req *dto.OpenAIResponsesCompactionRequest) *
 - 跨渠道重试复用同一个 BillingSession；最终 `2xx` 才调用 `SettleBilling`，最终失败调用 `Refund`，重试后成功不得退款。
 - 成功消费日志记录零 token、工具调用次数、单价、冻结额度和分组倍率；不得包含搜索请求、响应 body 或凭证。
 
-#### Responses Compact
-
-- `responsesRequestFromCompaction` 必须复制 `tools`、`parallel_tool_calls`、`reasoning`、`text`，以及原有 model/input/instructions/cache/service-tier 字段。
-- Compact 只允许能解析为 `APITypeOpenAI` 或 `APITypeCodex` 的渠道；不得借此扩大 API 类型范围。
-- 保持既有 URL：OpenAI-compatible `/v1/responses/compact`、Codex `/backend-api/codex/responses/compact`、Azure Responses Compact 规则。
-- 保持 `OaiResponsesCompactionHandler` 的原始 body 转发和 usage 映射：`input_tokens -> prompt_tokens`、`output_tokens -> completion_tokens`，并保留 cache token 细节。
-
 ### 4. Validation & Error Matrix
 
 | 条件 | 行为 |
@@ -93,8 +77,6 @@ func responsesRequestFromCompaction(req *dto.OpenAIResponsesCompactionRequest) *
 | 上游网络错误 | 安全的 `do request failed` 错误；最终失败退款 |
 | 上游非 `2xx` | 不提交原始响应；按状态码决定重试，错误体不进入日志 |
 | 上游任意 `2xx` | 透传成功响应并按冻结的一次 WebSearch 费用结算 |
-| Compact 使用不支持的 API type | `400 invalid_request`，跳过重试 |
-| Compact response 含 usage | 映射 input/output/total/cache token 后进入既有文本结算 |
 
 ### 5. Good / Base / Bad Cases
 
@@ -102,7 +84,6 @@ func responsesRequestFromCompaction(req *dto.OpenAIResponsesCompactionRequest) *
 - Good：第一次渠道返回 `503`，错误未提交且不泄露 body；第二次成功，最终只按冻结的一次 WebSearch 费用结算。
 - Good：Advanced Custom route 用固定 `api_key` query；客户端同名 query 被忽略，其他 cursor query 保留。
 - Base：分组倍率或工具价格为零；仍透传成功请求并记录请求次数，但实际 quota 为零。
-- Base：Compact 继续使用现有 URL、响应 usage 和计费，仅新增官方字段映射。
 - Bad：用封闭 DTO 重新 marshal Alpha Search body，导致未来字段或显式 `false` 丢失。
 - Bad：每次重试重新预扣独立 BillingSession，或成功后重新读取工具价格计算结算额度。
 - Bad：把 upstream URL、query、搜索请求或错误响应 body 写入日志。
@@ -114,7 +95,6 @@ func responsesRequestFromCompaction(req *dto.OpenAIResponsesCompactionRequest) *
 - 请求透传：覆盖未知字段、模型映射、Param Override、普通/Codex/Advanced Custom URL、query 冲突优先级和客户端 Authorization 替换。
 - 响应与安全：覆盖成功状态/body/header、非 `2xx` 未提交、网络错误不记录 query、错误 body 不进入日志。
 - 重试与计费：覆盖实际 Alpha Search `503` 可重试、最终失败退款、重试后成功不退款、饱和发生在 `Reserve` 前、成功使用冻结费用结算。
-- Compact：覆盖全部官方映射字段、OpenAI/Codex/Azure URL，以及 compaction usage/cache token 映射。
 - 回归命令：
   - `go test ./controller ./dto ./relay ./relay/channel/openai ./relay/helper ./router ./service`
   - `go test ./...`
@@ -166,154 +146,140 @@ for key, values := range c.Request.URL.Query() {
 }
 ```
 
-## 场景：OpenAI Compact V1/V2 与 Responses WebSocket
+## 场景：Responses Compact 渠道能力透传与基础模型计费
 
 ### 1. Scope / Trigger
 
-- Trigger：修改 `POST /v1/responses/compact`、`POST /v1/responses`、`GET /v1/responses`，或修改 Compact 协议检测、模型后缀、上游路径、Codex 元数据请求头、历史 SSE bridge、Responses WebSocket、多轮计费与审计日志。
-- 协议事实以锁定并核实的 OpenAI Codex 源码为优先依据；sub2api 只作为网关 wire 兼容参考，不复制其账号调度或跨客户端连接池。
-- Compact 模式必须贯穿分发、`RelayInfo`、模型映射、上游请求、响应处理、计费和日志，不能只根据 URL 或 relay mode 临时推断。
+- Trigger：修改 `POST /v1/responses/compact`、`POST /v1/responses`、`GET /v1/responses`、管理端 Compact 渠道测试，或修改 Compact 检测、渠道选择、渠道 `setting`、HTTP/WS 原始透传、usage 结算、重试、亲和性和审计日志。
+- new-api 只承接 Compact 协议透传、渠道能力门禁和基础模型计费；sub2api 负责历史 body bridge 的协议提升与 SSE 合成。
+- build 分支实现必须遵循 `../guides/build-upstream-friendly-customization.md`：核心逻辑放在独立新文件，原有 Relay、WebSocket 和前端大表单只保留最薄分派或挂载。
 
 ### 2. Signatures
-
-- 入口与协议检测：
 
 ```go
 POST /v1/responses/compact
 POST /v1/responses
 GET  /v1/responses // WebSocket Upgrade
+GET  /api/channel/test/:id?model=<基础模型>&endpoint_type=openai-response-compact
 
-type ResponsesCompactMode string
-
-const (
-	ResponsesCompactModeNone         ResponsesCompactMode = ""
-	ResponsesCompactModeV1Path       ResponsesCompactMode = "v1_path"
-	ResponsesCompactModeV1BodyBridge ResponsesCompactMode = "v1_body_bridge"
-	ResponsesCompactModeV2HTTP       ResponsesCompactMode = "v2_http"
-	ResponsesCompactModeV2WebSocket  ResponsesCompactMode = "v2_websocket"
-)
+type ChannelSettings struct {
+	ResponsesCompactPassthroughEnabled bool `json:"responses_compact_passthrough_enabled,omitempty"`
+}
 
 func DetectResponsesCompactMode(method string, requestPath string, headers http.Header, body []byte, transport ResponsesTransport) relayconstant.ResponsesCompactMode
-func (info *RelayInfo) IsResponsesCompact() bool
-func (info *RelayInfo) UsesResponsesCompactEndpoint() bool
-func (info *RelayInfo) UsesUpstreamStream() bool
+func ShouldHandleResponsesCompactPassthrough(info *relaycommon.RelayInfo) bool
+func PrepareResponsesCompactPassthrough(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError
+func ResponsesCompactPassthroughHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError
+func ParseResponsesCompactPassthroughUsage(raw json.RawMessage) (*dto.Usage, bool)
+
+func normalizeResponsesCompactChannelTestModel(modelName, endpointType string) string
+func testResponsesCompactPassthroughChannel(c *gin.Context, channel *model.Channel, testUserID int, startedAt time.Time, info *relaycommon.RelayInfo, request dto.Request) testResult
 ```
 
-- 历史 body-signal SSE bridge：
+前端表单字段与存储 JSON 键必须完全一致：
 
-```go
-func StartResponsesCompactSSEBridge(c *gin.Context, info *relaycommon.RelayInfo) func()
-func PrepareResponsesCompactSSEFinal(c *gin.Context) (active bool, committed bool)
-func WriteResponsesCompactSSECompleted(c *gin.Context, responseBody []byte, output json.RawMessage) error
-func WriteResponsesCompactSSEFailed(c *gin.Context, openAIError types.OpenAIError) error
-```
-
-- Responses WebSocket 与元数据：
-
-```go
-func RelayResponsesWebSocket(c *gin.Context)
-func DialResponsesWebSocket(c *gin.Context, info *relaycommon.RelayInfo) (*websocket.Conn, *http.Response, *types.NewAPIError)
-func CopyResponsesMetadataHeaders(c *gin.Context, target *http.Header)
-func CaptureResponsesMetadataHeaders(c *gin.Context, source http.Header)
-func ClearResponsesCompactAudit(ctx *gin.Context)
+```text
+responses_compact_passthrough_enabled: boolean
 ```
 
 ### 3. Contracts
 
-#### Compact 检测与路径
+#### 检测、选渠与能力门禁
 
-- `POST /v1/responses/compact` 是 `v1_path`。
-- 裸 `POST /v1/responses` 只有同时满足 `stream:true`、`input[]` 含 `type=compaction_trigger`、`x-codex-beta-features` 的逗号分隔 token 精确包含 `remote_compaction_v2` 时才是 `v2_http`。
-- 裸 `POST /v1/responses` 含 `compaction_trigger` 但不满足 V2 三项信号时是 `v1_body_bridge`；其上游使用 unary `/responses/compact`，下游流式意图单独保存在 `ResponsesClientStream`。
-- `GET /v1/responses` 的 `response.create` 首帧满足相同三项信号时是 `v2_websocket`；普通 Responses WebSocket turn 保持 `none`。
-- beta feature 必须对所有 header value 按逗号拆分、trim 后精确匹配，禁止 substring 判断。
+- `POST /v1/responses/compact` 是 `v1_path`；裸 `POST /v1/responses` 根据 `compaction_trigger`、`stream:true` 和精确 beta token 区分 `v1_body_bridge` / `v2_http`；`GET /v1/responses` 的 `response.create` 使用同一规则检测 `v2_websocket`。
+- 所有 Compact 模式的 Token 权限、分组、亲和性、首次选渠和真实上游失败后的重试都使用请求中的基础模型，不得生成、查询或要求配置 `*-openai-compact` 模型。
+- 能力开关不能参与选渠筛选。必须先按普通分发和亲和性选定渠道，再读取所选渠道的 `responses_compact_passthrough_enabled`。
+- 开关关闭返回 `503 responses_compact_passthrough_disabled`，同时设置 `skipRetry` 和 `noRecordErrorLog`；不得换渠、清理亲和性、auto-ban、发起上游请求或预扣。
+- 只有门禁通过后的真实上游错误继续服从现有状态码映射、渠道处理和重试语义。
 
-#### 模型、请求体与计费标记
+#### 原始请求与路径
 
-- `v1_path` 与 `v1_body_bridge` 的渠道选择和本地计费模型使用 `-openai-compact` 后缀，用于隔离仅支持 `/responses/compact` 的渠道能力。
-- `v2_http` 与 `v2_websocket` 的 token 模型权限、渠道亲和性、首次选择、后续 WebSocket turn 能力校验和跨渠道重试使用基础模型，复用普通 Responses 渠道；管理员不需要在渠道模型列表中额外配置 `*-openai-compact`。
-- 所有 Compact 模式在模型映射完成后都使用最终映射模型对应的 `-openai-compact` 计费名；`UpstreamModelName` 和上游 body 中只能出现无后缀的真实模型名。
-- V1 上游只发送当前 Codex canonical 字段：`model`、`input`、`instructions`、`tools`、`parallel_tool_calls`、`reasoning`、`service_tier`、`prompt_cache_key`、`text`。
-- `v1_path` 和 `v1_body_bridge` 使用 `/responses/compact`；`v2_http` 和 `v2_websocket` 必须保持普通 `/responses`，不得因为本地计费后缀改写路径。
-- V2 HTTP 的 Responses SSE data 和 WebSocket payload 原样写回；本地 DTO 解析只用于 usage、终态和 compaction item 观测，不能重组或丢弃 `encrypted_content` 等未知字段。
+- Compact 跳过 `ModelMappedHelper`、Param Override、disabled fields 和请求 DTO 重组；HTTP 从原始 `BodyStorage` 读取，WebSocket 返回原始 frame 副本。未知字段、显式 `0` / `false`、加密内容和字段顺序不得被本地重组丢失。
+- 基础模型同时写入 `OriginModelName`、`UpstreamModelName` 和计费快照；`IsModelMapped=false`，渠道 `use_upstream_model_for_billing` 对 Compact 透传不生效。
+- 路径矩阵：
+  - V1 path：OpenAI-compatible `/v1/responses/compact`；Codex/sub2api `/backend-api/codex/responses/compact`。
+  - 历史 body bridge：保持普通 `/responses`；Codex/sub2api `/backend-api/codex/responses`，由 sub2api 提升协议并生成 SSE。
+  - V2 HTTP / WebSocket：保持普通 `/responses`；不得改写到 Compact 端点。
+- Compact 请求不得启动 new-api 的旧 `StartResponsesCompactSSEBridge`；该旧实现不能补 usage、重组 output 或伪造成功终态。
+- 上游认证由所选 adaptor 和 Channel Key 构造；客户端 `Authorization`、Cookie、Host、hop-by-hop 头和 query credential 不得透传。Responses metadata 只通过现有安全 allowlist 复制。
 
-#### Codex 与 sub2api 元数据
+#### 响应、usage 与计费
 
-- 安全 allowlist 包含 beta feature、turn state/metadata、installation/window/parent-thread、client request ID、originator、user-agent，以及 session/thread 标识。
-- Codex 官方使用 `session-id` / `thread-id`，sub2api 历史入口使用 `session_id` / `thread_id`。连字符值优先，网关必须向上游同时发送两组别名。
-- 客户端 `Authorization`、Cookie、Host、`Content-Length`、WebSocket 生成头和 query credential 不得进入上游；认证必须替换为 Channel API Key。
-- Responses WebSocket 必须设置 `OpenAI-Beta: responses_websockets=2026-02-06`。Header Override 在安全默认头之后应用，但不得覆盖由 WebSocket dialer 生成的握手头。
-- 上游握手返回的 `x-codex-turn-state`、`x-codex-turn-metadata` 可保存到当前请求上下文供重连使用；不得跨客户端或跨请求复用。
-
-#### 历史 SSE bridge
-
-- bridge 使用 `text/event-stream` 和 SSE 注释心跳；心跳、成功终态、失败终态共享同一 writer mutex，停止函数必须等待心跳协程退出。
-- unary `output[]` 只有 JSON object 项可以生成 `response.output_item.done`；标量项跳过，`output_index` 按有效 object 连续编号。
-- 成功终态最后写 `response.completed`，其中 response 保留上游字段；缺失/null `usage` 时补齐三个零值 token 字段。
-- 已存在但缺少数字类型 `input_tokens`、`output_tokens` 或 `total_tokens` 的 usage 必须整体删除，避免 Codex 把 completed 事件判为不可解析。
-- 心跳提交前的错误保留真实 HTTP/OpenAI JSON 错误；提交后只能写 `response.failed` SSE 终态。心跳不能阻止渠道重试。
+- JSON 响应写回原始字节；SSE 按读到的原始行字节写回并及时 flush；WebSocket text/binary payload 按原始 frame 写回。旁路 observer 只能读取终态、usage 和工具计数，不能修改 payload。
+- 只有成功终态和完整合法 usage 才能调用 `PostTextConsumeQuota`。合法 usage 必须同时包含数字 `input_tokens`、`output_tokens`、`total_tokens`，数值非负、不超过 `common.MaxQuota`，且 `input_tokens + output_tokens == total_tokens`；cache token 也必须非负且不超过上限。
+- usage 缺失、null、字段不完整、负数、溢出、总数不一致，或请求失败、取消、断连、流不完整时，必须调用 BillingSession `Refund`；不得按输出文本估算，也不得补零后收费。
+- Compact 价格、预扣、结算和消费日志主模型均使用基础模型；不新增 Compact 工具价格、固定调用费或独立计费体系。已有真实 WebSearch 等工具调用仍按现有工具规则统计。
+- `ChannelSettings` 缺失新字段时默认 `false`，不需要数据库迁移。Default/Classic 保存 `setting` 时必须保留未知 JSON 字段。
 
 #### Responses WebSocket 生命周期
 
-- 路由复用性能检查、Token 鉴权和请求限流，但不挂载 Upgrade 前的 `Distribute`；控制器必须先读取首个 `response.create`，再校验 model 权限和选择渠道。
-- 首帧及后续 `response.create` 只接受 text/binary JSON，必须包含 `type=response.create` 和非空 model；请求校验、模型映射、disabled fields、Param Override 与普通 Responses 使用同一套实现。
-- 每个客户端连接只允许一个 active turn；前一轮收到成功或失败终态后才能发送下一轮。连接内保持所选渠道，后续 model 必须仍被该渠道和当前分组支持。
-- 上游 URL 由 adaptor 的 Responses 路径生成，再执行 `https -> wss`、`http -> ws` 转换；OpenAI、Codex 和显式原生 Responses 的 Advanced Custom route 可用。
-- 握手、首帧写入、上游关闭或业务错误只在尚未向客户端写出业务帧时允许 failover；写出任意上游业务帧后禁止切换渠道。
-- text/binary payload、取消帧和关闭码必须按 WebSocket 语义转发；普通业务错误不能包装成成功 compaction。
+- 路由先读取首个 `response.create`，再校验基础 model 权限和选择渠道；同一连接只允许一个 active turn，后续 turn 继续使用当前渠道并校验该渠道是否支持基础模型。
+- Compact turn 在 dial 和预扣前执行渠道门禁；门禁错误不是 channel error，不能进入 connector failover。
+- 普通 turn 继续使用原有模型映射、转换、disabled fields 和 Param Override；只有 Compact turn 分派到独立准备和终态 observer。
+- 每个 turn 独立预扣、结算或退款；`ClearResponsesCompactAudit` 只清理上一轮 `admin_info.responses_compact`，不能删除 quota saturation 等其他管理员字段。
 
-#### 多轮计费与日志
+#### 管理端渠道测试
 
-- 每个 `response.create` turn 独立执行预扣、结算或退款；成功终态以 `response.completed.response.usage` 结算，缺失 usage、失败、取消或断连必须退款，BillingSession 保证幂等。
-- 普通 turn 使用基础模型价格，V2 Compact turn 使用 Compact 后缀价格；每轮重新初始化 `RelayInfo` 的请求、Compact 模式、模型映射和计费字段。
-- 新 turn 准备阶段必须调用 `ClearResponsesCompactAudit`，只删除上一轮 `admin_info.responses_compact`，保留视觉辅助、quota saturation 等其他日志字段，防止 `普通 -> Compact -> 普通` 串轮。
-- Compact 审计只记录 mode、入站/上游路径、渠道、结局和上游 request ID；不得记录请求帧、对话、压缩密文、完整 URL/query 或凭证。
+- `endpoint_type=openai-response-compact` 的渠道测试必须使用基础模型。管理员仍传入历史 `*-openai-compact` 测试模型时，只在 Compact 测试入口移除一次旧后缀；普通端点测试不得改写模型。
+- 渠道测试已经由管理员明确选择渠道，不执行第二次选渠。生成 `RelayInfo` 后必须先调用 `PrepareResponsesCompactPassthrough`，能力关闭时在查价和网络请求前返回同一个专用 `503`。
+- Compact 渠道测试只将测试 DTO marshal 一次作为合成原始 body，随后直接调用 adaptor `DoRequest`；不得调用 `ModelMappedHelper`、请求 converter、Param Override 或 `DoResponse`，避免测试通过的 wire 行为与生产透传不一致。
+- Compact 渠道测试的价格查询、消费日志主模型和严格 usage 解析均使用基础模型；未配置任何后缀价格时仍可完成测试。
+- 原生测试只支持 OpenAI、Codex 和 Advanced Custom `converter=none` route。Codex 使用 `/backend-api/codex/responses/compact`；Advanced Custom 使用匹配 `/v1/responses/compact` 的 `upstream_path`。
+- 非 `2xx` 响应使用不记录错误 body 的 Relay 错误解析，成功响应仅解析完整合法 usage；不得把 Compact 响应正文、压缩密文或凭证写入渠道测试日志。
+- 普通渠道测试继续使用原有模型映射、converter、Param Override、`DoResponse` 和响应校验路径，不得被 Compact 提前分派影响。
 
 ### 4. Validation & Error Matrix
 
 | 条件 | 行为 |
 | --- | --- |
-| 普通 HTTP/WS Responses 不满足 Compact 信号 | mode=`none`，路径、模型价格和既有行为不变 |
-| V2 HTTP/WS 的分组和渠道只配置基础模型 | 使用基础模型完成权限校验、渠道选择与重试；不得因查询 `*-openai-compact` 返回 `503`，结算仍使用 Compact 价格模型 |
-| 非 Upgrade `GET /v1/responses` | `400 invalid_request`，提示需要 WebSocket Upgrade |
-| 首帧不是 JSON `response.create` 或 model 为空 | WebSocket error event + policy close，不选择渠道 |
-| Responses max-tokens 字段超过统一上限 | `400 invalid_request`，不得预扣或发送上游 |
-| 渠道 API type 不支持 Responses WS | 渠道错误；可在首个下游业务帧前重试 |
-| 同一连接存在 active turn 时再次 `response.create` | `409 invalid_request`，退款当前 turn 并关闭连接 |
-| 上游握手/首帧/首个业务错误失败且下游未写业务帧 | 按现有 retry 策略切换支持 WS 的渠道，复用当前 turn 的计费生命周期 |
-| 已向客户端写出业务帧后上游失败 | 禁止 failover；转发错误或关闭语义并退款未结算 turn |
-| bridge output 含标量项 | 跳过标量，仅为 object item 生成连续编号事件 |
-| bridge usage 缺失或 null | 补 `{input_tokens:0,output_tokens:0,total_tokens:0}` |
-| bridge usage 存在但三个必需数字字段不完整 | 从 `response.completed.response` 删除 usage |
-| WebSocket completed 缺失 usage | 记录异常、退款该 turn，不猜测 token 费用 |
+| 普通 HTTP/WS Responses 不满足 Compact 信号 | mode=`none`，普通路径、映射、计费和重试不变 |
+| 未配置任何 `*-openai-compact` 模型或价格 | 使用基础模型完成权限、亲和选渠、预扣和结算 |
+| 已选渠道关闭 Compact 透传 | `503 responses_compact_passthrough_disabled`；不换渠、不清亲和性、不 auto-ban、不预扣、不记上游错误日志 |
+| V1 path 使用 Codex/sub2api | 上游 `/backend-api/codex/responses/compact` |
+| 历史 bridge 或 V2 使用 Codex/sub2api | 上游 `/backend-api/codex/responses` |
+| Compact 请求含模型映射、Param Override 或 disabled fields | 全部跳过，原始请求体/frame 保持不变 |
+| 上游任意非 `2xx` 或网络错误 | 响应提交前返回标准 Relay 错误；真实上游错误可按现有策略重试 |
+| 成功终态含完整合法 usage | 原始响应不变，按基础模型结算一次 |
+| 成功终态 usage 缺失或非法 | 原始响应仍返回客户端，退款且不猜测 token |
+| SSE/WS 失败、取消、断连或无成功终态 | 退款未结算 turn/request |
+| 非 Upgrade `GET /v1/responses` | `400 invalid_request` |
+| Compact 渠道测试传入基础模型 | 不追加后缀，按基础模型查价并原生发送 |
+| Compact 渠道测试传入历史后缀模型 | 仅移除一次 `-openai-compact`，随后按基础模型执行 |
+| Compact 渠道测试所选渠道关闭能力 | 在查价和网络调用前返回 `503 responses_compact_passthrough_disabled` |
+| Compact 渠道测试配置模型映射或 Param Override | 两者均不生效，上游 body 的 `model` 保持基础模型 |
+| Advanced Custom Compact 渠道测试使用非 `none` converter | 返回请求错误，不把透传 body 送入转换 route |
 
 ### 5. Good / Base / Bad Cases
 
-- Good：Codex V2 HTTP 请求保持 `/v1/responses` 和原始 SSE，基础模型用于渠道选择，Compact 后缀只用于映射后的本地计费，`compaction` item 与 `response.completed` 原样到达客户端。
-- Good：Codex 客户端只发送 `session-id`，new-api 到 sub2api 的握手同时带 `session-id` 和 `session_id`，且客户端 Authorization 被 Channel API Key 替换。
-- Good：同一 WS 连接依次执行普通、Compact、普通 turn；三轮独立计费，第三轮消费日志不继承第二轮 `responses_compact` 审计。
-- Base：普通 `/v1/responses` HTTP/SSE 或 WS 请求没有 `compaction_trigger`；detector 返回 `none`，继续原有 Responses 行为。
-- Base：历史 body-signal 客户端请求 `stream:true` 但不声明 V2 beta；上游 unary Compact，客户端收到合法 SSE 终态。
-- Bad：看到 `compaction_trigger` 就把原生 V2 改写到 `/responses/compact`。
-- Bad：对 V2 使用 `mode.IsCompact()` 追加选择后缀，导致仅配置基础模型的普通 Responses 渠道在分发阶段返回 `No available channel for model ...-openai-compact`。
-- Bad：把 `-openai-compact` 后缀写入上游 model，或让 Compact 标记跨 WS turn 复用。
-- Bad：通配复制客户端 header/query，导致 Authorization、Cookie 或 credential 泄露到上游。
+- Good：亲和性命中 sub2api 渠道，渠道只配置 `gpt-5.6-sol` 且开启能力；V1 到 `/backend-api/codex/responses/compact`，V2/历史 bridge 到 `/backend-api/codex/responses`，全程按 `gpt-5.6-sol` 计费。
+- Good：请求含未知字段、`false` 和 `0`；上游收到的 HTTP body/WS frame 与下游原始字节一致，响应中的 `encrypted_content` 和未来字段原样返回。
+- Good：所选亲和渠道关闭能力；立即返回专用 503，未调用上游、未预扣、未重选或清理亲和性。
+- Good：管理端用基础模型测试 OpenAI、Codex 或 Advanced Custom 原生 Compact route；即使渠道配置模型映射和 Param Override，上游仍收到基础模型合成 body。
+- Base：旧渠道没有新字段；开关默认为 false，普通 Responses 不受影响。
+- Base：完整 usage 的三个 token 字段显式为零；视为结构合法并按零实际额度结算，不能误判为字段缺失。
+- Base：旧渠道的默认测试模型仍带 `-openai-compact`；选择 Compact 端点时归一为基础模型，选择普通端点时保持原值以避免扩大兼容变更。
+- Bad：给基础模型追加 `-openai-compact` 后再做 Token 权限、选渠、模型映射或计费。
+- Bad：历史 bridge 发到 `/responses/compact` 后由 new-api 把 unary JSON 重组为 SSE。
+- Bad：能力开关参与候选渠道过滤，导致亲和渠道被静默替换。
+- Bad：completed 缺 usage 时按本地 tokenizer 估算收费，或补零 usage 后记录为正常成功计费。
+- Bad：生产 Compact 已走原始透传，但管理端渠道测试仍追加后缀并调用 converter，导致测试结果与真实请求语义相反。
 
 ### 6. Tests Required
 
-- detector：覆盖 V1 path、V1 body bridge、V2 HTTP、V2 WS、普通 Responses、多 header value、逗号 token 和 substring 误匹配。
-- 模型与 HTTP：覆盖 V1/V1 bridge 使用 Compact 选择后缀、V2 使用基础模型完成 token 权限/渠道选择/retry、映射后 Compact 计费、后缀不泄漏、V2 保持 `/responses`、V1 canonical allowlist、OpenAI/Codex/Azure URL、usage/cache token 和普通 Responses 隔离。
-- header 与握手：使用真实 `httptest` WebSocket server 断言 path、query 合并、Channel Authorization、OpenAI-Beta、两组 session/thread 别名、turn state 回收和客户端凭证过滤。
-- bridge：覆盖 object/scalar output、连续 `output_index`、缺失/null/不完整 usage、心跳前后错误、取消、并发 writer 和停止幂等。
-- WebSocket：覆盖首帧鉴权、单 active turn、首个业务错误前 failover、输出后不重试、cancel/pong/close、多轮普通/Compact 交替、缺失 usage 退款和计费只结算一次。
-- 日志：覆盖 Compact 审计持久化、敏感信息过滤，以及 `ClearResponsesCompactAudit` 保留其他 `admin_info` 字段。
+- detector：覆盖 V1 path、历史 bridge、V2 HTTP、V2 WS、普通 Responses、多 header value、逗号 token 和 substring 误匹配。
+- 分发与门禁：断言四种 Compact 模式使用基础模型；关闭能力返回专用 503、`skipRetry`、`noRecordErrorLog`，且 Billing 未创建/预扣。
+- HTTP：使用真实 `httptest` 上游断言 OpenAI/Codex 路径矩阵、原始 body、Channel Authorization、客户端 Cookie/Authorization 过滤、JSON/SSE 原始响应和安全响应头。
+- usage：覆盖完整非零、完整显式零、缺失/null、不完整、负数、超过 `common.MaxQuota`、总数不一致、失败终态和不完整流；断言只结算一次或退款。
+- WebSocket：覆盖原始 frame、基础模型计费、开关关闭不 failover、多 turn 普通/Compact 交替、completed 非法 usage 退款、失败/取消/断连退款。
+- 管理端渠道测试：覆盖基础模型不追加后缀、历史后缀归一、能力关闭先于查价和网络、模型映射与 Param Override 跳过、OpenAI/Codex/Advanced Custom 原生路径，以及普通端点模型不被归一化。
+- 前端：Default 表单 round-trip 覆盖旧值默认 false、新值保存和未知 `setting` 字段保留；Default/Classic 构建或类型检查验证组件挂载，所有 locale 包含标签和说明。
 - 回归命令：
-  - `go test ./controller ./middleware ./relay ./relay/channel ./relay/channel/openai ./relay/helper ./router ./service`
-  - `go test -race ./relay/helper -run '^TestResponsesCompactSSEBridge'`
-  - `go test -race ./controller -run 'ResponsesWebSocket'`
-  - `go test -race ./relay ./service -run '(DialResponsesWebSocket|BillingSession|ResponsesCompactAudit|ClearResponsesCompactAudit)'`
-  - `go test ./...`
-  - `go vet` 至少覆盖本任务修改的包；全仓既有告警必须证明与本任务无关。
+  - `go test ./dto ./middleware ./relay ./relay/channel/openai ./relay/channel/codex ./controller ./service -count=1`
+  - `go test -race ./relay -run 'ResponsesCompactPassthrough' -count=1`
+  - `go test -race ./controller -run 'ResponsesCompactPassthrough|ResponsesWebSocket' -count=1`
+  - `go test ./... -count=1`
+  - `go vet ./...`；全仓既有告警必须与任务修改包区分记录。
+  - `cd web/default && bun test src/features/channels/lib/channel-form.test.ts && bun run typecheck && bun run build`
   - `git diff --check`
 
 ### 7. Wrong vs Correct
@@ -321,47 +287,54 @@ func ClearResponsesCompactAudit(ctx *gin.Context)
 #### Wrong
 
 ```go
-// 错误：仅凭 body 字符串判断，会混淆 V1 bridge、V2 和普通请求。
-if strings.Contains(string(body), "compaction_trigger") {
-	requestPath = "/v1/responses/compact"
-}
-```
-
-```go
-// 错误：V2 也会进入该分支，导致渠道查询使用本地计费后缀。
+// 错误：后缀模型会在 new-api 查价阶段触发 model_price_error。
 if mode.IsCompact() {
 	selectionModel = ratio_setting.WithCompactModelSuffix(modelName)
 }
 ```
 
 ```go
-// 错误：通配复制会泄露客户端认证和握手凭证。
-for key, values := range c.Request.Header {
-	targetHeader[key] = values
-}
+// 错误：在亲和性选渠前按 Compact 能力过滤候选渠道。
+channels = filterCompactEnabledChannels(channels)
+```
+
+```go
+// 错误：历史 bridge 由 new-api 重组响应并补 usage。
+StartResponsesCompactSSEBridge(c, relayInfo)
+```
+
+```go
+// 错误：管理端 Compact 测试重新制造虚拟模型并落回旧转换链。
+testModel = ratio_setting.WithCompactModelSuffix(testModel)
+_ = helper.ModelMappedHelper(c, info, request)
 ```
 
 #### Correct
 
 ```go
-mode := helper.DetectResponsesCompactMode(
-	c.Request.Method,
-	c.Request.URL.Path,
-	c.Request.Header,
-	body,
-	helper.ResponsesTransportHTTP,
-)
-if mode.UsesCompactEndpoint() {
-	selectionModel = ratio_setting.WithCompactModelSuffix(modelName)
-}
-```
-
-```go
-// V2 使用基础模型选择普通 Responses 渠道，映射后由 RelayInfo 形成 Compact 计费名。
+// 所有 Compact 模式先按基础模型完成普通分发和亲和性选择。
 selectionModel = modelName
 ```
 
 ```go
-// 明确 allowlist，并由渠道 adaptor/Channel Key 负责上游认证。
-channel.CopyResponsesMetadataHeaders(c, &targetHeader)
+// 渠道已选定、预扣尚未发生时执行能力门禁。
+if relay.ShouldHandleResponsesCompactPassthrough(relayInfo) {
+	if apiErr := relay.PrepareResponsesCompactPassthrough(c, relayInfo); apiErr != nil {
+		return apiErr
+	}
+}
+```
+
+```go
+// Compact 独立模块读取原始 BodyStorage；历史 bridge 的出站路径视图保持普通 Responses。
+outboundInfo := responsesCompactPassthroughOutboundInfo(relayInfo)
+response, err := adaptor.DoRequest(c, outboundInfo, common.ReaderOnly(storage))
+```
+
+```go
+// Compact 渠道测试在旧主函数中只做提前分派，完整测试逻辑位于独立文件。
+testModel = normalizeResponsesCompactChannelTestModel(testModel, endpointType)
+if relay.ShouldHandleResponsesCompactPassthrough(info) {
+	return testResponsesCompactPassthroughChannel(c, channel, testUserID, startedAt, info, request)
+}
 ```

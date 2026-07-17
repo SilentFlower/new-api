@@ -48,7 +48,11 @@ func relayHandler(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIErro
 	case relayconstant.RelayModeEmbeddings:
 		err = relay.EmbeddingHelper(c, info)
 	case relayconstant.RelayModeResponses, relayconstant.RelayModeResponsesCompact:
-		err = relay.ResponsesHelper(c, info)
+		if relay.ShouldHandleResponsesCompactPassthrough(info) {
+			err = relay.ResponsesCompactPassthroughHelper(c, info)
+		} else {
+			err = relay.ResponsesHelper(c, info)
+		}
 	case relayconstant.RelayModeAlphaSearch:
 		err = relay.AlphaSearchHelper(c, info)
 	default:
@@ -138,7 +142,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	stopNonStreamKeepAlive := helper.StartNonStreamKeepAlive(c, relayInfo)
 	defer stopNonStreamKeepAlive()
-	stopResponsesCompactSSEBridge := helper.StartResponsesCompactSSEBridge(c, relayInfo)
+	stopResponsesCompactSSEBridge := func() {}
+	if !relay.ShouldHandleResponsesCompactPassthrough(relayInfo) {
+		stopResponsesCompactSSEBridge = helper.StartResponsesCompactSSEBridge(c, relayInfo)
+	}
 	defer stopResponsesCompactSSEBridge()
 
 	mainBillingPrepared := false
@@ -176,7 +183,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 
 		addUsedChannel(c, channel.Id)
-		newAPIError = relay.PrepareRequestForSelectedChannel(c, relayInfo)
+		if relay.ShouldHandleResponsesCompactPassthrough(relayInfo) {
+			newAPIError = relay.PrepareResponsesCompactPassthrough(c, relayInfo)
+		} else {
+			newAPIError = relay.PrepareRequestForSelectedChannel(c, relayInfo)
+		}
 		if newAPIError != nil {
 			recordRelayErrorLog(c, newAPIError)
 			break

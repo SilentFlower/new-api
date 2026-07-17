@@ -237,6 +237,9 @@ func processResponsesWebSocketChannelError(c *gin.Context, turn *responsesWebSoc
 }
 
 func prepareResponsesWebSocketTurnAttempt(c *gin.Context, turn *responsesWebSocketTurn) ([]byte, *types.NewAPIError) {
+	if turn != nil && turn.compactMode.IsCompact() {
+		return prepareResponsesCompactPassthroughWebSocketTurn(c, turn)
+	}
 	service.ClearResponsesCompactAudit(c)
 	var request dto.OpenAIResponsesRequest
 	if err := common.Unmarshal(turn.rawPayload, &request); err != nil {
@@ -551,6 +554,9 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 }
 
 func handleResponsesWebSocketUpstreamEvent(c *gin.Context, turn *responsesWebSocketTurn, channel *model.Channel, payload []byte) bool {
+	if turn != nil && turn.compactMode.IsCompact() {
+		return handleResponsesCompactPassthroughWebSocketUpstreamEvent(c, turn, channel, payload)
+	}
 	var event dto.ResponsesStreamResponse
 	if err := common.Unmarshal(payload, &event); err != nil {
 		return false

@@ -19,16 +19,6 @@ import (
 
 const responsesWebSocketBeta = "responses_websockets=2026-02-06"
 
-var responsesWebSocketClientQueryCredentials = map[string]struct{}{
-	"key":           {},
-	"api_key":       {},
-	"api-key":       {},
-	"apikey":        {},
-	"access_token":  {},
-	"token":         {},
-	"authorization": {},
-}
-
 // DialResponsesWebSocket 建立到所选渠道的 Responses WebSocket 上游连接。
 // @param c 当前 Gin 请求上下文。
 // @param info 已完成渠道上下文和模型映射的 RelayInfo。
@@ -68,8 +58,7 @@ func DialResponsesWebSocket(c *gin.Context, info *relaycommon.RelayInfo) (*webso
 
 	query := parsedURL.Query()
 	for key, values := range c.Request.URL.Query() {
-		normalizedKey := strings.ToLower(strings.TrimSpace(key))
-		if _, blocked := responsesWebSocketClientQueryCredentials[normalizedKey]; blocked {
+		if isResponsesClientQueryCredentialKey(key) {
 			continue
 		}
 		if _, exists := query[key]; exists {

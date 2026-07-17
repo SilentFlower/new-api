@@ -38,7 +38,11 @@ func TestDialResponsesWebSocketBuildsSafeUpstreamHandshake(t *testing.T) {
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses?cursor=next&key=client-secret", nil)
+	c.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/v1/responses?cursor=next&key=client-secret&client_secret=hidden-client-secret&password=hidden-password&custom_token_hint=hidden-token&signature_v2=hidden-signature",
+		nil,
+	)
 	c.Request.Header.Set("Authorization", "Bearer client-secret")
 	c.Request.Header.Set("X-Codex-Beta-Features", "remote_compaction_v2")
 	c.Request.Header.Set("X-Codex-Turn-State", "turn-state")
@@ -66,6 +70,11 @@ func TestDialResponsesWebSocketBuildsSafeUpstreamHandshake(t *testing.T) {
 	assert.Equal(t, "/v1/responses", request.URL.Path)
 	assert.Equal(t, "next", request.URL.Query().Get("cursor"))
 	assert.Empty(t, request.URL.Query().Get("key"))
+	assert.Empty(t, request.URL.Query().Get("client_secret"))
+	assert.Empty(t, request.URL.Query().Get("password"))
+	assert.Empty(t, request.URL.Query().Get("custom_token_hint"))
+	assert.Empty(t, request.URL.Query().Get("signature_v2"))
+	assert.NotContains(t, request.URL.RawQuery, "hidden-")
 	assert.Equal(t, "Bearer upstream-key", request.Header.Get("Authorization"))
 	assert.Equal(t, responsesWebSocketBeta, request.Header.Get("OpenAI-Beta"))
 	assert.Equal(t, "remote_compaction_v2", request.Header.Get("X-Codex-Beta-Features"))

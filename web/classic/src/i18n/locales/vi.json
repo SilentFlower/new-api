@@ -4277,6 +4277,8 @@
     "无加密": "Không mã hóa",
     "旧版前端即将停止维护": "Frontend cũ sắp ngừng bảo trì",
     "该条历史记录缺少审计字段。当前版本已支持记录服务器 IP、回调 IP、支付方式与系统版本等审计信息；这些字段仅会写入后续新产生的记录，历史记录无法自动补齐。": "Bản ghi lịch sử này được tạo trước khi tính năng thông tin kiểm toán ra đời nên thiếu dữ liệu kiểm toán. Phiên bản hiện tại đã hỗ trợ ghi lại IP máy chủ, IP gọi lại, phương thức thanh toán và phiên bản hệ thống, nhưng các trường này chỉ được ghi cho các bản ghi mới về sau — không thể bổ sung hồi tố cho bản ghi cũ.",
-    "请选择一种 SMTP 传输加密方式": "Vui lòng chọn một chế độ bảo mật truyền tải SMTP"
+    "请选择一种 SMTP 传输加密方式": "Vui lòng chọn một chế độ bảo mật truyền tải SMTP",
+    "启用 Responses Compact 透传": "Bật chuyển tiếp Responses Compact",
+    "完成常规渠道选择和亲和性命中后，将 Compact 请求透传到此渠道": "Chuyển tiếp yêu cầu Compact đến kênh này sau khi định tuyến và chọn theo mức độ gắn kết thông thường."
   }
 }

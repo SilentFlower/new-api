@@ -1,0 +1,5 @@
+{"file":".trellis/tasks/07-17-responses-compact-passthrough-billing/research/compact-passthrough-boundaries.md","reason":"提供 new-api 与 sub2api 的 V1、V2、历史 bridge、WebSocket、亲和性和计费边界事实。"}
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"本任务是 build 分支定制，实施必须采用独立新模块和原有文件最薄接入。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"提供现有 Responses Compact 检测、路径、header、WebSocket、计费、日志与测试契约；任务明确变更的旧条款以 prd/design 为准。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"能力门禁必须使用不可重试且不触发渠道自动禁用的 Relay 错误语义。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"Compact 审计和异常日志必须保留请求关联并禁止记录正文、密文、完整 query 或凭证。"}

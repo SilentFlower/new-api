@@ -111,6 +111,7 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 
 	endpointType = normalizeChannelTestEndpoint(channel, testModel, endpointType)
+	testModel = normalizeResponsesCompactChannelTestModel(testModel, endpointType)
 
 	requestPath := "/v1/chat/completions"
 
@@ -150,10 +151,6 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 			requestPath = "/v1/responses/compact"
 		}
 	}
-	if strings.HasPrefix(requestPath, "/v1/responses/compact") {
-		testModel = ratio_setting.WithCompactModelSuffix(testModel)
-	}
-
 	c.Request = httptest.NewRequestWithContext(ctx, http.MethodPost, requestPath, nil)
 
 	cache, err := model.GetUserCache(testUserID)
@@ -245,6 +242,9 @@ func testChannel(ctx context.Context, channel *model.Channel, testUserID int, te
 	}
 
 	info.IsChannelTest = true
+	if relay.ShouldHandleResponsesCompactPassthrough(info) {
+		return testResponsesCompactPassthroughChannel(c, channel, testUserID, tik, info, request)
+	}
 	info.InitChannelMeta(c)
 
 	err = attachTestBillingRequestInput(info, request)

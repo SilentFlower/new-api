@@ -9,7 +9,6 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
-	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -30,7 +29,7 @@ func TestGetModelRequestMarksResponsesCompactModes(t *testing.T) {
 			path:          "/v1/responses/compact",
 			body:          `{"model":"gpt-5"}`,
 			expectedMode:  relayconstant.ResponsesCompactModeV1Path,
-			expectedModel: ratio_setting.WithCompactModelSuffix("gpt-5"),
+			expectedModel: "gpt-5",
 		},
 		{
 			name:          "v2 http reuses base model channel",
@@ -45,7 +44,7 @@ func TestGetModelRequestMarksResponsesCompactModes(t *testing.T) {
 			path:          "/v1/responses",
 			body:          `{"model":"gpt-5","stream":true,"input":[{"type":"compaction_trigger"}]}`,
 			expectedMode:  relayconstant.ResponsesCompactModeV1BodyBridge,
-			expectedModel: ratio_setting.WithCompactModelSuffix("gpt-5"),
+			expectedModel: "gpt-5",
 		},
 		{
 			name:          "ordinary responses",

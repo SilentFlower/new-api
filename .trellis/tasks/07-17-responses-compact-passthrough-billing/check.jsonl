@@ -1,0 +1,6 @@
+{"file":".trellis/tasks/07-17-responses-compact-passthrough-billing/research/compact-passthrough-boundaries.md","reason":"检查实际实现是否符合 sub2api 的 V1/V2/bridge/WS wire 契约。"}
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"检查新逻辑是否集中在新文件、旧文件是否仅含不可省略的薄接入点。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"回归检查普通 Responses、Compact 检测、header 安全、终态、WebSocket 多轮和日志隔离。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查 JSON wrapper、测试质量、前后端构建和代码规范。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查门禁错误不重试、不 auto-ban，真实上游错误仍使用既有传播与重试规则。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"检查管理员审计可关联且不存在请求正文、密文、完整 URL/query 或凭证泄漏。"}
