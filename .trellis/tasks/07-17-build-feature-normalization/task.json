@@ -22,5 +22,16 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-07-17T21:46:22+08:00",
+    "completedSteps": [
+      "完成 Responses WebSocket 渠道选择隔离、HTTP Distribute 上游友好恢复和 Relay/Alpha Search 计费拆分",
+      "完成行为契约回归、定向 race、Check-All 与相关规格更新",
+      "完成业务变更提交并推送"
+    ],
+    "partialStep": null,
+    "nextStep": "进入 Phase 3.5 收尾；用户明确要求后归档任务",
+    "notes": "相关包回归、三组定向 race、定向 go vet、gofmt 与 git diff --check 已通过。全仓 go test/go vet 仅受既有缺失 web/classic/dist/index.html 阻断，未执行真实 OpenAI/sub2api 联调。"
+  }
 }
