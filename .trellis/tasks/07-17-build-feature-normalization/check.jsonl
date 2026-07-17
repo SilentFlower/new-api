@@ -1,0 +1,5 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"检查原有上游文件的改动数量、行数和每个薄接入点必要性。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"逐项检查 Alpha Search、Compact HTTP/SSE/WS、渠道测试、计费与退款行为未改变。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查测试断言、JSON API、格式、全仓回归和差异质量。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"检查错误日志、管理员审计和敏感数据保护未回归。"}
+{"file":".trellis/tasks/07-17-build-feature-normalization/research.md","reason":"对照结构调整前基线、首批冲突面和明确不修改范围检查实际 diff。"}

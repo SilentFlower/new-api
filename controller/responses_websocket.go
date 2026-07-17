@@ -90,7 +90,7 @@ func RelayResponsesWebSocket(c *gin.Context) {
 		writeResponsesWebSocketError(c, clientConn, apiErr)
 		return
 	}
-	channel, apiErr := middleware.SelectAndSetupChannel(c, &middleware.ModelRequest{Model: turn.selectionModel}, true)
+	channel, apiErr := middleware.SelectResponsesWebSocketChannel(c, turn.selectionModel)
 	if apiErr != nil {
 		writeResponsesWebSocketError(c, clientConn, apiErr)
 		return
@@ -443,7 +443,7 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 					writeResponsesWebSocketError(c, clientConn, apiErr)
 					return apiErr
 				}
-				if apiErr := middleware.ValidateTokenModelAccess(c, turn.selectionModel); apiErr != nil {
+				if apiErr := middleware.ValidateResponsesWebSocketModelAccess(c, turn.selectionModel); apiErr != nil {
 					writeResponsesWebSocketError(c, clientConn, apiErr)
 					return apiErr
 				}
@@ -683,7 +683,7 @@ func responsesWebSocketBusinessErrorStatus(payload []byte, errorType string, err
 }
 
 func responsesWebSocketChannelSupportsTurn(c *gin.Context, channel *model.Channel, modelName string) bool {
-	if channel == nil || !middleware.ChannelSupportsRequest(channel, "/v1/responses", modelName) {
+	if channel == nil || !middleware.ResponsesWebSocketChannelSupportsModel(channel, modelName) {
 		return false
 	}
 	if _, specific := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId); specific {

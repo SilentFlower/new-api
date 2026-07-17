@@ -224,6 +224,25 @@ func TestMain(m *testing.M) {
 }
 ```
 
+#### 渠道分发测试夹具
+
+渠道随机选择、亲和性和 Advanced Custom 路由测试会读取全局 `model.DB`、渠道缓存和 Ability 映射。夹具必须同时创建 `Channel` 与对应 `Ability`，再调用 `model.InitChannelCache()`；只创建渠道后刷新缓存会产生不完整的分组映射，不能代表生产迁移后的正常数据。
+
+```go
+require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+model.DB = db
+common.MemoryCacheEnabled = true
+
+require.NoError(t, db.Create(channel).Error)
+require.NoError(t, db.Create(&model.Ability{
+    Group: channel.Group, Model: modelName, ChannelId: channel.Id, Enabled: true,
+}).Error)
+model.InitChannelCache()
+```
+
+- 测试必须保存并恢复原 `model.DB`、`common.MemoryCacheEnabled` 和数据库类型，且不得使用 `t.Parallel()` 修改这些全局状态。
+- 只验证 Token 指定渠道时可直接使用临时数据库的 `GetChannelById` 路径，不需要刷新随机选渠缓存。
+
 #### Gin 测试上下文
 
 ```go

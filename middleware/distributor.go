@@ -35,15 +35,142 @@ type ModelRequest struct {
 // @return 可注册到 Gin 路由的渠道分发中间件。
 func Distribute() func(c *gin.Context) {
 	return func(c *gin.Context) {
+		var channel *model.Channel
+		channelId, ok := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
 		modelRequest, shouldSelectChannel, err := getModelRequest(c)
 		if err != nil {
 			abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidRequest, map[string]any{"Error": err.Error()}))
 			return
 		}
-		channel, apiErr := SelectAndSetupChannel(c, modelRequest, shouldSelectChannel)
-		if apiErr != nil {
-			abortWithDistributorError(c, apiErr)
-			return
+		if ok {
+			id, err := strconv.Atoi(fmt.Sprint(channelId))
+			if err != nil {
+				abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidChannelId))
+				return
+			}
+			channel, err = model.GetChannelById(id, true)
+			if err != nil {
+				abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidChannelId))
+				return
+			}
+			if channel.Status != common.ChannelStatusEnabled {
+				abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorChannelDisabled))
+				return
+			}
+		} else {
+			modelLimitEnable := common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled)
+			if modelLimitEnable {
+				s, ok := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)
+				if !ok {
+					abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorTokenNoModelAccess))
+					return
+				}
+				var tokenModelLimit map[string]bool
+				tokenModelLimit, ok = s.(map[string]bool)
+				if !ok {
+					tokenModelLimit = map[string]bool{}
+				}
+				matchName := ratio_setting.FormatMatchingModelName(modelRequest.Model)
+				if _, ok := tokenModelLimit[matchName]; !ok {
+					abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorTokenModelForbidden, map[string]any{"Model": modelRequest.Model}))
+					return
+				}
+			}
+
+			if shouldSelectChannel {
+				if modelRequest.Model == "" {
+					abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorModelNameRequired))
+					return
+				}
+				var selectGroup string
+				usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
+				if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
+					playgroundRequest := &dto.PlayGroundRequest{}
+					err = common.UnmarshalBodyReusable(c, playgroundRequest)
+					if err != nil {
+						abortWithOpenAiMessage(c, http.StatusBadRequest, i18n.T(c, i18n.MsgDistributorInvalidPlayground, map[string]any{"Error": err.Error()}))
+						return
+					}
+					if playgroundRequest.Group != "" {
+						if !service.GroupInUserUsableGroups(usingGroup, playgroundRequest.Group) && playgroundRequest.Group != usingGroup {
+							abortWithOpenAiMessage(c, http.StatusForbidden, i18n.T(c, i18n.MsgDistributorGroupAccessDenied))
+							return
+						}
+						usingGroup = playgroundRequest.Group
+						common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
+					}
+				}
+
+				if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
+					affinityUsable := false
+					preferred, err := model.CacheGetChannel(preferredChannelID)
+					if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
+						channelSupportsRequestPath(preferred, c.Request.URL.Path, modelRequest.Model) {
+						if usingGroup == "auto" {
+							userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
+							autoGroups := service.GetUserAutoGroup(userGroup)
+							for _, g := range autoGroups {
+								if model.IsChannelEnabledForGroupModel(g, modelRequest.Model, preferred.Id) {
+									selectGroup = g
+									common.SetContextKey(c, constant.ContextKeyAutoGroup, g)
+									channel = preferred
+									affinityUsable = true
+									service.MarkChannelAffinityUsed(c, g, preferred.Id)
+									break
+								}
+							}
+						} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
+							channel = preferred
+							selectGroup = usingGroup
+							affinityUsable = true
+							service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
+						}
+					}
+					if !affinityUsable && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
+						service.ClearCurrentChannelAffinityCache(c)
+					}
+				}
+
+				if channel == nil {
+					channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
+						Ctx:         c,
+						ModelName:   modelRequest.Model,
+						TokenGroup:  usingGroup,
+						RequestPath: c.Request.URL.Path,
+						Retry:       common.GetPointer(0),
+					})
+					if err != nil {
+						showGroup := usingGroup
+						if usingGroup == "auto" {
+							showGroup = fmt.Sprintf("auto(%s)", selectGroup)
+						}
+						message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
+						// 如果错误，但是渠道不为空，说明是数据库一致性问题
+						//if channel != nil {
+						//	common.SysError(fmt.Sprintf("渠道不存在：%d", channel.Id))
+						//	message = "数据库一致性已被破坏，请联系管理员"
+						//}
+						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, message, types.ErrorCodeModelNotFound)
+						return
+					}
+					if channel == nil {
+						abortWithOpenAiMessage(c, http.StatusServiceUnavailable, i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model}), types.ErrorCodeModelNotFound)
+						return
+					}
+				}
+			}
+		}
+
+		if channel != nil {
+			if apiErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); apiErr != nil {
+				if apiErr.GetErrorCode() == types.ErrorCodeModelNotFound {
+					abortWithOpenAiMessage(c, apiErr.StatusCode, apiErr.Error(), apiErr.GetErrorCode())
+					return
+				}
+				// 历史 HTTP 契约只有“无可用渠道”分支返回 model_not_found，其他分发错误的 code 为空。
+				abortWithOpenAiMessage(c, apiErr.StatusCode, apiErr.Error())
+				return
+			}
 		}
 		common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
 		c.Next()
@@ -53,164 +180,9 @@ func Distribute() func(c *gin.Context) {
 	}
 }
 
-func abortWithDistributorError(c *gin.Context, apiErr *types.NewAPIError) {
-	if apiErr.GetErrorCode() == types.ErrorCodeModelNotFound {
-		abortWithOpenAiMessage(c, apiErr.StatusCode, apiErr.Error(), apiErr.GetErrorCode())
-		return
-	}
-	// 历史 HTTP 契约只有“无可用渠道”分支返回 model_not_found，其他分发错误的 code 为空。
-	abortWithOpenAiMessage(c, apiErr.StatusCode, apiErr.Error())
-}
-
-// SelectAndSetupChannel 复用 Token 模型权限、渠道亲和性、首次渠道选择和上下文初始化。
-// @param c 当前 Gin 请求上下文。
-// @param modelRequest 已解析的模型和可选分组。
-// @param shouldSelectChannel 是否需要选择渠道。
-// @return 选中的渠道，以及不可继续时的标准 Relay 错误。
-func SelectAndSetupChannel(c *gin.Context, modelRequest *ModelRequest, shouldSelectChannel bool) (*model.Channel, *types.NewAPIError) {
-	if c == nil || modelRequest == nil {
-		return nil, types.NewErrorWithStatusCode(errors.New("model request is nil"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-	}
-
-	var channel *model.Channel
-	channelID, hasSpecificChannel := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId)
-	if hasSpecificChannel {
-		id, err := strconv.Atoi(fmt.Sprint(channelID))
-		if err != nil {
-			return nil, types.NewErrorWithStatusCode(errors.New(i18n.T(c, i18n.MsgDistributorInvalidChannelId)), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-		}
-		channel, err = model.GetChannelById(id, true)
-		if err != nil {
-			return nil, types.NewErrorWithStatusCode(errors.New(i18n.T(c, i18n.MsgDistributorInvalidChannelId)), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-		}
-		if channel.Status != common.ChannelStatusEnabled {
-			return nil, types.NewErrorWithStatusCode(errors.New(i18n.T(c, i18n.MsgDistributorChannelDisabled)), types.ErrorCodeGetChannelFailed, http.StatusForbidden, types.ErrOptionWithSkipRetry())
-		}
-	} else {
-		if apiErr := ValidateTokenModelAccess(c, modelRequest.Model); apiErr != nil {
-			return nil, apiErr
-		}
-		if !shouldSelectChannel {
-			return nil, nil
-		}
-		if modelRequest.Model == "" {
-			return nil, types.NewErrorWithStatusCode(errors.New(i18n.T(c, i18n.MsgDistributorModelNameRequired)), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-		}
-
-		var selectGroup string
-		usingGroup := common.GetContextKeyString(c, constant.ContextKeyUsingGroup)
-		if strings.HasPrefix(c.Request.URL.Path, "/pg/chat/completions") {
-			playgroundRequest := &dto.PlayGroundRequest{}
-			if err := common.UnmarshalBodyReusable(c, playgroundRequest); err != nil {
-				message := i18n.T(c, i18n.MsgDistributorInvalidPlayground, map[string]any{"Error": err.Error()})
-				return nil, types.NewErrorWithStatusCode(errors.New(message), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-			}
-			if playgroundRequest.Group != "" {
-				if !service.GroupInUserUsableGroups(usingGroup, playgroundRequest.Group) && playgroundRequest.Group != usingGroup {
-					return nil, types.NewErrorWithStatusCode(errors.New(i18n.T(c, i18n.MsgDistributorGroupAccessDenied)), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
-				}
-				usingGroup = playgroundRequest.Group
-				common.SetContextKey(c, constant.ContextKeyUsingGroup, usingGroup)
-			}
-		}
-
-		if preferredChannelID, found := service.GetPreferredChannelByAffinity(c, modelRequest.Model, usingGroup); found {
-			affinityUsable := false
-			preferred, err := model.CacheGetChannel(preferredChannelID)
-			if err == nil && preferred != nil && preferred.Status == common.ChannelStatusEnabled &&
-				ChannelSupportsRequest(preferred, c.Request.URL.Path, modelRequest.Model) {
-				if usingGroup == "auto" {
-					userGroup := common.GetContextKeyString(c, constant.ContextKeyUserGroup)
-					for _, group := range service.GetUserAutoGroup(userGroup) {
-						if model.IsChannelEnabledForGroupModel(group, modelRequest.Model, preferred.Id) {
-							selectGroup = group
-							common.SetContextKey(c, constant.ContextKeyAutoGroup, group)
-							channel = preferred
-							affinityUsable = true
-							service.MarkChannelAffinityUsed(c, group, preferred.Id)
-							break
-						}
-					}
-				} else if model.IsChannelEnabledForGroupModel(usingGroup, modelRequest.Model, preferred.Id) {
-					channel = preferred
-					selectGroup = usingGroup
-					affinityUsable = true
-					service.MarkChannelAffinityUsed(c, usingGroup, preferred.Id)
-				}
-			}
-			if !affinityUsable && !service.ShouldKeepChannelAffinityOnChannelDisabled() {
-				service.ClearCurrentChannelAffinityCache(c)
-			}
-		}
-
-		if channel == nil {
-			var err error
-			channel, selectGroup, err = service.CacheGetRandomSatisfiedChannel(&service.RetryParam{
-				Ctx:         c,
-				ModelName:   modelRequest.Model,
-				TokenGroup:  usingGroup,
-				RequestPath: c.Request.URL.Path,
-				Retry:       common.GetPointer(0),
-			})
-			if err != nil {
-				showGroup := usingGroup
-				if usingGroup == "auto" {
-					showGroup = fmt.Sprintf("auto(%s)", selectGroup)
-				}
-				message := i18n.T(c, i18n.MsgDistributorGetChannelFailed, map[string]any{"Group": showGroup, "Model": modelRequest.Model, "Error": err.Error()})
-				return nil, types.NewErrorWithStatusCode(errors.New(message), types.ErrorCodeModelNotFound, http.StatusServiceUnavailable)
-			}
-			if channel == nil {
-				message := i18n.T(c, i18n.MsgDistributorNoAvailableChannel, map[string]any{"Group": usingGroup, "Model": modelRequest.Model})
-				return nil, types.NewErrorWithStatusCode(errors.New(message), types.ErrorCodeModelNotFound, http.StatusServiceUnavailable)
-			}
-		}
-	}
-
-	if channel != nil {
-		if apiErr := SetupContextForSelectedChannel(c, channel, modelRequest.Model); apiErr != nil {
-			return nil, apiErr
-		}
-	}
-	return channel, nil
-}
-
-// ValidateTokenModelAccess 校验当前 Token 是否允许使用指定模型。
-// @param c 当前 Gin 请求上下文。
-// @param modelName 渠道选择和计费使用的模型名。
-// @return 无权限时返回标准 Relay 错误，否则返回 nil。
-func ValidateTokenModelAccess(c *gin.Context, modelName string) *types.NewAPIError {
-	if c == nil {
-		return types.NewErrorWithStatusCode(errors.New("request context is nil"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-	}
-	if _, hasSpecificChannel := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId); hasSpecificChannel {
-		return nil
-	}
-	if !common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled) {
-		return nil
-	}
-	value, ok := common.GetContextKey(c, constant.ContextKeyTokenModelLimit)
-	if !ok {
-		return types.NewErrorWithStatusCode(errors.New(i18n.T(c, i18n.MsgDistributorTokenNoModelAccess)), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
-	}
-	tokenModelLimit, ok := value.(map[string]bool)
-	if !ok {
-		tokenModelLimit = map[string]bool{}
-	}
-	matchName := ratio_setting.FormatMatchingModelName(modelName)
-	if _, ok := tokenModelLimit[matchName]; !ok {
-		message := i18n.T(c, i18n.MsgDistributorTokenModelForbidden, map[string]any{"Model": modelName})
-		return types.NewErrorWithStatusCode(errors.New(message), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
-	}
-	return nil
-}
-
-// ChannelSupportsRequest 判断渠道是否支持指定请求路径和模型。
-// @param channel 待检查的渠道。
-// @param requestPath 入站请求路径。
-// @param requestModel 渠道选择使用的模型名。
-// @return 普通渠道返回 true；Advanced Custom 仅在显式路由匹配时返回 true。
-func ChannelSupportsRequest(channel *model.Channel, requestPath string, requestModel string) bool {
+// channelSupportsRequestPath 判断渠道是否支持指定请求路径和模型。
+// 普通渠道直接通过；Advanced Custom 仅在显式路由匹配时通过。
+func channelSupportsRequestPath(channel *model.Channel, requestPath string, requestModel string) bool {
 	if channel == nil {
 		return false
 	}

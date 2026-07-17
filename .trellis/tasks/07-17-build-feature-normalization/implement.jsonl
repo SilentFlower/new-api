@@ -1,0 +1,6 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"约束 build 定制逻辑独立、上游文件最薄接入和冲突面控制。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"保持 Alpha Search 与 Responses Compact 的路由、选渠、原始透传、计费、退款和 WS 契约。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"约束 JSON 封装、测试质量、Go 代码和验证流程。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"确认 controller、middleware、relay 与 service 的职责边界和文件布局。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"保持错误日志、Compact 管理员审计和敏感信息隔离。"}
+{"file":".trellis/tasks/07-17-build-feature-normalization/research.md","reason":"提供当前分支差异、首批冲突面、行为基线和推荐治理边界。"}

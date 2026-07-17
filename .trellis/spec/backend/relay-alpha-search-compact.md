@@ -172,6 +172,10 @@ func PrepareResponsesCompactPassthrough(c *gin.Context, info *relaycommon.RelayI
 func ResponsesCompactPassthroughHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError
 func ParseResponsesCompactPassthroughUsage(raw json.RawMessage) (*dto.Usage, bool)
 
+func SelectResponsesWebSocketChannel(c *gin.Context, modelName string) (*model.Channel, *types.NewAPIError)
+func ValidateResponsesWebSocketModelAccess(c *gin.Context, modelName string) *types.NewAPIError
+func ResponsesWebSocketChannelSupportsModel(channel *model.Channel, modelName string) bool
+
 func normalizeResponsesCompactChannelTestModel(modelName, endpointType string) string
 func testResponsesCompactPassthroughChannel(c *gin.Context, channel *model.Channel, testUserID int, startedAt time.Time, info *relaycommon.RelayInfo, request dto.Request) testResult
 ```
@@ -214,6 +218,9 @@ responses_compact_passthrough_enabled: boolean
 #### Responses WebSocket 生命周期
 
 - 路由先读取首个 `response.create`，再校验基础 model 权限和选择渠道；同一连接只允许一个 active turn，后续 turn 继续使用当前渠道并校验该渠道是否支持基础模型。
+- build 分支的 Responses WebSocket 渠道选择必须由 `middleware/responses_websocket_channel.go` 独立承载，不得为了与 HTTP 共用而重新抽取或改写整个 `middleware.Distribute`。允许保留受测试保护的局部重复。
+- WS 独立实现必须与 HTTP 分发同步复核 Token 模型权限、指定渠道状态、亲和性命中与失效清理、auto group、随机选渠、Advanced Custom `/v1/responses` path/model 约束，以及 `SetupContextForSelectedChannel` 初始化语义。
+- 普通 HTTP 分发错误响应只有无可用渠道返回 `model_not_found`；无效请求、Token 权限、禁用指定渠道和渠道上下文初始化错误的 `error.code` 保持为空。WS 内部返回标准 `NewAPIError`，不得用 HTTP code 清洗逻辑替代。
 - Compact turn 在 dial 和预扣前执行渠道门禁；门禁错误不是 channel error，不能进入 connector failover。
 - 普通 turn 继续使用原有模型映射、转换、disabled fields 和 Param Override；只有 Compact turn 分派到独立准备和终态 observer。
 - 每个 turn 独立预扣、结算或退款；`ClearResponsesCompactAudit` 只清理上一轮 `admin_info.responses_compact`，不能删除 quota saturation 等其他管理员字段。
@@ -243,6 +250,10 @@ responses_compact_passthrough_enabled: boolean
 | 成功终态 usage 缺失或非法 | 原始响应仍返回客户端，退款且不猜测 token |
 | SSE/WS 失败、取消、断连或无成功终态 | 退款未结算 turn/request |
 | 非 Upgrade `GET /v1/responses` | `400 invalid_request` |
+| WS 亲和渠道已禁用、分组能力失效或 Advanced Custom route/model 不匹配 | 按配置清理当前亲和性，再使用基础模型和 `/v1/responses` 进行普通随机选渠 |
+| WS 后续 turn 的基础模型不被当前渠道或 Advanced Custom route 支持 | 返回 `model_not_found`，不得把不兼容 turn 写入当前上游连接 |
+| HTTP 分发无效请求、Token 权限拒绝、禁用指定渠道或 context 初始化失败 | 保持对应 HTTP 状态，`error.code` 为空 |
+| HTTP 分发无可用渠道 | `503` 且 `error.code=model_not_found` |
 | Compact 渠道测试传入基础模型 | 不追加后缀，按基础模型查价并原生发送 |
 | Compact 渠道测试传入历史后缀模型 | 仅移除一次 `-openai-compact`，随后按基础模型执行 |
 | Compact 渠道测试所选渠道关闭能力 | 在查价和网络调用前返回 `503 responses_compact_passthrough_disabled` |
@@ -254,6 +265,7 @@ responses_compact_passthrough_enabled: boolean
 - Good：亲和性命中 sub2api 渠道，渠道只配置 `gpt-5.6-sol` 且开启能力；V1 到 `/backend-api/codex/responses/compact`，V2/历史 bridge 到 `/backend-api/codex/responses`，全程按 `gpt-5.6-sol` 计费。
 - Good：请求含未知字段、`false` 和 `0`；上游收到的 HTTP body/WS frame 与下游原始字节一致，响应中的 `encrypted_content` 和未来字段原样返回。
 - Good：所选亲和渠道关闭能力；立即返回专用 503，未调用上游、未预扣、未重选或清理亲和性。
+- Good：WS 亲和性命中一个不支持 `/v1/responses` 的 Advanced Custom 渠道；独立选渠逻辑清理失效亲和性，并回落到支持基础模型的普通渠道。
 - Good：管理端用基础模型测试 OpenAI、Codex 或 Advanced Custom 原生 Compact route；即使渠道配置模型映射和 Param Override，上游仍收到基础模型合成 body。
 - Base：旧渠道没有新字段；开关默认为 false，普通 Responses 不受影响。
 - Base：完整 usage 的三个 token 字段显式为零；视为结构合法并按零实际额度结算，不能误判为字段缺失。
@@ -261,6 +273,7 @@ responses_compact_passthrough_enabled: boolean
 - Bad：给基础模型追加 `-openai-compact` 后再做 Token 权限、选渠、模型映射或计费。
 - Bad：历史 bridge 发到 `/responses/compact` 后由 new-api 把 unary JSON 重组为 SSE。
 - Bad：能力开关参与候选渠道过滤，导致亲和渠道被静默替换。
+- Bad：为了让 WS 复用 HTTP 选渠而把 `Distribute` 主体抽成通用 helper，导致上游核心文件被大面积重排。
 - Bad：completed 缺 usage 时按本地 tokenizer 估算收费，或补零 usage 后记录为正常成功计费。
 - Bad：生产 Compact 已走原始透传，但管理端渠道测试仍追加后缀并调用 converter，导致测试结果与真实请求语义相反。
 
@@ -271,6 +284,8 @@ responses_compact_passthrough_enabled: boolean
 - HTTP：使用真实 `httptest` 上游断言 OpenAI/Codex 路径矩阵、原始 body、Channel Authorization、客户端 Cookie/Authorization 过滤、JSON/SSE 原始响应和安全响应头。
 - usage：覆盖完整非零、完整显式零、缺失/null、不完整、负数、超过 `common.MaxQuota`、总数不一致、失败终态和不完整流；断言只结算一次或退款。
 - WebSocket：覆盖原始 frame、基础模型计费、开关关闭不 failover、多 turn 普通/Compact 交替、completed 非法 usage 退款、失败/取消/断连退款。
+- WebSocket 选渠：覆盖 Token 权限、指定渠道启用/禁用、亲和性命中、亲和性失效清理、auto group、随机选渠的 Advanced Custom path/model 过滤、context 初始化和后续 turn 当前渠道能力。
+- HTTP 分发：覆盖无效请求、`shouldSelectChannel=false` 时仍执行 Token 权限、禁用指定渠道、无可用渠道的 `model_not_found`，以及 `SetupContextForSelectedChannel` 错误不泄露内部 error code。
 - 管理端渠道测试：覆盖基础模型不追加后缀、历史后缀归一、能力关闭先于查价和网络、模型映射与 Param Override 跳过、OpenAI/Codex/Advanced Custom 原生路径，以及普通端点模型不被归一化。
 - 前端：Default 表单 round-trip 覆盖旧值默认 false、新值保存和未知 `setting` 字段保留；Default/Classic 构建或类型检查验证组件挂载，所有 locale 包含标签和说明。
 - 回归命令：
@@ -309,6 +324,11 @@ testModel = ratio_setting.WithCompactModelSuffix(testModel)
 _ = helper.ModelMappedHelper(c, info, request)
 ```
 
+```go
+// 错误：为复用 WS 而重写 HTTP 分发主流程。
+channel, apiErr := SelectAndSetupChannel(c, request, true)
+```
+
 #### Correct
 
 ```go
@@ -337,4 +357,9 @@ testModel = normalizeResponsesCompactChannelTestModel(testModel, endpointType)
 if relay.ShouldHandleResponsesCompactPassthrough(info) {
 	return testResponsesCompactPassthroughChannel(c, channel, testUserID, startedAt, info, request)
 }
+```
+
+```go
+// HTTP 保持上游顺序式 Distribute，WS 使用独立领域入口。
+channel, apiErr := middleware.SelectResponsesWebSocketChannel(c, turn.selectionModel)
 ```

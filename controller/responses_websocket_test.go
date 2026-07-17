@@ -690,6 +690,22 @@ func TestPrepareResponsesWebSocketTurnAttemptRejectsAdvancedCustomConverter(t *t
 	require.Equal(t, types.ErrorCodeChannelModelMappedError, apiErr.GetErrorCode())
 }
 
+func TestResponsesWebSocketChannelSupportsTurnUsesAdvancedCustomModelRoute(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+	common.SetContextKey(c, constant.ContextKeyTokenSpecificChannelId, "7501")
+	channel := &model.Channel{Id: 7501, Type: constant.ChannelTypeAdvancedCustom}
+	channel.SetOtherSettings(dto.ChannelOtherSettings{
+		AdvancedCustom: &dto.AdvancedCustomConfig{Routes: []dto.AdvancedCustomRoute{
+			{IncomingPath: "/v1/responses", Models: []string{"gpt-5"}},
+		}},
+	})
+
+	assert.True(t, responsesWebSocketChannelSupportsTurn(c, channel, "gpt-5"))
+	assert.False(t, responsesWebSocketChannelSupportsTurn(c, channel, "gpt-4.1"))
+}
+
 func TestPrepareResponsesWebSocketTurnAttemptRejectsMaxOutputTokensOverflow(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
