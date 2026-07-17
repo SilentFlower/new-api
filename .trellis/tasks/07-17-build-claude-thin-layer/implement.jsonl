@@ -1,0 +1,5 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"约束 build 定制实现独立、上游文件最薄接入和差异控制。"}
+{"file":".trellis/spec/backend/relay-websearch-emulation.md","reason":"保持 Claude WebSearch 配置、密钥、Provider、Relay 短路、响应和计费契约。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"保持 Anthropic Reasoning Effort 日志同步和敏感信息隔离。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"约束 Go 文件布局、JSON 包装、测试和验证流程。"}
+{"file":".trellis/tasks/07-17-build-claude-thin-layer/research.md","reason":"提供当前函数清单、冲突面、目标边界和结构迁移风险。"}

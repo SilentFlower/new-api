@@ -1,0 +1,5 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"检查三个原有上游文件是否只保留可解释的窄调用。"}
+{"file":".trellis/spec/backend/relay-websearch-emulation.md","reason":"逐项核对 WebSearch 原生透传、模拟、密钥、响应和工具计费行为。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"核对 effort 日志来源、覆盖顺序和敏感信息保护。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查测试质量、JSON API、格式、vet 和回归结果。"}
+{"file":".trellis/tasks/07-17-build-claude-thin-layer/research.md","reason":"对照治理前函数清单与差异统计检查实际迁移范围。"}

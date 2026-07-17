@@ -1,0 +1,33 @@
+{
+  "id": "build-feature-thin-layer-completion",
+  "name": "build-feature-thin-layer-completion",
+  "title": "完成剩余 Build Feature 薄层治理",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-07-17",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "07-17-build-claude-thin-layer",
+    "07-17-build-vision-assist-thin-layer",
+    "07-17-build-upstream-billing-thin-layer",
+    "07-17-build-log-statistics-thin-layer",
+    "07-17-build-dashboard-thin-layer",
+    "07-17-build-channel-settings-ui-thin-layer"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {}
+}

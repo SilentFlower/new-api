@@ -1,12 +1,12 @@
 # Relay WebSearch 模拟契约
 
-> 记录 Claude Code 纯 WebSearch 请求在渠道级配置、管理 API、provider 调用、relay 短路、响应构造和计费之间的可执行契约。
+> 记录 Claude Code 纯 WebSearch 请求在渠道级配置、管理 API、provider 调用、relay 短路、响应构造和计费之间的可执行契约，以及 Claude 主链路的薄层接入边界。
 
 ## 场景：Claude Code 纯 WebSearch 渠道级模拟
 
 ### 1. Scope / Trigger
 
-- Trigger: 修改 Claude Messages `/v1/messages` 请求解析、渠道 `setting.web_search` 配置、WebSearch provider、管理 API 渠道脱敏/复制、Claude 本地响应构造或 Claude WebSearch 计费逻辑。
+- Trigger: 修改 Claude Messages `/v1/messages` 请求解析、渠道 `setting.web_search` 配置、WebSearch provider、管理 API 渠道脱敏/复制、Claude 本地响应构造、Claude WebSearch 计费逻辑，或 Anthropic `output_config.effort` 日志同步逻辑。
 - 适用范围: 渠道本身不支持 Claude `web_search` 工具，但本系统需要按渠道调用 Tavily / AnySearch 并返回 Claude Messages 兼容响应。
 - 透传规则: 本地 WebSearch 模拟只由渠道 `web_search.enabled` 开关控制；未启用时纯 WebSearch 请求必须走原有上游转发路径，不能被本地配置拦截为 400。
 - 风险背景: Claude prompt caching 对请求前缀敏感。WebSearch 模拟只能在本地短路并构造响应，不能把搜索结果、时间戳、随机 ID 或 provider 返回内容写回待转发的上游请求体。
@@ -77,10 +77,24 @@ func BuildClaudeWebSearchStreamEvents(messageID string, toolUseID string, modelN
 ```go
 func shouldHandleClaudeWebSearchEmulation(info *relaycommon.RelayInfo) bool
 func handleClaudeWebSearchEmulation(c *gin.Context, info *relaycommon.RelayInfo, request *dto.ClaudeRequest) *types.NewAPIError
+func writeClaudeWebSearchStream(c *gin.Context, messageID string, toolUseID string, modelName string, query string, results []websearch.SearchResult, inputTokens int, outputTokens int) error
+```
+
+- Anthropic Reasoning Effort 日志同步：
+
+```go
+func syncAnthropicReasoningEffort(info *relaycommon.RelayInfo, outputConfig []byte)
+func syncAnthropicReasoningEffortFromRequestBody(info *relaycommon.RelayInfo, requestBody []byte)
 ```
 
 ### 3. Contracts
 
+- 文件所有权与薄层接入：
+  - `dto/channel_websearch_settings.go` 独占 WebSearch provider 常量、`ChannelWebSearchSettings`、归一化、relay 校验和 provider 支持判断；`dto/channel_settings.go` 只在 `ChannelSettings` 中保留 `WebSearch ChannelWebSearchSettings` 字段。
+  - `controller/channel_websearch_setting.go` 独占 setting JSON record 读写、WebSearch key 继承/显式清空、创建归一化和响应副本脱敏；`controller/channel.go` 只在列表/搜索/详情/更新响应、创建和更新原有位置调用 `sanitizeChannel(s)ForResponse`、`normalizeChannelWebSearchForCreate`、`mergeChannelWebSearchAPIKey`。
+  - `relay/claude_websearch_emulation.go` 独占本地模拟开关、provider 调用、Claude JSON/SSE 响应和成功后的文本计费；`relay/claude_handler.go` 只在上游请求体转换前保留纯 WebSearch 条件分派。
+  - `relay/claude_reasoning_effort.go` 独占 Anthropic effort 日志同步；`relay/claude_handler.go` 只在透传 body 路径从解析后的 `OutputConfig` 同步一次，并在普通路径从参数覆盖后的最终 JSON 同步一次。
+  - 这些领域文件与原调用方保持同 package，避免为了结构治理新增导出 API、包装层或跨包依赖。
 - 配置存储：
   - WebSearch 配置存放在 `model.Channel.Setting` 的 `web_search` 字段，不需要数据库迁移。
   - `provider` 只支持 `tavily` / `anysearch`，启用但未指定 provider 时默认 Tavily。
@@ -106,6 +120,11 @@ func handleClaudeWebSearchEmulation(c *gin.Context, info *relaycommon.RelayInfo,
   - 混合普通工具、多个工具、无工具或非搜索工具时必须保持现有转发路径。
   - 本地模拟短路必须发生在 `adaptor.ConvertClaudeRequest`、`RemoveDisabledFields`、`ApplyParamOverride`、`NewOutboundJSONBody` 和 `adaptor.DoRequest` 之前；未启用本地模拟时必须完全跳过本地模拟 provider。
   - 搜索结果、响应 ID、时间戳和 provider 返回内容只能出现在响应侧，不能写回 `request`、`RelayInfo.RequestBody`、`ParamOverride` 或待转发上游 body。
+- Reasoning Effort 日志同步：
+  - 只对 `ChannelTypeAnthropic` 生效；非 Anthropic 渠道、空 `RelayInfo` 或尚未初始化 `ChannelMeta` 时不得修改日志字段。
+  - 透传 body 路径必须读取解析后的 `ClaudeRequest.OutputConfig`，不能重新编码或修改原始 body。
+  - 普通路径必须在 `RemoveDisabledFields` 和 `ApplyParamOverrideWithRelayInfo` 之后读取最终 JSON，确保日志记录的是实际发往上游的 `output_config.effort`。
+  - `effort` 不是 JSON 字符串或字段不存在时必须将 `RelayInfo.ReasoningEffort` 清空，避免渠道重试复用旧值。
 - 响应与计费：
   - 非流式响应必须包含 `server_tool_use`、`web_search_tool_result` 和文本摘要。
   - 流式响应按 Claude SSE 事件序列发送 `message_start`、`content_block_start/stop`、`message_delta`、`message_stop`。
@@ -123,6 +142,9 @@ func handleClaudeWebSearchEmulation(c *gin.Context, info *relaycommon.RelayInfo,
 | provider HTTP 非 2xx / JSON 解析失败 / 返回空响应 | 返回 relay 错误，`502`，带 `ErrOptionWithSkipRetry()` |
 | 管理 API 创建/更新启用 Tavily WebSearch 但缺 key | HTTP 200 + `{success:false,message:"..."}` |
 | 管理 API 列表/详情/更新响应包含 WebSearch key | 违反契约，必须修复为响应副本脱敏 |
+| 非 Anthropic 渠道携带 `output_config.effort` | 不更新 `RelayInfo.ReasoningEffort` |
+| Anthropic 最终上游 JSON 中 `effort` 缺失或不是字符串 | 清空 `RelayInfo.ReasoningEffort` |
+| 参数覆盖修改 Anthropic `output_config.effort` | 日志记录覆盖后的最终值 |
 
 ### 5. Good/Base/Bad Cases
 
@@ -131,11 +153,15 @@ func handleClaudeWebSearchEmulation(c *gin.Context, info *relaycommon.RelayInfo,
 - Good: 渠道未启用本地 WebSearch 模拟；Claude Code 发来纯 WebSearch 请求；relay 不调用 Tavily / AnySearch，继续把原始 Claude Messages 请求转发给上游。
 - Good: 编辑已配置 key 的渠道时前端不填新 key；后端保留旧 key，并在响应中只返回 `api_key_configured=true`。
 - Good: 复制已配置 WebSearch 的渠道；新渠道继承 provider、参数和真实 key。
+- Good: Anthropic 请求的 Param Override 把 `effort` 改为 `high`；上游 JSON 和 `RelayInfo.ReasoningEffort` 都记录 `high`。
 - Base: 请求包含 `web_search` 和普通函数工具；不做本地模拟，继续原转发路径。
 - Base: 老渠道没有 `web_search` 字段；默认关闭，不影响普通请求。
+- Base: 非 Anthropic 渠道请求中存在 `output_config.effort`；不写入 Anthropic 专属日志字段。
 - Bad: Tavily 请求体包含 `api_key`。
 - Bad: 把搜索结果追加到 `request.Messages` 或写入 `RelayInfo` 中会参与上游请求体构造的字段。
 - Bad: 在模型层或数据库层写入脱敏后的 `api_key=""`，导致复制渠道或后续编辑丢失真实 key。
+- Bad: 在参数覆盖前同步 effort，导致日志记录值与实际发往 Anthropic 的最终请求不一致。
+- Bad: 把 WebSearch、setting 或 effort 的完整实现重新放回 `claude_handler.go`、`channel.go` 或 `channel_settings.go`，扩大 build 分支与上游热点文件的冲突面。
 
 ### 6. Tests Required
 
@@ -158,6 +184,10 @@ func handleClaudeWebSearchEmulation(c *gin.Context, info *relaycommon.RelayInfo,
   - 查询提取只取最后一条 `user` 消息文本。
   - 响应包含 `server_tool_use`、`web_search_tool_result`、`usage.server_tool_use.web_search_requests=1`。
   - 纯 WebSearch helper 不修改原始 Claude 请求对象，防止污染上游请求体。
+  - effort 同步覆盖 Anthropic 字符串值、缺失/非字符串清空、非 Anthropic 无操作，以及从参数覆盖后的最终请求体读取。
+- 薄层边界复核：
+  - `dto/channel_settings.go` 只保留 `WebSearch` 字段，WebSearch DTO 测试位于 `dto/channel_websearch_settings_test.go`。
+  - `controller/channel.go` 和 `relay/claude_handler.go` 只保留本节约定的窄调用；迁移不得改变调用顺序、错误构造、状态码或计费入口。
 - 回归命令：
   - `go test ./dto ./controller ./relay/websearch ./relay ./service`
   - 跨层改动完成前运行 `go test ./...`。
@@ -200,3 +230,28 @@ convertedRequest, err := adaptor.ConvertClaudeRequest(c, info, request)
 - 未启用本地模拟时必须跳过 `handleClaudeWebSearchEmulation`，进入原有转发链路。
 - `handleClaudeWebSearchEmulation` 只读取查询并构造响应，不修改原始请求对象。
 - 成功短路后设置 `claude_web_search_requests=1` 并进入现有文本计费结算。
+
+#### Wrong
+
+```go
+// 错误：在热点主链路中重新实现参数解析，而且读取的是参数覆盖前的值。
+effort := gjson.GetBytes(request.OutputConfig, "effort")
+info.ReasoningEffort = effort.String()
+jsonData, _ = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+```
+
+#### Correct
+
+```go
+// 正确：主链路只保留窄调用，普通路径从最终上游 JSON 同步。
+jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
+if err != nil {
+	return newAPIErrorFromParamOverride(err)
+}
+syncAnthropicReasoningEffortFromRequestBody(info, jsonData)
+```
+
+要求：
+- effort 的解析和渠道门禁归属 `relay/claude_reasoning_effort.go`。
+- 透传路径调用 `syncAnthropicReasoningEffort(info, request.OutputConfig)`；普通路径调用 `syncAnthropicReasoningEffortFromRequestBody(info, jsonData)`。
+- 主链路不得复制 `gjson` 解析逻辑或新增另一套 effort 状态。
