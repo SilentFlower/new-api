@@ -22,5 +22,14 @@
   "parent": "07-17-build-feature-thin-layer-completion",
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-07-17T22:40:21+08:00",
+    "completedSteps": [
+      "Claude 主链路薄层迁移、完整检查与规格沉淀"
+    ],
+    "partialStep": null,
+    "nextStep": "归档 Claude 子任务后启动视觉辅助薄层治理",
+    "notes": "相关包测试、定向 race 和 go vet 均通过；全仓检查仅受既有 web/classic/dist/index.html 缺失阻断。"
+  }
 }
