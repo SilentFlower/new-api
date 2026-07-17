@@ -596,3 +596,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 18: Claude 主链路 Build 薄层化
+
+**Date**: 2026-07-17
+**Task**: Claude 主链路 Build 薄层化
+**Branch**: `build-bak`
+
+### Summary
+
+完成 Claude WebSearch、渠道 WebSearch 密钥处理与 Anthropic Reasoning Effort 薄层迁移，相关检查通过并更新后端规格。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `917fe08fc` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

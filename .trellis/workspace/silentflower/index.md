@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 17
+- **Total Sessions**: 18
 - **Last Active**: 2026-07-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~598 | Active |
+| `journal-1.md` | ~631 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 18 | 2026-07-17 | Claude 主链路 Build 薄层化 | `917fe08fc` | `build-bak` |
 | 17 | 2026-07-17 | 规范化 Build 特有 Feature 首批治理 | `c544a21bb`, `c213dd7e6` | `build-bak` |
 | 16 | 2026-07-17 | 归档 Anthropic Reasoning Effort 日志适配 | `a83ebf90b` | `build-bak` |
 | 15 | 2026-07-17 | Responses Compact 透传与基础模型计费 | `564d50d8f` | `build-bak` |
