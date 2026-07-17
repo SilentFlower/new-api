@@ -148,13 +148,13 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	if info.UsesResponsesCompactEndpoint() {
 		originModelName := info.OriginModelName
 		originPriceData := info.PriceData
-		originBillingModelName := info.ResolvedBillingModelName
+		originBillingModelName := info.FrozenBillingModelName()
 
 		_, err := helper.ModelPriceHelper(c, info, info.GetEstimatePromptTokens(), &types.TokenCountMeta{})
 		if err != nil {
 			info.OriginModelName = originModelName
 			info.PriceData = originPriceData
-			info.ResolvedBillingModelName = originBillingModelName
+			info.FreezeBillingModelName(originBillingModelName)
 			return types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithSkipRetry(), types.ErrOptionWithStatusCode(http.StatusBadRequest))
 		}
 		service.SetResponsesCompactAudit(c, info, "completed")
@@ -162,7 +162,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 
 		info.OriginModelName = originModelName
 		info.PriceData = originPriceData
-		info.ResolvedBillingModelName = originBillingModelName
+		info.FreezeBillingModelName(originBillingModelName)
 		return nil
 	}
 
