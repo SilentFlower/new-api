@@ -64,7 +64,10 @@ import ParamOverrideEditorModal from './ParamOverrideEditorModal';
 import JSONEditor from '../../../common/ui/JSONEditor';
 import SecureVerificationModal from '../../../common/modals/SecureVerificationModal';
 import StatusCodeRiskGuardModal from './StatusCodeRiskGuardModal';
-import ResponsesCompactPassthroughSetting from './ResponsesCompactPassthroughSetting';
+import {
+  BuildChannelExtraSettingsFields,
+  BuildChannelUpstreamModelSettings,
+} from './BuildChannelSettings';
 import ChannelKeyDisplay from '../../../common/ui/ChannelKeyDisplay';
 import { useSecureVerification } from '../../../../hooks/common/useSecureVerification';
 import { parseChannelConnectionString } from '../../../../helpers/token';
@@ -73,6 +76,18 @@ import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from './statusCodeRiskGuard';
+import {
+  BUILD_CHANNEL_OTHER_SETTING_DEFAULTS,
+  BUILD_CHANNEL_SETTING_DEFAULTS,
+  applyBuildChannelOtherSettingFields,
+  buildChannelSettingFields,
+  getBuildChannelSettingsState,
+  hasBuildChannelSettingValues,
+  parseBuildChannelOtherSettings,
+  parseBuildChannelSettings,
+  removeBuildChannelSettingFormFields,
+  validateBuildChannelSettingsBeforeSubmit,
+} from './buildChannelSettings';
 import {
   IconSave,
   IconClose,
@@ -127,111 +142,7 @@ const PARAM_OVERRIDE_OPERATIONS_TEMPLATE = {
   ],
 };
 
-const parseJsonObject = (value) => {
-  if (!value) return {};
-  if (typeof value === 'object' && !Array.isArray(value)) return value;
-  if (typeof value !== 'string') return {};
-  try {
-    const parsed = JSON.parse(value);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed
-      : {};
-  } catch (error) {
-    return {};
-  }
-};
-
-const parseCommaList = (value) =>
-  Array.from(
-    new Set(
-      String(value || '')
-        .split(',')
-        .map((item) => item.trim())
-        .filter(Boolean),
-    ),
-  );
-
-const joinList = (value) => (Array.isArray(value) ? value.join(',') : '');
-
-const WEB_SEARCH_PROVIDERS = ['tavily', 'anysearch'];
-const TAVILY_SEARCH_DEPTHS = ['basic', 'advanced'];
-const ANYSEARCH_FRESHNESS_VALUES = ['', 'day', 'week', 'month', 'year'];
-const WEB_SEARCH_FORM_DEFAULTS = {
-  web_search_enabled: false,
-  web_search_provider: 'tavily',
-  web_search_api_key: '',
-  web_search_api_key_configured: false,
-  web_search_clear_api_key: false,
-  web_search_max_results: 5,
-  web_search_search_depth: 'basic',
-  web_search_freshness: '',
-  web_search_content_types: '',
-};
-
-const normalizeWebSearchProvider = (value) => {
-  const provider = String(value || '');
-  return WEB_SEARCH_PROVIDERS.includes(provider) ? provider : 'tavily';
-};
-
-const normalizeTavilySearchDepth = (value) => {
-  const depth = String(value || '');
-  return TAVILY_SEARCH_DEPTHS.includes(depth) ? depth : 'basic';
-};
-
-const normalizeAnySearchFreshness = (value) => {
-  const freshness = String(value || '');
-  return ANYSEARCH_FRESHNESS_VALUES.includes(freshness) ? freshness : '';
-};
-
-const normalizeWebSearchMaxResults = (value) => {
-  const maxResults = parseInt(value, 10);
-  if (!Number.isFinite(maxResults)) {
-    return 5;
-  }
-  return Math.min(Math.max(maxResults, 1), 20);
-};
-
-const parseWebSearchSettings = (settings) => {
-  const webSearch = settings?.web_search || {};
-  return {
-    ...WEB_SEARCH_FORM_DEFAULTS,
-    web_search_enabled: webSearch.enabled === true,
-    web_search_provider: normalizeWebSearchProvider(webSearch.provider),
-    web_search_api_key: '',
-    web_search_api_key_configured: webSearch.api_key_configured === true,
-    web_search_clear_api_key: false,
-    web_search_max_results: normalizeWebSearchMaxResults(
-      webSearch.max_results,
-    ),
-    web_search_search_depth: normalizeTavilySearchDepth(
-      webSearch.search_depth,
-    ),
-    web_search_freshness: normalizeAnySearchFreshness(webSearch.freshness),
-    web_search_content_types: joinList(webSearch.content_types),
-  };
-};
-
-const VISION_ASSIST_ENDPOINT_MODES = [
-  'auto',
-  'openai_chat',
-  'openai_responses',
-  'anthropic_messages',
-  'gemini_native',
-];
-
-const normalizeVisionAssistEndpointMode = (value) => {
-  const endpointMode = String(value || '');
-  return VISION_ASSIST_ENDPOINT_MODES.includes(endpointMode)
-    ? endpointMode
-    : 'auto';
-};
-
 const DEPRECATED_DOUBAO_CODING_PLAN_BASE_URL = 'doubao-coding-plan';
-
-// 支持并且已适配通过接口获取模型列表的渠道类型
-const MODEL_FETCHABLE_TYPES = new Set([
-  1, 4, 14, 34, 17, 26, 27, 24, 47, 25, 20, 23, 31, 40, 42, 48, 43,
-]);
 
 function type2secretPrompt(type) {
   // inputs.type === 15 ? '按照如下格式输入：APIKey|SecretKey' : (inputs.type === 18 ? '按照如下格式输入：APPID|APISecret|APIKey' : '请输入渠道对应的鉴权密钥')
@@ -292,23 +203,9 @@ const EditChannelModal = (props) => {
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
-    responses_compact_passthrough_enabled: false,
-    use_upstream_model_for_billing: false,
+    ...BUILD_CHANNEL_SETTING_DEFAULTS,
     system_prompt: '',
     system_prompt_override: false,
-    vision_assist_enabled: false,
-    vision_assist_channel_id: '',
-    vision_assist_model: '',
-    vision_assist_target_models: '',
-    vision_assist_prompt: '',
-    vision_assist_cache_ttl_seconds: 86400,
-    vision_assist_failure_policy: 'error',
-    vision_assist_strip_image: true,
-    vision_assist_endpoint_mode: 'auto',
-    vision_assist_max_concurrency: 2,
-    vision_assist_retry_count: 1,
-    vision_assist_retry_backoff_ms: 500,
-    ...WEB_SEARCH_FORM_DEFAULTS,
     settings: '',
     // 仅 Vertex: 密钥格式（存入 settings.vertex_key_type）
     vertex_key_type: 'json',
@@ -324,11 +221,7 @@ const EditChannelModal = (props) => {
     allow_inference_geo: false,
     allow_speed: false,
     claude_beta_query: false,
-    upstream_model_update_check_enabled: false,
-    upstream_model_update_auto_sync_enabled: false,
-    upstream_model_update_last_check_time: 0,
-    upstream_model_update_last_detected_models: [],
-    upstream_model_update_ignored_models: '',
+    ...BUILD_CHANNEL_OTHER_SETTING_DEFAULTS,
   };
   const [batch, setBatch] = useState(false);
   const [multiToSingle, setMultiToSingle] = useState(false);
@@ -629,112 +522,35 @@ const EditChannelModal = (props) => {
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
-    responses_compact_passthrough_enabled: false,
-    use_upstream_model_for_billing: false,
+    ...BUILD_CHANNEL_SETTING_DEFAULTS,
     system_prompt: '',
     system_prompt_override: false,
-    vision_assist_enabled: false,
-    vision_assist_channel_id: '',
-    vision_assist_model: '',
-    vision_assist_target_models: '',
-    vision_assist_prompt: '',
-    vision_assist_cache_ttl_seconds: 86400,
-    vision_assist_failure_policy: 'error',
-    vision_assist_strip_image: true,
-    vision_assist_endpoint_mode: 'auto',
-    vision_assist_max_concurrency: 2,
-    vision_assist_retry_count: 1,
-    vision_assist_retry_backoff_ms: 500,
-    ...WEB_SEARCH_FORM_DEFAULTS,
   });
   const showApiConfigCard = true; // 控制是否显示 API 配置卡片
   const getInitValues = () => ({ ...originInputs });
 
   const buildChannelExtraSettings = (values) => {
-    const existingChannelExtraSettings = parseJsonObject(values.setting);
-    const visionAssistChannelId = parseInt(
-      values.vision_assist_channel_id,
-      10,
-    );
-    const visionAssistCacheTTL = parseInt(
-      values.vision_assist_cache_ttl_seconds,
-      10,
-    );
-    const visionAssistMaxConcurrency = parseInt(
-      values.vision_assist_max_concurrency,
-      10,
-    );
-    const visionAssistRetryCount = parseInt(
-      values.vision_assist_retry_count,
-      10,
-    );
-    const visionAssistRetryBackoff = parseInt(
-      values.vision_assist_retry_backoff_ms,
-      10,
-    );
+    let existingChannelExtraSettings = {};
+    if (values.setting) {
+      try {
+        const parsed = JSON.parse(values.setting);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          existingChannelExtraSettings = parsed;
+        }
+      } catch {
+        // 保持旧逻辑：历史异常 setting 不阻断提交，按空对象继续合并。
+        existingChannelExtraSettings = {};
+      }
+    }
     return {
       ...existingChannelExtraSettings,
       force_format: values.force_format || false,
       thinking_to_content: values.thinking_to_content || false,
       proxy: values.proxy || '',
       pass_through_body_enabled: values.pass_through_body_enabled || false,
-      responses_compact_passthrough_enabled:
-        values.responses_compact_passthrough_enabled === true,
-      use_upstream_model_for_billing:
-        values.use_upstream_model_for_billing === true,
+      ...buildChannelSettingFields(values, existingChannelExtraSettings),
       system_prompt: values.system_prompt || '',
       system_prompt_override: values.system_prompt_override || false,
-      vision_assist: {
-        ...(existingChannelExtraSettings.vision_assist || {}),
-        enabled: values.vision_assist_enabled === true,
-        assist_channel_id: Number.isFinite(visionAssistChannelId)
-          ? visionAssistChannelId
-          : 0,
-        assist_model: String(values.vision_assist_model || '').trim(),
-        target_models: parseCommaList(values.vision_assist_target_models),
-        prompt: String(values.vision_assist_prompt || '').trim(),
-        cache_ttl_seconds:
-          Number.isFinite(visionAssistCacheTTL) && visionAssistCacheTTL > 0
-            ? visionAssistCacheTTL
-            : 86400,
-        failure_policy:
-          values.vision_assist_failure_policy === 'skip' ? 'skip' : 'error',
-        strip_image: values.vision_assist_strip_image !== false,
-        endpoint_mode: normalizeVisionAssistEndpointMode(
-          values.vision_assist_endpoint_mode,
-        ),
-        max_concurrency:
-          Number.isFinite(visionAssistMaxConcurrency) &&
-          visionAssistMaxConcurrency > 0
-            ? visionAssistMaxConcurrency
-            : 2,
-        retry_count:
-          Number.isFinite(visionAssistRetryCount) && visionAssistRetryCount >= 0
-            ? visionAssistRetryCount
-            : 1,
-        retry_backoff_ms:
-          Number.isFinite(visionAssistRetryBackoff) &&
-          visionAssistRetryBackoff > 0
-            ? visionAssistRetryBackoff
-            : 500,
-      },
-      web_search: {
-        ...(existingChannelExtraSettings.web_search || {}),
-        enabled: values.web_search_enabled === true,
-        provider: normalizeWebSearchProvider(values.web_search_provider),
-        api_key: String(values.web_search_api_key || '').trim() || undefined,
-        clear_api_key:
-          values.web_search_clear_api_key === true &&
-          !String(values.web_search_api_key || '').trim(),
-        max_results: normalizeWebSearchMaxResults(
-          values.web_search_max_results,
-        ),
-        search_depth: normalizeTavilySearchDepth(
-          values.web_search_search_depth,
-        ),
-        freshness: normalizeAnySearchFreshness(values.web_search_freshness),
-        content_types: parseCommaList(values.web_search_content_types),
-      },
     };
   };
 
@@ -935,14 +751,6 @@ const EditChannelModal = (props) => {
     }
   };
 
-  const formatUnixTime = (timestamp) => {
-    const value = Number(timestamp || 0);
-    if (!value) {
-      return t('暂无');
-    }
-    return new Date(value * 1000).toLocaleString();
-  };
-
   const copyParamOverrideJson = async () => {
     const raw =
       typeof inputs.param_override === 'string'
@@ -1089,92 +897,28 @@ const EditChannelModal = (props) => {
           data.proxy = parsedSettings.proxy || '';
           data.pass_through_body_enabled =
             parsedSettings.pass_through_body_enabled || false;
-          data.responses_compact_passthrough_enabled =
-            parsedSettings.responses_compact_passthrough_enabled === true;
-          data.use_upstream_model_for_billing =
-            parsedSettings.use_upstream_model_for_billing === true;
+          Object.assign(data, parseBuildChannelSettings(parsedSettings));
           data.system_prompt = parsedSettings.system_prompt || '';
           data.system_prompt_override =
             parsedSettings.system_prompt_override || false;
-          const visionAssist = parsedSettings.vision_assist || {};
-          data.vision_assist_enabled = visionAssist.enabled === true;
-          data.vision_assist_channel_id =
-            visionAssist.assist_channel_id || '';
-          data.vision_assist_model = visionAssist.assist_model || '';
-          data.vision_assist_target_models = joinList(
-            visionAssist.target_models,
-          );
-          data.vision_assist_prompt = visionAssist.prompt || '';
-          data.vision_assist_cache_ttl_seconds =
-            visionAssist.cache_ttl_seconds || 86400;
-          data.vision_assist_failure_policy =
-            visionAssist.failure_policy || 'error';
-          data.vision_assist_strip_image =
-            visionAssist.strip_image === undefined
-              ? true
-              : visionAssist.strip_image === true;
-          data.vision_assist_endpoint_mode = normalizeVisionAssistEndpointMode(
-            visionAssist.endpoint_mode,
-          );
-          data.vision_assist_max_concurrency =
-            Number(visionAssist.max_concurrency) > 0
-              ? Number(visionAssist.max_concurrency)
-              : 2;
-          data.vision_assist_retry_count =
-            Number(visionAssist.retry_count) >= 0
-              ? Number(visionAssist.retry_count)
-              : 1;
-          data.vision_assist_retry_backoff_ms =
-            Number(visionAssist.retry_backoff_ms) > 0
-              ? Number(visionAssist.retry_backoff_ms)
-              : 500;
-          Object.assign(data, parseWebSearchSettings(parsedSettings));
         } catch (error) {
           console.error('解析渠道设置失败:', error);
           data.force_format = false;
           data.thinking_to_content = false;
           data.proxy = '';
           data.pass_through_body_enabled = false;
-          data.responses_compact_passthrough_enabled = false;
-          data.use_upstream_model_for_billing = false;
+          Object.assign(data, BUILD_CHANNEL_SETTING_DEFAULTS);
           data.system_prompt = '';
           data.system_prompt_override = false;
-          data.vision_assist_enabled = false;
-          data.vision_assist_channel_id = '';
-          data.vision_assist_model = '';
-          data.vision_assist_target_models = '';
-          data.vision_assist_prompt = '';
-          data.vision_assist_cache_ttl_seconds = 86400;
-          data.vision_assist_failure_policy = 'error';
-          data.vision_assist_strip_image = true;
-          data.vision_assist_endpoint_mode = 'auto';
-          data.vision_assist_max_concurrency = 2;
-          data.vision_assist_retry_count = 1;
-          data.vision_assist_retry_backoff_ms = 500;
-          Object.assign(data, WEB_SEARCH_FORM_DEFAULTS);
         }
       } else {
         data.force_format = false;
         data.thinking_to_content = false;
         data.proxy = '';
         data.pass_through_body_enabled = false;
-        data.responses_compact_passthrough_enabled = false;
-        data.use_upstream_model_for_billing = false;
+        Object.assign(data, BUILD_CHANNEL_SETTING_DEFAULTS);
         data.system_prompt = '';
         data.system_prompt_override = false;
-        data.vision_assist_enabled = false;
-        data.vision_assist_channel_id = '';
-        data.vision_assist_model = '';
-        data.vision_assist_target_models = '';
-        data.vision_assist_prompt = '';
-        data.vision_assist_cache_ttl_seconds = 86400;
-        data.vision_assist_failure_policy = 'error';
-        data.vision_assist_strip_image = true;
-        data.vision_assist_endpoint_mode = 'auto';
-        data.vision_assist_max_concurrency = 2;
-        data.vision_assist_retry_count = 1;
-        data.vision_assist_retry_backoff_ms = 500;
-        Object.assign(data, WEB_SEARCH_FORM_DEFAULTS);
       }
 
       if (data.settings) {
@@ -1200,22 +944,7 @@ const EditChannelModal = (props) => {
             parsedSettings.allow_inference_geo || false;
           data.allow_speed = parsedSettings.allow_speed || false;
           data.claude_beta_query = parsedSettings.claude_beta_query || false;
-          data.upstream_model_update_check_enabled =
-            parsedSettings.upstream_model_update_check_enabled === true;
-          data.upstream_model_update_auto_sync_enabled =
-            parsedSettings.upstream_model_update_auto_sync_enabled === true;
-          data.upstream_model_update_last_check_time =
-            Number(parsedSettings.upstream_model_update_last_check_time) || 0;
-          data.upstream_model_update_last_detected_models = Array.isArray(
-            parsedSettings.upstream_model_update_last_detected_models,
-          )
-            ? parsedSettings.upstream_model_update_last_detected_models
-            : [];
-          data.upstream_model_update_ignored_models = Array.isArray(
-            parsedSettings.upstream_model_update_ignored_models,
-          )
-            ? parsedSettings.upstream_model_update_ignored_models.join(',')
-            : '';
+          Object.assign(data, parseBuildChannelOtherSettings(parsedSettings));
         } catch (error) {
           console.error('解析其他设置失败:', error);
           data.azure_responses_version = '';
@@ -1230,11 +959,7 @@ const EditChannelModal = (props) => {
           data.allow_inference_geo = false;
           data.allow_speed = false;
           data.claude_beta_query = false;
-          data.upstream_model_update_check_enabled = false;
-          data.upstream_model_update_auto_sync_enabled = false;
-          data.upstream_model_update_last_check_time = 0;
-          data.upstream_model_update_last_detected_models = [];
-          data.upstream_model_update_ignored_models = '';
+          Object.assign(data, BUILD_CHANNEL_OTHER_SETTING_DEFAULTS);
         }
       } else {
         // 兼容历史数据：老渠道没有 settings 时，默认按 json 展示
@@ -1248,11 +973,7 @@ const EditChannelModal = (props) => {
         data.allow_inference_geo = false;
         data.allow_speed = false;
         data.claude_beta_query = false;
-        data.upstream_model_update_check_enabled = false;
-        data.upstream_model_update_auto_sync_enabled = false;
-        data.upstream_model_update_last_check_time = 0;
-        data.upstream_model_update_last_detected_models = [];
-        data.upstream_model_update_ignored_models = '';
+        Object.assign(data, BUILD_CHANNEL_OTHER_SETTING_DEFAULTS);
       }
 
       if (
@@ -1282,40 +1003,9 @@ const EditChannelModal = (props) => {
         thinking_to_content: data.thinking_to_content,
         proxy: data.proxy,
         pass_through_body_enabled: data.pass_through_body_enabled,
-        responses_compact_passthrough_enabled:
-          data.responses_compact_passthrough_enabled === true,
-        use_upstream_model_for_billing:
-          data.use_upstream_model_for_billing || false,
+        ...getBuildChannelSettingsState(data),
         system_prompt: data.system_prompt,
         system_prompt_override: data.system_prompt_override || false,
-        vision_assist_enabled: data.vision_assist_enabled || false,
-        vision_assist_channel_id: data.vision_assist_channel_id || '',
-        vision_assist_model: data.vision_assist_model || '',
-        vision_assist_target_models: data.vision_assist_target_models || '',
-        vision_assist_prompt: data.vision_assist_prompt || '',
-        vision_assist_cache_ttl_seconds:
-          data.vision_assist_cache_ttl_seconds || 86400,
-        vision_assist_failure_policy:
-          data.vision_assist_failure_policy || 'error',
-        vision_assist_strip_image: data.vision_assist_strip_image !== false,
-        vision_assist_endpoint_mode: data.vision_assist_endpoint_mode || 'auto',
-        vision_assist_max_concurrency: data.vision_assist_max_concurrency || 2,
-        vision_assist_retry_count:
-          data.vision_assist_retry_count === undefined
-            ? 1
-            : data.vision_assist_retry_count,
-        vision_assist_retry_backoff_ms:
-          data.vision_assist_retry_backoff_ms || 500,
-        web_search_enabled: data.web_search_enabled || false,
-        web_search_provider: data.web_search_provider || 'tavily',
-        web_search_api_key: '',
-        web_search_api_key_configured:
-          data.web_search_api_key_configured === true,
-        web_search_clear_api_key: false,
-        web_search_max_results: data.web_search_max_results || 5,
-        web_search_search_depth: data.web_search_search_depth || 'basic',
-        web_search_freshness: data.web_search_freshness || '',
-        web_search_content_types: data.web_search_content_types || '',
       });
       initialModelsRef.current = (data.models || [])
         .map((model) => (model || '').trim())
@@ -1356,22 +1046,9 @@ const EditChannelModal = (props) => {
         (data.system_prompt && data.system_prompt.trim()) ||
         data.thinking_to_content ||
         data.pass_through_body_enabled ||
-        data.responses_compact_passthrough_enabled ||
-        data.use_upstream_model_for_billing ||
         data.force_format ||
         data.claude_beta_query ||
-        data.vision_assist_enabled ||
-        data.vision_assist_channel_id ||
-        data.vision_assist_model ||
-        data.vision_assist_target_models ||
-        data.web_search_enabled ||
-        data.web_search_api_key_configured ||
-        data.web_search_provider !== 'tavily' ||
-        data.web_search_clear_api_key ||
-        data.web_search_max_results !== 5 ||
-        data.web_search_search_depth !== 'basic' ||
-        data.web_search_freshness ||
-        data.web_search_content_types ||
+        hasBuildChannelSettingValues(data) ||
         data.system_prompt_override;
       if (hasAdvancedValues) {
         setAdvancedSettingsOpen(true);
@@ -1712,23 +1389,9 @@ const EditChannelModal = (props) => {
       thinking_to_content: false,
       proxy: '',
       pass_through_body_enabled: false,
-      responses_compact_passthrough_enabled: false,
-      use_upstream_model_for_billing: false,
+      ...BUILD_CHANNEL_SETTING_DEFAULTS,
       system_prompt: '',
       system_prompt_override: false,
-      vision_assist_enabled: false,
-      vision_assist_channel_id: '',
-      vision_assist_model: '',
-      vision_assist_target_models: '',
-      vision_assist_prompt: '',
-      vision_assist_cache_ttl_seconds: 86400,
-      vision_assist_failure_policy: 'error',
-      vision_assist_strip_image: true,
-      vision_assist_endpoint_mode: 'auto',
-      vision_assist_max_concurrency: 2,
-      vision_assist_retry_count: 1,
-      vision_assist_retry_backoff_ms: 500,
-      ...WEB_SEARCH_FORM_DEFAULTS,
     });
     // 重置密钥模式状态
     setKeyMode('append');
@@ -2004,33 +1667,8 @@ const EditChannelModal = (props) => {
       showInfo(t('请至少选择一个模型！'));
       return;
     }
-    if (localInputs.web_search_enabled === true) {
-      const webSearchProvider = normalizeWebSearchProvider(
-        localInputs.web_search_provider,
-      );
-      const hasNewWebSearchKey = Boolean(
-        String(localInputs.web_search_api_key || '').trim(),
-      );
-      const hasExistingWebSearchKey =
-        localInputs.web_search_api_key_configured === true;
-      if (
-        webSearchProvider === 'tavily' &&
-        !hasNewWebSearchKey &&
-        !hasExistingWebSearchKey
-      ) {
-        showInfo(t('启用 Tavily WebSearch 时必须填写 WebSearch API Key'));
-        return;
-      }
-      if (
-        webSearchProvider === 'tavily' &&
-        localInputs.web_search_clear_api_key === true &&
-        !hasNewWebSearchKey
-      ) {
-        showInfo(
-          t('Tavily WebSearch 清空已保存密钥前，请先填写新的 WebSearch API Key 或关闭 WebSearch'),
-        );
-        return;
-      }
+    if (!validateBuildChannelSettingsBeforeSubmit(localInputs, t, showInfo)) {
+      return;
     }
     if (
       localInputs.type === 45 &&
@@ -2172,28 +1810,7 @@ const EditChannelModal = (props) => {
       }
     }
 
-    settings.upstream_model_update_check_enabled =
-      localInputs.upstream_model_update_check_enabled === true;
-    settings.upstream_model_update_auto_sync_enabled =
-      settings.upstream_model_update_check_enabled &&
-      localInputs.upstream_model_update_auto_sync_enabled === true;
-    settings.upstream_model_update_ignored_models = Array.from(
-      new Set(
-        String(localInputs.upstream_model_update_ignored_models || '')
-          .split(',')
-          .map((model) => model.trim())
-          .filter(Boolean),
-      ),
-    );
-    if (
-      !Array.isArray(settings.upstream_model_update_last_detected_models) ||
-      !settings.upstream_model_update_check_enabled
-    ) {
-      settings.upstream_model_update_last_detected_models = [];
-    }
-    if (typeof settings.upstream_model_update_last_check_time !== 'number') {
-      settings.upstream_model_update_last_check_time = 0;
-    }
+    applyBuildChannelOtherSettingFields(localInputs, settings);
 
     localInputs.settings = JSON.stringify(settings);
 
@@ -2202,31 +1819,9 @@ const EditChannelModal = (props) => {
     delete localInputs.thinking_to_content;
     delete localInputs.proxy;
     delete localInputs.pass_through_body_enabled;
-    delete localInputs.responses_compact_passthrough_enabled;
-    delete localInputs.use_upstream_model_for_billing;
+    removeBuildChannelSettingFormFields(localInputs);
     delete localInputs.system_prompt;
     delete localInputs.system_prompt_override;
-    delete localInputs.vision_assist_enabled;
-    delete localInputs.vision_assist_channel_id;
-    delete localInputs.vision_assist_model;
-    delete localInputs.vision_assist_target_models;
-    delete localInputs.vision_assist_prompt;
-    delete localInputs.vision_assist_cache_ttl_seconds;
-    delete localInputs.vision_assist_failure_policy;
-    delete localInputs.vision_assist_strip_image;
-    delete localInputs.vision_assist_endpoint_mode;
-    delete localInputs.vision_assist_max_concurrency;
-    delete localInputs.vision_assist_retry_count;
-    delete localInputs.vision_assist_retry_backoff_ms;
-    delete localInputs.web_search_enabled;
-    delete localInputs.web_search_provider;
-    delete localInputs.web_search_api_key;
-    delete localInputs.web_search_api_key_configured;
-    delete localInputs.web_search_clear_api_key;
-    delete localInputs.web_search_max_results;
-    delete localInputs.web_search_search_depth;
-    delete localInputs.web_search_freshness;
-    delete localInputs.web_search_content_types;
     delete localInputs.is_enterprise_account;
     // 顶层的 vertex_key_type 不应发送给后端
     delete localInputs.vertex_key_type;
@@ -2240,11 +1835,6 @@ const EditChannelModal = (props) => {
     delete localInputs.allow_inference_geo;
     delete localInputs.allow_speed;
     delete localInputs.claude_beta_query;
-    delete localInputs.upstream_model_update_check_enabled;
-    delete localInputs.upstream_model_update_auto_sync_enabled;
-    delete localInputs.upstream_model_update_last_check_time;
-    delete localInputs.upstream_model_update_last_detected_models;
-    delete localInputs.upstream_model_update_ignored_models;
     // 渠道启停状态只能通过专用状态接口修改，编辑保存不应隐式启用禁用渠道。
     delete localInputs.status;
 
@@ -2605,95 +2195,15 @@ const EditChannelModal = (props) => {
           {() => {
             const advancedSettingsContent = (
               <div className='space-y-4'>
-                {/* Upstream Model Management Section */}
-                {MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type) && (
-                <div className='pb-3 border-b border-gray-100'>
-                  <Text className='text-sm font-medium text-gray-500 mb-3 block'>
-                    {t('上游模型管理')}
-                  </Text>
-
-                  <Form.Switch
-                    field='upstream_model_update_check_enabled'
-                    label={t('是否检测上游模型更新')}
-                    checkedText={t('开')}
-                    uncheckedText={t('关')}
-                    onChange={(value) =>
-                      handleChannelOtherSettingsChange(
-                        'upstream_model_update_check_enabled',
-                        value,
-                      )
-                    }
-                    extraText={t(
-                      '开启后由后端定时任务检测该渠道上游模型变化',
-                    )}
-                  />
-                  <Form.Switch
-                    field='upstream_model_update_auto_sync_enabled'
-                    label={t('是否自动同步上游模型更新')}
-                    checkedText={t('开')}
-                    uncheckedText={t('关')}
-                    disabled={!inputs.upstream_model_update_check_enabled}
-                    onChange={(value) =>
-                      handleChannelOtherSettingsChange('upstream_model_update_auto_sync_enabled', value)
-                    }
-                    extraText={t('开启后检测到新增模型会自动加入当前渠道模型列表')}
-                  />
-                  <Form.Input
-                    field='upstream_model_update_ignored_models'
-                    label={t('已忽略模型')}
-                    placeholder={t(
-                      '例如：gpt-4.1-nano,regex:^claude-.*$,regex:^sora-.*$',
-                    )}
-                    extraText={t(
-                      '支持精确匹配；使用 regex: 开头可按正则匹配。',
-                    )}
-                    onChange={(value) =>
-                      handleInputChange(
-                        'upstream_model_update_ignored_models',
-                        value,
-                      )
-                    }
-                    showClear
-                  />
-                  <div className='text-xs text-gray-500 mb-2'>
-                    {t('上次检测时间')}:&nbsp;
-                    {formatUnixTime(
-                      inputs.upstream_model_update_last_check_time,
-                    )}
-                  </div>
-                  <div className='text-xs text-gray-500 mb-3'>
-                    {t('上次检测到可加入模型')}:&nbsp;
-                    {upstreamDetectedModels.length === 0 ? (
-                      t('暂无')
-                    ) : (
-                      <>
-                        <Tooltip
-                          position='topLeft'
-                          content={
-                            <div className='max-w-[640px] break-all text-xs leading-5'>
-                              {upstreamDetectedModels.join(', ')}
-                            </div>
-                          }
-                        >
-                          <span className='cursor-help break-all'>
-                            {upstreamDetectedModelsPreview.join(', ')}
-                          </span>
-                        </Tooltip>
-                        <span className='ml-1 text-gray-400'>
-                          {upstreamDetectedModelsOmittedCount > 0
-                            ? t('（共 {{total}} 个，省略 {{omit}} 个）', {
-                                total: upstreamDetectedModels.length,
-                                omit: upstreamDetectedModelsOmittedCount,
-                              })
-                            : t('（共 {{total}} 个）', {
-                                total: upstreamDetectedModels.length,
-                              })}
-                        </span>
-                      </>
-                    )}
-                  </div>
-                </div>
-                )}
+                <BuildChannelUpstreamModelSettings
+                  visible={MODEL_FETCHABLE_CHANNEL_TYPES.has(inputs.type)}
+                  inputs={inputs}
+                  upstreamDetectedModels={upstreamDetectedModels}
+                  upstreamDetectedModelsPreview={upstreamDetectedModelsPreview}
+                  upstreamDetectedModelsOmittedCount={upstreamDetectedModelsOmittedCount}
+                  onInputChange={handleInputChange}
+                  onOtherSettingsChange={handleChannelOtherSettingsChange}
+                />
 
                 {/* Request Config Section */}
                 <div className='py-3 border-b border-gray-100'>
@@ -2919,214 +2429,10 @@ const EditChannelModal = (props) => {
 
                   <Form.Switch field='thinking_to_content' label={t('思考内容转换')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('thinking_to_content', value)} extraText={t('将 reasoning_content 转换为 <think> 标签拼接到内容中')} />
                   <Form.Switch field='pass_through_body_enabled' label={t('透传请求体')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('pass_through_body_enabled', value)} extraText={t('启用请求体透传功能')} />
-                  <ResponsesCompactPassthroughSetting
-                    onChange={(value) =>
-                      handleChannelSettingsChange(
-                        'responses_compact_passthrough_enabled',
-                        value,
-                      )
-                    }
+                  <BuildChannelExtraSettingsFields
+                    inputs={inputs}
+                    onSettingsChange={handleChannelSettingsChange}
                   />
-                  <Form.Switch field='use_upstream_model_for_billing' label={t('重定向后按上游模型计费')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('use_upstream_model_for_billing', value)} extraText={t('开启后，model_mapping 生效时日志主模型与计费价格按最终上游模型计算')} />
-
-                  <div className='mt-4 mb-2 text-sm font-medium text-gray-700'>
-                    {t('Claude Code WebSearch')}
-                  </div>
-                  <Form.Switch
-                    field='web_search_enabled'
-                    label={t('启用 WebSearch 模拟')}
-                    checkedText={t('开')}
-                    uncheckedText={t('关')}
-                    onChange={(value) =>
-                      handleChannelSettingsChange('web_search_enabled', value)
-                    }
-                    extraText={t(
-                      '开启后在此渠道本地处理 Claude Code 纯 web_search 请求',
-                    )}
-                  />
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Form.Select
-                        field='web_search_provider'
-                        label={t('搜索供应商')}
-                        optionList={[
-                          { label: 'Tavily', value: 'tavily' },
-                          { label: 'AnySearch', value: 'anysearch' },
-                        ]}
-                        onChange={(value) =>
-                          handleChannelSettingsChange(
-                            'web_search_provider',
-                            value,
-                          )
-                        }
-                        style={{ width: '100%' }}
-                      />
-                    </Col>
-                    <Col span={12}>
-                      <Form.InputNumber
-                        field='web_search_max_results'
-                        label={t('最大搜索结果数')}
-                        placeholder='5'
-                        min={1}
-                        max={20}
-                        onNumberChange={(value) =>
-                          handleChannelSettingsChange(
-                            'web_search_max_results',
-                            value,
-                          )
-                        }
-                        style={{ width: '100%' }}
-                      />
-                    </Col>
-                  </Row>
-                  <Form.Input
-                    field='web_search_api_key'
-                    label={
-                      <span className='inline-flex items-center gap-2'>
-                        {t('WebSearch API Key')}
-                        {inputs.web_search_api_key_configured && (
-                          <Tag color='green' size='small'>
-                            {t('已配置')}
-                          </Tag>
-                        )}
-                      </span>
-                    }
-                    mode='password'
-                    autoComplete='new-password'
-                    placeholder={
-                      inputs.web_search_api_key_configured
-                        ? t('留空表示保留已有密钥')
-                        : inputs.web_search_provider === 'anysearch'
-                          ? t('供应商 API Key（可选）')
-                          : t('请输入供应商 API Key')
-                    }
-                    onChange={(value) =>
-                      handleChannelSettingsChange('web_search_api_key', value)
-                    }
-                    showClear
-                    extraText={t(
-                      'Tavily 必填；AnySearch 可选。填写后通过 Authorization Bearer 发送，接口响应不会返回明文密钥',
-                    )}
-                  />
-                  <Form.Switch
-                    field='web_search_clear_api_key'
-                    label={t('清空已保存的 WebSearch 密钥')}
-                    checkedText={t('开')}
-                    uncheckedText={t('关')}
-                    disabled={!inputs.web_search_api_key_configured}
-                    onChange={(value) =>
-                      handleChannelSettingsChange(
-                        'web_search_clear_api_key',
-                        value,
-                      )
-                    }
-                    extraText={t(
-                      'AnySearch 可清空后继续启用；Tavily 需要关闭 WebSearch 或填写新密钥',
-                    )}
-                  />
-                  {inputs.web_search_provider === 'tavily' ? (
-                    <Form.Select
-                      field='web_search_search_depth'
-                      label={t('Tavily 搜索深度')}
-                      optionList={[
-                        { label: t('基础'), value: 'basic' },
-                        { label: t('高级'), value: 'advanced' },
-                      ]}
-                      onChange={(value) =>
-                        handleChannelSettingsChange(
-                          'web_search_search_depth',
-                          value,
-                        )
-                      }
-                      style={{ width: '100%' }}
-                    />
-                  ) : (
-                    <Row gutter={12}>
-                      <Col span={12}>
-                        <Form.Select
-                          field='web_search_freshness'
-                          label={t('AnySearch 时效')}
-                          optionList={[
-                            { label: t('无'), value: '' },
-                            { label: t('天'), value: 'day' },
-                            { label: t('周'), value: 'week' },
-                            { label: t('月'), value: 'month' },
-                            { label: t('年'), value: 'year' },
-                          ]}
-                          onChange={(value) =>
-                            handleChannelSettingsChange(
-                              'web_search_freshness',
-                              value,
-                            )
-                          }
-                          style={{ width: '100%' }}
-                        />
-                      </Col>
-                      <Col span={12}>
-                        <Form.Input
-                          field='web_search_content_types'
-                          label={t('AnySearch 内容类型')}
-                          placeholder='web,news,doc'
-                          onChange={(value) =>
-                            handleChannelSettingsChange(
-                              'web_search_content_types',
-                              value,
-                            )
-                          }
-                          showClear
-                        />
-                      </Col>
-                    </Row>
-                  )}
-
-                  <div className='mt-4 mb-2 text-sm font-medium text-gray-700'>
-                    {t('视觉辅助识别')}
-                  </div>
-                  <Form.Switch field='vision_assist_enabled' label={t('启用视觉辅助识别')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('vision_assist_enabled', value)} extraText={t('当目标渠道不支持图片时，先调用配置的视觉模型生成图片描述，再将请求改写为文本请求')} />
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Form.InputNumber field='vision_assist_channel_id' label={t('辅助渠道 ID')} placeholder={t('例如: 12')} min={0} onNumberChange={(value) => handleChannelSettingsChange('vision_assist_channel_id', value)} style={{ width: '100%' }} />
-                    </Col>
-                    <Col span={12}>
-                      <Form.Input field='vision_assist_model' label={t('辅助模型')} placeholder={t('例如: gpt-4o-mini')} onChange={(value) => handleChannelSettingsChange('vision_assist_model', value)} showClear />
-                    </Col>
-                  </Row>
-                  <Form.Input field='vision_assist_target_models' label={t('目标上游模型')} placeholder={t('留空表示全部，多个模型用英文逗号分隔')} onChange={(value) => handleChannelSettingsChange('vision_assist_target_models', value)} showClear extraText={t('按 model_mapping 重定向后的最终上游模型匹配，而不是用户请求的原始模型')} />
-                  <Form.TextArea field='vision_assist_prompt' label={t('辅助提示词')} placeholder={t('留空使用默认图片描述提示词')} onChange={(value) => handleChannelSettingsChange('vision_assist_prompt', value)} autosize showClear />
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Form.Select field='vision_assist_endpoint_mode' label={t('辅助请求端点')} optionList={[
-                        { label: t('自动选择'), value: 'auto' },
-                        { label: t('OpenAI Chat Completions'), value: 'openai_chat' },
-                        { label: t('OpenAI Responses'), value: 'openai_responses' },
-                        { label: t('Anthropic Messages'), value: 'anthropic_messages' },
-                        { label: t('Gemini 原生'), value: 'gemini_native' },
-                      ]} onChange={(value) => handleChannelSettingsChange('vision_assist_endpoint_mode', value)} style={{ width: '100%' }} extraText={t('自动模式会让 Gemini 走原生接口、Claude 走 Messages，其他渠道走 OpenAI Chat')} />
-                    </Col>
-                    <Col span={12}>
-                      <Form.InputNumber field='vision_assist_max_concurrency' label={t('辅助并发数')} placeholder='2' min={1} max={8} onNumberChange={(value) => handleChannelSettingsChange('vision_assist_max_concurrency', value)} style={{ width: '100%' }} />
-                    </Col>
-                  </Row>
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Form.InputNumber field='vision_assist_cache_ttl_seconds' label={t('缓存时间（秒）')} placeholder='86400' min={1} onNumberChange={(value) => handleChannelSettingsChange('vision_assist_cache_ttl_seconds', value)} style={{ width: '100%' }} />
-                    </Col>
-                    <Col span={12}>
-                      <Form.Select field='vision_assist_failure_policy' label={t('失败策略')} optionList={[
-                        { label: t('报错'), value: 'error' },
-                        { label: t('跳过'), value: 'skip' },
-                      ]} onChange={(value) => handleChannelSettingsChange('vision_assist_failure_policy', value)} style={{ width: '100%' }} />
-                    </Col>
-                  </Row>
-                  <Row gutter={12}>
-                    <Col span={12}>
-                      <Form.InputNumber field='vision_assist_retry_count' label={t('辅助失败重试次数')} placeholder='1' min={0} max={5} onNumberChange={(value) => handleChannelSettingsChange('vision_assist_retry_count', value)} style={{ width: '100%' }} />
-                    </Col>
-                    <Col span={12}>
-                      <Form.InputNumber field='vision_assist_retry_backoff_ms' label={t('重试退避（毫秒）')} placeholder='500' min={1} max={30000} onNumberChange={(value) => handleChannelSettingsChange('vision_assist_retry_backoff_ms', value)} style={{ width: '100%' }} />
-                    </Col>
-                  </Row>
-                  <Form.Switch field='vision_assist_strip_image' label={t('移除原始图片')} checkedText={t('开')} uncheckedText={t('关')} onChange={(value) => handleChannelSettingsChange('vision_assist_strip_image', value)} extraText={t('推荐开启，避免非视觉模型收到无法处理的图片内容')} />
 
                   <Form.Input field='proxy' label={t('代理地址')} placeholder={t('例如: socks5://user:pass@host:port')} onChange={(value) => handleChannelSettingsChange('proxy', value)} showClear extraText={t('用于配置网络代理，支持 socks5 协议')} />
 

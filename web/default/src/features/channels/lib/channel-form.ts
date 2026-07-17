@@ -21,7 +21,6 @@ import { z } from 'zod'
 import {
   CHANNEL_STATUS,
   ERROR_MESSAGES,
-  MODEL_FETCHABLE_TYPES,
 } from '../constants'
 import type { Channel } from '../types'
 import {
@@ -31,6 +30,17 @@ import {
   stringifyAdvancedCustomConfig,
   validateAdvancedCustomConfig,
 } from './advanced-custom'
+import {
+  BUILD_CHANNEL_OTHER_SETTING_DEFAULTS,
+  BUILD_CHANNEL_SETTING_DEFAULTS,
+  applyBuildChannelOtherSettingFields,
+  buildChannelOtherSettingFormSchema,
+  buildChannelSettingFields,
+  buildChannelSettingFormSchema,
+  parseBuildChannelOtherSettingDefaults,
+  parseBuildChannelSettingDefaults,
+  refineBuildChannelSettings,
+} from './build-channel-settings'
 
 // ============================================================================
 // Form Validation Schema
@@ -87,13 +97,6 @@ function isOptionalStatusCodeMapping(value: string | undefined): boolean {
   }
 }
 
-function parseCommaList(value: string | undefined): string[] {
-  return String(value || '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
 function isCodexCredential(value: string | undefined): boolean {
   try {
     const parsed = parseOptionalJson(value)
@@ -133,71 +136,6 @@ function addRequiredIssue(
     path: [path],
     message,
   })
-}
-
-const visionAssistEndpointModes = [
-  'auto',
-  'openai_chat',
-  'openai_responses',
-  'anthropic_messages',
-  'gemini_native',
-] as const
-
-type VisionAssistEndpointMode = (typeof visionAssistEndpointModes)[number]
-
-const webSearchProviders = ['tavily', 'anysearch'] as const
-type WebSearchProvider = (typeof webSearchProviders)[number]
-
-const tavilySearchDepths = ['basic', 'advanced'] as const
-type TavilySearchDepth = (typeof tavilySearchDepths)[number]
-
-const anySearchFreshnessValues = ['', 'day', 'week', 'month', 'year'] as const
-type AnySearchFreshness = (typeof anySearchFreshnessValues)[number]
-
-function normalizeVisionAssistEndpointMode(
-  value: unknown
-): VisionAssistEndpointMode {
-  const endpointMode = String(value || '')
-  return visionAssistEndpointModes.includes(
-    endpointMode as VisionAssistEndpointMode
-  )
-    ? (endpointMode as VisionAssistEndpointMode)
-    : 'auto'
-}
-
-function normalizeWebSearchProvider(value: unknown): WebSearchProvider {
-  const provider = String(value || '')
-  return webSearchProviders.includes(provider as WebSearchProvider)
-    ? (provider as WebSearchProvider)
-    : 'tavily'
-}
-
-function normalizeTavilySearchDepth(value: unknown): TavilySearchDepth {
-  const depth = String(value || '')
-  return tavilySearchDepths.includes(depth as TavilySearchDepth)
-    ? (depth as TavilySearchDepth)
-    : 'basic'
-}
-
-function normalizeAnySearchFreshness(value: unknown): AnySearchFreshness {
-  const freshness = String(value || '')
-  return anySearchFreshnessValues.includes(freshness as AnySearchFreshness)
-    ? (freshness as AnySearchFreshness)
-    : ''
-}
-
-function numberOrDefault(value: unknown, defaultValue: number): number {
-  const numberValue = Number(value)
-  return Number.isFinite(numberValue) ? numberValue : defaultValue
-}
-
-function minNumberOrDefault(
-  value: unknown,
-  minValue: number,
-  defaultValue: number
-): number {
-  const numberValue = numberOrDefault(value, defaultValue)
-  return numberValue >= minValue ? numberValue : defaultValue
 }
 
 export const channelFormSchema = z
@@ -261,31 +199,9 @@ export const channelFormSchema = z
     thinking_to_content: z.boolean().optional(),
     proxy: z.string().optional(),
     pass_through_body_enabled: z.boolean().optional(),
-    responses_compact_passthrough_enabled: z.boolean().optional(),
-    use_upstream_model_for_billing: z.boolean().optional(),
+    ...buildChannelSettingFormSchema,
     system_prompt: z.string().optional(),
     system_prompt_override: z.boolean().optional(),
-    vision_assist_enabled: z.boolean().optional(),
-    vision_assist_channel_id: z.number().min(0).optional(),
-    vision_assist_model: z.string().optional(),
-    vision_assist_target_models: z.string().optional(),
-    vision_assist_prompt: z.string().optional(),
-    vision_assist_cache_ttl_seconds: z.number().min(0).optional(),
-    vision_assist_failure_policy: z.enum(['error', 'skip']).optional(),
-    vision_assist_strip_image: z.boolean().optional(),
-    vision_assist_endpoint_mode: z.enum(visionAssistEndpointModes).optional(),
-    vision_assist_max_concurrency: z.number().min(1).max(8).optional(),
-    vision_assist_retry_count: z.number().min(0).max(5).optional(),
-    vision_assist_retry_backoff_ms: z.number().min(1).max(30000).optional(),
-    web_search_enabled: z.boolean().optional(),
-    web_search_provider: z.enum(webSearchProviders).optional(),
-    web_search_api_key: z.string().optional(),
-    web_search_api_key_configured: z.boolean().optional(),
-    web_search_clear_api_key: z.boolean().optional(),
-    web_search_max_results: z.number().min(1).max(20).optional(),
-    web_search_search_depth: z.enum(tavilySearchDepths).optional(),
-    web_search_freshness: z.enum(anySearchFreshnessValues).optional(),
-    web_search_content_types: z.string().optional(),
     // Type-specific settings (stored in settings JSON)
     is_enterprise_account: z.boolean().optional(), // OpenRouter specific
     vertex_key_type: z.enum(['json', 'api_key']).optional(), // Vertex AI specific
@@ -301,9 +217,7 @@ export const channelFormSchema = z
     claude_beta_query: z.boolean().optional(), // Anthropic: beta query passthrough
     disable_task_polling_sleep: z.boolean().optional(),
     // Upstream model update settings (stored in settings JSON)
-    upstream_model_update_check_enabled: z.boolean().optional(),
-    upstream_model_update_auto_sync_enabled: z.boolean().optional(),
-    upstream_model_update_ignored_models: z.string().optional(),
+    ...buildChannelOtherSettingFormSchema,
   })
   .superRefine((data, ctx) => {
     if ([3, 8, 36, 45].includes(data.type) && !data.base_url?.trim()) {
@@ -386,48 +300,7 @@ export const channelFormSchema = z
       )
     }
 
-    if (data.vision_assist_enabled === true) {
-      if (
-        !data.vision_assist_channel_id ||
-        data.vision_assist_channel_id <= 0
-      ) {
-        addRequiredIssue(
-          ctx,
-          'vision_assist_channel_id',
-          'Assist channel ID is required when vision assist is enabled'
-        )
-      }
-      if (!data.vision_assist_model?.trim()) {
-        addRequiredIssue(
-          ctx,
-          'vision_assist_model',
-          'Assist model is required when vision assist is enabled'
-        )
-      }
-    }
-    if (data.web_search_enabled === true) {
-      const providerRequiresKey = data.web_search_provider === 'tavily'
-      const hasNewKey = Boolean(data.web_search_api_key?.trim())
-      const hasExistingKey = data.web_search_api_key_configured === true
-      if (providerRequiresKey && !hasNewKey && !hasExistingKey) {
-        addRequiredIssue(
-          ctx,
-          'web_search_api_key',
-          'API Key is required when Tavily WebSearch is enabled'
-        )
-      }
-      if (
-        providerRequiresKey &&
-        data.web_search_clear_api_key === true &&
-        !hasNewKey
-      ) {
-        addRequiredIssue(
-          ctx,
-          'web_search_api_key',
-          'Enter a new API Key before clearing the existing one'
-        )
-      }
-    }
+    refineBuildChannelSettings(data, ctx, addRequiredIssue)
   })
 
 export type ChannelFormValues = z.infer<typeof channelFormSchema>
@@ -467,31 +340,9 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   thinking_to_content: false,
   proxy: '',
   pass_through_body_enabled: false,
-  responses_compact_passthrough_enabled: false,
-  use_upstream_model_for_billing: false,
+  ...BUILD_CHANNEL_SETTING_DEFAULTS,
   system_prompt: '',
   system_prompt_override: false,
-  vision_assist_enabled: false,
-  vision_assist_channel_id: 0,
-  vision_assist_model: '',
-  vision_assist_target_models: '',
-  vision_assist_prompt: '',
-  vision_assist_cache_ttl_seconds: 86400,
-  vision_assist_failure_policy: 'error',
-  vision_assist_strip_image: true,
-  vision_assist_endpoint_mode: 'auto',
-  vision_assist_max_concurrency: 2,
-  vision_assist_retry_count: 1,
-  vision_assist_retry_backoff_ms: 500,
-  web_search_enabled: false,
-  web_search_provider: 'tavily',
-  web_search_api_key: '',
-  web_search_api_key_configured: false,
-  web_search_clear_api_key: false,
-  web_search_max_results: 5,
-  web_search_search_depth: 'basic',
-  web_search_freshness: '',
-  web_search_content_types: '',
   // Type-specific settings
   is_enterprise_account: false,
   vertex_key_type: 'json',
@@ -506,9 +357,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   allow_speed: false,
   claude_beta_query: false,
   disable_task_polling_sleep: false,
-  upstream_model_update_check_enabled: false,
-  upstream_model_update_auto_sync_enabled: false,
-  upstream_model_update_ignored_models: '',
+  ...BUILD_CHANNEL_OTHER_SETTING_DEFAULTS,
   advanced_custom: '',
 }
 
@@ -523,36 +372,21 @@ export function transformChannelToFormDefaults(
   channel: Channel
 ): ChannelFormValues {
   // Parse channel extra settings from setting field
-  let extraSettings = {
+  let extraSettings: {
+    force_format: boolean
+    thinking_to_content: boolean
+    proxy: string
+    pass_through_body_enabled: boolean
+    system_prompt: string
+    system_prompt_override: boolean
+  } & ReturnType<typeof parseBuildChannelSettingDefaults> = {
     force_format: false,
     thinking_to_content: false,
     proxy: '',
     pass_through_body_enabled: false,
-    responses_compact_passthrough_enabled: false,
-    use_upstream_model_for_billing: false,
+    ...BUILD_CHANNEL_SETTING_DEFAULTS,
     system_prompt: '',
     system_prompt_override: false,
-    vision_assist_enabled: false,
-    vision_assist_channel_id: 0,
-    vision_assist_model: '',
-    vision_assist_target_models: '',
-    vision_assist_prompt: '',
-    vision_assist_cache_ttl_seconds: 86400,
-    vision_assist_failure_policy: 'error' as 'error' | 'skip',
-    vision_assist_strip_image: true,
-    vision_assist_endpoint_mode: 'auto' as VisionAssistEndpointMode,
-    vision_assist_max_concurrency: 2,
-    vision_assist_retry_count: 1,
-    vision_assist_retry_backoff_ms: 500,
-    web_search_enabled: false,
-    web_search_provider: 'tavily' as WebSearchProvider,
-    web_search_api_key: '',
-    web_search_api_key_configured: false,
-    web_search_clear_api_key: false,
-    web_search_max_results: 5,
-    web_search_search_depth: 'basic' as TavilySearchDepth,
-    web_search_freshness: '' as AnySearchFreshness,
-    web_search_content_types: '',
   }
 
   if (channel.setting) {
@@ -563,75 +397,9 @@ export function transformChannelToFormDefaults(
         thinking_to_content: parsed.thinking_to_content || false,
         proxy: parsed.proxy || '',
         pass_through_body_enabled: parsed.pass_through_body_enabled || false,
-        responses_compact_passthrough_enabled:
-          parsed.responses_compact_passthrough_enabled === true,
-        use_upstream_model_for_billing:
-          parsed.use_upstream_model_for_billing === true,
+        ...parseBuildChannelSettingDefaults(parsed),
         system_prompt: parsed.system_prompt || '',
         system_prompt_override: parsed.system_prompt_override || false,
-        vision_assist_enabled: parsed.vision_assist?.enabled === true,
-        vision_assist_channel_id:
-          Number(parsed.vision_assist?.assist_channel_id) || 0,
-        vision_assist_model: parsed.vision_assist?.assist_model || '',
-        vision_assist_target_models: Array.isArray(
-          parsed.vision_assist?.target_models
-        )
-          ? parsed.vision_assist.target_models.join(',')
-          : '',
-        vision_assist_prompt: parsed.vision_assist?.prompt || '',
-        vision_assist_cache_ttl_seconds: minNumberOrDefault(
-          parsed.vision_assist?.cache_ttl_seconds,
-          0,
-          86400
-        ),
-        vision_assist_failure_policy:
-          parsed.vision_assist?.failure_policy === 'skip' ? 'skip' : 'error',
-        vision_assist_strip_image:
-          parsed.vision_assist?.strip_image === undefined
-            ? true
-            : parsed.vision_assist.strip_image !== false,
-        vision_assist_endpoint_mode: normalizeVisionAssistEndpointMode(
-          parsed.vision_assist?.endpoint_mode
-        ),
-        vision_assist_max_concurrency: minNumberOrDefault(
-          parsed.vision_assist?.max_concurrency,
-          1,
-          2
-        ),
-        vision_assist_retry_count: minNumberOrDefault(
-          parsed.vision_assist?.retry_count,
-          0,
-          1
-        ),
-        vision_assist_retry_backoff_ms: minNumberOrDefault(
-          parsed.vision_assist?.retry_backoff_ms,
-          1,
-          500
-        ),
-        web_search_enabled: parsed.web_search?.enabled === true,
-        web_search_provider: normalizeWebSearchProvider(
-          parsed.web_search?.provider
-        ),
-        web_search_api_key: '',
-        web_search_api_key_configured:
-          parsed.web_search?.api_key_configured === true,
-        web_search_clear_api_key: false,
-        web_search_max_results: minNumberOrDefault(
-          parsed.web_search?.max_results,
-          1,
-          5
-        ),
-        web_search_search_depth: normalizeTavilySearchDepth(
-          parsed.web_search?.search_depth
-        ),
-        web_search_freshness: normalizeAnySearchFreshness(
-          parsed.web_search?.freshness
-        ),
-        web_search_content_types: Array.isArray(
-          parsed.web_search?.content_types
-        )
-          ? parsed.web_search.content_types.join(',')
-          : '',
       }
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -652,9 +420,7 @@ export function transformChannelToFormDefaults(
   let allowSpeed = false
   let claudeBetaQuery = false
   let disableTaskPollingSleep = false
-  let upstreamModelUpdateCheckEnabled = false
-  let upstreamModelUpdateAutoSyncEnabled = false
-  let upstreamModelUpdateIgnoredModels = ''
+  let buildOtherSettings = { ...BUILD_CHANNEL_OTHER_SETTING_DEFAULTS }
   let advancedCustom = ''
 
   if (channel.settings) {
@@ -672,15 +438,7 @@ export function transformChannelToFormDefaults(
       allowSpeed = parsed.allow_speed === true
       claudeBetaQuery = parsed.claude_beta_query === true
       disableTaskPollingSleep = parsed.disable_task_polling_sleep === true
-      upstreamModelUpdateCheckEnabled =
-        parsed.upstream_model_update_check_enabled === true
-      upstreamModelUpdateAutoSyncEnabled =
-        parsed.upstream_model_update_auto_sync_enabled === true
-      upstreamModelUpdateIgnoredModels = Array.isArray(
-        parsed.upstream_model_update_ignored_models
-      )
-        ? parsed.upstream_model_update_ignored_models.join(',')
-        : ''
+      buildOtherSettings = parseBuildChannelOtherSettingDefaults(parsed)
       if (parsed.advanced_custom) {
         advancedCustom = stringifyAdvancedCustomConfig(parsed.advanced_custom)
       }
@@ -731,9 +489,7 @@ export function transformChannelToFormDefaults(
     claude_beta_query: claudeBetaQuery,
     disable_task_polling_sleep: disableTaskPollingSleep,
     allow_safety_identifier: allowSafetyIdentifier,
-    upstream_model_update_check_enabled: upstreamModelUpdateCheckEnabled,
-    upstream_model_update_auto_sync_enabled: upstreamModelUpdateAutoSyncEnabled,
-    upstream_model_update_ignored_models: upstreamModelUpdateIgnoredModels,
+    ...buildOtherSettings,
     advanced_custom: advancedCustom,
   }
 }
@@ -759,61 +515,9 @@ function buildSettingJSON(formData: ChannelFormValues): string {
     thinking_to_content: formData.thinking_to_content || false,
     proxy: formData.proxy || '',
     pass_through_body_enabled: formData.pass_through_body_enabled || false,
-    responses_compact_passthrough_enabled:
-      formData.responses_compact_passthrough_enabled === true,
-    use_upstream_model_for_billing:
-      formData.use_upstream_model_for_billing === true,
+    ...buildChannelSettingFields(formData, existingSettings),
     system_prompt: formData.system_prompt || '',
     system_prompt_override: formData.system_prompt_override || false,
-    vision_assist: {
-      ...((isJsonObjectValue(existingSettings.vision_assist)
-        ? existingSettings.vision_assist
-        : {}) as Record<string, unknown>),
-      enabled: formData.vision_assist_enabled === true,
-      assist_channel_id: Number(formData.vision_assist_channel_id) || 0,
-      assist_model: String(formData.vision_assist_model || '').trim(),
-      target_models: parseCommaList(formData.vision_assist_target_models),
-      prompt: String(formData.vision_assist_prompt || '').trim(),
-      cache_ttl_seconds: minNumberOrDefault(
-        formData.vision_assist_cache_ttl_seconds,
-        0,
-        86400
-      ),
-      failure_policy:
-        formData.vision_assist_failure_policy === 'skip' ? 'skip' : 'error',
-      strip_image: formData.vision_assist_strip_image !== false,
-      endpoint_mode: normalizeVisionAssistEndpointMode(
-        formData.vision_assist_endpoint_mode
-      ),
-      max_concurrency: minNumberOrDefault(
-        formData.vision_assist_max_concurrency,
-        1,
-        2
-      ),
-      retry_count: minNumberOrDefault(formData.vision_assist_retry_count, 0, 1),
-      retry_backoff_ms: minNumberOrDefault(
-        formData.vision_assist_retry_backoff_ms,
-        1,
-        500
-      ),
-    },
-    web_search: {
-      ...((isJsonObjectValue(existingSettings.web_search)
-        ? existingSettings.web_search
-        : {}) as Record<string, unknown>),
-      enabled: formData.web_search_enabled === true,
-      provider: normalizeWebSearchProvider(formData.web_search_provider),
-      api_key: String(formData.web_search_api_key || '').trim() || undefined,
-      clear_api_key:
-        formData.web_search_clear_api_key === true &&
-        !String(formData.web_search_api_key || '').trim(),
-      max_results: minNumberOrDefault(formData.web_search_max_results, 1, 5),
-      search_depth: normalizeTavilySearchDepth(
-        formData.web_search_search_depth
-      ),
-      freshness: normalizeAnySearchFreshness(formData.web_search_freshness),
-      content_types: parseCommaList(formData.web_search_content_types),
-    },
   }
   return JSON.stringify(settingObj)
 }
@@ -879,13 +583,18 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
       formData.allow_include_obfuscation === true
     settingsObj.allow_inference_geo = formData.allow_inference_geo === true
   } else {
-    if ('disable_store' in settingsObj) delete settingsObj.disable_store
-    if ('allow_safety_identifier' in settingsObj)
+    if ('disable_store' in settingsObj) {
+      delete settingsObj.disable_store
+    }
+    if ('allow_safety_identifier' in settingsObj) {
       delete settingsObj.allow_safety_identifier
-    if ('allow_include_obfuscation' in settingsObj)
+    }
+    if ('allow_include_obfuscation' in settingsObj) {
       delete settingsObj.allow_include_obfuscation
-    if (formData.type !== 14 && 'allow_inference_geo' in settingsObj)
+    }
+    if (formData.type !== 14 && 'allow_inference_geo' in settingsObj) {
       delete settingsObj.allow_inference_geo
+    }
   }
 
   // Anthropic (type 14): claude_beta_query, allow_inference_geo, allow_speed
@@ -901,31 +610,7 @@ function buildSettingsJSON(formData: ChannelFormValues): string {
   settingsObj.disable_task_polling_sleep =
     formData.disable_task_polling_sleep === true
 
-  // Upstream model update settings (for model-fetchable channel types)
-  if (MODEL_FETCHABLE_TYPES.has(formData.type)) {
-    settingsObj.upstream_model_update_check_enabled =
-      formData.upstream_model_update_check_enabled === true
-    settingsObj.upstream_model_update_auto_sync_enabled =
-      settingsObj.upstream_model_update_check_enabled === true &&
-      formData.upstream_model_update_auto_sync_enabled === true
-    settingsObj.upstream_model_update_ignored_models = Array.from(
-      new Set(
-        String(formData.upstream_model_update_ignored_models || '')
-          .split(',')
-          .map((model) => model.trim())
-          .filter(Boolean)
-      )
-    )
-    if (
-      !Array.isArray(settingsObj.upstream_model_update_last_detected_models) ||
-      settingsObj.upstream_model_update_check_enabled !== true
-    ) {
-      settingsObj.upstream_model_update_last_detected_models = []
-    }
-    if (typeof settingsObj.upstream_model_update_last_check_time !== 'number') {
-      settingsObj.upstream_model_update_last_check_time = 0
-    }
-  }
+  applyBuildChannelOtherSettingFields(formData, settingsObj)
 
   if (formData.type === CHANNEL_TYPE_ADVANCED_CUSTOM) {
     const advancedCustomConfig = parseAdvancedCustomConfig(
