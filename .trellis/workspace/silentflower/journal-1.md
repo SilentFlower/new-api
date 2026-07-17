@@ -483,3 +483,44 @@
 ### Next Steps
 
 - None - task complete
+
+
+## 会话 15：Responses Compact 透传与基础模型计费
+
+**日期**：2026-07-17
+**任务**：Responses Compact 透传与基础模型计费
+**分支**：`build-bak`
+
+### 摘要
+
+完成 Responses Compact 基础模型选渠、选渠后渠道能力门禁、HTTP 与 WebSocket 原始透传、基础模型计费、管理端渠道测试和双前端配置，修复 CHK-001 至 CHK-008 并更新规格；真实 new-api 到 sub2api 四协议联调待具备运行环境和安全账号后执行。
+
+### 主要变更
+
+- V1、历史 body bridge、V2 HTTP/SSE 和 V2 WebSocket 统一按基础模型完成权限、亲和性选渠和计费。
+- 渠道选定后检查 `responses_compact_passthrough_enabled`；关闭时返回不可重试 503，不换渠、不预扣、不自动禁用。
+- HTTP 与 WebSocket Compact 使用独立原始透传模块，跳过模型映射、参数覆盖、禁用字段和 DTO 重组。
+- Default 与 Classic 渠道编辑界面增加透传开关；管理端 Compact 渠道测试按基础模型和原始协议执行。
+- 新增 build 分支上游同步友好定制指南，并更新 Responses Compact 后端契约。
+
+### Git 提交
+
+| 提交 | 说明 |
+|------|------|
+| `564d50d8f` | 重构 Responses Compact 透传与基础模型计费 |
+
+### 验证
+
+- 后端定向测试、Relay/Controller race 和定向 vet 通过。
+- Default 单测、typecheck、build 通过；Classic ESLint 和 locale JSON 解析通过。
+- `git diff --check` 通过。
+- 全仓 Go 测试与 vet 受缺少 `web/classic/dist/index.html` 的既有基线限制；Classic build 受既有 `date-fns` 依赖冲突限制。
+
+### 状态
+
+代码、检查、规格更新、提交和任务归档已完成；release audit 标记为需要人工复核。
+
+### 后续步骤
+
+- 具备运行环境和安全账号后，完成 new-api 到 sub2api 的 V1、历史 bridge、V2 HTTP/SSE 和 V2 WebSocket 真实联调。
+- 确认目标 sub2api 兼容后，再对目标渠道开启 `responses_compact_passthrough_enabled`。
