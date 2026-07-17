@@ -56,7 +56,9 @@
 
 ### Main Changes
 
-(Add details)
+- 从 Anthropic 最终请求的 `output_config.effort` 回填消费日志上下文，并反映参数覆盖后的最终值。
+- 补充字段存在、覆盖后改变和字段缺失的回归测试。
+- 同步后端日志规范，明确仅记录 effort 字符串，不记录完整请求体或敏感信息。
 
 ### Git Commits
 
@@ -67,7 +69,10 @@
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] Relay 全包测试
+- [OK] Service 测试
+- [OK] 定向 race、vet 与差异检查
+- [WARN] 未执行真实 Anthropic 请求和浏览器日志页面联调
 
 ### Status
 
@@ -75,7 +80,7 @@
 
 ### Next Steps
 
-- None - task complete
+- 具备安全测试账号后，可补充真实 Anthropic 请求和浏览器日志详情联调。
 
 
 ## Session 3: 完成视觉辅助端点并发与重试任务
@@ -524,3 +529,36 @@
 
 - 具备运行环境和安全账号后，完成 new-api 到 sub2api 的 V1、历史 bridge、V2 HTTP/SSE 和 V2 WebSocket 真实联调。
 - 确认目标 sub2api 兼容后，再对目标渠道开启 `responses_compact_passthrough_enabled`。
+
+
+## Session 16: 归档 Anthropic Reasoning Effort 日志适配
+
+**Date**: 2026-07-17
+**Task**: 归档 Anthropic Reasoning Effort 日志适配
+**Branch**: `build-bak`
+
+### Summary
+
+完成 Anthropic Reasoning Effort 日志适配任务收口：release audit 为 no-op，归档任务并保留未执行真实 Anthropic 请求及浏览器联调的验证备注。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `a83ebf90b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 15
+- **Total Sessions**: 16
 - **Last Active**: 2026-07-17
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~518 | Active |
+| `journal-1.md` | ~559 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 16 | 2026-07-17 | 归档 Anthropic Reasoning Effort 日志适配 | `a83ebf90b` | `build-bak` |
 | 15 | 2026-07-17 | Responses Compact 透传与基础模型计费 | `564d50d8f` | `build-bak` |
 | 14 | 2026-07-16 | 归档非流式保活与 Responses 视觉辅助任务 | `538dc0893`, `0e8e7e92d` | `build-bak` |
 | 13 | 2026-07-15 | 补全 Alpha Search 与远程压缩上游透传 | `66928c467` | `build-bak` |
