@@ -22,5 +22,17 @@
   "parent": null,
   "relatedFiles": [],
   "notes": "",
-  "meta": {}
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-07-17T16:56:34+08:00",
+    "completedSteps": [
+      "完成 Responses Compact 基础模型选渠、选渠后渠道能力门禁和不可重试 503 语义",
+      "完成 V1、历史 bridge、V2 HTTP/SSE、V2 WebSocket 原始透传与基础模型计费",
+      "完成管理端 Compact 渠道测试、Default/Classic 开关及多语言",
+      "完成 CHK-001 至 CHK-008 修复、定向后端与前端验证及规格更新"
+    ],
+    "partialStep": "真实 new-api 到 sub2api 的四协议联调尚未执行，当前缺少可用运行环境和安全账号",
+    "nextStep": "具备环境后执行 V1、历史 bridge、V2 HTTP/SSE、V2 WebSocket 真实联调；用户明确要求后再归档当前任务",
+    "notes": "全仓 Go 测试和 vet 受缺少 web/classic/dist/index.html 的既有基线限制；Classic build 受既有 date-fns 依赖冲突限制。"
+  }
 }
