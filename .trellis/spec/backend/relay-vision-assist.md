@@ -133,6 +133,124 @@ return &dto.GeminiChatRequest{
 }, nil
 ```
 
+## 场景：视觉辅助主链路薄层接入
+
+### 1. Scope / Trigger
+
+- Trigger: 修改 `controller.Relay` 的渠道重试准备、Claude/OpenAI Chat handler 的渠道初始化与模型映射、视觉辅助嵌套渠道上下文，或 Relay 错误日志写入。
+- 适用范围: build 分支需要在主请求计费前完成映射和视觉辅助改写，同时保持上游热点文件只保留窄生命周期调用。
+- 风险背景: 准备状态跨 Controller、Relay handler 和辅助渠道嵌套请求共享。状态未重置会让重试渠道复用旧映射，状态未恢复会让主请求继承辅助渠道；视觉辅助预处理失败若进入普通渠道错误处理，还可能错误封禁主渠道。
+
+### 2. Signatures
+
+- 主请求准备入口与状态边界：
+
+```go
+func PrepareRequestForSelectedChannel(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError
+func ResetRequestPreparation(c *gin.Context)
+func isRequestPreparationComplete(c *gin.Context) bool
+func markRequestPreparationComplete(c *gin.Context)
+```
+
+- Relay 错误日志入口：
+
+```go
+func recordRelayErrorLog(c *gin.Context, err *types.NewAPIError)
+func shouldRecordRelayErrorLog(c *gin.Context, err *types.NewAPIError) bool
+```
+
+### 3. Contracts
+
+- 文件所有权：
+  - `relay/vision_assist.go` 独占 `ContextKeyVisionAssistPrepared` 的运行时读写、渠道元信息初始化、模型映射和视觉辅助 Relay 实现。
+  - `controller/relay_error_log.go` 独占 Relay 错误日志门禁、字段组装、上下文扩展合并和数据库写入。
+  - `controller/relay.go` 只在每次渠道尝试开始时调用 `ResetRequestPreparation`，并在既有预处理失败和渠道失败位置调用 `recordRelayErrorLog`。
+  - `relay/compatible_handler.go` 和 `relay/claude_handler.go` 只通过 `isRequestPreparationComplete` 判断是否需要执行原有 `InitChannelMeta` 与 `ModelMappedHelper`。
+- 主请求准备顺序：
+  - 每次渠道重试必须先克隆原请求、清理 `ChannelMeta` 和 attempt 字段，再重置准备状态。
+  - 选定渠道后，`PrepareRequestForSelectedChannel` 必须先初始化渠道元信息和执行模型映射，再标记准备完成并调用 `service.ApplyVisionAssist`。
+  - 准备失败必须发生在主请求计费前；不得对未完成视觉改写的请求预扣主渠道费用。
+- handler 兼容：
+  - 已准备请求必须跳过重复初始化和重复模型映射，直接深拷贝已经改写的 `RelayInfo.Request`。
+  - 未经过 Controller 主循环的独立 handler 调用仍必须执行原有初始化和模型映射。
+- 辅助渠道上下文：
+  - 切换辅助渠道前必须快照主请求的准备状态；切换后重置状态，让辅助 handler 按辅助渠道重新初始化和映射。
+  - 辅助调用结束后必须恢复主请求准备状态及其他既有 context key，不能把辅助渠道 ID、密钥、模型或日志上下文泄漏到主请求。
+- 错误日志与封禁隔离：
+  - `recordRelayErrorLog` 只在 `types.IsRecordErrorLog(err)` 成立，并且全局错误日志开启或存在非空 `vision_assist_failure_reason` 时写入。
+  - 视觉辅助预处理失败直接记录日志后结束当前请求，不得调用 `processChannelError`，因此不得触发主渠道自动封禁。
+  - 日志继续使用 `MaskSensitiveErrorWithStatusCode`，并合并 `ContextKeyLogOther`、亲和性 admin 信息和请求耗时；不得记录请求体、图片内容或凭证。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 新的主渠道重试开始 | 准备状态重置为 false，按新渠道重新初始化、映射和视觉改写 |
+| `PrepareRequestForSelectedChannel` 完成映射 | 准备状态标记为 true，handler 不重复映射 |
+| handler 未经过主 Controller 准备 | 准备状态为 false，执行原有初始化和模型映射 |
+| 进入辅助渠道嵌套请求 | 重置准备状态，辅助 handler 使用辅助渠道元信息 |
+| 辅助调用返回主请求 | 恢复快照中的主请求准备状态和渠道上下文 |
+| 全局错误日志关闭且没有视觉失败原因 | 普通错误不写数据库错误日志 |
+| 全局错误日志关闭但存在视觉失败原因 | 写入脱敏错误日志和视觉失败字段 |
+| 视觉辅助预处理失败 | 记录日志并返回错误，不自动封禁主渠道 |
+
+### 5. Good/Base/Bad Cases
+
+- Good: 第一次主渠道视觉辅助完成后上游失败并重试；第二次尝试先重置状态，再按新渠道重新映射和执行该渠道的视觉配置。
+- Good: 主请求切到 Anthropic 辅助渠道；辅助 Claude handler 看到未准备状态，初始化辅助渠道并映射辅助模型；返回后恢复主请求状态。
+- Good: 全局错误日志关闭，但辅助调用失败写入 `vision_assist_failure_reason`；系统保存脱敏错误日志，同时不禁用主渠道。
+- Base: 单元测试直接调用 `TextHelper`，上下文没有准备标记；handler 保持原有初始化和映射行为。
+- Bad: Controller 直接写 `ContextKeyVisionAssistPrepared`，handler 也各自解释该 key，导致状态语义分散。
+- Bad: 重试时不重置准备状态，导致第二个渠道复用第一个渠道的 `ChannelMeta`、模型映射或已改写请求。
+- Bad: 视觉辅助预处理失败调用 `processChannelError`，把辅助渠道故障归因并封禁到主渠道。
+
+### 6. Tests Required
+
+- `TestRequestPreparationStateLifecycle`: 断言初始未准备、标记后已准备、重置后再次未准备。
+- 视觉辅助 Relay 测试必须覆盖模型映射后的最终模型、辅助渠道元信息初始化、端点模式和上下文恢复。
+- Controller 错误日志测试必须覆盖：
+  - 全局错误日志关闭时，视觉失败字段仍写入数据库。
+  - 普通错误尊重全局开关，不产生错误日志。
+  - 日志保留请求路径、请求 ID、视觉失败字段和脱敏错误。
+- 回归命令：
+  - `go test ./controller ./relay ./service -count=1`
+  - `go test -race ./controller ./relay ./service -run 'VisionAssist|RelayErrorLog|RequestPreparationState' -count=1`
+  - `go vet ./controller ./relay ./service`
+  - `git diff --check`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+common.SetContextKey(c, constant.ContextKeyVisionAssistPrepared, false)
+
+prepared := common.GetContextKeyBool(c, constant.ContextKeyVisionAssistPrepared)
+if !prepared {
+	info.InitChannelMeta(c)
+}
+```
+
+问题：Controller 和 handler 直接共享底层 context key，未来调整状态语义时容易漏改调用方，也扩大 build 分支与上游热点文件的冲突面。
+
+#### Correct
+
+```go
+// Controller 每次渠道尝试只保留生命周期调用。
+relay.ResetRequestPreparation(c)
+
+// Relay handler 只读取领域入口，不解释底层 context key。
+prepared := isRequestPreparationComplete(c)
+if !prepared {
+	info.InitChannelMeta(c)
+}
+```
+
+要求：
+- 状态 helper 与 `PrepareRequestForSelectedChannel` 同属 `relay/vision_assist.go`。
+- `controller/relay.go` 不承载视觉状态实现；Claude/OpenAI handler 不直接引用 `ContextKeyVisionAssistPrepared`。
+- 错误日志函数体放在 `controller/relay_error_log.go`，原调用位置和行为保持不变。
+
 ## 场景：Responses 工具输出视觉辅助
 
 ### 1. Scope / Trigger

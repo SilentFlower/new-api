@@ -30,6 +30,29 @@ type visionAssistPreparedRequest struct {
 	mode string
 }
 
+// ResetRequestPreparation 重置当前渠道尝试的请求准备状态。
+// @param c 当前 Gin 请求上下文。
+func ResetRequestPreparation(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	common.SetContextKey(c, constant.ContextKeyVisionAssistPrepared, false)
+}
+
+func isRequestPreparationComplete(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	return common.GetContextKeyBool(c, constant.ContextKeyVisionAssistPrepared)
+}
+
+func markRequestPreparationComplete(c *gin.Context) {
+	if c == nil {
+		return
+	}
+	common.SetContextKey(c, constant.ContextKeyVisionAssistPrepared, true)
+}
+
 // PrepareRequestForSelectedChannel 在主请求计费前完成渠道元信息、模型映射与视觉辅助改写。
 func PrepareRequestForSelectedChannel(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError {
 	if c == nil || info == nil || info.Request == nil {
@@ -39,7 +62,7 @@ func PrepareRequestForSelectedChannel(c *gin.Context, info *relaycommon.RelayInf
 	if err := helper.ModelMappedHelper(c, info, info.Request); err != nil {
 		return types.NewError(err, types.ErrorCodeChannelModelMappedError, types.ErrOptionWithSkipRetry())
 	}
-	common.SetContextKey(c, constant.ContextKeyVisionAssistPrepared, true)
+	markRequestPreparationComplete(c)
 	if shouldSkipVisionAssistPreprocess(c, info) {
 		return nil
 	}
@@ -655,7 +678,7 @@ func switchContextToVisionAssistChannel(c *gin.Context, channelModel *model.Chan
 		return func() {}, newAPIError
 	}
 	common.SetContextKey(c, constant.ContextKeyVisionAssistProcessing, true)
-	common.SetContextKey(c, constant.ContextKeyVisionAssistPrepared, false)
+	ResetRequestPreparation(c)
 	common.SetContextKey(c, constant.ContextKeyLogOther, map[string]interface{}{
 		"vision_assist":            true,
 		"assist_channel_id":        channelModel.Id,

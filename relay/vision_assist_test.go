@@ -19,6 +19,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRequestPreparationStateLifecycle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+
+	assert.False(t, isRequestPreparationComplete(c))
+	markRequestPreparationComplete(c)
+	assert.True(t, isRequestPreparationComplete(c))
+	ResetRequestPreparation(c)
+	assert.False(t, isRequestPreparationComplete(c))
+}
+
 func TestApplyVisionAssistAfterModelMappingUsesFinalUpstreamModel(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

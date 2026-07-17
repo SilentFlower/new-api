@@ -24,7 +24,7 @@ import (
 
 func ClaudeHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 
-	prepared := common.GetContextKeyBool(c, constant.ContextKeyVisionAssistPrepared)
+	prepared := isRequestPreparationComplete(c)
 	if !prepared {
 		info.InitChannelMeta(c)
 	}
