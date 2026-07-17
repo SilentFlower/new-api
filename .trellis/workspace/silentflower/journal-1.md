@@ -562,3 +562,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 17: 规范化 Build 特有 Feature 首批治理
+
+**Date**: 2026-07-17
+**Task**: 规范化 Build 特有 Feature 首批治理
+**Branch**: `build-bak`
+
+### Summary
+
+完成 Responses WebSocket 渠道选择隔离、HTTP Distribute 上游友好恢复及 Relay/Alpha Search 计费拆分；行为契约回归、定向 race、Check-All、规格更新和推送已完成。release audit 为 no-op；全仓检查仅受既有 Classic embed 缺失阻断，未执行真实 OpenAI/sub2api 联调。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c544a21bb` | (see git log) |
+| `c213dd7e6` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
