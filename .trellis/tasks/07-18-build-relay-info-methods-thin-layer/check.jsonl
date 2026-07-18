@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"验证 RelayInfo 核心文件只保留结构和通用初始化职责。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"验证 Compact mode 判断语义未改变。"}
+{"file":".trellis/spec/backend/relay-billing-model.md","reason":"验证计费模型方法仍在 billing_model.go，冻结字段语义不变。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"验证测试、注释和 Go 质量约束。"}
