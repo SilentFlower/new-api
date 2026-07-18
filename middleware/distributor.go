@@ -16,7 +16,6 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
-	relayhelper "github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -419,26 +418,8 @@ func getModelRequest(c *gin.Context) (*ModelRequest, bool, error) {
 		common.SetContextKey(c, constant.ContextKeyTokenGroup, modelRequest.Group)
 	}
 
-	if strings.HasPrefix(c.Request.URL.Path, "/v1/responses") {
-		var requestBody []byte
-		if !strings.HasPrefix(c.Request.URL.Path, "/v1/responses/compact") {
-			storage, storageErr := common.GetBodyStorage(c)
-			if storageErr != nil {
-				return nil, false, storageErr
-			}
-			requestBody, storageErr = storage.Bytes()
-			if storageErr != nil {
-				return nil, false, storageErr
-			}
-		}
-		compactMode := relayhelper.DetectResponsesCompactMode(
-			c.Request.Method,
-			c.Request.URL.Path,
-			c.Request.Header,
-			requestBody,
-			relayhelper.ResponsesTransportHTTP,
-		)
-		common.SetContextKey(c, constant.ContextKeyResponsesCompactMode, compactMode)
+	if err := detectAndStoreResponsesCompactMode(c); err != nil {
+		return nil, false, err
 	}
 	return &modelRequest, shouldSelectChannel, nil
 }

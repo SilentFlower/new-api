@@ -1,0 +1,3 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"要求 Distributor 主流程只保留 Compact 检测薄接入，不为复用重构上游分发。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"规定 Compact 检测模式、基础模型选渠和 Distribute 边界。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查 Go 代码质量、注释和测试要求。"}
