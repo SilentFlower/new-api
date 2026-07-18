@@ -702,3 +702,41 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 21: Build 分支薄层治理收尾
+
+**Date**: 2026-07-18
+**Task**: Build 分支薄层治理收尾
+**Branch**: `build-bak`
+
+### Summary
+
+完成 6 个 build 分支薄层治理任务：RelayInfo、Responses Compact 审计、Alpha Search 校验、Distributor 检测、Responses handler、公共 Token 日志前端；已通过对应验证并推送业务提交，随后归档父子任务。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `31658f82b` | (see git log) |
+| `1ef02db57` | (see git log) |
+| `8b265701b` | (see git log) |
+| `53ff3518b` | (see git log) |
+| `966f3deb0` | (see git log) |
+| `c1ab8a7d3` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
