@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"检查 diff 是否符合 build 薄层化和低上游冲突要求。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查 Go JSON、测试、受保护项目信息和前端 Bun 命令约束。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"回归 Compact/Alpha Search 计费、日志、错误和透传契约。"}
+{"file":".trellis/spec/backend/relay-billing-model.md","reason":"回归计费模型快照、冻结和恢复契约。"}

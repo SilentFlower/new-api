@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"父任务的最高优先级治理原则：定制逻辑独立、上游文件最薄接入、回滚和同步复核。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"覆盖 Responses Compact 与 Alpha Search 的行为边界、计费、日志和验证要求。"}
+{"file":".trellis/spec/backend/relay-billing-model.md","reason":"覆盖 RelayInfo 计费模型快照方法和 Responses Compact 临时查价恢复约束。"}
+{"file":"web/default/AGENTS.md","reason":"公共 Token 日志 Default 前端拆分时的 i18n、组件、类型检查和构建规范。"}
