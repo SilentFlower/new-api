@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"要求主 Responses handler 只保留 Compact 薄调用，不重排上游主流程。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"规定 Responses Compact endpoint、请求转换、audit 和计费行为边界。"}
+{"file":".trellis/spec/backend/relay-billing-model.md","reason":"规定 Compact 临时查价必须保存和恢复冻结计费模型。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查 JSON wrapper、注释、测试和 Go 质量约束。"}

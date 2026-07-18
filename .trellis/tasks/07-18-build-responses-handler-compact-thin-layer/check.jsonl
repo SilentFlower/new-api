@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"验证 `relay/responses_handler.go` 是否只剩窄调用。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"验证 Compact endpoint、audit outcome 和 Responses 普通路径未变。"}
+{"file":".trellis/spec/backend/relay-billing-model.md","reason":"验证临时查价和计费模型冻结恢复行为。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"验证测试、注释和 Go 质量约束。"}
