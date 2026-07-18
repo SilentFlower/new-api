@@ -24,49 +24,8 @@ import React, {
   useMemo,
   useRef,
 } from 'react';
-import {
-  Button,
-  Input,
-  Card,
-  Tag,
-  Space,
-  Form,
-  Empty,
-  Descriptions,
-  Skeleton,
-  Avatar,
-  Tabs,
-  TabPane,
-  Typography,
-  Toast,
-  Spin,
-  DatePicker,
-  RadioGroup,
-  Radio,
-} from '@douyinfe/semi-ui';
-import {
-  IconSearch,
-  IconKey,
-  IconPulse,
-  IconCoinMoneyStroked,
-  IconTextStroked,
-  IconStopwatchStroked,
-  IconSend,
-  IconTypograph,
-  IconRefresh,
-} from '@douyinfe/semi-icons';
-import {
-  PieChart,
-  Activity,
-  Zap,
-  Gauge,
-  KeyRound,
-  CalendarClock,
-} from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { initVChartSemiTheme } from '@visactor/vchart-semi-theme';
-import { VChart } from '@visactor/react-vchart';
-import axios from 'axios';
 
 import {
   renderQuota,
@@ -75,10 +34,7 @@ import {
   modelToColor,
   getQuotaWithUnit,
   timestamp2string,
-  getTodayStartTimestamp,
   getLogOther,
-  renderModelTag,
-  renderModelPriceSimple,
   copy,
   showSuccess,
   renderLogContent,
@@ -88,51 +44,29 @@ import {
   renderAudioModelPrice,
 } from '../../helpers';
 import {
-  processRawData,
-  calculateTrendData,
   aggregateDataByTimeAndModel,
   generateChartTimePoints,
   updateChartSpec,
-  updateMapValue,
-  initializeMaps,
-  createSectionTitle,
   getDefaultTime,
-  getInitialTimestamp,
 } from '../../helpers/dashboard';
-import {
-  CHART_CONFIG,
-  CARD_PROPS,
-  TIME_OPTIONS,
-} from '../../constants/dashboard.constants';
 import { ITEMS_PER_PAGE } from '../../constants';
 import { getLogsColumns } from '../../components/table/usage-logs/UsageLogsColumnDefs';
-import CardTable from '../../components/common/ui/CardTable';
 import {
-  IllustrationNoResult,
-  IllustrationNoResultDark,
-  IllustrationNoAccess,
-  IllustrationNoAccessDark,
-} from '@douyinfe/semi-illustrations';
+  createTokenAPI,
+} from './api';
+import {
+  TokenLogAuthPanel,
+  TokenLogChartsPanel,
+  TokenLogHeader,
+  TokenLogStatsCards,
+  TokenLogTablePanel,
+  TokenLogTimeRangeControls,
+} from './components';
+import {
+  getGlobalTokenLogTimeRange,
+} from './utils';
 import ParamOverrideEntry from '../../components/table/usage-logs/components/ParamOverrideEntry';
 import ParamOverrideModal from '../../components/table/usage-logs/modals/ParamOverrideModal';
-
-/**
- * createTokenAPI - 创建一个带有 API Key 认证的 axios 实例
- * 用于公共日志查看器的所有 API 请求
- * @param {string} apiKey - 用户输入的 API Key
- * @returns {import('axios').AxiosInstance}
- */
-const createTokenAPI = (apiKey) => {
-  return axios.create({
-    baseURL: import.meta.env.VITE_REACT_APP_SERVER_URL
-      ? import.meta.env.VITE_REACT_APP_SERVER_URL
-      : '',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Cache-Control': 'no-store',
-    },
-  });
-};
 
 /**
  * LogViewer - 公共 API Key 使用日志查看页面
@@ -154,8 +88,6 @@ const LogViewer = () => {
 
   // ========== 图表数据状态 ==========
   const [chartLoading, setChartLoading] = useState(false);
-  const [modelStats, setModelStats] = useState([]);
-  const [quotaData, setQuotaData] = useState([]);
   const [activeChartTab, setActiveChartTab] = useState('1');
 
   // ========== 日志表格状态 ==========
@@ -166,9 +98,6 @@ const LogViewer = () => {
   const [logCount, setLogCount] = useState(0);
   const [pageSize, setPageSize] = useState(ITEMS_PER_PAGE);
   const [formApi, setFormApi] = useState(null);
-
-  // ========== 日志类型过滤状态 ==========
-  const [logType, setLogType] = useState(0);
 
   // ========== 参数覆盖弹窗状态 ==========
   const [showParamOverrideModal, setShowParamOverrideModal] = useState(false);
@@ -287,48 +216,8 @@ const LogViewer = () => {
 
   // ========== 全局时间范围计算 ==========
   const getGlobalTimeRange = useCallback(() => {
-    const now = Math.floor(Date.now() / 1000);
-    if (
-      timePreset === 'custom' &&
-      customDateRange &&
-      customDateRange.length === 2
-    ) {
-      return {
-        startTs: Math.floor(new Date(customDateRange[0]).getTime() / 1000),
-        endTs: Math.floor(new Date(customDateRange[1]).getTime() / 1000),
-      };
-    }
-    const presetMap = {
-      today: getTodayStartTimestamp(),
-      '7d': now - 7 * 86400,
-      '30d': now - 30 * 86400,
-    };
-    return {
-      startTs: Math.floor(presetMap[timePreset] || presetMap.today),
-      endTs: now,
-    };
+    return getGlobalTokenLogTimeRange(timePreset, customDateRange);
   }, [timePreset, customDateRange]);
-
-  // ========== 时间范围显示文本 ==========
-  const timeRangeLabel = useMemo(() => {
-    const labels = {
-      today: t('今天'),
-      '7d': t('最近 7 天'),
-      '30d': t('最近 30 天'),
-    };
-    if (
-      timePreset === 'custom' &&
-      customDateRange &&
-      customDateRange.length === 2
-    ) {
-      const fmt = (d) => {
-        const dt = new Date(d);
-        return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-      };
-      return `${fmt(customDateRange[0])} ~ ${fmt(customDateRange[1])}`;
-    }
-    return labels[timePreset] || labels.today;
-  }, [timePreset, customDateRange, t]);
 
   // ========== 初始化图表主题 ==========
   useEffect(() => {
@@ -716,8 +605,6 @@ const LogViewer = () => {
         );
         if (res.data.success) {
           const data = res.data.data;
-          setModelStats(data.model_stats || []);
-          setQuotaData(data.quota_data || []);
 
           // 更新饼图数据
           const pieData = (data.model_stats || []).map((item) => ({
@@ -900,103 +787,23 @@ const LogViewer = () => {
     return allColumns.filter((col) => visibleColumns[col.key]);
   }, [allColumns, visibleColumns]);
 
-  // ========== 展开行渲染 ==========
-  const expandRowRender = useCallback(
-    (record) => {
-      return <Descriptions data={expandData[record.key]} />;
-    },
-    [expandData],
-  );
-
   const hasExpandableRows = useCallback(() => {
     return logs.some(
       (log) => expandData[log.key] && expandData[log.key].length > 0,
     );
   }, [logs, expandData]);
 
-  // ========== 统计卡片配置 ==========
-  const statsCards = useMemo(() => {
-    if (!stat) return [];
-    return [
-      {
-        title: t('使用次数'),
-        value: stat.count?.toLocaleString() || '0',
-        icon: <IconSend />,
-        avatarColor: 'green',
-        bgColor: 'bg-green-50',
-      },
-      {
-        title: t('消耗额度'),
-        value: renderQuota(stat.quota || 0),
-        icon: <IconCoinMoneyStroked />,
-        avatarColor: 'yellow',
-        bgColor: 'bg-yellow-50',
-      },
-      {
-        title: t('Token 用量'),
-        value: (
-          stat.total_tokens ??
-          (stat.prompt_tokens || 0) + (stat.completion_tokens || 0)
-        ).toLocaleString(),
-        icon: <IconTextStroked />,
-        avatarColor: 'blue',
-        bgColor: 'bg-blue-50',
-      },
-      {
-        title: 'RPM / TPM',
-        value: `${stat.rpm || 0} / ${stat.tpm || 0}`,
-        icon: <IconStopwatchStroked />,
-        avatarColor: 'purple',
-        bgColor: 'bg-purple-50',
-      },
-    ];
-  }, [stat, t]);
-
   // ========== 未认证界面 ==========
   if (!authenticated) {
     return (
-      <div className='px-4 py-4'>
-        <div className='max-w-lg mx-auto mt-20'>
-          <Card
-            {...CARD_PROPS}
-            className='!rounded-2xl'
-            title={
-              <div className='flex items-center gap-2'>
-                <KeyRound size={18} />
-                {t('API Key 日志查看器')}
-              </div>
-            }
-          >
-            <div className='space-y-4'>
-              <Typography.Text type='secondary'>
-                {t('输入您的 API Key 以查看使用日志和统计数据')}
-              </Typography.Text>
-              <Input
-                prefix={<IconKey />}
-                placeholder={t('请输入 API Key（sk-...）')}
-                value={apiKey}
-                onChange={setApiKey}
-                onEnterPress={handleAuth}
-                size='large'
-                showClear
-              />
-              {authError && (
-                <Typography.Text type='danger'>{authError}</Typography.Text>
-              )}
-              <Button
-                theme='solid'
-                type='primary'
-                block
-                loading={authLoading}
-                onClick={handleAuth}
-                size='large'
-              >
-                {t('查询')}
-              </Button>
-            </div>
-          </Card>
-        </div>
-      </div>
+      <TokenLogAuthPanel
+        t={t}
+        apiKey={apiKey}
+        setApiKey={setApiKey}
+        authError={authError}
+        authLoading={authLoading}
+        onAuth={handleAuth}
+      />
     );
   }
 
@@ -1013,287 +820,54 @@ const LogViewer = () => {
 
       {/* 顶部：标题 + 全局时间选择器 + 操作 */}
       <div className='mb-4 flex flex-col gap-3'>
-        <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2'>
-          <div className='flex items-center gap-2'>
-            <KeyRound size={18} />
-            <Typography.Title heading={5} style={{ margin: 0 }}>
-              {t('API Key 日志查看器')}
-            </Typography.Title>
-          </div>
-          <Button
-            type='tertiary'
-            size='small'
-            onClick={() => {
+        <TokenLogHeader
+          t={t}
+          onSwitchKey={() => {
               setAuthenticated(false);
               setApiKey('');
               setStat(null);
               setLogs([]);
-              setModelStats([]);
-              setQuotaData([]);
               tokenAPI.current = null;
             }}
-          >
-            {t('切换 Key')}
-          </Button>
-        </div>
-        {/* 全局时间范围选择器 */}
-        <div className='flex flex-col sm:flex-row items-start sm:items-center gap-3 p-3 bg-[var(--semi-color-fill-0)] rounded-xl'>
-          <div className='flex items-center gap-2 text-sm text-[var(--semi-color-text-2)]'>
-            <CalendarClock size={16} />
-            <span>{t('数据范围')}</span>
-          </div>
-          <RadioGroup
-            type='button'
-            buttonSize='small'
-            value={timePreset}
-            onChange={(e) => {
-              setTimePreset(e.target.value);
-              if (e.target.value !== 'custom') {
-                setCustomDateRange(null);
-              }
-            }}
-          >
-            <Radio value='today'>{t('今天')}</Radio>
-            <Radio value='7d'>{t('7 天')}</Radio>
-            <Radio value='30d'>{t('30 天')}</Radio>
-            <Radio value='custom'>{t('自定义')}</Radio>
-          </RadioGroup>
-          {timePreset === 'custom' && (
-            <DatePicker
-              type='dateTimeRange'
-              value={customDateRange}
-              onChange={(value) => setCustomDateRange(value)}
-              placeholder={[t('开始时间'), t('结束时间')]}
-              size='small'
-              density='compact'
-              style={{ width: 360 }}
-            />
-          )}
-          <Button
-            icon={<IconRefresh />}
-            type='tertiary'
-            size='small'
-            onClick={refreshAll}
-            loading={statLoading || chartLoading || logLoading}
-          />
-        </div>
+        />
+        <TokenLogTimeRangeControls
+          t={t}
+          timePreset={timePreset}
+          setTimePreset={setTimePreset}
+          customDateRange={customDateRange}
+          setCustomDateRange={setCustomDateRange}
+          onRefresh={refreshAll}
+          loading={statLoading || chartLoading || logLoading}
+        />
       </div>
 
-      {/* 统计卡片 */}
-      <div className='mb-4'>
-        <div className='grid grid-cols-2 lg:grid-cols-4 gap-4'>
-          {statsCards.map((card, idx) => (
-            <Card
-              key={idx}
-              {...CARD_PROPS}
-              className={`${card.bgColor} border-0 !rounded-2xl`}
-            >
-              <div className='flex items-center'>
-                <Avatar className='mr-3' size='small' color={card.avatarColor}>
-                  {card.icon}
-                </Avatar>
-                <div>
-                  <div className='text-xs text-gray-500'>{card.title}</div>
-                  <div className='text-lg font-semibold'>
-                    <Skeleton
-                      loading={statLoading}
-                      active
-                      placeholder={
-                        <Skeleton.Paragraph
-                          active
-                          rows={1}
-                          style={{
-                            width: '65px',
-                            height: '24px',
-                            marginTop: '4px',
-                          }}
-                        />
-                      }
-                    >
-                      {card.value}
-                    </Skeleton>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      </div>
+      <TokenLogStatsCards t={t} stat={stat} loading={statLoading} />
 
-      {/* 图表区域 */}
-      <div className='mb-4'>
-        <Card
-          {...CARD_PROPS}
-          className='!rounded-2xl'
-          title={
-            <div className='flex flex-col lg:flex-row lg:items-center lg:justify-between w-full gap-3'>
-              <div className='flex items-center gap-2'>
-                <PieChart size={16} />
-                {t('模型数据分析')}
-              </div>
-              <Tabs
-                type='slash'
-                activeKey={activeChartTab}
-                onChange={setActiveChartTab}
-              >
-                <TabPane tab={<span>{t('调用次数分布')}</span>} itemKey='1' />
-                <TabPane tab={<span>{t('消耗分布')}</span>} itemKey='2' />
-              </Tabs>
-            </div>
-          }
-          bodyStyle={{ padding: 0 }}
-        >
-          <Spin spinning={chartLoading}>
-            <div className='h-96 p-2'>
-              {activeChartTab === '1' && (
-                <VChart spec={specPie} option={CHART_CONFIG} />
-              )}
-              {activeChartTab === '2' && (
-                <VChart spec={specLine} option={CHART_CONFIG} />
-              )}
-            </div>
-          </Spin>
-        </Card>
-      </div>
+      <TokenLogChartsPanel
+        t={t}
+        activeChartTab={activeChartTab}
+        setActiveChartTab={setActiveChartTab}
+        specPie={specPie}
+        specLine={specLine}
+        loading={chartLoading}
+      />
 
-      {/* 日志表格区域 */}
-      <div className='mb-4'>
-        <Card
-          {...CARD_PROPS}
-          className='!rounded-2xl'
-          title={
-            <div className='flex items-center gap-2'>
-              <Activity size={16} />
-              {t('使用日志')}
-            </div>
-          }
-        >
-          {/* 过滤器 */}
-          <Form
-            initValues={{
-              model_name: '',
-              request_id: '',
-              logType: '0',
-            }}
-            getFormApi={(api) => setFormApi(api)}
-            onSubmit={refreshAll}
-            allowEmpty={true}
-            autoComplete='off'
-            layout='vertical'
-          >
-            <div className='flex flex-col gap-2 mb-4'>
-              <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2'>
-                <Form.Input
-                  field='model_name'
-                  prefix={<IconSearch />}
-                  placeholder={t('模型名称')}
-                  showClear
-                  pure
-                  size='small'
-                />
-                <Form.Input
-                  field='request_id'
-                  prefix={<IconSearch />}
-                  placeholder={t('Request ID')}
-                  showClear
-                  pure
-                  size='small'
-                />
-              </div>
-              <div className='flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3'>
-                <div className='w-full sm:w-auto'>
-                  <Form.Select
-                    field='logType'
-                    placeholder={t('日志类型')}
-                    className='w-full sm:w-auto min-w-[120px]'
-                    showClear
-                    pure
-                    onChange={() => {
-                      setTimeout(() => refreshAll(), 0);
-                    }}
-                    size='small'
-                  >
-                    <Form.Select.Option value='0'>
-                      {t('全部')}
-                    </Form.Select.Option>
-                    <Form.Select.Option value='2'>
-                      {t('消费')}
-                    </Form.Select.Option>
-                    <Form.Select.Option value='5'>
-                      {t('错误')}
-                    </Form.Select.Option>
-                    <Form.Select.Option value='6'>
-                      {t('退款')}
-                    </Form.Select.Option>
-                  </Form.Select>
-                </div>
-                <div className='flex gap-2 w-full sm:w-auto justify-end'>
-                  <Button
-                    type='tertiary'
-                    htmlType='submit'
-                    loading={logLoading}
-                    size='small'
-                  >
-                    {t('查询')}
-                  </Button>
-                  <Button
-                    type='tertiary'
-                    onClick={() => {
-                      if (formApi) {
-                        formApi.reset();
-                        setTimeout(() => refreshAll(), 100);
-                      }
-                    }}
-                    size='small'
-                  >
-                    {t('重置')}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </Form>
-
-          {/* 表格 */}
-          <CardTable
-            columns={tableColumns}
-            {...(hasExpandableRows() && {
-              expandedRowRender: expandRowRender,
-              expandRowByClick: true,
-              rowExpandable: (record) =>
-                expandData[record.key] && expandData[record.key].length > 0,
-            })}
-            dataSource={logs}
-            rowKey='key'
-            loading={logLoading}
-            scroll={{ x: 'max-content' }}
-            className='rounded-xl overflow-hidden'
-            size='small'
-            empty={
-              <Empty
-                image={
-                  <IllustrationNoResult style={{ width: 150, height: 150 }} />
-                }
-                darkModeImage={
-                  <IllustrationNoResultDark
-                    style={{ width: 150, height: 150 }}
-                  />
-                }
-                description={t('搜索无结果')}
-                style={{ padding: 30 }}
-              />
-            }
-            pagination={{
-              currentPage: activePage,
-              pageSize: pageSize,
-              total: logCount,
-              pageSizeOptions: [10, 20, 50, 100],
-              showSizeChanger: true,
-              onPageSizeChange: handlePageSizeChange,
-              onPageChange: handlePageChange,
-            }}
-          />
-        </Card>
-      </div>
+      <TokenLogTablePanel
+        t={t}
+        formApi={formApi}
+        setFormApi={setFormApi}
+        tableColumns={tableColumns}
+        hasExpandableRows={hasExpandableRows}
+        expandData={expandData}
+        logs={logs}
+        activePage={activePage}
+        pageSize={pageSize}
+        logCount={logCount}
+        loading={logLoading}
+        onRefresh={refreshAll}
+        onPageSizeChange={handlePageSizeChange}
+        onPageChange={handlePageChange}
+      />
     </div>
   );
 };

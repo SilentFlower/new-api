@@ -1,0 +1,4 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"验证前端页面入口是否变薄，新增文件是否承担领域职责。"}
+{"file":"web/default/AGENTS.md","reason":"验证 Default typecheck、build、i18n、文件组织和组件规范。"}
+{"file":".agents/skills/i18n-translate/SKILL.md","reason":"验证 locale 修改是否通过脚本和 i18n:sync，未手工编辑 JSON。"}
+{"file":".agents/skills/vercel-react-best-practices/SKILL.md","reason":"验证拆分后没有引入明显请求瀑布、无谓重渲染或错误 hooks 依赖。"}

@@ -1,0 +1,5 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"指导前端 build 定制页面入口保持薄层，新增领域文件承载实现。"}
+{"file":"web/default/AGENTS.md","reason":"Default React/TypeScript/i18n/Bun/文件组织和检查命令规范。"}
+{"file":".agents/skills/i18n-translate/SKILL.md","reason":"Default 公共日志涉及用户可见文案，新增或调整 i18n key 必须按脚本流程。"}
+{"file":".agents/skills/vercel-react-best-practices/SKILL.md","reason":"拆分 React 组件和 hooks 时避免不必要渲染、请求瀑布和状态错误。"}
+{"file":".agents/skills/shadcn-ui/SKILL.md","reason":"Default UI 组件拆分需保持项目 Base UI/shadcn-aware 组件上下文，不引入错误组件体系。"}
