@@ -1,0 +1,3 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"要求 Alpha Search 定制校验迁出通用上游文件，只保留薄调用。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"规定 Alpha Search 最小 DTO、重复 model、max_output_tokens 上限和原始 body 透传契约。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查 JSON wrapper、可选字段指针和测试规范。"}
