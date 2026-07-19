@@ -1,0 +1,36 @@
+{
+  "id": "dashboard-natural-period-user-analytics-fixes",
+  "name": "dashboard-natural-period-user-analytics-fixes",
+  "title": "数据看板自然周期与用户统计修复",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-07-19",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-07-19T17:16:48Z",
+    "completedSteps": [
+      "实现与检查完成",
+      "业务变更已提交并推送"
+    ],
+    "partialStep": null,
+    "nextStep": "等待 finish-work 归档",
+    "notes": "数据看板自然周期、用户统计筛选 i18n、用户排行实际数量显示与 VChart 标签采样修复已完成。"
+  }
+}

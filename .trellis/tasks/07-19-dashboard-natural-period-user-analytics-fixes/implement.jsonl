@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/guides/build-upstream-friendly-customization.md", "reason": "约束 build 分支定制使用独立模块和最薄接入，降低上游同步冲突"}
+{"file": ".trellis/spec/guides/code-reuse-thinking-guide.md", "reason": "新增自然周期常量和时间 helper 前检查现有复用边界"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "提供前端 Bun、测试、i18n 与受保护信息质量约束"}
+{"file": ".trellis/tasks/07-19-dashboard-natural-period-user-analytics-fixes/research/vchart-user-ranking.md", "reason": "记录 VChart band 轴默认标签采样与排名滚动设计依据"}
