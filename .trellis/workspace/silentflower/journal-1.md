@@ -740,3 +740,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 22: 数据看板自然周期与用户统计修复
+
+**Date**: 2026-07-20
+**Task**: 数据看板自然周期与用户统计修复
+**Branch**: `build-bak`
+
+### Summary
+
+完成新 UI 数据看板自然周期筛选、用户统计筛选 i18n、用户排行实际数量展示与 VChart 标签采样修复；已提交推送并触发 build。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e5077dc1b` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
