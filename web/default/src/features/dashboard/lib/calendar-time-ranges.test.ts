@@ -55,6 +55,17 @@ describe('dashboard calendar time ranges', () => {
     assert.equal(range.granularity, 'hour')
   })
 
+  test('uses local day boundaries for yesterday across year boundary', () => {
+    const range = getDashboardCalendarTimeRange(
+      'yesterday',
+      new Date(2026, 0, 1, 14, 30)
+    )
+
+    assertLocalDate(range.start, [2025, 11, 31, 0, 0, 0, 0])
+    assertLocalDate(range.end, [2025, 11, 31, 23, 59, 59, 999])
+    assert.equal(range.granularity, 'hour')
+  })
+
   test('uses Monday through Sunday for week ranges', () => {
     const current = getDashboardCalendarTimeRange('this_week', sunday)
     const previous = getDashboardCalendarTimeRange('last_week', sunday)
@@ -87,6 +98,7 @@ describe('dashboard calendar time ranges', () => {
 
   test('detects calendar ranges before rolling ranges', () => {
     const today = getDashboardCalendarTimeRange('today', sunday)
+    const yesterday = getDashboardCalendarTimeRange('yesterday', sunday)
     const rolling = getRollingDateRange(1, sunday)
 
     assert.equal(
@@ -98,6 +110,16 @@ describe('dashboard calendar time ranges', () => {
         sunday
       ),
       'today'
+    )
+    assert.equal(
+      detectDashboardCalendarTimeRange(
+        {
+          start_timestamp: yesterday.start,
+          end_timestamp: yesterday.end,
+        },
+        sunday
+      ),
+      'yesterday'
     )
     assert.equal(
       detectDashboardCalendarTimeRange(

@@ -176,6 +176,7 @@ export const STATIC_I18N_KEYS = [
 
   // 数据看板动态筛选与统计文案
   'Calendar Period',
+  'Yesterday',
   'This Week',
   'Last Week',
   'This Month',

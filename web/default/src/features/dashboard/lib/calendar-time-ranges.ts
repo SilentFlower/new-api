@@ -22,6 +22,7 @@ import { getEndOfDay, getStartOfDay, type TimeGranularity } from '@/lib/time'
 /** 数据看板支持的自然周期标识。 */
 export type DashboardCalendarRangeId =
   | 'today'
+  | 'yesterday'
   | 'this_week'
   | 'last_week'
   | 'this_month'
@@ -45,6 +46,7 @@ export interface DashboardCalendarTimeRange {
 export const DASHBOARD_CALENDAR_RANGES: readonly DashboardCalendarRangeOption[] =
   [
     { id: 'today', label: 'Today', granularity: 'hour' },
+    { id: 'yesterday', label: 'Yesterday', granularity: 'hour' },
     { id: 'this_week', label: 'This Week', granularity: 'day' },
     { id: 'last_week', label: 'Last Week', granularity: 'day' },
     { id: 'this_month', label: 'This Month', granularity: 'week' },
@@ -69,10 +71,15 @@ export function getDashboardCalendarTimeRange(
     throw new Error(`Unsupported dashboard calendar range: ${id}`)
   }
 
-  if (id === 'today') {
+  if (id === 'today' || id === 'yesterday') {
+    const start = new Date(baseDate)
+    if (id === 'yesterday') {
+      start.setDate(baseDate.getDate() - 1)
+    }
+
     return {
-      start: baseDate,
-      end: getEndOfDay(baseDate),
+      start,
+      end: getEndOfDay(start),
       granularity: option.granularity,
     }
   }
