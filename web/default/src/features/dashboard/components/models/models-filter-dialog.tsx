@@ -39,13 +39,19 @@ import {
   TIME_GRANULARITY_OPTIONS,
   TIME_RANGE_PRESETS,
 } from '@/features/dashboard/constants'
+import { useDashboardFilterOptions } from '@/features/dashboard/hooks/use-dashboard-filter-options'
 import {
   buildDefaultDashboardFilters,
   cleanFilters,
   filterDashboardTokenOptionsByGroups,
   filterDashboardTokenValuesByGroups,
 } from '@/features/dashboard/lib'
-import { useDashboardFilterOptions } from '@/features/dashboard/hooks/use-dashboard-filter-options'
+import {
+  DASHBOARD_CALENDAR_RANGES,
+  detectDashboardCalendarTimeRange,
+  getDashboardCalendarTimeRange,
+  type DashboardCalendarRangeId,
+} from '@/features/dashboard/lib/calendar-time-ranges'
 import type {
   DashboardChartPreferences,
   DashboardFilters,
@@ -112,8 +118,14 @@ export function ModelsFilter(props: ModelsFilterProps) {
       props.currentFilters ?? buildDefaultDashboardFilters(props.preferences)
   )
   const [selectedRange, setSelectedRange] = useState<number | null>(() =>
-    detectQuickRangeDays(props.currentFilters)
+    detectDashboardCalendarTimeRange(props.currentFilters)
+      ? null
+      : detectQuickRangeDays(props.currentFilters)
   )
+  const [selectedCalendarRange, setSelectedCalendarRange] =
+    useState<DashboardCalendarRangeId | null>(() =>
+      detectDashboardCalendarTimeRange(props.currentFilters)
+    )
 
   const handleOpenChange = (nextOpen: boolean) => {
     // Sync the editing state from the applied filters every time the dialog
@@ -121,8 +133,10 @@ export function ModelsFilter(props: ModelsFilterProps) {
     if (nextOpen) {
       const applied =
         props.currentFilters ?? buildDefaultDashboardFilters(props.preferences)
+      const calendarRange = detectDashboardCalendarTimeRange(applied)
       setFilters(applied)
-      setSelectedRange(detectQuickRangeDays(applied))
+      setSelectedCalendarRange(calendarRange)
+      setSelectedRange(calendarRange ? null : detectQuickRangeDays(applied))
     }
     setOpen(nextOpen)
   }
@@ -148,6 +162,7 @@ export function ModelsFilter(props: ModelsFilterProps) {
       end_timestamp: end,
     })
     setSelectedRange(days)
+    setSelectedCalendarRange(null)
     props.onReset()
     setOpen(false)
   }
@@ -157,8 +172,10 @@ export function ModelsFilter(props: ModelsFilterProps) {
     value: Date | string | string[] | undefined
   ) => {
     setFilters((prev) => ({ ...prev, [field]: value }))
-    if (field === 'start_timestamp' || field === 'end_timestamp')
+    if (field === 'start_timestamp' || field === 'end_timestamp') {
       setSelectedRange(null)
+      setSelectedCalendarRange(null)
+    }
   }
 
   const handleGroupsChange = (groups: string[]) => {
@@ -183,6 +200,20 @@ export function ModelsFilter(props: ModelsFilterProps) {
       time_granularity: granularityForRangeDays(days),
     }))
     setSelectedRange(days)
+    setSelectedCalendarRange(null)
+  }
+
+  const handleCalendarRange = (rangeId: DashboardCalendarRangeId) => {
+    const { start, end, granularity } = getDashboardCalendarTimeRange(rangeId)
+
+    setFilters((prev) => ({
+      ...prev,
+      start_timestamp: start,
+      end_timestamp: end,
+      time_granularity: granularity,
+    }))
+    setSelectedRange(null)
+    setSelectedCalendarRange(rangeId)
   }
 
   return (
@@ -235,6 +266,32 @@ export function ModelsFilter(props: ModelsFilterProps) {
                   className={cn(
                     'flex-1',
                     selectedRange === range.days &&
+                      'ring-ring ring-2 ring-offset-2'
+                  )}
+                >
+                  {t(range.label)}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          <div className='grid gap-2'>
+            <Label className='flex items-center gap-2'>
+              <Calendar className='h-4 w-4' />
+              {t('Calendar Period')}
+            </Label>
+            <div className='grid grid-cols-2 gap-2 sm:grid-cols-3'>
+              {DASHBOARD_CALENDAR_RANGES.map((range) => (
+                <Button
+                  key={range.id}
+                  type='button'
+                  size='sm'
+                  variant={
+                    selectedCalendarRange === range.id ? 'default' : 'outline'
+                  }
+                  onClick={() => handleCalendarRange(range.id)}
+                  className={cn(
+                    selectedCalendarRange === range.id &&
                       'ring-ring ring-2 ring-offset-2'
                   )}
                 >

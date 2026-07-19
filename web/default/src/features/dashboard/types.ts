@@ -270,6 +270,7 @@ export interface ProcessedChartData {
 }
 
 export interface ProcessedUserChartData {
+  rankUserCount: number
   spec_user_rank: VChartSpec
   spec_user_trend: VChartSpec
 }

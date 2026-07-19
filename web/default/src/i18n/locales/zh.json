@@ -5279,6 +5279,14 @@
     "Zero retention": "零数据保留",
     "Zhipu": "智谱",
     "Zhipu V4": "智谱 V4",
-    "Zoom": "缩放"
+    "Zoom": "缩放",
+    "Calendar Period": "自然周期",
+    "This Week": "本周",
+    "Last Week": "上周",
+    "This Month": "本月",
+    "Last Month": "上月",
+    "User Analytics Filters": "用户统计筛选",
+    "Filter the user analytics view by time range, groups, and API keys.": "按时间范围、分组和 API Key 筛选用户统计。",
+    "{{count}} active users": "{{count}} 名活跃用户"
   }
 }

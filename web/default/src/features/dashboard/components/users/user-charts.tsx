@@ -22,6 +22,7 @@ import { Users, Loader2 } from 'lucide-react'
 import { useEffect, useMemo, useState, useRef, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Badge } from '@/components/ui/badge'
 import { IconBadge } from '@/components/ui/icon-badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -39,10 +40,13 @@ import {
 } from '@/features/dashboard/lib'
 import type {
   DashboardFilters,
-  ProcessedUserChartData,
   UserChartsFilters,
 } from '@/features/dashboard/types'
-import { computeTimeRange, getRollingDateRange, type TimeGranularity } from '@/lib/time'
+import {
+  computeTimeRange,
+  getRollingDateRange,
+  type TimeGranularity,
+} from '@/lib/time'
 import { VCHART_OPTION } from '@/lib/vchart'
 
 let themeManagerPromise: Promise<
@@ -52,7 +56,7 @@ let themeManagerPromise: Promise<
 const USER_CHARTS: {
   value: string
   labelKey: string
-  specKey: keyof ProcessedUserChartData
+  specKey: 'spec_user_rank' | 'spec_user_trend'
 }[] = [
   {
     value: 'rank',
@@ -67,6 +71,9 @@ const USER_CHARTS: {
 ]
 
 const TOP_USER_LIMIT_OPTIONS = [5, 10, 20, 50]
+const USER_RANK_MIN_CHART_HEIGHT = 300
+const USER_RANK_ROW_HEIGHT = 30
+const USER_RANK_CHART_PADDING = 90
 
 interface UserChartsProps {
   filters: UserChartsFilters
@@ -270,6 +277,12 @@ export function UserCharts(props: UserChartsProps) {
       <div className='grid gap-3'>
         {USER_CHARTS.map((chart) => {
           const spec = chartData[chart.specKey]
+          const isRankingChart = chart.value === 'rank'
+          const rankChartHeight = Math.max(
+            USER_RANK_MIN_CHART_HEIGHT,
+            chartData.rankUserCount * USER_RANK_ROW_HEIGHT +
+              USER_RANK_CHART_PADDING
+          )
 
           return (
             <div
@@ -281,25 +294,51 @@ export function UserCharts(props: UserChartsProps) {
                   <Users />
                 </IconBadge>
                 <div className='text-sm font-semibold'>{t(chart.labelKey)}</div>
+                {isRankingChart && (
+                  <Badge variant='secondary' className='ml-auto'>
+                    {t('{{count}} active users', {
+                      count: chartData.rankUserCount,
+                    })}
+                  </Badge>
+                )}
               </div>
 
-              <div className='h-[300px] p-1.5 sm:h-96 sm:p-2'>
-                {isLoading ? (
-                  <Skeleton className='h-full w-full' />
-                ) : (
-                  themeReady &&
-                  spec && (
-                    <VChart
-                      key={`user-${chart.value}-${topUserLimit}-${resolvedTheme}`}
-                      spec={{
-                        ...spec,
-                        theme: resolvedTheme === 'dark' ? 'dark' : 'light',
-                        background: 'transparent',
-                      }}
-                      option={VCHART_OPTION}
-                    />
-                  )
-                )}
+              <div
+                className={
+                  isRankingChart
+                    ? 'max-h-[420px] overflow-y-auto p-1.5 sm:max-h-[480px] sm:p-2'
+                    : 'h-[300px] p-1.5 sm:h-96 sm:p-2'
+                }
+                tabIndex={isRankingChart ? 0 : undefined}
+                aria-label={
+                  isRankingChart ? t('User Consumption Ranking') : undefined
+                }
+              >
+                <div
+                  className={isRankingChart ? undefined : 'h-full'}
+                  style={
+                    isRankingChart
+                      ? { height: `${rankChartHeight}px` }
+                      : undefined
+                  }
+                >
+                  {isLoading ? (
+                    <Skeleton className='h-full w-full' />
+                  ) : (
+                    themeReady &&
+                    spec && (
+                      <VChart
+                        key={`user-${chart.value}-${topUserLimit}-${resolvedTheme}`}
+                        spec={{
+                          ...spec,
+                          theme: resolvedTheme === 'dark' ? 'dark' : 'light',
+                          background: 'transparent',
+                        }}
+                        option={VCHART_OPTION}
+                      />
+                    )
+                  )}
+                </div>
               </div>
             </div>
           )

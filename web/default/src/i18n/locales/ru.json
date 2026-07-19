@@ -5279,6 +5279,14 @@
     "Zero retention": "Без хранения данных",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Calendar Period": "Календарный период",
+    "This Week": "Эта неделя",
+    "Last Week": "Прошлая неделя",
+    "This Month": "Этот месяц",
+    "Last Month": "Прошлый месяц",
+    "User Analytics Filters": "Фильтры статистики пользователей",
+    "Filter the user analytics view by time range, groups, and API keys.": "Фильтровать статистику пользователей по периоду, группам и API-ключам.",
+    "{{count}} active users": "Активных пользователей: {{count}}"
   }
 }

@@ -174,6 +174,16 @@ export const STATIC_I18N_KEYS = [
   'Technical Support',
   'Professional team providing 24/7 technical support',
 
+  // 数据看板动态筛选与统计文案
+  'Calendar Period',
+  'This Week',
+  'Last Week',
+  'This Month',
+  'Last Month',
+  'User Analytics Filters',
+  'Filter the user analytics view by time range, groups, and API keys.',
+  '{{count}} active users',
+
   // User management (interpolated keys)
   'Remaining Quota ({{currency}})',
   'Enter quota in tokens',

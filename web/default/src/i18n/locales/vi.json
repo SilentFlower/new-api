@@ -5279,6 +5279,14 @@
     "Zero retention": "Không lưu dữ liệu",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Calendar Period": "Khoảng lịch",
+    "This Week": "Tuần này",
+    "Last Week": "Tuần trước",
+    "This Month": "Tháng này",
+    "Last Month": "Tháng trước",
+    "User Analytics Filters": "Bộ lọc thống kê người dùng",
+    "Filter the user analytics view by time range, groups, and API keys.": "Lọc thống kê người dùng theo khoảng thời gian, nhóm và khóa API.",
+    "{{count}} active users": "{{count}} người dùng hoạt động"
   }
 }

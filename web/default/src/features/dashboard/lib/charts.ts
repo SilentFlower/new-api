@@ -701,6 +701,15 @@ const USER_COLORS = [
   '#5D7092',
 ]
 
+/**
+ * 聚合用户消费排行与趋势图数据。
+ *
+ * @param data 用户消费明细
+ * @param timeGranularity 趋势图时间粒度
+ * @param t 国际化函数
+ * @param limit 排行用户上限
+ * @returns 排行、趋势图规格与实际排行用户数
+ */
 export function processUserChartData(
   data: QuotaDataItem[],
   timeGranularity: TimeGranularity = 'day',
@@ -714,6 +723,7 @@ export function processUserChartData(
   const formatVal = (raw: number) => renderQuotaCompat(raw, 2)
 
   const emptyResult: ProcessedUserChartData = {
+    rankUserCount: 0,
     spec_user_rank: {
       type: 'bar',
       data: [{ id: 'userRankData', values: [] }],
@@ -813,6 +823,7 @@ export function processUserChartData(
   })
 
   return {
+    rankUserCount: topUsers.length,
     spec_user_rank: {
       type: 'bar',
       data: [{ id: 'userRankData', values: rankValues }],
@@ -836,7 +847,7 @@ export function processUserChartData(
         style: { fontSize: 11 },
       },
       axes: [
-        { orient: 'left', type: 'band' },
+        { orient: 'left', type: 'band', sampling: false },
         { orient: 'bottom', type: 'linear', visible: false },
       ],
       tooltip: {

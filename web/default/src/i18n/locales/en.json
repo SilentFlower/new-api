@@ -5279,6 +5279,14 @@
     "Zero retention": "Zero retention",
     "Zhipu": "Zhipu",
     "Zhipu V4": "Zhipu V4",
-    "Zoom": "Zoom"
+    "Zoom": "Zoom",
+    "Calendar Period": "Calendar Period",
+    "This Week": "This Week",
+    "Last Week": "Last Week",
+    "This Month": "This Month",
+    "Last Month": "Last Month",
+    "User Analytics Filters": "User Analytics Filters",
+    "Filter the user analytics view by time range, groups, and API keys.": "Filter the user analytics view by time range, groups, and API keys.",
+    "{{count}} active users": "{{count}} active users"
   }
 }
