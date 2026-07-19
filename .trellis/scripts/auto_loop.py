@@ -19,6 +19,7 @@ MAX_FIX_RECHECK = 3
 DECISION_LOG_LIMIT = 20
 VALID_IMPLEMENT_ROUTES = {"inline", "subagent"}
 VALID_CHECK_ROUTES = {"check-all-inline", "check-all-subagent"}
+VALID_CHECK_DEPTHS = {"auto", "light", "full"}
 RECOVERABLE_BLOCK_REASONS = {
     "missing-prd",
     "open-questions",
@@ -204,6 +205,12 @@ def _effective_route_authorization(repo_root: Path, task_ref: str, route_authori
             if mode:
                 effective[target] = mode
     return effective
+
+
+def _requested_check_depth(state: dict[str, Any]) -> str:
+    """读取 run 请求的检查深度，旧状态或非法值按 full 兼容。"""
+    value = state.get("check_depth")
+    return str(value) if value in VALID_CHECK_DEPTHS else "full"
 
 
 def _append_item_decision(
@@ -497,6 +504,7 @@ def _recent_run_summaries(repo_root: Path, limit: int = 8) -> list[dict[str, Any
             "path": _rel_path(repo_root, path),
             "run_status": state.get("status"),
             "profile": state.get("profile"),
+            "check_depth": _requested_check_depth(state),
             "updated_at": state.get("updated_at"),
             "completed": counts["completed"],
             "blocked": counts["blocked"],
@@ -543,6 +551,7 @@ def _resume_capsule(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "run_id": state.get("run_id"),
         "status": state.get("status"),
+        "check_depth": _requested_check_depth(state),
         "current_task": current.get("task") if current else None,
         "next_step": current.get("current_step") if current else "done",
         "completed": counts["completed"],
@@ -664,6 +673,7 @@ def _compact_summary(state: dict[str, Any]) -> dict[str, Any]:
         "run_id": state.get("run_id"),
         "run_status": state.get("status"),
         "profile": state.get("profile"),
+        "check_depth": _requested_check_depth(state),
         "current_index": state.get("current_index"),
         "current_task": current.get("task") if current else None,
         "next_step": current.get("current_step") if current else "done",
@@ -710,6 +720,7 @@ def _make_item(repo_root: Path, task_ref: str) -> dict[str, Any]:
         "current_step": step,
         "attempts": {"fix_recheck": 0},
         "last_failure": None,
+        "last_check": None,
         "last_action": None,
         "commit": None,
         "blocked": None,
@@ -735,13 +746,17 @@ def _action(action: str, item: dict[str, Any], extra: dict[str, Any] | None = No
     elif action == "run_implement":
         base["instruction"] = "进入 Phase 2.1 implement route，并执行实现。"
     elif action == "run_check_all":
-        base["instruction"] = "进入 Phase 2.2 check route，默认执行 check-all。"
+        base["instruction"] = "进入 Phase 2.2 check route，按 requested_check_depth 执行统一 Check-All；完成后立即 record + next。"
     elif action == "run_fix":
         base["instruction"] = "根据最近失败摘要修复问题。"
     elif action == "run_recheck":
-        base["instruction"] = "修复后重新执行 check-all。"
+        base["instruction"] = "修复后重新执行统一 Check-All，不得低于 minimum_check_depth；完成后立即 record + next。"
     elif action == "run_spec_update":
-        base["instruction"] = "若有代码/测试证据支撑，执行 trellis-update-spec；否则直接 record ok。"
+        base["instruction"] = (
+            "执行 trellis-update-spec 并读取 spec_update_result：no-op/written 时 "
+            "record --action run_spec_update --result ok 后立即 next；needs-review 时 "
+            "record --action run_spec_update --result blocked --failure-type spec-needs-review。"
+        )
     elif action == "commit_only":
         base["instruction"] = "进入 trellis-push commit-only 语义：AI 先生成当前任务提交计划并复核 Git 状态，只提交可归属文件，不 push。"
     if extra:
@@ -766,6 +781,17 @@ def _outstanding_action_name(item: dict[str, Any]) -> str | None:
     if isinstance(last_action, dict) and isinstance(last_action.get("action"), str):
         return last_action["action"]
     return None
+
+
+def _minimum_check_depth(item: dict[str, Any], action: str) -> str | None:
+    """返回检查续跑的最小有效深度；旧 recheck 状态按 full 兼容。"""
+    if action not in {"run_check_all", "run_recheck"}:
+        return None
+    last_check = item.get("last_check")
+    if not isinstance(last_check, dict):
+        return "full" if action == "run_recheck" else None
+    effective = last_check.get("effective_depth")
+    return str(effective) if effective in {"light", "full"} else "full"
 
 
 def _block_item(item: dict[str, Any], reason: str, summary: str, detail: dict[str, Any] | None = None) -> None:
@@ -814,7 +840,17 @@ def _next_item(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any] |
             item["current_step"] = "implement"
             return item, _remember_action(item, _action("run_implement", item))
         if step == "check":
-            return item, _remember_action(item, _action("run_check_all", item))
+            return item, _remember_action(
+                item,
+                _action(
+                    "run_check_all",
+                    item,
+                    {
+                        "requested_check_depth": _requested_check_depth(state),
+                        "minimum_check_depth": _minimum_check_depth(item, "run_check_all"),
+                    },
+                ),
+            )
         if step == "fix":
             attempts = item.setdefault("attempts", {}).get("fix_recheck", 0)
             if attempts >= MAX_FIX_RECHECK:
@@ -825,7 +861,17 @@ def _next_item(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any] |
                 _action("run_fix", item, {"attempt": attempts, "max_attempts": MAX_FIX_RECHECK}),
             )
         if step == "recheck":
-            return item, _remember_action(item, _action("run_recheck", item))
+            return item, _remember_action(
+                item,
+                _action(
+                    "run_recheck",
+                    item,
+                    {
+                        "requested_check_depth": _requested_check_depth(state),
+                        "minimum_check_depth": _minimum_check_depth(item, "run_recheck"),
+                    },
+                ),
+            )
         if step == "spec_update":
             return item, _remember_action(item, _action("run_spec_update", item))
         if step == "commit_only":
@@ -887,6 +933,7 @@ def cmd_start(args: argparse.Namespace) -> int:
         "run_id": run_id,
         "status": "running",
         "profile": args.profile,
+        "check_depth": args.check_depth,
         "created_at": now,
         "updated_at": now,
         "owner": {"host": socket.gethostname(), "pid": os.getpid()},
@@ -952,6 +999,16 @@ def _apply_route_authorization_args(state: dict[str, Any], args: argparse.Namesp
     return {str(key): str(value) for key, value in route_authorization.items()}
 
 
+def _apply_check_depth_arg(state: dict[str, Any], args: argparse.Namespace) -> tuple[str, str, bool]:
+    """把 retry 参数中的检查深度合并到 run 状态。"""
+    previous = _requested_check_depth(state)
+    requested = getattr(args, "check_depth", None)
+    if requested in VALID_CHECK_DEPTHS:
+        state["check_depth"] = requested
+    current = _requested_check_depth(state)
+    return previous, current, previous != current
+
+
 def _blocked_reason(item: dict[str, Any]) -> str:
     """读取队列项 blocked reason。"""
     blocked = item.get("blocked")
@@ -979,6 +1036,7 @@ def cmd_retry_blocked(args: argparse.Namespace) -> int:
 
     task = _normalize_task_ref(repo_root, args.task) if args.task else None
     route_authorization = _apply_route_authorization_args(state, args)
+    previous_check_depth, check_depth, check_depth_changed = _apply_check_depth_arg(state, args)
     queue = state.get("queue") if isinstance(state.get("queue"), list) else []
     reset: list[str] = []
     skipped: list[dict[str, str]] = []
@@ -1003,7 +1061,12 @@ def cmd_retry_blocked(args: argparse.Namespace) -> int:
             item,
             "retry_unblocked",
             "blocked 队列项已重置，将在同一个 auto run 内重试",
-            {"previous_reason": reason, "route_authorization": route_authorization},
+            {
+                "previous_reason": reason,
+                "route_authorization": route_authorization,
+                "check_depth": check_depth,
+                "previous_check_depth": previous_check_depth if check_depth_changed else None,
+            },
         )
 
     if not reset:
@@ -1142,6 +1205,63 @@ def _record_failure(item: dict[str, Any], action: str, args: argparse.Namespace)
     _block_item(item, args.failure_type or "action-failed", args.summary or f"{action} 执行失败")
 
 
+def _check_record_error(
+    state: dict[str, Any],
+    item: dict[str, Any],
+    action: str,
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    """校验检查结果没有低于请求或重检要求的最小深度。"""
+    if action not in {"run_check_all", "run_recheck"}:
+        return None
+    effective = getattr(args, "effective_check_depth", None) or "full"
+    requested = _requested_check_depth(state)
+    minimum = _minimum_check_depth(item, action)
+    if effective == "light" and (requested == "full" or minimum == "full"):
+        return {
+            "status": "error",
+            "reason": "check-depth-below-minimum",
+            "requested_check_depth": requested,
+            "minimum_check_depth": minimum,
+            "effective_check_depth": effective,
+            "message": "检查结果低于 run 请求或重检要求的最小深度，请按 full 完成 Check-All 后重新 record。",
+        }
+    return None
+
+
+def _record_check_result(
+    state: dict[str, Any],
+    item: dict[str, Any],
+    action: str,
+    args: argparse.Namespace,
+) -> None:
+    """保存 Check-All 实际深度与结果，供审计和后续 recheck 使用。"""
+    if action not in {"run_check_all", "run_recheck"}:
+        return
+    provided_effective = getattr(args, "effective_check_depth", None)
+    effective = provided_effective or "full"
+    if provided_effective is None:
+        reason = "legacy-default-full"
+    else:
+        reason = getattr(args, "check_depth_reason", None) or "未提供深度原因"
+    last_check = {
+        "action": action,
+        "requested_depth": _requested_check_depth(state),
+        "minimum_depth": _minimum_check_depth(item, action),
+        "effective_depth": effective,
+        "reason": reason,
+        "result": args.result,
+        "recorded_at": _utc_now(),
+    }
+    item["last_check"] = last_check
+    _append_item_decision(
+        item,
+        "check_recorded",
+        f"Check-All {args.result}: requested={last_check['requested_depth']} effective={effective}",
+        last_check,
+    )
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     """记录 agent 执行结果。"""
     repo_root = _repo_root()
@@ -1186,6 +1306,12 @@ def cmd_record(args: argparse.Namespace) -> int:
         })
 
     action = args.action
+    check_error = _check_record_error(state, item, action, args)
+    if check_error is not None:
+        check_error.update({"task": item.get("task"), "action": action})
+        return _print(check_error)
+
+    _record_check_result(state, item, action, args)
     item["last_action"] = None
     if args.result == "ok":
         _advance_after_ok(item, action, args)
@@ -1259,6 +1385,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--tasks", nargs="+", required=True)
     start.add_argument("--run-id")
     start.add_argument("--profile", choices=(DEFAULT_PROFILE,), default=DEFAULT_PROFILE)
+    start.add_argument("--check-depth", choices=sorted(VALID_CHECK_DEPTHS), default="auto")
     start.add_argument("--route-implement", choices=sorted(VALID_IMPLEMENT_ROUTES))
     start.add_argument("--route-check", choices=sorted(VALID_CHECK_ROUTES))
     start.add_argument("--force", action="store_true")
@@ -1285,6 +1412,8 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--snapshot-commit")
     record.add_argument("--route-mode")
     record.add_argument("--route-source")
+    record.add_argument("--effective-check-depth", choices=("light", "full"))
+    record.add_argument("--check-depth-reason")
     record.add_argument("--verbose", action="store_true")
     record.set_defaults(func=cmd_record)
 
@@ -1293,6 +1422,7 @@ def build_parser() -> argparse.ArgumentParser:
     retry.add_argument("--task")
     retry.add_argument("--route-implement", choices=sorted(VALID_IMPLEMENT_ROUTES))
     retry.add_argument("--route-check", choices=sorted(VALID_CHECK_ROUTES))
+    retry.add_argument("--check-depth", choices=sorted(VALID_CHECK_DEPTHS))
     retry.add_argument("--all", action="store_true")
     retry.add_argument("--verbose", action="store_true")
     retry.set_defaults(func=cmd_retry_blocked)

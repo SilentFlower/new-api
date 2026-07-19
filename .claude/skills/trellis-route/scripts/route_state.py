@@ -15,11 +15,12 @@ from typing import Any
 VALID_SOURCES = {"trellis-route", "numbered-fallback", "route-prefs", "auto-loop"}
 VALID_MODES = {
     "implement": {"inline", "subagent"},
+    "check": {"check-all-inline", "check-all-subagent"},
+}
+LEGACY_MODE_ALIASES = {
     "check": {
-        "check-all-inline",
-        "check-all-subagent",
-        "check-inline",
-        "check-subagent",
+        "check-inline": "check-all-inline",
+        "check-subagent": "check-all-subagent",
     },
 }
 PREF_MODES = {
@@ -89,6 +90,13 @@ def _decision_summary(decision: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _normalize_mode(target: str, mode: Any) -> str | None:
+    """把历史 route mode 归一为当前统一入口，非法值返回 None。"""
+    aliases = LEGACY_MODE_ALIASES.get(target, {})
+    normalized = aliases.get(mode, mode)
+    return str(normalized) if normalized in VALID_MODES[target] else None
+
+
 def _current_task(repo_root: Path) -> tuple[str | None, str | None, str | None]:
     """通过 task.py current --source 获取当前任务和 session key。"""
     result = subprocess.run(
@@ -155,8 +163,10 @@ def _read_prefs(repo_root: Path) -> dict[str, str]:
         key, value = raw.split("=", 1)
         key = key.strip()
         value = value.strip()
-        if key in PREF_MODES and value in PREF_MODES[key]:
-            prefs[key] = value
+        if key in PREF_MODES:
+            normalized = _normalize_mode(key, value)
+            if normalized in PREF_MODES[key]:
+                prefs[key] = normalized
     return prefs
 
 
@@ -222,7 +232,7 @@ def _auto_route_mode(repo_root: Path, context_key: str, target: str) -> tuple[st
     if not isinstance(auth, dict):
         return None, path, "no-route-authorization"
 
-    mode = auth.get(target)
+    mode = _normalize_mode(target, auth.get(target))
     if mode in PREF_MODES[target]:
         return mode, path, None
     return None, path, "invalid-auto-route-mode"
@@ -252,17 +262,22 @@ def _write_prefs(repo_root: Path, prefs: dict[str, str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def _valid_decision(decision: Any, target: str, current_task: str) -> bool:
-    """校验 runtime 中的 route 决策是否能复用。"""
+def _normalized_decision(decision: Any, target: str, current_task: str) -> dict[str, Any] | None:
+    """校验并归一化 runtime route 决策，非法时返回 None。"""
     if not isinstance(decision, dict):
-        return False
-    return (
+        return None
+    mode = _normalize_mode(target, decision.get("mode"))
+    if not (
         decision.get("target") == target
-        and decision.get("mode") in VALID_MODES[target]
+        and mode is not None
         and decision.get("source") in VALID_SOURCES
         and decision.get("scope") == "task"
         and decision.get("task") == current_task
-    )
+    ):
+        return None
+    normalized = dict(decision)
+    normalized["mode"] = mode
+    return normalized
 
 
 def _decision(target: str, mode: str, source: str, current_task: str) -> dict[str, str]:
@@ -336,15 +351,16 @@ def read_runtime(args: argparse.Namespace) -> int:
     path = _session_path(repo_root, context_key)
     context = _read_json(path)
     decision = context.get("route_decisions", {}).get(args.target)
-    if _valid_decision(decision, args.target, current_task):
+    normalized = _normalized_decision(decision, args.target, current_task)
+    if normalized is not None:
         return _output(
             args,
             {
                 "status": "hit",
-                **_decision_summary(decision),
+                **_decision_summary(normalized),
             },
             {
-                "decision": decision,
+                "decision": normalized,
                 "path": _rel_path(repo_root, path),
                 "context_key": context_key,
                 "task": current_task,
@@ -379,19 +395,31 @@ def resolve_route(args: argparse.Namespace) -> int:
     path = _session_path(repo_root, context_key)
     context = _read_json(path)
     decision = context.get("route_decisions", {}).get(args.target)
-    if _valid_decision(decision, args.target, current_task):
+    normalized = _normalized_decision(decision, args.target, current_task)
+    if normalized is not None:
+        written_path = path
+        if normalized.get("mode") != decision.get("mode"):
+            written_path, normalized = _write_runtime_decision(
+                repo_root,
+                context_key,
+                current_task,
+                args.target,
+                str(normalized["mode"]),
+                str(normalized["source"]),
+            )
         return _output(
             args,
             {
                 "status": "hit",
                 "origin": "runtime",
-                **_decision_summary(decision),
+                **_decision_summary(normalized),
             },
             {
-                "decision": decision,
-                "path": _rel_path(repo_root, path),
+                "decision": normalized,
+                "path": _rel_path(repo_root, written_path),
                 "context_key": context_key,
                 "task": current_task,
+                "normalized_legacy_mode": normalized.get("mode") != decision.get("mode"),
             }
         )
 
@@ -472,7 +500,8 @@ def write_route(args: argparse.Namespace) -> int:
     """写入当前 target 的 route 决策并保留 session 文件的其他字段。"""
     if args.source not in VALID_SOURCES:
         return _print({"status": "error", "reason": "invalid-source", "source": args.source})
-    if args.mode not in VALID_MODES[args.target]:
+    mode = _normalize_mode(args.target, args.mode)
+    if mode is None:
         return _print(
             {
                 "status": "error",
@@ -487,7 +516,7 @@ def write_route(args: argparse.Namespace) -> int:
         return _print({"status": "skipped", "reason": "not-trellis-project"})
 
     if args.save_pref:
-        if args.mode not in PREF_MODES[args.target]:
+        if mode not in PREF_MODES[args.target]:
             return _print(
                 {
                     "status": "error",
@@ -497,7 +526,7 @@ def write_route(args: argparse.Namespace) -> int:
                 }
             )
         prefs = _read_prefs(repo_root)
-        prefs[args.target] = args.mode
+        prefs[args.target] = mode
         _write_prefs(repo_root, prefs)
 
     current_task, source, context_key = _current_task(repo_root)
@@ -511,7 +540,7 @@ def write_route(args: argparse.Namespace) -> int:
         context_key,
         current_task,
         args.target,
-        args.mode,
+        mode,
         args.source,
     )
     return _output(

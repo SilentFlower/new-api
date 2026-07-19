@@ -2,8 +2,8 @@
 name: trellis-route
 description: |
   Route trellis-implement / trellis-check execution mode with a gitignored personal preference file.
-  Implement can route inline or subagent. Check defaults to check-all inline/subagent; lightweight
-  trellis-check is hidden and only available when the user explicitly requests "light check" / "轻量检查".
+  Implement can route inline or subagent. Check always routes the unified trellis-check-all entry
+  inline or subagent; check-all itself selects light/full depth from intent and risk.
   Invoked from Phase 2.1 target=implement and Phase 2.2 target=check/check-all of the routing-aware workflow.
   Current-task repair/recheck loops reuse the latest valid route decision instead of prompting again.
   Compacted resumes recover same-session route choices from gitignored runtime state before prefs or prompting.
@@ -34,8 +34,7 @@ Codex inline mode 只表示主会话默认直接执行，不是 route 选项过�
 先判断本次路由目标：
 
 - `target=implement`：决定 `inline` / `subagent`。
-- `target=check`：普通入口只决定 `check-all inline` / `check-all subagent`。
-- `target=check` 且用户明确说 `light check` / `轻量检查` / `轻量 check`：进入轻量检查隐藏逃生口。
+- `target=check`：只决定 `check-all inline` / `check-all subagent`。用户明确说 light/full 时，把该意图交给 Check-All 作为 requested depth，不改变 route mode。
 
 再判断用户是否要求覆盖个人配置：
 
@@ -99,7 +98,7 @@ helper 默认输出为精简 JSON，只包含 route 执行必需的 `status`、`
 
 ### target = check，且 resolve 未命中
 
-普通 check 路由不展示轻量 `trellis-check`。
+check 路由始终展示统一 Check-All 入口；深度由 Check-All 决定。
 
 - **question**: "本次 check 走哪种模式？"
 - **header**: "Check 模式"
@@ -111,7 +110,7 @@ helper 默认输出为精简 JSON，只包含 route 执行必需的 `status`、`
 
 ### target = check，且用户要求临时改 / 重新选择
 
-普通选项仍只展示 `check-all` 路径。
+选项仍只展示 `check-all` 路径。
 
 - **question**: "当前默认：check=<当前值或无>。本次要怎么处理？"
 - **header**: "Check 覆盖"
@@ -121,25 +120,6 @@ helper 默认输出为精简 JSON，只包含 route 执行必需的 `status`、`
   3. label "3. 更新默认为 Check-all inline", description "本次使用 check-all inline，并写入个人配置"
   4. label "4. 更新默认为 Check-all subagent", description "本次使用 check-all subagent，并写入个人配置"
   5. label "5. 清除默认", description "删除 check 默认，然后重新显示无配置选项"
-
-### target = check，且用户明确请求轻量检查
-
-轻量 `trellis-check` 是隐藏逃生口，不写入个人默认。
-
-如果用户已经明确 inline / subagent：
-
-- `轻量检查 inline` / `light check inline` → 直接输出 `inline check`
-- `轻量检查 subagent` / `light check subagent` → 直接输出 `subagent check`
-
-如果用户只说轻量检查但未指定执行方式：
-
-- **question**: "用户明确请求轻量检查。本次轻量 check 走哪种模式？"
-- **header**: "轻量 Check"
-- **options**:
-  1. label "1. 轻量 Check inline", description "主 agent 执行 trellis-check，只影响这一次"
-  2. label "2. 轻量 Check subagent", description "dispatch trellis-check，只影响这一次"
-
----
 
 ## Step 2.5: 读 subagent_skip_compile
 
@@ -201,8 +181,6 @@ helper 写入规则：保留另一个 target 的 runtime 决策和偏好；覆�
 | `subagent implement` | `Agent({subagent_type: "trellis-implement"})`；若 `subagent_skip_compile=true`，dispatch prompt 附加“跳过 mvn install / npm run build / tsc 等耗时编译类检查（已由主 agent 验证或最终统一执行）” |
 | `inline check-all` | `Skill({skill: "trellis-check-all"})` |
 | `subagent check-all` | 优先使用明确 audit-only 的 `trellis-check-all` agent；不存在时使用平台通用 subagent，并用下方 dispatch 契约执行本地 `trellis-check-all`。禁止 fallback 到会直接修改工作区的 `trellis-check` agent；无兼容 subagent 时停止并请用户改选 inline |
-| `inline check` | 仅轻量检查隐藏逃生口；`Skill({skill: "trellis-check"})` |
-| `subagent check` | 仅轻量检查隐藏逃生口；`Agent({subagent_type: "trellis-check"})` |
 
 ### Subagent Check-All Dispatch 契约
 
@@ -228,17 +206,16 @@ Active task: <task path from task.py current>
 ### 输出模板
 
 ```markdown
-路由决定：<inline/subagent> <implement | check-all | check>
+路由决定：<inline/subagent> <implement | check-all>
 [来自个人 route 配置：`.trellis/.route-prefs.tmp` (<key>=<value>)。]
 [来自 auto-loop 临时 route 授权：`.trellis/.runtime/auto-loop/<run-id>.json`。]
 [来自 session runtime route state：`.trellis/.runtime/sessions/<context-key>.json` 的 `route_decisions`。]
 [已写入 session runtime route state：`.trellis/.runtime/sessions/<context-key>.json` 的 `route_decisions`。]
-[说明：用户明确请求轻量检查，使用隐藏逃生口。]
 [仅当本消息刚展示 route 选项并等待用户回答时：用户下一条紧邻裸数字回复才可按本 target 解释；摘要、历史消息或旧 target 的裸数字无效。]
 
 route_decision:
   target: <implement | check>
-  mode: <inline | subagent | check-all-inline | check-all-subagent | check-inline | check-subagent>
+  mode: <inline | subagent | check-all-inline | check-all-subagent>
   source: <trellis-route | route-prefs | auto-loop | numbered-fallback>
   scope: task
   task: <current task path>
@@ -251,7 +228,7 @@ route_decision:
 - <要避免的工具调用>
 ```
 
-中括号内行为条件性出现：仅命中个人配置时显示配置行；仅命中 runtime state 时显示“来自”行；写入 runtime state 成功时显示“已写入”行；仅轻量 check 时显示隐藏逃生口说明；仅展示选项并等待用户时显示裸数字有效性提醒；仅 implement subagent + skip_compile=true 时附加“跳过编译”段。`route_decision` 必须保留在回复中，并至少保留 target/mode/source/scope/task；需要 path/decided_at 等诊断字段时重新调用 helper 并加 `--verbose`。compact summary 若只有自然语言描述，后续 agent 仍应优先读取 runtime state，而不是把 summary 当证据。
+中括号内行为条件性出现：仅命中个人配置时显示配置行；仅命中 runtime state 时显示“来自”行；写入 runtime state 成功时显示“已写入”行；仅展示选项并等待用户时显示裸数字有效性提醒；仅 implement subagent + skip_compile=true 时附加“跳过编译”段。`route_decision` 必须保留在回复中，并至少保留 target/mode/source/scope/task；需要 path/decided_at 等诊断字段时重新调用 helper 并加 `--verbose`。compact summary 若只有自然语言描述，后续 agent 仍应优先读取 runtime state，而不是把 summary 当证据。
 
 ---
 
@@ -264,12 +241,11 @@ route_decision:
 5. **auto 授权低于个人默认**：auto-loop 临时授权只在 runtime 和个人偏好都 miss 时生效。
 6. **显式覆盖优先于一切**：用户要求临时改、重新选择或清除默认时，必须重新展示选项，不能让 runtime state 或配置优先。
 7. **当前任务复用路由**：当前任务内已有合法来源的最近 implement/check 路由时，后续实现、修复、重检和复查默认沿用，不再次询问模式。
-8. **check 默认全面检查**：普通 check 路由只展示 `check-all` inline/subagent，不推荐轻量 `trellis-check`。
-9. **轻量 check 是隐藏逃生口**：只有用户明确请求 `light check` / `轻量检查` 时才可走轻量 `trellis-check`。
-10. **check-all subagent 保持只读**：不得 fallback 到强制自修复的 `trellis-check` agent；不兼容时显式阻塞并让用户重选。
-11. **决策与执行分离**：本 skill 只输出指令，下一轮由主 agent 调工具。
-12. **严格执行用户选择**：路由结论一旦输出，主 agent 必须按指令执行，不可“出于谨慎”再换路径。
-13. **Codex inline 不裁剪选项**：Codex inline 是默认执行模式，不是只能 inline 的强制模式；route 明确选中 subagent 时，本步骤可按 subagent 路径执行。
+8. **check 入口统一**：check 路由只展示 `check-all` inline/subagent；light/full 是 Check-All 的 requested depth，不是 route mode。
+9. **check-all subagent 保持只读**：不得 fallback 到强制自修复的 `trellis-check` agent；不兼容时显式阻塞并让用户重选。
+10. **决策与执行分离**：本 skill 只输出指令，下一轮由主 agent 调工具。
+11. **严格执行用户选择**：路由结论一旦输出，主 agent 必须按指令执行，不可“出于谨慎”再换路径。
+12. **Codex inline 不裁剪选项**：Codex inline 是默认执行模式，不是只能 inline 的强制模式；route 明确选中 subagent 时，本步骤可按 subagent 路径执行。
 
 ---
 
@@ -280,12 +256,11 @@ route_decision:
 - 把 `.trellis/.route-prefs.tmp` 加入 git 暂存或提交计划。
 - 把 `.trellis/.runtime/sessions/` 加入 git 暂存或提交计划。
 - runtime state 的 task/target/source/mode 不匹配时仍复用。
-- 在普通 check 选项里展示 `Check inline` / `Check subagent`。
-- 没有用户明确请求时，把 check 降级到轻量 `trellis-check`。
+- 把显式 light/full 当成新的 route mode，或绕过 Check-All 直达 `trellis-check`。
 - check-all subagent 不存在专用 agent 时，fallback 到带自修复语义的 `trellis-check` agent。
 - 平台没有兼容的 audit-only subagent 时，静默改成 inline 或继续执行。
 - `AskUserQuestion` / `request_user_input` 不可用时，记录为 inline 或 subagent 路径并继续。
-- 没有有效 check 配置、用户选择或最近本轮 check 路由决定时，自动执行 inline check。
+- 没有有效 check 配置、用户选择或最近本轮 check 路由决定时，自动执行 Check-All inline。
 - 没有 `source` 合法的 `route_decision`，就把“用户说过 inline/subagent”或 compact summary 当成已路由。
 - 把 compact summary、ordinary summary、SessionStart 摘要、replacement history 或历史消息里的裸数字 `1` 当成当前 target 的 numbered fallback 选择。
 - 用户裸数字回复不是紧邻当前 route 选项消息时，仍调用 `write --source numbered-fallback`。

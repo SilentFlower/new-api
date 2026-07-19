@@ -47,7 +47,9 @@ From Step 1 you know the current task and status. Check the task directory:
   ```bash
   python3 ./.trellis/scripts/get_context.py --mode phase --step 2.1 --platform codex
   ```
-- **No active task** → classify first. For simple conversation / small task, ask only whether this turn should create a Trellis task. For complex work, ask whether you may create a Trellis task and enter planning. If the user says no, skip Trellis for this session.
+<!-- BEGIN skill-garden patch start-no-task-routing v0.6 -->
+- **No active task** → infer `discuss`, `inspect`, `direct_edit`, `task_plan`, or `workflow_action`. Proceed with high-confidence reversible routing; inferred complex implementation uses `task_intent.py create`, explicit task planning uses `task.py create`, and material ambiguity or independent safety boundaries still require one focused question.
+<!-- END skill-garden patch start-no-task-routing v0.6 -->
 
 ---
 

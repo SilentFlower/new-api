@@ -25,17 +25,27 @@ Use this skill during Phase 1 planning to turn the user's request into clear req
 
 ## Preconditions
 
-Use this skill only after task-creation consent has been given and the user is ready to enter Trellis planning.
+<!-- BEGIN skill-garden patch brainstorm-planning-authorization v0.6 -->
+Use this skill after the user explicitly requests task planning, or after clear complex implementation intent authorizes creating a planning workspace. This authorization covers planning only; it never authorizes `task.py start` or implementation.
+<!-- END skill-garden patch brainstorm-planning-authorization v0.6 -->
 
-If no task exists yet, create one:
+<!-- BEGIN skill-garden patch brainstorm-auto-task-create v0.6 -->
+If no task exists yet, choose the creator from the authorization source.
+
+For inferred high-confidence complex implementation intent, create an auto-routed planning task:
 
 ```bash
-TASK_DIR=$(python3 ./.trellis/scripts/task.py create "<short task title>" --slug <slug>)
+python3 ./.trellis/scripts/task_intent.py create --title "<short task title>" --slug <slug>
 ```
 
-Use a concise title from the user's request. Use a slug without a date prefix. `task.py create` adds the `MM-DD-` directory prefix automatically.
+For explicit user-requested task planning or a manually maintained task, use:
 
-`task.py create` creates the default `prd.md`. Update that file with the current understanding before asking follow-up questions.
+```bash
+python3 ./.trellis/scripts/task.py create "<short task title>" --slug <slug>
+```
+
+Use a concise title from the user's request and a slug without a date prefix. Both paths create the default `prd.md`; update it with the current understanding before asking follow-up questions.
+<!-- END skill-garden patch brainstorm-auto-task-create v0.6 -->
 
 ## Planning Flow
 

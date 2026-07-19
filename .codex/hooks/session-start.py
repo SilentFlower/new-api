@@ -223,11 +223,14 @@ def _resolve_task_dir(trellis_dir: Path, task_ref: str) -> Path:
 def _get_task_status(trellis_dir: Path, hook_input: dict) -> str:
     active = _resolve_active_task(trellis_dir, hook_input)
     if not active.task_path:
+# BEGIN skill-garden patch codex-session-start-no-task v0.6
         return (
             "Status: NO ACTIVE TASK\n"
-            "Next: Classify the current turn and ask for task-creation consent "
-            "before creating any Trellis task."
+            "Next: Infer discuss, inspect, direct_edit, task_plan, or workflow_action. "
+            "Proceed with high-confidence reversible routing; ask only for material ambiguity "
+            "or independent safety gates."
         )
+# END skill-garden patch codex-session-start-no-task v0.6
 
     task_ref = active.task_path
     task_dir = _resolve_task_dir(trellis_dir, task_ref)

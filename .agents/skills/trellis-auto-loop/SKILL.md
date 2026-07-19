@@ -20,6 +20,7 @@ description: "启动、恢复和推进 Trellis 自动任务循环。用于用户
 - 启动 runner 前先完成 route 准备度判断：已有当前任务 runtime route 决策或个人 `.trellis/.route-prefs.tmp` 时可启动；没有时先进入 `trellis-route` 正常询问 / fallback，写入真实决策后再启动。
 - auto-loop 不默认写 `route_authorization`；只有用户本次明确给出的临时 route 策略，才能通过 `--route-implement` / `--route-check` 传给 runner，且不能当成模型真实执行结果。
 - auto-loop 启动前若 implement 与 check 都缺 route，优先展示 auto-loop 专用的合并选择，不要把 `trellis-route` 的两套完整 fallback 原样贴给用户。仍允许用户回复高级格式 `implement 1, check 1`。
+- 检查深度由 run 级 `--check-depth auto|light|full` 控制，默认 `auto`，与 `--route-check` 独立；历史 run 缺少该字段时按 `full` 兼容。
 - 代码提交必须复用 `trellis-push` 的内部 commit-only 执行能力；auto-loop 自己负责预授权校验和 runner 回写，不要裸 `git commit` / `git push`。
 
 ## 启动
@@ -60,9 +61,12 @@ auto-loop 需要你先选执行路线，才能启动。
 python3 ./.trellis/scripts/auto_loop.py start \
   --tasks <task> [<task> ...] \
   --profile commit-only \
+  [--check-depth auto|light|full] \
   [--route-implement inline|subagent] \
   [--route-check check-all-inline|check-all-subagent]
 ```
+
+除非用户明确指定 light/full，启动时使用默认 `--check-depth auto`。显式 light 仍必须进入 Check-All，命中 hard-full 时由 Check-All 升级 full；不得把它映射到顶层 `trellis-check`。
 
 多任务队列中，当前任务切换到下一个任务且缺少该任务 route 决策时，回到 `trellis-route` 获取该任务真实选择，再继续 `next` / `record`。个人 `.trellis/.route-prefs.tmp` 会由 `trellis-route` 统一复用并写回 runtime。
 
@@ -91,6 +95,7 @@ python3 ./.trellis/scripts/auto_loop.py next
 python3 ./.trellis/scripts/auto_loop.py retry-blocked \
   [--run-id <run-id>] \
   [--task <task>] \
+  [--check-depth auto|light|full] \
   [--route-implement inline|subagent] \
   [--route-check check-all-inline|check-all-subagent]
 python3 ./.trellis/scripts/auto_loop.py next
@@ -105,10 +110,10 @@ python3 ./.trellis/scripts/auto_loop.py next
 | `refresh_brief` | 使用 `trellis-task-brief` 生成并展示 brief | `record --action refresh_brief --result ok` |
 | `start_task` | 执行返回的 `task.py start ...` 命令 | `record --action start_task --result ok` |
 | `run_implement` | 进入 Phase 2.1，先用 `trellis-route(target=implement)` 决定 inline/subagent，再实现 | `record --action run_implement --result ok --route-mode <mode> --route-source <source>` |
-| `run_check_all` | 进入 Phase 2.2，先用 `trellis-route(target=check)`，执行 check-all | `record --action run_check_all --result ok --route-mode <mode> --route-source <source>` |
+| `run_check_all` | 进入 Phase 2.2，先用 `trellis-route(target=check)`，按 action 的 requested depth 执行 Check-All | `record --action run_check_all --result ok --route-mode <mode> --route-source <source> --effective-check-depth <light|full> --check-depth-reason "<摘要>"` |
 | `run_fix` | 根据 `last_failure` 修复，复用当前任务 implement route | `record --action run_fix --result ok --route-mode <mode> --route-source <source>` |
-| `run_recheck` | 复用当前任务 check route，重新 check-all | `record --action run_recheck --result ok --route-mode <mode> --route-source <source>` |
-| `run_spec_update` | 有代码/测试证据时用 `trellis-update-spec`；无必要更新也 record ok | `record --action run_spec_update --result ok` |
+| `run_recheck` | 复用当前任务 check route，按 action 的 requested/minimum depth 重新 Check-All | `record --action run_recheck --result ok --route-mode <mode> --route-source <source> --effective-check-depth <light|full> --check-depth-reason "<摘要>"` |
+| `run_spec_update` | 调用 `trellis-update-spec` 自主返回三态 | `no-op` / `written`：`record --action run_spec_update --result ok` 后立即 `next`；`needs-review`：`record --action run_spec_update --result blocked --failure-type spec-needs-review` |
 | `commit_only` | 校验本 run 的预授权与文件归属，再把 exact files/message 交给 `trellis-push` 内部 commit-only 执行 | auto-loop 执行 `record --action commit_only --result ok --commit <hash>` |
 
 失败时写回：
@@ -119,6 +124,8 @@ python3 ./.trellis/scripts/auto_loop.py record \
   --result failed \
   --failure-type <type> \
   --summary "<失败摘要>" \
+  [--effective-check-depth light|full] \
+  [--check-depth-reason "<深度原因>"] \
   --files <file> [<file> ...]
 ```
 
@@ -129,7 +136,9 @@ python3 ./.trellis/scripts/auto_loop.py record \
   --action <action> \
   --result blocked \
   --failure-type <type> \
-  --summary "<阻塞原因>"
+  --summary "<阻塞原因>" \
+  [--effective-check-depth light|full] \
+  [--check-depth-reason "<深度原因>"]
 ```
 
 runner 会按 3 轮 fix/recheck 预算决定继续、跳过当前任务或结束队列。
@@ -139,6 +148,10 @@ runner 会按 3 轮 fix/recheck 预算决定继续、跳过当前任务或结束
 route action 成功回写时必须带上 `trellis-route` 输出里的真实 `mode` / `source`，例如
 `--route-mode inline --route-source route-prefs` 或
 `--route-mode check-all-subagent --route-source trellis-route`；不要写 auto-loop 默认值。
+
+`run_check_all` / `run_recheck` 无论结果为 ok、failed 还是 blocked，都必须回写 Check-All 实际产生的 effective depth 和原因。更新后的 runner 会保存 `item.last_check`；旧调用缺字段时只能按 `full / legacy-default-full` 记录，不能推断为 light。recheck action 的 `minimum_check_depth=full` 时不得降级。
+
+检查 action 完成后，validated auto-loop 不适用普通 Post-Check Stop Gate：inline Check-All 直接执行匹配 action 的 `record` 并立即 `next`；subagent 只返回 audit-only 报告和 `check_profile`，主会话收到后立即完成同样的 `record + next`。只有 runner action mismatch、真正产品决策、越权、生产副作用或破坏性安全边界才停止等待用户。
 
 ## Commit-Only 预授权
 

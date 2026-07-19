@@ -1,6 +1,6 @@
 ---
 name: trellis-push
-description: "按确认的精确文件范围提交普通变更或完成已就绪的 merge commit；多仓计划可包含已展示的本地生成命令，并在普通推送后同步当前任务进度。"
+description: "按确认的精确文件范围提交普通变更或完成已就绪的 merge commit；多仓计划可包含已展示的本地生成命令，并在普通推送后同步当前任务记录与进度。"
 ---
 
 # Trellis Push
@@ -11,6 +11,7 @@ description: "按确认的精确文件范围提交普通变更或完成已就绪
 
 - 普通模式默认 `commit + push`。
 - 普通多仓计划可以包含本地确定性生成命令；生成后没有新增计划外文件时沿用同一次确认。
+- 普通模式把当前任务产物与更新后的 `task.json` 纳入同一次确认下的独立任务记录提交。
 - 用户明确要求“只提交不推送”时使用 `commit-only`。
 - auto-loop 可调用内部 `commit-only`，但必须传入已经校验过的 exact files 与 commit message；本 skill 只执行该提交。
 - 不发起、终止或解决分支合并；只允许普通模式完成已经开始、冲突已清零且索引完全可归属的 merge commit。
@@ -46,7 +47,13 @@ python3 ./.trellis/scripts/task.py current --source || true
 python3 ./.trellis/scripts/task_progress.py status --json || true
 ```
 
-无活动任务时仍可提交相关代码，但不生成任务进度。存在活动任务时，结合 `brief.md`、`implement.md`、当前 diff 与本轮执行范围生成一行语义进度；不得从旧进度推断 Git 动作。
+存在活动任务时，必须额外获取文件级任务状态：
+
+```bash
+git status --short --untracked-files=all -- <task-dir>
+```
+
+不得把默认 `git status --short` 可能返回的 `?? <task-dir>/` 折叠目录当成 exact file、展示条目或 pathspec。无活动任务时仍可提交相关代码，但不生成任务进度。存在活动任务时，结合 `brief.md`、`implement.md`、当前 diff 与本轮执行范围生成一行语义进度；同时识别当前任务目录中已存在且可归属的 dirty/untracked 产物，供 Step 5 生成任务记录 exact files。不得从旧进度推断 Git 动作。
 
 ## Step 2：预检与文件归属
 
@@ -75,10 +82,12 @@ git log @{u}..HEAD --oneline 2>/dev/null || true
 - 无法确定 planned file 是否属于当前请求或活动任务。
 - 内部 `commit-only` 发现 staged 区非空。
 
-文件分为两组：
+业务 Git 文件分为两组；普通模式的当前任务记录 exact files 按下方独立提交规则处理：
 
 - `planned`：本轮明确归属且准备提交的 exact files。
 - `retained`：当前存在、但本次明确不提交并保持原状的 dirty paths，包含计划外 untracked、unstaged、staged 文件。clean files 不进入该集合。
+
+普通模式存在活动任务时，当前任务目录中已存在且可归属的 dirty/untracked 产物不进入业务 `planned`，也不进入 `retained`；它们与预计由 helper 更新的 `<task-dir>/task.json` 组成 Step 5 的任务记录 exact files。其他任务目录和无法归属当前任务的文件仍属于 `retained` 或风险，不得顺带提交。
 
 普通 `PUSH` 需要在仓库间运行本地生成命令时，首次计划同时展示命令、工作目录和后续仓预计 exact files。仅在后续仓没有 retained dirty 时使用；命令必须本地、可重复且无外部副作用。
 
@@ -121,6 +130,9 @@ Push：<执行 / 跳过（commit-only）>
 ### 风险（仅数量大于 0 时显示）
 - <unknown ahead / branch-upstream / attribution risk>
 
+[任务记录（仅普通模式且存在活动任务时显示）：`chore(task): update <task-name> progress` · <N> 个文件]
+[仓库：<repository-name> · 分支：`<branch>` -> `<upstream>`]
+[计划提交：<当前任务 exact files 或分组摘要>]
 任务进度：completed=<...> | partial=<...> | next=<...>
 执行：<commit -> push -> progress commit -> progress push>
 
@@ -131,6 +143,7 @@ Push：<执行 / 跳过（commit-only）>
 
 - 单仓 `planned` 不超过 8 个文件时完整列出。
 - 超过 8 个时按目录归组，最多 12 行；用户要求展开时展示同一 exact set。
+- 顶部仓库/commit/file 总数包含独立任务记录提交所在 Git root、该提交及其 exact files；任务记录文件使用相同的 8 文件展示阈值和展开规则。
 - 保留未提交的变更始终逐项标注 Git 状态；真正风险在独立“风险”区逐项展示。
 - 无活动任务或 `commit-only` 时省略进度动作。
 - 不重复展示检查结果、规范复核、归档或其他阶段信息。
@@ -214,7 +227,7 @@ git push origin <current-branch>
 
 写入前确认：
 
-- 当前任务 `task.json` 在业务提交结束后没有计划外 dirty 内容。
+- 当前任务 exact files 与首次确认的路径集合一致，没有新增当前任务路径或无法归属的 dirty 内容。
 - 父仓分支、upstream 和冲突状态安全。
 - 推送不会携带无法归属的历史 ahead commits。
 
@@ -227,15 +240,15 @@ python3 ./.trellis/scripts/task_progress.py write \
   --json
 ```
 
-然后只提交并推送当前任务 `task.json`：
+然后只提交并推送首次确认的当前任务 exact files；该集合包含 helper 更新后的 `task.json`，以及首次计划时已存在且可归属的当前任务 dirty/untracked 产物：
 
 ```bash
-git add -- <task-dir>/task.json
-git commit --only -m "chore(task): update <task-name> progress" -- <task-dir>/task.json
+git add -- <current-task-exact-files>
+git commit --only -m "chore(task): update <task-name> progress" -- <current-task-exact-files>
 git push origin <current-branch>
 ```
 
-该动作属于用户已确认的普通 push 计划，不增加第二次确认。提交后必须验证 commit 只包含该 `task.json`。如果写入、提交或推送失败，不回滚已成功的业务 Git 动作，并单独报告进度同步失败。
+该动作属于用户已确认的普通 push 计划，不增加第二次确认。提交后必须验证 commit 只包含首次确认的当前任务 exact files；其他任务和无关 dirty/staged 文件保持原状。如果写入、提交或推送失败，不回滚已成功的业务 Git 动作，并单独报告进度同步失败。
 
 ## Step 6：结果
 
@@ -257,6 +270,7 @@ git push origin <current-branch>
 ### 任务进度
 
 状态：<✓ 已同步 · `<progress-hash>` / · 已跳过 / ❌ 同步失败>
+记录：<N> 个当前任务文件
 进度：completed=<...> | partial=<...> | next=<...>
 [失败时追加：原因和恢复动作]
 
@@ -271,6 +285,7 @@ git push origin <current-branch>
 ## 禁止事项
 
 - 扩大到计划外文件或要求清理无关工作区。
+- 把普通 push 中可归属当前活动任务的规划产物列为 retained，并以“finish-work 归档时再入库”为由延后首次记录。
 - 执行首次计划未展示的生成命令，或生成计划外文件后仍沿用旧确认。
 - 用任务进度决定是否推送代码。
 - 在本 skill 内发起、终止、解决冲突或改变分支合并目标；只允许完成已就绪的 merge commit。
