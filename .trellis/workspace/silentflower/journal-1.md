@@ -773,3 +773,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 23: 记录原始 User-Agent 日志与双 UI 展示
+
+**Date**: 2026-07-20
+**Task**: 记录原始 User-Agent 日志与双 UI 展示
+**Branch**: `build-bak`
+
+### Summary
+
+消费日志和错误日志保存应用收到的原始 User-Agent，并在 Default 与 Classic 管理员日志详情中展示；普通用户继续通过 admin_info 脱敏，相关测试、构建和日志规范已同步。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `707de0ab8` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
