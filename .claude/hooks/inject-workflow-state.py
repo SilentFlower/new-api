@@ -17,12 +17,12 @@ missing or a tag is absent, the breadcrumb degrades to a generic
 "Refer to workflow.md for current step." line so users see (and fix)
 the broken state instead of the hook silently masking it.
 
-Shared across all hook-capable platforms (Claude, Cursor, Codex, Qoder,
-CodeBuddy, Droid, Gemini, Copilot, Kiro). Kiro wires this via the CLI
-custom agent's ``hooks.userPromptSubmit`` and the IDE ``.kiro.hook``
+Shared across platforms with a per-turn workflow-state hook (Claude, Codex,
+Gemini, Qoder, Copilot, CodeBuddy, Droid, Kiro, Trae). Kiro wires this via the
+CLI custom agent's ``hooks.userPromptSubmit`` and the IDE ``.kiro.hook``
 ``promptSubmit`` event; its output branch emits a plain-text breadcrumb
-(Kiro adds hook stdout directly to the conversation context). Written to
-each platform's hooks directory via writeSharedHooks() at init time.
+(Kiro adds hook stdout directly to the conversation context). Written to each
+platform's hooks directory via writeSharedHooks() at init time.
 
 Silent exit 0 cases (no output):
   - No .trellis/ directory found (not a Trellis project)
@@ -185,7 +185,7 @@ def get_active_task(root: Path, input_data: dict) -> Optional[tuple[str, str, st
     if not task_dir.is_absolute():
         task_dir = root / task_dir
     if active.stale:
-        return task_dir.name, f"stale_{active.source_type}", active.source
+        return task_dir.name, "missing_task", active.source
 
     task_json = task_dir / "task.json"
     if not task_json.is_file():

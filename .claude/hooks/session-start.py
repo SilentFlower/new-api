@@ -341,11 +341,14 @@ def _get_task_status(trellis_dir: Path, input_data: dict) -> str:
     task_ref = active.task_path
     task_dir = _resolve_task_dir(trellis_dir, task_ref)
     if active.stale or not task_dir.is_dir():
+# BEGIN skill-garden patch claude-session-start-missing-task v0.6
         return (
-            f"Status: STALE POINTER\nTask: {task_ref}\n"
-            f"Next-Action: Run `python3 ./.trellis/scripts/task.py finish` to clear the stale pointer, "
-            "then ask the user what to work on next."
+            f"Status: MISSING TASK POINTER\nTask: {task_ref}\n"
+            "Next-Action: Run `python3 ./.trellis/scripts/task.py finish`. If cleanup fails, report it "
+            "and stop. If cleanup succeeds, treat the current request as NO ACTIVE TASK in the same "
+            "turn and follow no_task Request Intent Routing before any edit, task creation, or task start."
         )
+# END skill-garden patch claude-session-start-missing-task v0.6
 
     task_json_path = task_dir / "task.json"
     task_data = {}

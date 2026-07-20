@@ -96,6 +96,7 @@ python3 ./.trellis/scripts/get_context.py --mode phase --step <X.Y>  # detailed 
 
 ---
 
+<!-- BEGIN skill-garden patch workflow-state-contract-comment v0.6 -->
 <!--
   WORKFLOW-STATE BREADCRUMB CONTRACT (read this before editing the tag blocks below)
 
@@ -119,6 +120,7 @@ python3 ./.trellis/scripts/get_context.py --mode phase --step <X.Y>  # detailed 
 
   TAG ↔ PHASE scoping:
     [workflow-state:no_task]      → no active task; before Phase 1
+    [workflow-state:missing_task]   → missing active-task directory recovery
     [workflow-state:planning]     → all of Phase 1 (status='planning')
     [workflow-state:planning-inline] → Codex inline variant of Phase 1
     [workflow-state:in_progress]  → Phase 2 + Phase 3.2-3.4
@@ -137,9 +139,11 @@ python3 ./.trellis/scripts/get_context.py --mode phase --step <X.Y>  # detailed 
       matching phase's `[required · once]` walkthrough steps for sync
     - Run `trellis update` after editing to push the new bodies to
       downstream user projects (block-level managed replacement)
-    - Full runtime contract:
-      .trellis/spec/cli/backend/workflow-state-contract.md
+    - Runtime pseudo-status names are fixed. This Flower variant defines
+      `no_task` and `missing_task`; hook diagnostic source types must not be
+      appended to workflow-state tag names.
 -->
+<!-- END skill-garden patch workflow-state-contract-comment v0.6 -->
 
 ## Phase Index
 
@@ -333,6 +337,13 @@ Handle `discuss` and `inspect` silently. For `workflow_action`, load the named T
 For high-confidence complex implementation, create an auto-routed planning task through `task_intent.py create`, show one non-blocking switch hint, and enter `trellis-brainstorm`. Ask only for material ambiguity or independent safety gates.
 <!-- END skill-garden patch workflow-state-no-task v0.6 -->
 [/workflow-state:no_task]
+<!-- BEGIN skill-garden patch workflow-state-missing-task v0.6 -->
+[workflow-state:missing_task]
+An active task pointer that points to a missing task directory is a recovery-only state, not permission to implement, edit, create a task, start a task, or attribute work to the missing task.
+Run `python3 ./.trellis/scripts/task.py finish`. If it fails, report the failure and stop.
+If it succeeds, in the same turn treat the current user request as `no_task` and follow `[workflow-state:no_task]` / Request Intent Routing before any edit or task action.
+[/workflow-state:missing_task]
+<!-- END skill-garden patch workflow-state-missing-task v0.6 -->
 
 ### Phase 1: Plan
 <!-- BEGIN skill-garden patch workflow-phase-index-create-task v0.6 -->
@@ -779,7 +790,9 @@ Supported events: `after_create / after_start / after_finish / after_archive`. N
 
 ### Full contract
 
-For the workflow state machine's runtime contract, the locations of all status writers, pseudo-statuses (`no_task` / `stale_<source_type>`), the hook reachability matrix, and other deep details, see:
+<!-- BEGIN skill-garden patch workflow-runtime-contract-reference v0.6 -->
+For the workflow state machine's runtime contract, the authoritative runtime inputs are the installed per-turn hook parser and the `[workflow-state:*]` tags in this file. This Flower variant uses fixed pseudo-status tag names `no_task` and `missing_task`; hook diagnostic source types such as `session` or `session-fallback` must not become workflow-state tag names.
 
-- `.trellis/spec/cli/backend/workflow-state-contract.md` — runtime contract + writer table + test invariants
-- `.trellis/scripts/inject-workflow-state.py` — actual parser (reads workflow.md only, no embedded text)
+- Installed `<platform>/hooks/inject-workflow-state.py` copies — parse this workflow and emit the current breadcrumb for platforms with a per-turn hook.
+- `.trellis/spec/` project specs, when present — project-local runtime contract notes and invariants.
+<!-- END skill-garden patch workflow-runtime-contract-reference v0.6 -->
