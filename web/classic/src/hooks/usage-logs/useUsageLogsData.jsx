@@ -42,6 +42,7 @@ import {
 import { ITEMS_PER_PAGE } from '../../constants';
 import { useTableCompactMode } from '../common/useTableCompactMode';
 import ParamOverrideEntry from '../../components/table/usage-logs/components/ParamOverrideEntry';
+import { getUserAgentLogDetail } from '../../components/table/usage-logs/components/UserAgentDetail';
 
 export const useLogsData = () => {
   const { t } = useTranslation();
@@ -394,6 +395,10 @@ export const useLogsData = () => {
           key: t('Request ID'),
           value: logs[i].request_id,
         });
+      }
+      const userAgentDetail = getUserAgentLogDetail(other, isAdminUser, t);
+      if (userAgentDetail) {
+        expandDataLocal.push(userAgentDetail);
       }
       if (other?.ws || other?.audio) {
         expandDataLocal.push({

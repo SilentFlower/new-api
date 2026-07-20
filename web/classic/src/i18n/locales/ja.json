@@ -256,6 +256,7 @@
     "URL 标识，只能包含小写字母、数字和连字符": "URL識別子、小文字、数字、ハイフンのみ使用可能",
     "URL链接": "URL",
     "USD (美元)": "USD (US Dollar)",
+    "User Agent": "ユーザーエージェント",
     "User Info Endpoint": "User Info Endpoint",
     "User-Agent include（每行一个，可不写）": "User-Agent include（1行に1つ、オプション）",
     "Value 正则": "値の正規表現",

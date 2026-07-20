@@ -64,6 +64,7 @@ import {
   isTimingLogType,
 } from '../../lib/utils'
 import { USAGE_BILLING_PATH, type LogOtherData } from '../../types'
+import { RequestUserAgentDetail } from './request-user-agent-detail'
 
 // Maps a channel-update changed-field token (as recorded by the backend audit)
 // to its i18n label key for display in the audit details.
@@ -669,6 +670,11 @@ export function DetailsDialog(props: DetailsDialogProps) {
               mono
             />
           )}
+
+          <RequestUserAgentDetail
+            isAdmin={props.isAdmin}
+            userAgent={other?.admin_info?.user_agent}
+          />
 
           {showAdminIp && (
             <DetailRow

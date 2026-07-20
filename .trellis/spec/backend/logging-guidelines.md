@@ -219,6 +219,130 @@ logger.LogDebug(ctx, fmt.Sprintf("Redis GET: key=%s, value=%s", key, value))
 4. **忘记区分日志数据库**：日志模型操作应使用 `LOG_DB`，支持独立日志数据库
 5. **调试信息不加条件**：高频调试信息应使用 `LogDebug`（受 `DebugEnabled` 控制），避免生产环境产生大量无用日志
 
+## 场景：API 请求原始 User-Agent 审计
+
+### 1. Scope / Trigger
+
+- Trigger：修改 API 消费日志、错误日志、`Log.Other` 管理员字段、日志脱敏或 Default/Classic 日志详情展示。
+- 仅记录应用从 Go `net/http` 请求对象读取到的入站 `User-Agent`，用于管理员排查调用来源；该值可伪造，不能作为身份或安全判定依据。
+- 登录日志的 `other.user_agent`、管理操作审计和异步任务后续结算日志不属于本合同。
+
+### 2. Signatures
+
+```go
+func appendRequestUserAgent(c *gin.Context, other map[string]interface{}) map[string]interface{}
+
+func RecordErrorLog(
+	c *gin.Context,
+	userId int,
+	channelId int,
+	modelName string,
+	tokenName string,
+	content string,
+	tokenId int,
+	useTimeSeconds int,
+	isStream bool,
+	group string,
+	other map[string]interface{},
+)
+
+func RecordConsumeLog(c *gin.Context, userId int, params RecordConsumeLogParams)
+func formatUserLogs(logs []*Log, startIdx int)
+```
+
+管理员日志 JSON 与前端类型：
+
+```json
+{
+  "other": {
+    "admin_info": {
+      "user_agent": "SourceSDK/7.3 (linux; x86_64)"
+    }
+  }
+}
+```
+
+```typescript
+interface LogOtherData {
+  admin_info?: {
+    user_agent?: string
+  }
+}
+```
+
+### 3. Contracts
+
+- `RecordConsumeLog` 和 `RecordErrorLog` 必须在 `common.MapToJsonStr` 序列化 `Other` 之前调用 `appendRequestUserAgent`。
+- 唯一可信写入来源是 `c.Request.Header.Get("User-Agent")`；不得使用调用方预置的 `admin_info.user_agent` 代替入站请求头。
+- 应用层不得解析、trim、截断、改变大小写或标准化 UA。HTTP 协议解析器在业务代码之前执行的规范化不在本合同控制范围内。
+- 非空 UA 写入 `other.admin_info.user_agent`；`Other` 或 `admin_info` 缺失时按需创建，已有管理员字段必须保留。
+- UA 为空、上下文为空或请求对象为空时，辅助函数不写该字段，并移除调用方预置的同名值。
+- 管理员日志接口保留 `admin_info`；普通用户和公共 Token 日志必须继续通过既有清洗逻辑删除整个 `admin_info`。
+- Default 与 Classic 只在管理员上下文且字段为非空字符串时展示，标签使用各自的 `User Agent` i18n 文案；旧日志缺少字段时不显示空行。
+- 存储继续复用 `Log.Other` JSON 字符串，不新增数据库列或迁移，保持 SQLite、MySQL、PostgreSQL 和独立日志库兼容。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 写入与展示行为 |
+|------|----------------|
+| 请求头为非空字符串 | 按应用收到的字符串原值写入 `admin_info.user_agent` |
+| 已有 `admin_info` 包含其他字段 | 保留其他字段，仅覆盖 `user_agent` 为请求头值 |
+| 请求头为空或缺失 | 不写 `user_agent`，并移除调用方预置值 |
+| 辅助函数收到空上下文或空请求对象 | 不 panic，不保留调用方预置 UA |
+| `Other` 或 `admin_info` 为空 | 按需创建 map 后写入 |
+| 管理员查询消费/错误日志 | API 保留字段，Default 与 Classic 展示 UA |
+| 普通用户或公共 Token 查询 | 删除整个 `admin_info`，不得返回 UA |
+| 历史日志没有该字段 | 前端不展示 UA，其他详情正常显示 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：客户端发送 `SourceSDK/7.3 (linux; x86_64)`，数据库 `Other` 中保存完全相同的字符串，管理员两套 UI 均可见。
+- Good：计费逻辑已写入 `admin_info.quota_saturation`，追加 UA 后该审计字段仍保留。
+- Base：请求未携带 UA，日志照常写入，详情中没有 User Agent 行。
+- Base：旧日志没有 `admin_info.user_agent`，Default 与 Classic 均正常渲染其余详情。
+- Bad：解析 UA 后只保存浏览器或 SDK 名称，导致排查信息丢失。
+- Bad：把 UA 写到 `other.user_agent`，从而混淆登录日志合同或绕开管理员字段隔离。
+- Bad：在普通用户日志接口单独保留 `admin_info.user_agent`，泄露客户端指纹信息。
+
+### 6. Tests Required
+
+- 使用真实 `RecordConsumeLog` 和 `RecordErrorLog` 写入 SQLite 测试库，断言持久化后的 `admin_info.user_agent` 与请求头完全一致。
+- 预置不同的 `admin_info.user_agent` 和其他管理员字段，断言请求头值覆盖预置 UA，其他字段保持不变。
+- 覆盖空 UA、空上下文和空请求对象，断言不保留伪造 UA；空 UA 场景还必须断言日志仍成功写入。
+- 调用 `formatUserLogs`，断言普通用户响应删除整个 `admin_info`，非管理员字段继续存在。
+- 前端至少执行 Default 类型检查、两套 UI 的涉及文件 lint/格式检查、两套构建和 i18n 同步。
+- 回归命令：
+  - `go test ./model -run 'UserAgent' -count=1`
+  - `go test ./... -count=1`
+  - `go vet ./model ./controller ./service`
+  - `cd web/default && bun run typecheck && bun run build && bun run i18n:sync`
+  - `cd web/classic && bun run build && bun run i18n:sync`
+  - `git diff --check`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+// 错误：改变了原值，而且字段不在管理员专属命名空间内。
+other["user_agent"] = strings.TrimSpace(parseUserAgent(c.Request.UserAgent()).Name)
+otherStr := common.MapToJsonStr(other)
+```
+
+#### Correct
+
+```go
+// 正确：在序列化前由独立模块合并应用实际收到的请求头原值。
+params.Other = appendRequestUserAgent(c, params.Other)
+otherStr := common.MapToJsonStr(params.Other)
+```
+
+普通用户返回前：
+
+```go
+delete(otherMap, "admin_info")
+```
+
 ## 场景：Anthropic Reasoning Effort 消费日志
 
 ### 1. Scope / Trigger

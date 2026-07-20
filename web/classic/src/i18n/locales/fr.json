@@ -262,6 +262,7 @@
     "URL 标识，只能包含小写字母、数字和连字符": "Identifiant URL, uniquement lettres minuscules, chiffres et tirets autorisés",
     "URL链接": "Lien URL",
     "USD (美元)": "USD (Dollar US)",
+    "User Agent": "Agent utilisateur",
     "User Info Endpoint": "Point de terminaison des informations utilisateur",
     "User-Agent include（每行一个，可不写）": "User-Agent include (un par ligne, optionnel)",
     "Value 正则": "Regex de valeur",

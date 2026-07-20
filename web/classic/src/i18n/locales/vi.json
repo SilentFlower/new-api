@@ -257,6 +257,7 @@
     "URL 标识，只能包含小写字母、数字和连字符": "Định danh URL, chỉ cho phép chữ thường, số và dấu gạch ngang",
     "URL链接": "Liên kết URL",
     "USD (美元)": "USD (Đô la Mỹ)",
+    "User Agent": "Tác nhân người dùng",
     "User Info Endpoint": "User Info Endpoint",
     "User-Agent include（每行一个，可不写）": "User-Agent include (mỗi dòng một mục, tùy chọn)",
     "Value 正则": "Regex giá trị",

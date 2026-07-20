@@ -248,6 +248,7 @@
     "URL 标识，只能包含小写字母、数字和连字符": "URL 标识，只能包含小写字母、数字和连字符",
     "URL链接": "URL链接",
     "USD (美元)": "USD (美元)",
+    "User Agent": "用户代理",
     "User Info Endpoint": "User Info Endpoint",
     "User-Agent include（每行一个，可不写）": "User-Agent include（每行一个，可不写）",
     "Value 正则": "Value 正则",
