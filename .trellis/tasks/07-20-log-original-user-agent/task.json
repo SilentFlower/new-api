@@ -1,0 +1,50 @@
+{
+  "id": "log-original-user-agent",
+  "name": "log-original-user-agent",
+  "title": "记录请求原始 User-Agent",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-07-20",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-07-20T02:22:35Z",
+      "contextKey": "codex_019f7d52-88f4-7251-be74-cd710812792b",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "8a3ad5c1cc1d9a0fd4710bd418277bf1e08e24d8",
+        "status": []
+      }
+    }
+  },
+  "progress": {
+    "updatedAt": "2026-07-20T11:06:51+08:00",
+    "completedSteps": [
+      "完成消费日志与错误日志原始 User-Agent 持久化",
+      "完成 Default 与 Classic 管理员日志详情展示及 i18n",
+      "完成全量 Go 测试、双前端构建和任务范围质量检查",
+      "完成日志可执行规范同步",
+      "完成业务提交并推送到 origin/build-bak"
+    ],
+    "partialStep": null,
+    "nextStep": "等待用户显式执行 /trellis:finish-work 完成任务归档",
+    "notes": "仓库级 Default lint、format、copyright 与 Classic i18n lint 存在既有基线错误；本任务涉及文件的定向检查、类型检查、构建和 i18n 同步已通过。"
+  }
+}

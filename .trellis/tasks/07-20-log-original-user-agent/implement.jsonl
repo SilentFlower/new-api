@@ -1,0 +1,5 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"实现必须把定制逻辑放入新文件，并将 model、Default、Classic 原有文件的改动限制为最薄接入点。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"确认数据库审计日志的 other/admin_info 权限、敏感信息和消费/错误日志记录契约。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"确认不新增日志列、继续使用 Other JSON 时对 SQLite、MySQL、PostgreSQL 和独立日志库的兼容要求。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"约束 Go 测试、JSON 包装、错误处理和最小差异实现质量。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"追踪 User-Agent 从 HTTP 请求到日志存储、管理员 API 响应以及 Default/Classic 展示的完整数据流。"}

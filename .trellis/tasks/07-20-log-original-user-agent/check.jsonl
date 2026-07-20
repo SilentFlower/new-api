@@ -1,0 +1,5 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"检查新增文件职责完整、原有上游文件接入点足够薄且无无关格式化或重构。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"检查 UA 仅进入管理员可见 admin_info，普通用户剥离和旧日志兼容行为未回退。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查 Go 测试是否保护消费/错误日志真实契约，并符合项目断言和 JSON 使用规范。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"反向核对 Request Header、Other JSON、API 格式化、Default UI、Classic UI 各层字段名和空值语义一致。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查两套 UI 是否复用各自稳定展示模式，同时避免为小改动引入不必要跨技术栈抽象。"}
