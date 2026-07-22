@@ -1,0 +1,39 @@
+{
+  "id": "fix-client-gone-local-usage-billing",
+  "name": "fix-client-gone-local-usage-billing",
+  "title": "修复流式 client_gone 本地 usage 误计费",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-07-22",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-07-22T00:48:18.574955+00:00",
+    "completedSteps": [
+      "完成计费薄层防护实现",
+      "补充 client_gone 本地 usage 回归测试",
+      "完成 Check-All 与定向验证",
+      "更新 relay 计费规范",
+      "业务提交已推送"
+    ],
+    "partialStep": null,
+    "nextStep": "等待 finish-work 归档与会话收尾",
+    "notes": "业务提交 1d2672232 已推送到 origin/build-bak；提交信息不含 [build]，避免触发 build。"
+  }
+}

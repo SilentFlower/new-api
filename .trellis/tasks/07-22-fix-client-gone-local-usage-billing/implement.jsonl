@@ -1,0 +1,3 @@
+{"file": ".trellis/spec/backend/relay-billing-model.md", "reason": "计费收口必须保持预扣、结算、日志读取 BillingModelName 的一致性。"}
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "本任务修改消费/错误日志审计字段，必须遵守日志类型、admin_info 和敏感信息规则。"}
+{"file": ".trellis/spec/backend/relay-alpha-search-compact.md", "reason": "包含 build 分支薄层处理约束，要求核心逻辑独立承载，原有入口只保留薄分派。"}
