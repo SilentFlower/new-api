@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,24 +20,27 @@ import (
 )
 
 type textQuotaGuardBillingStub struct {
-	settledQuotas []int
+	settledQuotas   []int
+	settleErr       error
+	needsRefund     bool
+	refundCallCount int
 }
 
 // Settle 记录文本计费收口传入的实际结算额度。
 // @param actualQuota 实际结算额度。
-// @return 始终返回 nil。
+// @return 测试配置的结算错误。
 func (s *textQuotaGuardBillingStub) Settle(actualQuota int) error {
 	s.settledQuotas = append(s.settledQuotas, actualQuota)
-	return nil
+	return s.settleErr
 }
 
-// Refund 忽略测试中的退款调用。
+// Refund 记录测试中的退款调用。
 // @param c 当前 Gin 请求上下文。
-func (s *textQuotaGuardBillingStub) Refund(c *gin.Context) {}
+func (s *textQuotaGuardBillingStub) Refund(c *gin.Context) { s.refundCallCount++ }
 
-// NeedsRefund 返回测试会话无需退款。
-// @return 始终返回 false。
-func (s *textQuotaGuardBillingStub) NeedsRefund() bool { return false }
+// NeedsRefund 返回测试会话是否仍有可退款的预扣状态。
+// @return 测试配置的退款状态。
+func (s *textQuotaGuardBillingStub) NeedsRefund() bool { return s.needsRefund }
 
 // GetPreConsumedQuota 返回测试会话的预扣额度。
 // @return 固定返回零。
@@ -277,4 +281,70 @@ func TestPostTextConsumeQuotaSkipsClientGoneLocalUsageWithoutForcedErrorLog(t *t
 	assertTextQuotaGuardUserAndChannelUsed(t, userId, channelId, 0, 0)
 	assertTextQuotaGuardTokenUnchanged(t, tokenId)
 	assert.Empty(t, logsByRequestId(t, "client-gone-local-no-error-log"))
+}
+
+func TestPostTextConsumeQuotaRefundsClientGoneLocalUsageWhenZeroSettlementFails(t *testing.T) {
+	setupTextQuotaGuardTest(t, true, false)
+	userId := 2141
+	tokenId := 2142
+	channelId := 2143
+	seedTextQuotaGuardData(t, userId, tokenId, channelId)
+
+	c := newTextQuotaGuardContext("client-gone-local-settlement-refund")
+	common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
+	billing := &textQuotaGuardBillingStub{
+		settleErr:   errors.New("zero settlement failed"),
+		needsRefund: true,
+	}
+	info := newTextQuotaGuardRelayInfo(userId, tokenId, channelId, billing, relaycommon.StreamEndReasonClientGone)
+
+	PostTextConsumeQuota(c, info, textQuotaGuardUsage(), nil)
+
+	require.Equal(t, []int{0}, billing.settledQuotas)
+	assert.Equal(t, 1, billing.refundCallCount)
+	assertTextQuotaGuardUserAndChannelUsed(t, userId, channelId, 0, 0)
+	assertTextQuotaGuardTokenUnchanged(t, tokenId)
+
+	logs := logsByRequestId(t, "client-gone-local-settlement-refund")
+	require.Len(t, logs, 1)
+	assert.Equal(t, model.LogTypeError, logs[0].Type)
+	assert.Contains(t, logs[0].Content, "零额结算失败")
+	assert.Contains(t, logs[0].Content, "已触发退款兜底")
+
+	other, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, adminInfo["billing_settlement_failed"])
+	assert.Equal(t, true, adminInfo["billing_refund_fallback_triggered"])
+}
+
+func TestPostTextConsumeQuotaDoesNotRefundClientGoneLocalUsageAfterFundingSettled(t *testing.T) {
+	setupTextQuotaGuardTest(t, true, false)
+	userId := 2151
+	tokenId := 2152
+	channelId := 2153
+	seedTextQuotaGuardData(t, userId, tokenId, channelId)
+
+	c := newTextQuotaGuardContext("client-gone-local-settlement-no-refund")
+	common.SetContextKey(c, constant.ContextKeyLocalCountTokens, true)
+	billing := &textQuotaGuardBillingStub{
+		settleErr:   errors.New("token adjustment failed after funding settled"),
+		needsRefund: false,
+	}
+	info := newTextQuotaGuardRelayInfo(userId, tokenId, channelId, billing, relaycommon.StreamEndReasonClientGone)
+
+	PostTextConsumeQuota(c, info, textQuotaGuardUsage(), nil)
+
+	require.Equal(t, []int{0}, billing.settledQuotas)
+	assert.Equal(t, 0, billing.refundCallCount)
+
+	logs := logsByRequestId(t, "client-gone-local-settlement-no-refund")
+	require.Len(t, logs, 1)
+	other, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, adminInfo["billing_settlement_failed"])
+	assert.Equal(t, false, adminInfo["billing_refund_fallback_triggered"])
 }

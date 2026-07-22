@@ -32,25 +32,39 @@ func handleClientGoneLocalUsageBilling(ctx *gin.Context, relayInfo *relaycommon.
 	if !shouldSkipClientGoneLocalUsageBilling(ctx, relayInfo, originUsage) {
 		return false
 	}
+	settlementFailed := false
+	refundFallbackTriggered := false
 	if err := SettleBilling(ctx, relayInfo, 0); err != nil {
+		settlementFailed = true
 		logger.LogError(ctx, "error settling skipped client_gone local usage billing: "+err.Error())
+		// 零额结算的资金调整失败时，会话仍可能保留预扣状态；只对明确可退款的会话兜底，避免已提交资金后发生二次退款。
+		if relayInfo.Billing != nil && relayInfo.Billing.NeedsRefund() {
+			relayInfo.Billing.Refund(ctx)
+			refundFallbackTriggered = true
+		}
 	}
-	recordClientGoneLocalUsageErrorLog(ctx, relayInfo, summary, originUsage, adminRejectReason)
-	logger.LogWarn(ctx, fmt.Sprintf("skip billing for client_gone local usage: userId=%d, channelId=%d, tokenId=%d, model=%s, estimatedQuota=%d",
-		relayInfo.UserId, relayInfoChannelID(relayInfo), relayInfo.TokenId, summary.ModelName, summary.Quota))
+	recordClientGoneLocalUsageErrorLog(ctx, relayInfo, summary, originUsage, adminRejectReason, settlementFailed, refundFallbackTriggered)
+	logger.LogWarn(ctx, fmt.Sprintf("handle client_gone local usage billing: userId=%d, channelId=%d, tokenId=%d, model=%s, estimatedQuota=%d, settlementFailed=%t, refundFallbackTriggered=%t",
+		relayInfo.UserId, relayInfoChannelID(relayInfo), relayInfo.TokenId, summary.ModelName, summary.Quota, settlementFailed, refundFallbackTriggered))
 	return true
 }
 
-func recordClientGoneLocalUsageErrorLog(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, summary textQuotaSummary, originUsage *dto.Usage, adminRejectReason string) {
+func recordClientGoneLocalUsageErrorLog(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, summary textQuotaSummary, originUsage *dto.Usage, adminRejectReason string, settlementFailed bool, refundFallbackTriggered bool) {
 	if !constant.ErrorLogEnabled {
 		return
 	}
-	other := buildClientGoneLocalUsageErrorOther(ctx, relayInfo, summary, originUsage, adminRejectReason)
+	other := buildClientGoneLocalUsageErrorOther(ctx, relayInfo, summary, originUsage, adminRejectReason, settlementFailed, refundFallbackTriggered)
 	content := "流式请求客户端断开，本地估算 usage 不计费"
+	if settlementFailed {
+		content = "流式请求客户端断开，本地估算 usage 零额结算失败"
+		if refundFallbackTriggered {
+			content += "，已触发退款兜底"
+		}
+	}
 	model.RecordErrorLog(ctx, relayInfo.UserId, relayInfoChannelID(relayInfo), summary.ModelName, summary.TokenName, content, relayInfo.TokenId, int(summary.UseTimeSeconds), relayInfo.IsStream, relayInfo.UsingGroup, other)
 }
 
-func buildClientGoneLocalUsageErrorOther(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, summary textQuotaSummary, originUsage *dto.Usage, adminRejectReason string) map[string]interface{} {
+func buildClientGoneLocalUsageErrorOther(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, summary textQuotaSummary, originUsage *dto.Usage, adminRejectReason string, settlementFailed bool, refundFallbackTriggered bool) map[string]interface{} {
 	var other map[string]interface{}
 	if summary.IsClaudeUsageSemantic {
 		other = GenerateClaudeOtherInfo(ctx, relayInfo,
@@ -77,6 +91,10 @@ func buildClientGoneLocalUsageErrorOther(ctx *gin.Context, relayInfo *relaycommo
 	adminInfo["estimated_quota"] = summary.Quota
 	adminInfo["estimated_prompt_tokens"] = summary.PromptTokens
 	adminInfo["estimated_completion_tokens"] = summary.CompletionTokens
+	if settlementFailed {
+		adminInfo["billing_settlement_failed"] = true
+		adminInfo["billing_refund_fallback_triggered"] = refundFallbackTriggered
+	}
 	return other
 }
 
