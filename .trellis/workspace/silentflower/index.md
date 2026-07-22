@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 23
-- **Last Active**: 2026-07-20
+- **Total Sessions**: 24
+- **Last Active**: 2026-07-22
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~808 | Active |
+| `journal-1.md` | ~842 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 24 | 2026-07-22 | 完成 client_gone 本地 usage 计费修复 | `1d2672232`, `186c123ff` | `build-bak` |
 | 23 | 2026-07-20 | 记录原始 User-Agent 日志与双 UI 展示 | `707de0ab8` | `build-bak` |
 | 22 | 2026-07-20 | 数据看板自然周期与用户统计修复 | `e5077dc1b` | `build-bak` |
 | 21 | 2026-07-18 | Build 分支薄层治理收尾 | `31658f82b`, `1ef02db57`, `8b265701b`, `53ff3518b`, `966f3deb0`, `c1ab8a7d3` | `build-bak` |

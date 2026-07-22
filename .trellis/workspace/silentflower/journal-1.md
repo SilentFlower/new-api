@@ -806,3 +806,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 24: 完成 client_gone 本地 usage 计费修复
+
+**Date**: 2026-07-22
+**Task**: 完成 client_gone 本地 usage 计费修复
+**Branch**: `build-bak`
+
+### Summary
+
+在文本计费收口修复流式 client_gone 本地估算 usage 误计费，补充零额结算失败退款兜底、审计与回归测试；部署 revision 186c123ff，并冲正 36 条生产异常消费及用户、渠道、Token、quota_data 统计。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1d2672232` | (see git log) |
+| `186c123ff` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
