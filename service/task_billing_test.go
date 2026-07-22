@@ -47,6 +47,7 @@ func TestMain(m *testing.M) {
 		&model.User{},
 		&model.Token{},
 		&model.Log{},
+		&model.QuotaData{},
 		&model.Channel{},
 		&model.TopUp{},
 		&model.UserSubscription{},

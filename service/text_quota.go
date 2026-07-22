@@ -350,12 +350,15 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	if usage == nil {
 		extraContent = append(extraContent, "上游无计费信息")
 	}
-	if originUsage != nil {
+	if originUsage != nil && !shouldSkipClientGoneLocalUsageBilling(ctx, relayInfo, originUsage) {
 		ObserveChannelAffinityUsageCacheByRelayFormat(ctx, billingUsage, relayInfo.GetFinalRequestRelayFormat())
 	}
 
 	adminRejectReason := common.GetContextKeyString(ctx, constant.ContextKeyAdminRejectReason)
 	summary := calculateTextQuotaSummary(ctx, relayInfo, billingUsage)
+	if handleClientGoneLocalUsageBilling(ctx, relayInfo, summary, originUsage, adminRejectReason) {
+		return
+	}
 
 	var tieredResult *billingexpr.TieredResult
 	tieredBillingApplied := false

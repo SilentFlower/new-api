@@ -138,3 +138,112 @@ info.FreezeBillingModelName(originBillingModelName)
 - 价格、结算、任务和日志读取 `BillingModelName()`。
 - 价格阶段解析使用 `ResolveBillingModelName()`，成功后调用 `FreezeBillingModelName()`。
 - 重试开始调用 `ClearBillingModelName()`；临时保存只读 `FrozenBillingModelName()`。
+
+## 场景：流式 client_gone 本地估算 usage 零额结算
+
+### 1. Scope / Trigger
+
+- Trigger: 修改文本流式 usage 生成、`PostTextConsumeQuota`、本地 token 估算、`StreamStatus`、预扣/结算、用户/渠道/token 统计、消费日志或 `quota_data` 写入。
+- 风险背景: 客户端断开后，部分渠道没有可信上游 usage，会通过 `ResponseText2Usage` 等本地估算路径填充 usage。该 usage 只适合审计排查，不能作为正常消费依据，否则可能把异常中断请求记为 `type=2` 消费并更新统计。
+- 适用范围: 文本类流式 relay 的统一计费收口；不得把同一判断复制到 Claude、Gemini、OpenAI 兼容等渠道 adapter。
+
+### 2. Signatures
+
+```go
+func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string)
+
+func shouldSkipClientGoneLocalUsageBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage) bool
+
+const ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
+const StreamEndReasonClientGone StreamEndReason = "client_gone"
+```
+
+审计字段：
+
+```json
+{
+  "stream_status": {"status": "error", "end_reason": "client_gone"},
+  "admin_info": {
+    "local_count_tokens": true,
+    "usage_billing_path": "local",
+    "billing_skipped_reason": "client_gone_local_usage"
+  }
+}
+```
+
+### 3. Contracts
+
+- 命中零额结算必须同时满足：
+  - `relayInfo != nil`
+  - `relayInfo.IsStream == true`
+  - `relayInfo.StreamStatus != nil`
+  - `relayInfo.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone`
+  - `usage != nil`
+  - `common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens) == true`
+- 命中后必须调用 `SettleBilling(ctx, relayInfo, 0)`，让 BillingSession 通过既有生命周期完成退款或零额结算。
+- 命中后不得调用 `UpdateUserUsedQuotaAndRequestCount`、`UpdateChannelUsedQuota` 或任何 token 消费方向统计更新。
+- 命中后不得调用 `RecordConsumeLog`，因为 `RecordConsumeLog` 会间接写 `quota_data` 消费统计。
+- 若 `constant.ErrorLogEnabled` 为 true，应写一条 `type=5`、`quota=0` 的错误审计日志；若为 false，尊重现有策略，不强制写数据库错误日志。
+- 错误审计日志必须把 `billing_skipped_reason=client_gone_local_usage` 放在 `other.admin_info` 下；普通用户日志视图会剥离 `admin_info` 和 `stream_status`。
+- 不得把所有 `client_gone` 一概免费。未设置 `ContextKeyLocalCountTokens` 的可信上游 usage 继续按现有逻辑结算。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 流式 `client_gone` 且 `local_count_tokens=true` 且 `usage != nil` | `SettleBilling(..., 0)`；不写消费日志；不更新 used quota；不写 `quota_data` |
+| 上述条件且 `ErrorLogEnabled=true` | 额外写 `type=5`、`quota=0` 错误审计，`admin_info.billing_skipped_reason=client_gone_local_usage` |
+| 上述条件但 `ErrorLogEnabled=false` | 不写数据库错误日志，仍零额结算且不更新统计 |
+| `client_gone` 但没有本地估算标记 | 视为可信上游 usage，继续现有消费结算 |
+| 本地估算 usage 但流正常结束、EOF 或 handler stop | 继续现有消费结算 |
+| `usage == nil` | 走既有“上游无计费信息”路径，不由本场景改写语义 |
+
+### 5. Good/Base/Bad Cases
+
+- Good: Claude 流式客户端断开，未收到终态 usage，本地估算填充 usage 并设置 `local_count_tokens=true`；文本计费收口只结算 0，错误日志保留估算 token 到 `admin_info.estimated_*` 供管理员排查。
+- Good: Gemini 或 OpenAI 兼容未来出现相同本地估算断开路径，不需要改 adapter，仍由 `PostTextConsumeQuota` 附近统一防护。
+- Base: 客户端断开前上游已经返回可信 usage，未设置 `local_count_tokens`；平台仍按真实 usage 结算。
+- Bad: 在 `relay/channel/claude` 里特殊判断 `client_gone` 并返回 nil usage，导致其他渠道漏防护。
+- Bad: 命中零额场景后继续调用 `RecordConsumeLog` 但写 `quota=0`；这仍会污染消费日志和 `quota_data` 的请求统计口径。
+- Bad: 只检查 `StreamEndReasonClientGone`，把可信上游 usage 也免费。
+
+### 6. Tests Required
+
+- 文本计费 service 测试覆盖 `client_gone + local_count_tokens`：
+  - `SettleBilling` 收到 `0`。
+  - `users.used_quota`、`users.request_count`、`channels.used_quota`、`tokens.used_quota/remain_quota` 不发生消费方向变化。
+  - 不存在 `type=2` 消费日志，`model.CacheQuotaData` 不新增消费统计。
+  - `ErrorLogEnabled=true` 时写 `type=5`、`quota=0`，且 `other.admin_info.billing_skipped_reason=client_gone_local_usage`。
+- 回归测试覆盖 `client_gone + 非 local usage` 仍产生消费日志和 used quota。
+- 回归测试覆盖 `local_count_tokens + 非 client_gone` 仍产生消费日志和 used quota。
+- 回归测试覆盖 `ErrorLogEnabled=false` 时不强制写错误日志。
+- 验证命令：
+  - `go test ./service ./model -run 'ClientGone|TextQuota|ConsumeLog|QuotaData' -count=1`
+  - `go test -race ./service -run 'ClientGone|TextQuotaGuard' -count=1`
+  - `git diff --check`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+if relayInfo.StreamStatus.EndReason == relaycommon.StreamEndReasonClientGone {
+	return
+}
+```
+
+问题：只按断开原因跳过会把可信上游 usage 也免费，并且没有通过 BillingSession 完成预扣退款。
+
+#### Correct
+
+```go
+if shouldSkipClientGoneLocalUsageBilling(ctx, relayInfo, originUsage) {
+	_ = SettleBilling(ctx, relayInfo, 0)
+	return
+}
+```
+
+要求：
+- 跳过条件必须同时检查流式、`client_gone`、`usage != nil` 和 `ContextKeyLocalCountTokens`。
+- 零额结算必须发生在用户/渠道统计、`RecordConsumeLog` 和 tiered billing 消费结算之前。
+- 审计字段放入 `admin_info`，不要暴露给普通用户日志视图。
