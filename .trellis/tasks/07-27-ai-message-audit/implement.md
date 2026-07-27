@@ -99,6 +99,14 @@
 - i18n 新文案必须通过 `scripts/add-missing-keys.mjs` 同步六语言后运行 `bun run i18n:sync`，不得直接修改 locale JSON。
 - 增加前缀指纹稳定性、工具定义排除、精确/前缀/压缩/新建/歧义归属、低覆盖压缩拒绝、筛选后会话分组、历史空会话、最新代表、会话内倒序、存储统计与回退、API 参数、详情类型过滤和时间线交互测试，并重新执行消息审计定向测试、三库兼容、typecheck、变更文件 lint/format、build 和 Check-All。
 
+## 10. 审计模型名与消费日志对齐（二次实现）
+
+- 入站 capture 继续使用原始模型名生成不可变快照，避免把模型映射和计费逻辑带入采集入口。
+- 抽取 `ConsumeLogModelName()` 统一消费日志与消息审计的模型展示规则，以 `BillingModelName()` 为基础并保留 gizmo 通配归一化；文本消费日志和 `controller.Relay` 的审计 finalize 共用该函数。
+- 现有 finalize 轻量事件增加最终模型名；依赖既有 defer 后进先出顺序，确保主计费收口先于消息审计 finalize 执行。
+- model finalize 仅在最终模型名非空时更新 `message_audit_requests.model_name`，避免失败或未完成计费时清空采集阶段模型。
+- 更新异步 capture/finalize 顺序测试，验证最终持久化模型名覆盖为消费日志同源模型，同时保持非阻塞队列与数据库结构不变。
+
 ## 风险与回滚点
 
 - 密钥不一致会导致跨节点详情解密失败和去重失效；发布必须先统一环境变量，再启用设置。
