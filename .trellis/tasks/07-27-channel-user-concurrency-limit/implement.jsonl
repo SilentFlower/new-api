@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"约束 Go 导出 API 注释、testify 测试、JSON 封装、显式零值和质量检查。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"约束 Channel 新列的 GORM 可空字段、AutoMigrate 和 SQLite/MySQL/PostgreSQL 兼容。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"约束本地并发错误的 ErrorCode、skipRetry、协议响应与自动禁用隔离。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"约束超限与 Redis 故障日志的请求关联和敏感信息保护。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"约束 Responses WebSocket 多轮连接、渠道重试、预扣和连接关闭生命周期。"}
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"约束 build 分支定制逻辑独立、原有 Relay 热点最薄接入、diff 控制和上游同步冲突面。"}
+{"file":".trellis/spec/backend/relay-vision-assist.md","reason":"约束视觉辅助主链路与辅助渠道上下文的薄层接入、计费前准备和错误隔离。"}

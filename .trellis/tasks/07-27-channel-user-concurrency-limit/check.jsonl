@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查实现风格、GoDoc、测试质量、gofmt、go test 和前端 Bun 验证。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"检查新字段迁移、显式零值更新和三数据库兼容性。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查 429/503 错误格式、不可重试和不自动禁用行为。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"检查请求日志、错误日志和 Redis/Token/请求体敏感信息边界。"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"检查 Responses WebSocket 首轮重试、多轮复用、计费与断连释放。"}
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"检查新逻辑是否集中在独立领域文件、旧热点文件是否只有必要窄调用及是否存在无关 diff。"}
+{"file":".trellis/spec/backend/relay-vision-assist.md","reason":"检查视觉辅助并发接入未扩大 Controller/handler 状态语义，且保持辅助渠道上下文恢复。"}

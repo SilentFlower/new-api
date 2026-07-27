@@ -1,0 +1,38 @@
+{
+  "id": "channel-user-concurrency-limit",
+  "name": "channel-user-concurrency-limit",
+  "title": "渠道单用户并发限制",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-07-27",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-07-27T13:49:15+08:00",
+    "completedSteps": [
+      "完成渠道单用户并发限制实现",
+      "完成完整 Check-All 修复与验证",
+      "完成跨层 code-spec 更新",
+      "业务提交已推送"
+    ],
+    "partialStep": "生产发布验证",
+    "nextStep": "部署后将渠道 80 的 user_concurrency_limit 配置为 4，并验证第 5 个同用户并发请求返回 429",
+    "notes": "全仓 Go 测试、race 测试、前端构建和定向 lint 已通过；全量前端 lint 仍存在未修改文件的存量错误。"
+  }
+}
