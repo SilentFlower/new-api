@@ -116,6 +116,36 @@ func TestCreateMessageAuditCaptureDeduplicatesWithinUser(t *testing.T) {
 	assert.Equal(t, firstItem.BlobID, secondItem.BlobID)
 }
 
+func TestFinalizeMessageAuditRequestUpdatesNonEmptyModelName(t *testing.T) {
+	truncateTables(t)
+	now := time.Now().Unix()
+	require.NoError(t, DB.Create(&MessageAuditRequest{
+		RequestID:   "finalize-model-request",
+		ModelName:   "origin-model",
+		Status:      "pending",
+		AuditStatus: "captured",
+		CapturedAt:  now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}).Error)
+
+	require.NoError(t, FinalizeMessageAuditRequest(MessageAuditFinalizeRecord{
+		RequestID:   "finalize-model-request",
+		ModelName:   "billing-model",
+		Status:      "succeeded",
+		FinalizedAt: now + 1,
+	}))
+	require.NoError(t, FinalizeMessageAuditRequest(MessageAuditFinalizeRecord{
+		RequestID:   "finalize-model-request",
+		Status:      "succeeded",
+		FinalizedAt: now + 2,
+	}))
+
+	var request MessageAuditRequest
+	require.NoError(t, DB.Where("request_id = ?", "finalize-model-request").First(&request).Error)
+	assert.Equal(t, "billing-model", request.ModelName)
+}
+
 func TestMessageAuditSessionInferenceAndGroupedList(t *testing.T) {
 	truncateTables(t)
 
@@ -144,6 +174,7 @@ func TestMessageAuditSessionInferenceAndGroupedList(t *testing.T) {
 	require.Len(t, requests, 1)
 	assert.Equal(t, duplicate.Request.RequestID, requests[0].RequestID)
 	assert.Equal(t, int64(3), requests[0].SessionRequestCount)
+	assert.Zero(t, requests[0].CompressedCount)
 
 	sessionRequests, sessionTotal, err := ListMessageAudits(MessageAuditListFilter{
 		AuditSessionID: first.Request.AuditSessionID,
@@ -235,6 +266,16 @@ func TestMessageAuditSessionInferenceRecognizesCompressedSubsequence(t *testing.
 	assert.Equal(t, previous.Request.AuditSessionID, compressed.Request.AuditSessionID)
 	assert.Equal(t, previous.Request.RequestID, compressed.Request.ParentRequestID)
 	assert.Equal(t, "compressed", compressed.Request.SessionMatch)
+
+	requests, total, err := ListMessageAudits(MessageAuditListFilter{Limit: 20})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, requests, 1)
+	assert.Equal(t, int64(1), requests[0].CompressedCount)
+
+	detailRequest, _, err := GetMessageAuditEncryptedDetail(compressed.Request.RequestID)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), detailRequest.CompressedCount)
 }
 
 func TestMessageAuditSessionInferenceRejectsWeakCompressionEvidence(t *testing.T) {
@@ -315,6 +356,24 @@ func TestMessageAuditStorageStatsReturnsAuditTableUsage(t *testing.T) {
 	assert.Equal(t, int64(1), stats.RequestCount)
 	assert.Equal(t, int64(1), stats.BlobCount)
 	assert.Equal(t, int64(1), stats.ItemCount)
+	assert.Equal(t, int64(len("nonce-value!")+len("ciphertext")), stats.PayloadBytes)
+	assert.Positive(t, stats.StorageBytes)
+
+	cutoff, err := AdvanceMessageAuditPurgeBefore(time.Unix(802, 0).UnixNano())
+	require.NoError(t, err)
+	deletedRequests, err := DeleteMessageAuditsBeforeBatch(context.Background(), cutoff, 10)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), deletedRequests)
+	deletedBlobs, err := DeleteOrphanMessageAuditBlobsBatch(context.Background(), 10)
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), deletedBlobs)
+
+	stats, err = GetMessageAuditStorageStats()
+	require.NoError(t, err)
+	assert.Zero(t, stats.RequestCount)
+	assert.Zero(t, stats.BlobCount)
+	assert.Zero(t, stats.ItemCount)
+	assert.Zero(t, stats.PayloadBytes)
 	assert.Positive(t, stats.StorageBytes)
 }
 

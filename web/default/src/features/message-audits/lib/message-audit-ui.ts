@@ -67,6 +67,25 @@ export function getMessageAuditErrorMessage(
 }
 
 /**
+ * 返回会话续接方式对应的 i18n 文案键。
+ *
+ * @param match 服务端记录的会话续接方式。
+ * @returns 精确、前缀、压缩或新会话对应的英文源键。
+ */
+export function getMessageAuditSessionMatchLabelKey(match: string): string {
+  switch (match) {
+    case 'exact':
+      return 'Exact history match'
+    case 'prefix':
+      return 'History continuation'
+    case 'compressed':
+      return 'Compressed continuation'
+    default:
+      return 'New inferred session'
+  }
+}
+
+/**
  * 按角色和内容类型过滤详情消息，并保持服务端返回顺序。
  *
  * @param messages 服务端按 sequence 排列的消息。

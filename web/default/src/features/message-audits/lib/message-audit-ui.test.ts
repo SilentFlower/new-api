@@ -7,6 +7,7 @@ import {
   getMessageAuditCleanupProgress,
   getMessageAuditCleanupTitleKey,
   getMessageAuditErrorMessage,
+  getMessageAuditSessionMatchLabelKey,
   isMessageAuditCleanupActive,
   isMessageAuditClearConfirmed,
   keepMessageAuditSessionPlaceholder,
@@ -109,6 +110,27 @@ describe('消息审计详情过滤', () => {
 
   test('没有筛选时返回全部消息', () => {
     assert.deepEqual(filterMessageAuditMessages(messages, [], []), messages)
+  })
+})
+
+describe('消息审计会话续接标识', () => {
+  test('覆盖精确、前缀、压缩和新会话', () => {
+    assert.equal(
+      getMessageAuditSessionMatchLabelKey('exact'),
+      'Exact history match'
+    )
+    assert.equal(
+      getMessageAuditSessionMatchLabelKey('prefix'),
+      'History continuation'
+    )
+    assert.equal(
+      getMessageAuditSessionMatchLabelKey('compressed'),
+      'Compressed continuation'
+    )
+    assert.equal(
+      getMessageAuditSessionMatchLabelKey('unknown'),
+      'New inferred session'
+    )
   })
 })
 

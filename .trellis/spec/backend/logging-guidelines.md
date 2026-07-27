@@ -234,6 +234,7 @@ logger.LogDebug(ctx, fmt.Sprintf("Redis GET: key=%s, value=%s", key, value))
 ```go
 func CaptureMessageAudit(input MessageAuditCaptureInput) bool
 func FinalizeMessageAudit(input MessageAuditFinalizeInput)
+func ConsumeLogModelName(relayInfo *relaycommon.RelayInfo) string
 func ValidateMessageAuditConfiguration() error
 func ListMessageAudits(filter model.MessageAuditListFilter) ([]model.MessageAuditRequest, int64, error)
 func GetMessageAuditDetail(requestID string) (*MessageAuditDetail, error)
@@ -265,15 +266,17 @@ message_audit_states
 - `MessageAuditEnabled` 默认 `false`；开启时必须先通过密钥校验。`MessageAuditRetentionDays` 默认 `7`，合法范围为 `1-30`。
 - controller/relay 只传递验证后的 DTO、请求 ID、用户、令牌、模型、路径、协议、流式标志和时间；协议规范化、过滤、HMAC、加密、去重、会话推断和数据库操作分别归 service/model。
 - capture/finalize 均非阻塞入队。队列容量为 1024 条、总字节上限为 64 MiB，单请求快照上限为 1 MiB；队列满、快照超限或持久化失败不得使 relay 或计费失败。
+- capture 可以先保存 `OriginModelName`；请求结束时 finalize 必须在计费收口之后调用 `ConsumeLogModelName()`，异步覆盖为消费日志同源模型名。最终模型名为空时不得覆盖采集值，历史记录不自动回填。
 - 正文使用 AES-256-GCM 加密；去重指纹使用独立密钥的 HMAC-SHA256，并包含用户 ID 和 schema version。去重只允许发生在同一用户内；每次请求仍保留独立元数据和有序引用。
 - 支持 OpenAI Chat、OpenAI Responses、Claude Messages 和 Gemini GenerateContent 的入站可见内容；Responses Compact、Realtime、Alpha Search、Embedding、Rerank、图片/音频任务及异步任务正文不进入审计。
 - 媒体只记录类型、MIME、大小、来源类别和摘要；Authorization、API Key、Cookie、密码、OAuth/Webhook 密钥、Base64/文件二进制和隐藏 reasoning/thinking/signature 必须过滤。
 - 推断会话仅在同一用户、同一协议内工作。唯一最长完整前缀标记 `prefix`，完全一致标记 `exact`；前缀失败时只允许使用非公共会话内容 HMAC 的高覆盖严格有序子序列标记 `compressed`；无匹配、低覆盖或多候选歧义必须标记 `new`。
-- 默认列表先应用筛选，再按 `audit_session_id` 聚合并返回每个会话的最新请求；`audit_session_id` 查询返回该会话的单次请求且最新在前。历史空会话 ID 和 metadata-only 请求必须单独展示。
+- 默认列表先应用筛选，再按 `audit_session_id` 聚合并返回每个会话的最新请求、`session_request_count` 和 `compressed_request_count`；`audit_session_id` 查询返回该会话的单次请求且最新在前。历史空会话 ID 和 metadata-only 请求必须单独展示。
 - 列表和状态接口不得返回密文、nonce 或正文。详情接口按单个 `request_id` 解密有序消息，每次成功或失败的查看尝试都写不含正文的管理审计日志。
-- 状态接口返回 `storage_bytes`、`storage_estimated`、`request_count`、`blob_count` 和 `item_count`。优先统计四张审计表及其索引的实际分配空间，数据库能力不足时回退为密文与 nonce 的逻辑字节并标记估算。
+- 状态接口返回 `payload_bytes`、`storage_bytes`、`storage_estimated`、`request_count`、`blob_count` 和 `item_count`。`payload_bytes` 始终表示仍被引用的密文与 nonce 逻辑字节；`storage_bytes` 优先表示四张审计表及其索引的实际分配空间，数据库能力不足时回退为 `payload_bytes` 并标记估算。
 - 一键清空使用异步系统任务和持久化纳秒清理水位；清理截止时间之后的新请求继续保留，截止时间之前尚在队列中的旧 capture 不能在任务结束后重新出现。
 - Default 会话历史查询只能在同一 `audit_session_id` 翻页时复用上一页占位数据；切换 session 时必须立即清空旧数据，避免在新会话标识下展示上一会话记录。
+- Default 详情在当前 Sheet/Drawer 内提供推断会话历史选择器；切换请求只更新详情请求 ID，不关闭容器。分页列表不含当前请求时必须把当前请求补入选项，确保受控 Select 的 value 始终有效。
 
 ### 4. Validation & Error Matrix
 
@@ -286,28 +289,36 @@ message_audit_states
 | 后台写入失败 | 最多重试 3 次，最终增加 `failed` 并记录不含正文的请求关联告警 |
 | 完整前缀落入多个会话 | 创建新的 `audit_session_id`，`session_match=new` |
 | 压缩子序列候选相同或差距不足 | 不强行归并，创建新会话 |
-| 物理表空间查询不可用 | 返回逻辑字节，`storage_estimated=true` |
+| finalize 模型名非空 | 使用 `ConsumeLogModelName()` 的结果覆盖审计 `model_name` |
+| finalize 模型名为空 | 保留 capture 阶段模型名，不写空字符串 |
+| 物理表空间查询不可用 | `storage_bytes=payload_bytes`，`storage_estimated=true` |
+| 清空后数据库未收缩 | `payload_bytes` 降低或归零；`storage_bytes` 可保持不变并作为可复用空间展示 |
 | 历史记录没有会话 ID | 按单次请求独立显示，不与其他空值记录合并 |
 | 前端从会话 A 切换到会话 B | B 加载期间不得把 A 的请求作为 placeholder 展示 |
+| 详情选择器翻到不含当前请求的页 | 显式补入当前请求选项，不得让 Select 失去受控值 |
 
 ### 5. Good / Base / Bad Cases
 
 - Good：同一用户的长会话后续请求复用已有加密消息块，只新增变化内容和有序引用；列表聚合为一个推断会话，详情仍能还原每次请求。
 - Good：客户端压缩上下文后保留足够多且顺序一致的旧消息 HMAC，系统标记 `compressed`，不解密正文做匹配。
+- Good：模型映射后消费日志显示冻结计费模型，消息审计 finalize 使用同一归一化函数更新为相同名称。
 - Base：功能关闭或请求协议不支持正文审计，普通消费日志、计费和转发行为保持不变。
 - Base：完全摘要化且没有足够原始锚点时创建新会话，这是保守边界而不是错误。
+- Base：清空删除全部有效载荷后，数据库已分配空间仍可保持不变并供后续写入复用。
 - Bad：把请求 JSON、提示词或响应正文写入 `logger.LogDebug`、`logs.content` 或 `logs.other`。
 - Bad：使用普通 SHA 哈希去重、跨用户共享消息块或把客户端 session/thread 头作为唯一归属依据。
 - Bad：为了保证审计必达而同步等待数据库写入，导致 relay 延迟或失败。
+- Bad：详情切换请求时关闭 Sheet/Drawer，或在分页选项不含当前值时继续渲染受控 Select。
 
 ### 6. Tests Required
 
 - service 规范化测试必须覆盖四种支持协议、隐藏思考/签名过滤、媒体二进制剥离、超大快照降级和 Responses Compact 排除。
 - 加密与去重测试必须断言相同用户复用消息块、不同用户不共享、密文不能直接还原正文、工具定义不改变会话前缀。
 - model 测试必须覆盖 SQLite 写入/查询/清理、共享块回收、纳秒水位、历史秒级水位、精确/前缀/压缩/新建归属，以及前缀和压缩多候选歧义拒绝。
+- model/service 测试必须断言 finalize 非空模型名会覆盖、空模型名保留旧值，异步 capture 先于 finalize 持久化，并覆盖消费日志模型归一化。
 - 外部数据库测试通过隔离 schema 的 `MESSAGE_AUDIT_MYSQL_DSN`、`MESSAGE_AUDIT_POSTGRES_DSN` 验证迁移、事务、详情和清理；未提供 DSN 时必须明确记录为未执行，不能声称三库已实测。
 - controller/router 测试必须断言非 root 拒绝、列表不泄露正文、详情查看产生管理审计、`audit_session_id` 参数原样传递。
-- 前端测试必须断言会话查询参数、角色/内容类型组合过滤保持原顺序，以及跨 session 切换不复用旧 placeholder；变更文件还必须通过 typecheck、lint、format 和 build。
+- 前端测试必须断言会话查询参数、角色/内容类型组合过滤保持原顺序、跨 session 切换不复用旧 placeholder，以及详情内选择器保持当前请求选项；变更文件还必须通过 typecheck、lint、format 和 build。
 - 回归命令：
   - `go test ./... -count=1`
   - `go test -race ./model ./service -run 'MessageAudit' -count=1`
@@ -336,6 +347,11 @@ auditCaptured := service.CaptureMessageAudit(service.MessageAuditCaptureInput{
 	UserID:    relayInfo.UserId,
 	Protocol:  relayInfo.RelayFormat,
 	Request:   request,
+})
+
+defer service.FinalizeMessageAudit(service.MessageAuditFinalizeInput{
+	RequestID: relayInfo.RequestId,
+	ModelName: service.ConsumeLogModelName(relayInfo),
 })
 ```
 

@@ -35,6 +35,7 @@ func (info *RelayInfo) FreezeBillingModelName(modelName string)
 func (info *RelayInfo) ClearBillingModelName()
 func (info *RelayInfo) FrozenBillingModelName() string
 func (info *RelayInfo) BillingModelName() string
+func ConsumeLogModelName(relayInfo *relaycommon.RelayInfo) string
 ```
 
 - 异步任务冻结字段：
@@ -67,6 +68,7 @@ type TaskBillingContext struct {
   - Compact 原始透传使用基础模型冻结计费，`use_upstream_model_for_billing` 不得改变其基础模型契约。
 - 消费方：
   - 预扣、文本/音频/实时结算、工具费、违规费、BillingSession、渠道测试和日志统一调用 `BillingModelName()`，不得重新判断渠道开关或映射状态。
+  - 消费日志主模型字段和消息审计 finalize 必须共用 `ConsumeLogModelName()`；该函数以 `BillingModelName()` 为输入，仅保留既有 `gpt-4-gizmo*`、`gpt-4o-gizmo*` 通配展示兼容。计费查价仍直接使用 `BillingModelName()`，不得使用展示归一化值。
   - 异步任务提交把 `BillingModelName()` 写入 `TaskBillingContext.BillingModelName`；轮询结算和日志优先读取该字段。
   - 历史任务缺少 `BillingModelName` 时，继续回退 `TaskBillingContext.OriginModelName`，再回退任务属性中的原始模型。
 - 计费安全：
@@ -87,17 +89,21 @@ type TaskBillingContext struct {
 | Compact 临时查价成功或失败 | 恢复进入临时查价前的冻结值 |
 | 历史任务缺少 `billing_model_name` | 回退历史 `origin_model_name`，不得为空或改用当前配置 |
 | 实际计费模型缺少价格或表达式 | 错误指向实际计费模型，不静默回退原始模型价格 |
+| `gpt-4-gizmo*` 或 `gpt-4o-gizmo*` 写消费日志/消息审计 | 两处分别归一为 `gpt-4-gizmo-*` 或 `gpt-4o-gizmo-*` |
+| 消息审计 finalize 未获得模型名 | 不以空值覆盖 capture 阶段的原始模型名 |
 
 ### 5. Good/Base/Bad Cases
 
 - Good: 用户请求 `gpt-4o`，渠道映射到 `gpt-4o-mini` 且开启开关；价格、预扣、结算、任务和日志统一使用冻结的 `gpt-4o-mini`。
 - Good: 第一次渠道映射到模型 A 后失败；第二次渠道开始时清空快照并映射到模型 B，最终所有费用和日志使用 B。
 - Good: 上游响应把模型名改成资源路径；结算继续读取预扣阶段冻结模型，不重新查价。
+- Good: 模型映射后消费日志和消息审计都调用 `ConsumeLogModelName()`，管理员按请求 ID 对照时模型名一致。
 - Base: 历史渠道缺少开关字段；零值为 false，继续按原始模型计费。
 - Base: 历史任务没有 `billing_model_name`；轮询结算按保存的原始模型兼容执行。
 - Bad: 在 `service/quota.go`、任务或日志层重复判断 `UseUpstreamModelForBilling`，导致不同路径语义漂移。
 - Bad: 结算阶段直接读取当前 `UpstreamModelName` 或重新调用价格配置，绕过预扣阶段冻结。
 - Bad: Responses handler 直接保存和恢复 `ResolvedBillingModelName` 字段，使快照语义泄漏到领域外。
+- Bad: 消息审计重新实现模型映射或 gizmo 判断，导致与消费日志展示漂移。
 
 ### 6. Tests Required
 
@@ -106,6 +112,7 @@ type TaskBillingContext struct {
   - 冻结值 trim、上游模型变化不污染冻结值、清理后重新动态解析。
 - 价格测试覆盖普通倍率、固定价格和 tiered expression 按映射后的计费模型读取并冻结。
 - 文本结算测试覆盖上游模型变化后仍使用冻结值。
+- service 测试覆盖普通冻结模型和两类 gizmo 归一化，断言消费日志与消息审计使用相同结果。
 - 任务测试覆盖提交时保存 `BillingModelName`、消费日志追溯字段和历史任务回退。
 - 重试测试覆盖每次渠道尝试清理旧快照、成功渠道重新冻结。
 - 回归命令：
@@ -136,6 +143,7 @@ info.FreezeBillingModelName(originBillingModelName)
 
 要求：
 - 价格、结算、任务和日志读取 `BillingModelName()`。
+- 消费日志展示字段与消息审计 finalize 读取 `ConsumeLogModelName()`，不得复制 gizmo 分支。
 - 价格阶段解析使用 `ResolveBillingModelName()`，成功后调用 `FreezeBillingModelName()`。
 - 重试开始调用 `ClearBillingModelName()`；临时保存只读 `FrozenBillingModelName()`。
 

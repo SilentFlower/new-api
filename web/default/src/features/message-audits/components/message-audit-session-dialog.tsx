@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { ChevronLeft, ChevronRight, Loader2, Minimize2 } from 'lucide-react'
+import { Fragment, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Badge } from '@/components/ui/badge'
@@ -32,27 +32,18 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import dayjs from '@/lib/dayjs'
+import { cn } from '@/lib/utils'
 
 import { getMessageAuditSessionRequests } from '../api'
-import { keepMessageAuditSessionPlaceholder } from '../lib/message-audit-ui'
+import {
+  getMessageAuditSessionMatchLabelKey,
+  keepMessageAuditSessionPlaceholder,
+} from '../lib/message-audit-ui'
 
 type MessageAuditSessionDialogProps = {
   sessionId: string | null
   onOpenChange: (open: boolean) => void
   onSelectRequest: (requestId: string) => void
-}
-
-function getSessionMatchLabelKey(match: string): string {
-  switch (match) {
-    case 'exact':
-      return 'Exact history match'
-    case 'prefix':
-      return 'History continuation'
-    case 'compressed':
-      return 'Compressed continuation'
-    default:
-      return 'New inferred session'
-  }
 }
 
 /**
@@ -66,7 +57,7 @@ export function MessageAuditSessionDialog(
 ) {
   const { t } = useTranslation()
   const [page, setPage] = useState(1)
-  const pageSize = 20
+  const pageSize = 50
   const open = Boolean(props.sessionId)
 
   useEffect(() => {
@@ -118,44 +109,74 @@ export function MessageAuditSessionDialog(
           )}
           {!sessionQuery.isLoading && !sessionQuery.isError && data && (
             <div className='divide-y'>
-              {data.items.map((request) => (
-                <button
-                  key={request.request_id}
-                  type='button'
-                  className='hover:bg-muted/40 focus-visible:ring-ring grid w-full gap-2 px-3 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset sm:grid-cols-[150px_minmax(0,1fr)_auto] sm:items-center'
-                  onClick={() => {
-                    props.onSelectRequest(request.request_id)
-                    props.onOpenChange(false)
-                  }}
-                >
-                  <span className='text-sm'>
-                    {dayjs
-                      .unix(request.captured_at)
-                      .format('YYYY-MM-DD HH:mm:ss')}
-                  </span>
-                  <span className='min-w-0'>
-                    <span className='block truncate font-mono text-xs'>
-                      {request.request_id}
-                    </span>
-                    <span className='text-muted-foreground mt-1 block truncate text-xs'>
-                      {request.token_name || `#${request.token_id}`} ·{' '}
-                      {request.model_name}
-                    </span>
-                  </span>
-                  <span className='flex flex-wrap items-center gap-2 sm:justify-end'>
-                    <Badge variant='outline'>
-                      {t(getSessionMatchLabelKey(request.session_match))}
-                    </Badge>
-                    <Badge
-                      variant={
-                        request.status === 'failed' ? 'destructive' : 'outline'
-                      }
+              {data.items.map((request) => {
+                const isCompressed = request.session_match === 'compressed'
+                return (
+                  <Fragment key={request.request_id}>
+                    {isCompressed && (
+                      <div className='border-y border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-medium text-amber-700 dark:text-amber-300'>
+                        <span className='flex items-center gap-2'>
+                          <Minimize2 className='size-4' aria-hidden='true' />
+                          {t('Context compressed here')}
+                        </span>
+                      </div>
+                    )}
+                    <button
+                      type='button'
+                      className={cn(
+                        'hover:bg-muted/40 focus-visible:ring-ring grid w-full gap-2 px-3 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-inset sm:grid-cols-[150px_minmax(0,1fr)_auto] sm:items-center',
+                        isCompressed &&
+                          'border-l-4 border-l-amber-500 bg-amber-500/5'
+                      )}
+                      onClick={() => {
+                        props.onSelectRequest(request.request_id)
+                        props.onOpenChange(false)
+                      }}
                     >
-                      {t(request.status || 'pending')}
-                    </Badge>
-                  </span>
-                </button>
-              ))}
+                      <span className='text-sm'>
+                        {dayjs
+                          .unix(request.captured_at)
+                          .format('YYYY-MM-DD HH:mm:ss')}
+                      </span>
+                      <span className='min-w-0'>
+                        <span className='block truncate font-mono text-xs'>
+                          {request.request_id}
+                        </span>
+                        <span className='text-muted-foreground mt-1 block truncate text-xs'>
+                          {request.token_name || `#${request.token_id}`} ·{' '}
+                          {request.model_name}
+                        </span>
+                      </span>
+                      <span className='flex flex-wrap items-center gap-2 sm:justify-end'>
+                        <Badge
+                          variant='outline'
+                          className={
+                            isCompressed
+                              ? 'border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                              : undefined
+                          }
+                        >
+                          {isCompressed && <Minimize2 aria-hidden='true' />}
+                          {t(
+                            getMessageAuditSessionMatchLabelKey(
+                              request.session_match
+                            )
+                          )}
+                        </Badge>
+                        <Badge
+                          variant={
+                            request.status === 'failed'
+                              ? 'destructive'
+                              : 'outline'
+                          }
+                        >
+                          {t(request.status || 'pending')}
+                        </Badge>
+                      </span>
+                    </button>
+                  </Fragment>
+                )
+              })}
               {data.items.length === 0 && (
                 <p className='text-muted-foreground px-3 py-10 text-center text-sm'>
                   {t('No requests found in this inferred session.')}

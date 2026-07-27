@@ -16,6 +16,23 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// ConsumeLogModelName 返回消费日志和消息审计共同展示的模型名。
+// @param relayInfo 当前请求的转发与计费上下文。
+// @return 经过消费日志兼容归一化的最终模型名。
+func ConsumeLogModelName(relayInfo *relaycommon.RelayInfo) string {
+	if relayInfo == nil {
+		return ""
+	}
+	modelName := relayInfo.BillingModelName()
+	if strings.HasPrefix(modelName, "gpt-4-gizmo") {
+		return "gpt-4-gizmo-*"
+	}
+	if strings.HasPrefix(modelName, "gpt-4o-gizmo") {
+		return "gpt-4o-gizmo-*"
+	}
+	return modelName
+}
+
 // MergeContextLogOther 将请求上下文中的附加日志字段合并到最终日志。
 // admin_info 会按字段合并，避免覆盖已有的管理员审计信息。
 // @param ctx 当前 Gin 请求上下文。

@@ -17,7 +17,16 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { Check, Copy, ListFilter, Loader2, RotateCcw } from 'lucide-react'
+import {
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  ListFilter,
+  Loader2,
+  Minimize2,
+  RotateCcw,
+} from 'lucide-react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -34,10 +43,19 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import {
   Sheet,
   SheetContent,
@@ -48,13 +66,17 @@ import {
 import { useMediaQuery } from '@/hooks'
 import dayjs from '@/lib/dayjs'
 
-import { getMessageAuditDetail } from '../api'
-import { filterMessageAuditMessages } from '../lib/message-audit-ui'
+import { getMessageAuditDetail, getMessageAuditSessionRequests } from '../api'
+import {
+  filterMessageAuditMessages,
+  getMessageAuditSessionMatchLabelKey,
+} from '../lib/message-audit-ui'
 import type { MessageAuditMessage } from '../types'
 
 type MessageAuditDetailPanelProps = {
   requestId: string | null
   onOpenChange: (open: boolean) => void
+  onSelectRequest: (requestId: string) => void
 }
 
 type AuditMessageListProps = {
@@ -152,32 +174,73 @@ function MessageFilterMenu(props: MessageFilterMenuProps) {
         {props.label}
       </DropdownMenuTrigger>
       <DropdownMenuContent align='start' className='max-h-72 min-w-48'>
-        <DropdownMenuLabel>{props.label}</DropdownMenuLabel>
-        <DropdownMenuSeparator />
-        {props.options.map((option) => (
-          <DropdownMenuCheckboxItem
-            key={option}
-            checked={!props.hiddenOptions.includes(option)}
-            onCheckedChange={(checked) => props.onToggle(option, checked)}
-          >
-            {option}
-          </DropdownMenuCheckboxItem>
-        ))}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>{props.label}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          {props.options.map((option) => (
+            <DropdownMenuCheckboxItem
+              key={option}
+              checked={!props.hiddenOptions.includes(option)}
+              onCheckedChange={(checked) => props.onToggle(option, checked)}
+            >
+              {option}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   )
 }
 
-function DetailBody(props: { requestId: string }) {
+function DetailBody(props: {
+  requestId: string
+  onSelectRequest: (requestId: string) => void
+}) {
   const { t } = useTranslation()
   const [copiedSequence, setCopiedSequence] = useState<number | null>(null)
   const [hiddenRoles, setHiddenRoles] = useState<string[]>([])
   const [hiddenContentTypes, setHiddenContentTypes] = useState<string[]>([])
+  const [sessionPage, setSessionPage] = useState(1)
+  const sessionPageSize = 50
   const detailQuery = useQuery({
     queryKey: ['message-audit-detail', props.requestId],
     queryFn: () => getMessageAuditDetail(props.requestId),
   })
   const detail = detailQuery.data
+  const auditSessionId = detail?.request.audit_session_id
+  const sessionQuery = useQuery({
+    queryKey: [
+      'message-audit-detail-session',
+      auditSessionId,
+      sessionPage,
+      sessionPageSize,
+    ],
+    queryFn: () => {
+      if (!auditSessionId) {
+        throw new Error(t('Inferred session ID is required'))
+      }
+      return getMessageAuditSessionRequests(
+        auditSessionId,
+        sessionPage,
+        sessionPageSize
+      )
+    },
+    enabled: Boolean(auditSessionId),
+  })
+  const sessionRequests = useMemo(() => {
+    const requests = sessionQuery.data?.items ?? []
+    if (
+      !detail ||
+      requests.some((item) => item.request_id === props.requestId)
+    ) {
+      return requests
+    }
+    return [...requests, detail.request]
+  }, [detail, props.requestId, sessionQuery.data?.items])
+  const sessionPageCount = Math.max(
+    1,
+    Math.ceil((sessionQuery.data?.total ?? 0) / sessionPageSize)
+  )
   const roles = useMemo(
     () =>
       [...new Set(detail?.messages.map((message) => message.role) ?? [])]
@@ -287,8 +350,136 @@ function DetailBody(props: { requestId: string }) {
           {detail.request.request_path}
         </dd>
         <dt className='text-muted-foreground'>{t('Inferred session')}</dt>
-        <dd className='font-mono text-xs break-all'>
+        <dd className='min-w-0 font-mono text-xs break-all'>
           {detail.request.audit_session_id}
+        </dd>
+        <dt className='text-muted-foreground'>
+          {t('Inferred session history')}
+        </dt>
+        <dd className='flex min-w-0 flex-wrap items-center gap-2'>
+          <div className='min-w-0 flex-1'>
+            <Select
+              value={detail.request.request_id}
+              onValueChange={(requestId) => {
+                if (requestId && requestId !== detail.request.request_id) {
+                  props.onSelectRequest(requestId)
+                }
+              }}
+              disabled={
+                !detail.request.audit_session_id || sessionQuery.isLoading
+              }
+            >
+              <SelectTrigger className='w-full min-w-0'>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent
+                align='start'
+                alignItemWithTrigger={false}
+                className='max-w-[calc(100vw-2rem)] min-w-80'
+              >
+                <SelectGroup>
+                  {sessionRequests.map((request) => (
+                    <SelectItem
+                      key={request.request_id}
+                      value={request.request_id}
+                      className={
+                        request.session_match === 'compressed'
+                          ? 'text-amber-700 dark:text-amber-300'
+                          : undefined
+                      }
+                    >
+                      {request.session_match === 'compressed' && (
+                        <Minimize2 aria-hidden='true' />
+                      )}
+                      {dayjs.unix(request.captured_at).format('MM-DD HH:mm:ss')}{' '}
+                      ·{' '}
+                      {t(
+                        getMessageAuditSessionMatchLabelKey(
+                          request.session_match
+                        )
+                      )}{' '}
+                      · {request.message_count} {t('Messages')}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </div>
+          {sessionPageCount > 1 && (
+            <div className='flex shrink-0 items-center gap-1'>
+              <Button
+                type='button'
+                variant='outline'
+                size='icon-sm'
+                title={t('Previous page')}
+                aria-label={t('Previous page')}
+                disabled={sessionPage <= 1 || sessionQuery.isFetching}
+                onClick={() =>
+                  setSessionPage((value) => Math.max(1, value - 1))
+                }
+              >
+                <ChevronLeft aria-hidden='true' />
+              </Button>
+              <span className='min-w-12 text-center text-xs'>
+                {sessionPage}/{sessionPageCount}
+              </span>
+              <Button
+                type='button'
+                variant='outline'
+                size='icon-sm'
+                title={t('Next page')}
+                aria-label={t('Next page')}
+                disabled={
+                  sessionPage >= sessionPageCount || sessionQuery.isFetching
+                }
+                onClick={() =>
+                  setSessionPage((value) =>
+                    Math.min(sessionPageCount, value + 1)
+                  )
+                }
+              >
+                <ChevronRight aria-hidden='true' />
+              </Button>
+            </div>
+          )}
+          {sessionQuery.isError && (
+            <span className='text-destructive basis-full text-xs'>
+              {t('Failed to load session history')}
+            </span>
+          )}
+        </dd>
+        <dt className='text-muted-foreground'>{t('Session continuation')}</dt>
+        <dd>
+          <Badge
+            variant='outline'
+            className={
+              detail.request.session_match === 'compressed'
+                ? 'border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                : undefined
+            }
+          >
+            {detail.request.session_match === 'compressed' && (
+              <Minimize2 aria-hidden='true' />
+            )}
+            {t(
+              getMessageAuditSessionMatchLabelKey(detail.request.session_match)
+            )}
+          </Badge>
+        </dd>
+        <dt className='text-muted-foreground'>{t('Session compression')}</dt>
+        <dd>
+          {detail.request.compressed_request_count > 0 ? (
+            <Badge
+              variant='outline'
+              className='border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+            >
+              <Minimize2 aria-hidden='true' />
+              {t('Compressed continuation')} ·{' '}
+              {detail.request.compressed_request_count}
+            </Badge>
+          ) : (
+            <span className='text-muted-foreground'>{t('None')}</span>
+          )}
         </dd>
       </dl>
 
@@ -360,7 +551,13 @@ export function MessageAuditDetailPanel(props: MessageAuditDetailPanelProps) {
             </DrawerDescription>
           </DrawerHeader>
           <div className='min-h-0 flex-1 overflow-y-auto px-4'>
-            {props.requestId && <DetailBody requestId={props.requestId} />}
+            {props.requestId && (
+              <DetailBody
+                key={props.requestId}
+                requestId={props.requestId}
+                onSelectRequest={props.onSelectRequest}
+              />
+            )}
           </div>
         </DrawerContent>
       </Drawer>
@@ -380,7 +577,13 @@ export function MessageAuditDetailPanel(props: MessageAuditDetailPanelProps) {
           </SheetDescription>
         </SheetHeader>
         <div className='px-4'>
-          {props.requestId && <DetailBody requestId={props.requestId} />}
+          {props.requestId && (
+            <DetailBody
+              key={props.requestId}
+              requestId={props.requestId}
+              onSelectRequest={props.onSelectRequest}
+            />
+          )}
         </div>
       </SheetContent>
     </Sheet>

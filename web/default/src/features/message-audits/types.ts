@@ -25,6 +25,7 @@ export type MessageAuditRequest = {
   parent_request_id: string
   session_match: 'new' | 'exact' | 'prefix' | 'compressed' | string
   session_request_count: number
+  compressed_request_count: number
   user_id: number
   username: string
   token_id: number
@@ -81,6 +82,7 @@ export type MessageAuditStatus = {
   dropped: number
   storage_bytes: number
   storage_estimated: boolean
+  payload_bytes: number
   request_count: number
   blob_count: number
   item_count: number

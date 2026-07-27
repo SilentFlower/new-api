@@ -22,6 +22,7 @@ import type { ColumnDef } from '@tanstack/react-table'
 import {
   AlertTriangle,
   History,
+  Minimize2,
   RefreshCw,
   Settings,
   Trash2,
@@ -288,9 +289,21 @@ export function MessageAudits() {
         cell: ({ row }) => formatBytes(row.original.plaintext_bytes),
       },
       {
-        accessorKey: 'dedup_saved_bytes',
-        header: t('Dedup saved'),
-        cell: ({ row }) => formatBytes(row.original.dedup_saved_bytes),
+        accessorKey: 'compressed_request_count',
+        header: t('Context compression'),
+        cell: ({ row }) =>
+          row.original.compressed_request_count > 0 ? (
+            <Badge
+              variant='outline'
+              className='border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+            >
+              <Minimize2 aria-hidden='true' />
+              {t('Compressed continuation')} ·{' '}
+              {row.original.compressed_request_count}
+            </Badge>
+          ) : (
+            <span className='text-muted-foreground'>{t('None')}</span>
+          ),
       },
       {
         accessorKey: 'status',
@@ -435,7 +448,7 @@ export function MessageAudits() {
               />
             )}
             {!statusQuery.isLoading && !statusQuery.isError && status && (
-              <div className='bg-muted/30 grid gap-x-6 gap-y-2 border px-3 py-2 text-xs sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-12'>
+              <div className='bg-muted/30 grid gap-x-6 gap-y-2 border px-3 py-2 text-xs sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7'>
                 <span>
                   {t('Capture')}:{' '}
                   <strong>
@@ -473,7 +486,11 @@ export function MessageAudits() {
                   {t('Dropped')}: <strong>{status.dropped}</strong>
                 </span>
                 <span>
-                  {t('Audit storage')}:{' '}
+                  {t('Encrypted payload')}:{' '}
+                  <strong>{formatBytes(status.payload_bytes ?? 0)}</strong>
+                </span>
+                <span>
+                  {t('Allocated storage')}:{' '}
                   <strong>{formatBytes(status.storage_bytes ?? 0)}</strong>
                   {status.storage_estimated && (
                     <span className='text-muted-foreground ml-1'>
@@ -542,6 +559,11 @@ export function MessageAudits() {
                         {t('{{count}} message blocks removed.', {
                           count: cleanupTask.result?.deleted_blobs ?? 0,
                         })}
+                      </span>
+                      <span className='basis-full'>
+                        {t(
+                          'Audit remains enabled, so requests received after cleanup started are retained. Database allocated space is reusable and may not shrink after records are deleted.'
+                        )}
                       </span>
                     </>
                   )}
@@ -727,6 +749,16 @@ export function MessageAudits() {
                                 {t(row.original.status)}
                               </Badge>
                             </div>
+                            {row.original.compressed_request_count > 0 && (
+                              <Badge
+                                variant='outline'
+                                className='mt-2 border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                              >
+                                <Minimize2 aria-hidden='true' />
+                                {t('Compressed continuation')} ·{' '}
+                                {row.original.compressed_request_count}
+                              </Badge>
+                            )}
                             <div className='text-muted-foreground mt-1 truncate font-mono text-xs'>
                               {row.original.request_id}
                             </div>
@@ -776,6 +808,7 @@ export function MessageAudits() {
       <MessageAuditDetailPanel
         requestId={selectedRequestId}
         onOpenChange={(open) => !open && setSelectedRequestId(null)}
+        onSelectRequest={setSelectedRequestId}
       />
 
       <MessageAuditSessionDialog
@@ -793,6 +826,9 @@ export function MessageAudits() {
             <AlertDialogDescription>
               {t(
                 'Existing audited messages will be permanently deleted. New requests can continue to be captured during cleanup.'
+              )}{' '}
+              {t(
+                'Database allocated space is reusable and may not shrink after records are deleted.'
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>

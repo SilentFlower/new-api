@@ -30,6 +30,7 @@ type MessageAuditRequest struct {
 	ConversationItemCount int    `json:"-"`
 	SessionAnchorCount    int    `json:"-"`
 	SessionRequestCount   int64  `json:"session_request_count" gorm:"-:all"`
+	CompressedCount       int64  `json:"compressed_request_count" gorm:"-:all"`
 	UserID                int    `json:"user_id" gorm:"index;index:idx_message_audit_session_candidate,priority:1"`
 	Username              string `json:"username" gorm:"type:varchar(128);index"`
 	TokenID               int    `json:"token_id" gorm:"index"`
@@ -110,6 +111,7 @@ type MessageAuditCaptureRecord struct {
 // MessageAuditFinalizeRecord 描述请求结束后需要补充的轻量状态。
 type MessageAuditFinalizeRecord struct {
 	RequestID    string
+	ModelName    string
 	Status       string
 	ErrorCode    string
 	FinishReason string
@@ -139,6 +141,7 @@ type MessageAuditListFilter struct {
 type MessageAuditStorageStats struct {
 	StorageBytes     int64
 	StorageEstimated bool
+	PayloadBytes     int64
 	RequestCount     int64
 	BlobCount        int64
 	ItemCount        int64
@@ -453,6 +456,9 @@ func FinalizeMessageAuditRequest(record MessageAuditFinalizeRecord) error {
 		"finalized_at":  record.FinalizedAt,
 		"updated_at":    record.FinalizedAt,
 	}
+	if record.ModelName != "" {
+		updates["model_name"] = record.ModelName
+	}
 	return DB.Model(&MessageAuditRequest{}).Where("request_id = ?", record.RequestID).Updates(updates).Error
 }
 
@@ -479,15 +485,16 @@ func ListMessageAudits(filter MessageAuditListFilter) ([]MessageAuditRequest, in
 	}
 
 	groupedQuery := query.
-		Select("MAX(id) AS latest_id, COUNT(*) AS session_request_count").
+		Select("MAX(id) AS latest_id, COUNT(*) AS session_request_count, SUM(CASE WHEN session_match = 'compressed' THEN 1 ELSE 0 END) AS compressed_request_count").
 		Group("audit_session_id, CASE WHEN audit_session_id IS NULL OR audit_session_id = '' THEN id ELSE 0 END")
 	var total int64
 	if err := DB.Table("(?) AS message_audit_sessions", groupedQuery).Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 	type messageAuditSessionRow struct {
-		LatestID            int64
-		SessionRequestCount int64
+		LatestID               int64
+		SessionRequestCount    int64
+		CompressedRequestCount int64
 	}
 	var sessionRows []messageAuditSessionRow
 	if err := DB.Table("(?) AS message_audit_sessions", groupedQuery).
@@ -503,9 +510,11 @@ func ListMessageAudits(filter MessageAuditListFilter) ([]MessageAuditRequest, in
 
 	latestIDs := make([]int64, 0, len(sessionRows))
 	countsByID := make(map[int64]int64, len(sessionRows))
+	compressedCountsByID := make(map[int64]int64, len(sessionRows))
 	for _, row := range sessionRows {
 		latestIDs = append(latestIDs, row.LatestID)
 		countsByID[row.LatestID] = row.SessionRequestCount
+		compressedCountsByID[row.LatestID] = row.CompressedRequestCount
 	}
 	var unorderedRequests []MessageAuditRequest
 	if err := DB.Model(&MessageAuditRequest{}).
@@ -517,6 +526,7 @@ func ListMessageAudits(filter MessageAuditListFilter) ([]MessageAuditRequest, in
 	requestsByID := make(map[int64]MessageAuditRequest, len(unorderedRequests))
 	for _, request := range unorderedRequests {
 		request.SessionRequestCount = countsByID[request.ID]
+		request.CompressedCount = compressedCountsByID[request.ID]
 		requestsByID[request.ID] = request
 	}
 	requests := make([]MessageAuditRequest, 0, len(sessionRows))
@@ -562,9 +572,9 @@ func messageAuditFilteredQuery(query *gorm.DB, filter MessageAuditListFilter) *g
 	return query
 }
 
-// GetMessageAuditStorageStats 返回消息审计表占用空间和行数。
+// GetMessageAuditStorageStats 返回消息审计表占用空间、有效密文载荷和行数。
 //
-// 返回值优先使用数据库表级物理分配空间，能力不足时回退为密文逻辑大小。
+// 返回值优先使用数据库表级物理分配空间，能力不足时回退为有效密文载荷。
 func GetMessageAuditStorageStats() (MessageAuditStorageStats, error) {
 	stats := MessageAuditStorageStats{}
 	if err := DB.Model(&MessageAuditRequest{}).Count(&stats.RequestCount).Error; err != nil {
@@ -574,6 +584,11 @@ func GetMessageAuditStorageStats() (MessageAuditStorageStats, error) {
 		return stats, err
 	}
 	if err := DB.Model(&MessageAuditItem{}).Count(&stats.ItemCount).Error; err != nil {
+		return stats, err
+	}
+	if err := DB.Model(&MessageAuditBlob{}).
+		Select("COALESCE(SUM(LENGTH(ciphertext) + LENGTH(nonce)), 0)").
+		Scan(&stats.PayloadBytes).Error; err != nil {
 		return stats, err
 	}
 
@@ -595,11 +610,7 @@ func GetMessageAuditStorageStats() (MessageAuditStorageStats, error) {
 	}
 
 	stats.StorageEstimated = true
-	if fallbackErr := DB.Model(&MessageAuditBlob{}).
-		Select("COALESCE(SUM(LENGTH(ciphertext) + LENGTH(nonce)), 0)").
-		Scan(&stats.StorageBytes).Error; fallbackErr != nil {
-		return stats, fallbackErr
-	}
+	stats.StorageBytes = stats.PayloadBytes
 	return stats, nil
 }
 
@@ -611,6 +622,13 @@ func GetMessageAuditEncryptedDetail(requestID string) (*MessageAuditRequest, []M
 	var request MessageAuditRequest
 	if err := DB.Where("request_id = ?", requestID).First(&request).Error; err != nil {
 		return nil, nil, err
+	}
+	if request.AuditSessionID != "" {
+		if err := DB.Model(&MessageAuditRequest{}).
+			Where("audit_session_id = ? AND session_match = ?", request.AuditSessionID, "compressed").
+			Count(&request.CompressedCount).Error; err != nil {
+			return nil, nil, err
+		}
 	}
 	var items []MessageAuditEncryptedItem
 	err := DB.Table("message_audit_items").

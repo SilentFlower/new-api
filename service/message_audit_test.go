@@ -8,6 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,26 @@ func newMessageAuditTestManager(t *testing.T) *messageAuditManager {
 		keyFingerprint: fingerprint,
 		keyConfigured:  true,
 	}
+}
+
+func TestConsumeLogModelNameMatchesConsumptionLogNormalization(t *testing.T) {
+	tests := []struct {
+		name      string
+		modelName string
+		expected  string
+	}{
+		{name: "普通计费模型", modelName: "claude-opus-5", expected: "claude-opus-5"},
+		{name: "旧版 gizmo", modelName: "gpt-4-gizmo-custom", expected: "gpt-4-gizmo-*"},
+		{name: "新版 gizmo", modelName: "gpt-4o-gizmo-custom", expected: "gpt-4o-gizmo-*"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			info := &relaycommon.RelayInfo{OriginModelName: "origin-model"}
+			info.FreezeBillingModelName(test.modelName)
+			assert.Equal(t, test.expected, ConsumeLogModelName(info))
+		})
+	}
+	assert.Empty(t, ConsumeLogModelName(nil))
 }
 
 func TestMessageAuditNormalizeRequestFiltersHiddenContent(t *testing.T) {
@@ -243,6 +264,7 @@ func TestMessageAuditManagerDrainsCaptureBeforeFinalize(t *testing.T) {
 			request: model.MessageAuditRequest{
 				RequestID:      "async-request",
 				UserID:         7,
+				ModelName:      "origin-model",
 				Status:         "pending",
 				AuditStatus:    "captured",
 				MessageCount:   1,
@@ -260,6 +282,7 @@ func TestMessageAuditManagerDrainsCaptureBeforeFinalize(t *testing.T) {
 		size: 64,
 		finalize: &model.MessageAuditFinalizeRecord{
 			RequestID:   "async-request",
+			ModelName:   "billing-model",
 			Status:      "succeeded",
 			HTTPStatus:  200,
 			DurationMS:  25,
@@ -275,6 +298,7 @@ func TestMessageAuditManagerDrainsCaptureBeforeFinalize(t *testing.T) {
 	var request model.MessageAuditRequest
 	require.NoError(t, model.DB.Where("request_id = ?", "async-request").First(&request).Error)
 	assert.Equal(t, "succeeded", request.Status)
+	assert.Equal(t, "billing-model", request.ModelName)
 	assert.Equal(t, 200, request.HTTPStatus)
 	assert.Equal(t, int64(25), request.DurationMS)
 	assert.Equal(t, uint64(2), manager.succeeded.Load())

@@ -59,6 +59,7 @@ type MessageAuditCaptureInput struct {
 // MessageAuditFinalizeInput 是请求结束时提交的轻量审计状态。
 type MessageAuditFinalizeInput struct {
 	RequestID    string
+	ModelName    string
 	Status       string
 	ErrorCode    string
 	FinishReason string
@@ -82,6 +83,7 @@ type MessageAuditStatus struct {
 	Dropped           uint64 `json:"dropped"`
 	StorageBytes      int64  `json:"storage_bytes"`
 	StorageEstimated  bool   `json:"storage_estimated"`
+	PayloadBytes      int64  `json:"payload_bytes"`
 	RequestCount      int64  `json:"request_count"`
 	BlobCount         int64  `json:"blob_count"`
 	ItemCount         int64  `json:"item_count"`
@@ -215,6 +217,7 @@ func GetMessageAuditStatus() MessageAuditStatus {
 	} else {
 		status.StorageBytes = storageStats.StorageBytes
 		status.StorageEstimated = storageStats.StorageEstimated
+		status.PayloadBytes = storageStats.PayloadBytes
 		status.RequestCount = storageStats.RequestCount
 		status.BlobCount = storageStats.BlobCount
 		status.ItemCount = storageStats.ItemCount
@@ -293,7 +296,7 @@ func CaptureMessageAudit(input MessageAuditCaptureInput) bool {
 
 // FinalizeMessageAudit 非阻塞投递请求结束元数据。
 //
-// 参数 input 不包含响应正文，仅记录状态和耗时。
+// 参数 input 不包含响应正文，仅记录最终模型、状态和耗时。
 func FinalizeMessageAudit(input MessageAuditFinalizeInput) {
 	manager := messageAuditManagerInst
 	if manager == nil || manager.stopping.Load() || input.RequestID == "" {
@@ -305,6 +308,7 @@ func FinalizeMessageAudit(input MessageAuditFinalizeInput) {
 	}
 	record := &model.MessageAuditFinalizeRecord{
 		RequestID:    input.RequestID,
+		ModelName:    input.ModelName,
 		Status:       status,
 		ErrorCode:    input.ErrorCode,
 		FinishReason: input.FinishReason,

@@ -160,6 +160,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			}
 			service.FinalizeMessageAudit(service.MessageAuditFinalizeInput{
 				RequestID:  relayInfo.RequestId,
+				ModelName:  service.ConsumeLogModelName(relayInfo),
 				Status:     status,
 				ErrorCode:  errorCode,
 				HTTPStatus: httpStatus,
