@@ -338,7 +338,7 @@ When applicable, also validate indexes/links, code signatures, or project-specif
 ### Workflow Disposition
 
 - Interactive: after a passed Check-All stop, when the user says “下一步”, “继续”, `next`, `continue`, or an equivalent continuation intent, run this skill. A `no-op` or `written` result must load `trellis-push` in the same turn and present its single confirmation plan. A `needs-review` result stops and must not generate a Push plan.
-- Interactive direct push: when Check-All has passed, the user directly requests a push, and there is no currently valid `spec_update_result`, run this skill first. Only `no-op` or `written` may proceed to `trellis-push`.
+- Interactive direct Git: when the latest user message that triggered the current completion chain explicitly requests an ordinary push or a user-initiated `commit-only`, use that request only as conditional continuation after a strictly passed Check-All. After the existing standard Check-All report is shown, run this skill in the same turn when no currently valid `spec_update_result` exists. Only `no-op` or `written` may proceed to `trellis-push`; `needs-review` stops. Do not infer this intent from history, summaries, dirty state, or an auto-loop internal `commit-only`.
 - Validated auto-loop: for `no-op` or `written`, execute `record --action run_spec_update --result ok` and immediately run `next`. For `needs-review`, execute `record --action run_spec_update --result blocked --failure-type spec-needs-review`; never disguise it as `no-op`.
 
 Do not ask again or rerun when a currently valid `no-op` or `written` result already exists. Re-evaluate after the actual diff, Check-All conclusion, or the user's spec intent changes.

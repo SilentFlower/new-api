@@ -336,6 +336,7 @@ def set_current_task(
     ) is not None
 
 
+# BEGIN skill-garden patch paths-clear-current-result v0.6
 def clear_current_task(
     repo_root: Path | None = None,
     platform_input: dict | None = None,
@@ -345,21 +346,24 @@ def clear_current_task(
 
     Args:
         repo_root: Repository root path. Defaults to auto-detected.
+        platform_input: Platform hook input.
+        platform: Explicit platform name.
 
     Returns:
-        True on success.
+        True only when the selected session state was cleared or already absent.
     """
     if repo_root is None:
         repo_root = get_repo_root()
 
     from .active_task import clear_active_task
 
-    clear_active_task(
+    result = clear_active_task(
         repo_root,
         platform_input=platform_input,
         platform=platform,
     )
-    return True
+    return result.cleared
+# END skill-garden patch paths-clear-current-result v0.6
 
 
 def has_current_task(repo_root: Path | None = None) -> bool:

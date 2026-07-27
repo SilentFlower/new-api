@@ -4,32 +4,64 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import socket
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-SCHEMA_VERSION = 1
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from decision_log import DecisionLogError, append_decision
+
+SCHEMA_VERSION = 2
+LEGACY_SCHEMA_VERSION = 1
 DEFAULT_PROFILE = "commit-only"
 MAX_FIX_RECHECK = 3
+MAX_PLANNING_REPAIR = 3
 DECISION_LOG_LIMIT = 20
+ACTIVE_RUN_STATUSES = {"preparing", "awaiting_input", "running"}
+TERMINAL_RUN_STATUSES = {
+    "completed",
+    "completed_with_blocked",
+    "globally_blocked",
+    "stopped",
+}
+ALLOWED_TASK_STATUSES = {"planning", "in_progress"}
 VALID_IMPLEMENT_ROUTES = {"inline", "subagent"}
 VALID_CHECK_ROUTES = {"check-all-inline", "check-all-subagent"}
 VALID_CHECK_DEPTHS = {"auto", "light", "full"}
 RECOVERABLE_BLOCK_REASONS = {
     "missing-prd",
     "open-questions",
+    "open-questions-ambiguous",
+    "planning-readiness",
+    "planning-readiness-ambiguous",
     "incomplete-complex-artifacts",
     "missing-implement-context",
     "missing-check-context",
+    "planning-repair-budget-exhausted",
+    "artifact-drift",
+    "protected-path-conflict",
+    "protected-baseline-drift",
+    "blocked-dependency",
     "unknown-step",
 }
 STEP_ACTIONS = {
+    "classify_dirty_baseline": "classify_dirty_baseline",
+    "resolve_open_questions": "resolve_open_questions",
+    "review_open_questions": "review_open_questions",
+    "review_planning_readiness": "review_planning_readiness",
+    "planning_repair": "run_planning_repair",
     "refresh_brief": "refresh_brief",
+    "confirm_brief": "confirm_brief",
     "start_task": "start_task",
     "implement": "run_implement",
     "check": "run_check_all",
@@ -68,19 +100,45 @@ def _print(data: dict[str, Any]) -> int:
     return 0
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    """读取 JSON 对象，失败返回空对象。"""
+def _read_json_result(path: Path) -> dict[str, Any]:
+    """读取 runtime JSON，并保留缺失、损坏和 I/O 错误的区别。"""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
+    except FileNotFoundError:
+        return {"status": "missing", "data": None, "error": None}
+    except json.JSONDecodeError as exc:
+        return {"status": "corrupt", "data": None, "error": str(exc)}
+    except OSError as exc:
+        return {"status": "io_error", "data": None, "error": str(exc)}
+    if not isinstance(data, dict):
+        return {"status": "corrupt", "data": None, "error": "JSON 根节点不是对象"}
+    return {"status": "ok", "data": data, "error": None}
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    """兼容非关键读取；仅返回成功解析的 JSON 对象。"""
+    result = _read_json_result(path)
+    data = result.get("data")
     return data if isinstance(data, dict) else {}
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
-    """写入格式化 JSON。"""
+    """使用同目录临时文件原子写入 runtime JSON。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _rel_path(repo_root: Path, path: Path) -> str:
@@ -330,25 +388,371 @@ def _has_real_jsonl_entries(path: Path, repo_root: Path) -> bool:
     return False
 
 
-def _open_questions(text: str) -> list[str]:
-    """提取 PRD 中仍存在的 open question 条目。"""
+def _open_questions(text: str) -> dict[str, list[str]]:
+    """按 checkbox 契约分类 PRD 中的 Open Questions 条目。"""
     lines = text.splitlines()
     collecting = False
-    questions: list[str] = []
+    questions: dict[str, list[str]] = {"unchecked": [], "checked": [], "bare": []}
     for line in lines:
         if line.startswith("## "):
             collecting = line.strip().lower() == "## open questions"
             continue
-        if collecting and line.strip().startswith("-"):
-            item = line.strip().lstrip("-").strip()
-            if item and item.upper() not in {"TBD", "N/A"}:
-                questions.append(item)
+        stripped = line.strip()
+        if not collecting or not stripped.startswith("-"):
+            continue
+        lowered = stripped.lower()
+        if lowered.startswith("- [ ]"):
+            item = stripped[5:].strip()
+            if item:
+                questions["unchecked"].append(item)
+        elif lowered.startswith("- [x]"):
+            item = stripped[5:].strip()
+            if item:
+                questions["checked"].append(item)
+        else:
+            item = stripped[1:].strip()
+            if item:
+                questions["bare"].append(item)
     return questions
+
+
+def _prd_sha256(content: bytes) -> str:
+    """返回用于绑定语义复核结果的 PRD 内容摘要。"""
+    return hashlib.sha256(content).hexdigest()
+
+
+def _artifact_digest(paths: list[Path]) -> tuple[str, list[str]]:
+    """返回按路径和内容绑定的稳定摘要，以及参与摘要的文件名。"""
+    digest = hashlib.sha256()
+    names: list[str] = []
+    for path in paths:
+        if not path.is_file():
+            continue
+        content = path.read_bytes()
+        names.append(path.name)
+        digest.update(path.name.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(content)
+        digest.update(b"\0")
+    return digest.hexdigest(), names
+
+
+def _task_artifact_hashes(repo_root: Path, item: dict[str, Any]) -> dict[str, str]:
+    """返回当前任务 planning/handoff 文件的逐文件摘要。"""
+    task_dir = _task_dir(repo_root, str(item.get("task") or ""))
+    hashes: dict[str, str] = {}
+    for name in ("prd.md", "design.md", "implement.md", "brief.md"):
+        path = task_dir / name
+        hashes[_baseline_key(".", _rel_path(repo_root, path))] = _file_sha256(path)
+    return hashes
+
+
+def _normalize_record_file(raw: str) -> str:
+    """把 action 文件参数规范化为跨仓库唯一键。"""
+    value = raw.strip()
+    if "::" in value:
+        repository, path = value.split("::", 1)
+        repository = repository.strip() or "."
+        return _baseline_key(repository, path.strip().removeprefix("./"))
+    return _baseline_key(".", value.removeprefix("./"))
+
+
+def _planning_digest(task_dir: Path) -> tuple[str, list[str]]:
+    """返回当前 planning authoritative artifacts 的内容摘要。"""
+    return _artifact_digest([
+        task_dir / "prd.md",
+        task_dir / "design.md",
+        task_dir / "implement.md",
+    ])
+
+
+def _brief_is_stale(task_dir: Path) -> tuple[bool, list[str]]:
+    """判断 brief 是否早于任一 authoritative planning artifact。"""
+    brief = task_dir / "brief.md"
+    if not brief.is_file():
+        return True, ["brief.md"]
+    brief_mtime = brief.stat().st_mtime_ns
+    newer = [
+        path.name
+        for path in (task_dir / "prd.md", task_dir / "design.md", task_dir / "implement.md")
+        if path.is_file() and path.stat().st_mtime_ns > brief_mtime
+    ]
+    return bool(newer), newer
+
+
+def _schema_version(state: dict[str, Any]) -> int:
+    """读取 runtime schema；历史缺失值按 schema 1 兼容。"""
+    value = state.get("schema_version", LEGACY_SCHEMA_VERSION)
+    if value not in {LEGACY_SCHEMA_VERSION, SCHEMA_VERSION}:
+        raise ValueError(f"不支持的 auto-loop schema_version:{value}")
+    return int(value)
+
+
+def _file_sha256(path: Path) -> str:
+    """返回路径当前内容摘要，缺失路径使用稳定哨兵值。"""
+    if not path.exists():
+        return "missing"
+    if path.is_symlink():
+        return hashlib.sha256(os.readlink(path).encode("utf-8")).hexdigest()
+    if not path.is_file():
+        return "non-file"
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _git_output(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
+    """执行返回原始字节的 Git 命令。"""
+    return subprocess.run(
+        ["git", *args],
+        cwd=repo,
+        check=False,
+        capture_output=True,
+    )
+
+
+def _integration_in_progress(repo: Path) -> list[str]:
+    """返回当前仓库未完成的 Git 集成状态名称。"""
+    result = _git_output(repo, "rev-parse", "--git-path", ".")
+    if result.returncode != 0:
+        return []
+    git_dir = Path(result.stdout.decode("utf-8", errors="replace").strip())
+    if not git_dir.is_absolute():
+        git_dir = repo / git_dir
+    markers = {
+        "MERGE_HEAD": "merge",
+        "rebase-merge": "rebase",
+        "rebase-apply": "rebase",
+        "CHERRY_PICK_HEAD": "cherry-pick",
+        "REVERT_HEAD": "revert",
+    }
+    return sorted({name for marker, name in markers.items() if (git_dir / marker).exists()})
+
+
+def _git_repositories(repo_root: Path) -> list[Path]:
+    """返回主仓和已初始化子模块仓库。"""
+    probe = _git_output(repo_root, "rev-parse", "--show-toplevel")
+    if probe.returncode != 0:
+        return []
+    root = Path(probe.stdout.decode("utf-8", errors="replace").strip()).resolve()
+    repositories = [root]
+    submodules = _git_output(
+        root,
+        "submodule",
+        "foreach",
+        "--recursive",
+        "--quiet",
+        "pwd",
+    )
+    if submodules.returncode == 0:
+        for raw in submodules.stdout.decode("utf-8", errors="replace").splitlines():
+            path = Path(raw.strip()).resolve()
+            if path.is_dir() and path not in repositories:
+                repositories.append(path)
+    return repositories
+
+
+def _parse_porcelain_z(repo: Path, payload: bytes) -> list[dict[str, str]]:
+    """解析 `git status --porcelain=v1 -z` 输出。"""
+    entries: list[dict[str, str]] = []
+    parts = payload.split(b"\0")
+    index = 0
+    while index < len(parts):
+        raw = parts[index]
+        index += 1
+        if not raw:
+            continue
+        text = raw.decode("utf-8", errors="surrogateescape")
+        if len(text) < 4:
+            continue
+        xy = text[:2]
+        path = text[3:]
+        original = ""
+        if xy[0] in {"R", "C"} and index < len(parts):
+            original = parts[index].decode("utf-8", errors="surrogateescape")
+            index += 1
+        entries.append({"xy": xy, "path": path, "original_path": original})
+    return entries
+
+
+def _capture_git_baseline(repo_root: Path) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """捕获 Git dirty baseline，并返回全局阻断信息。"""
+    repositories: list[dict[str, Any]] = []
+    for repo in _git_repositories(repo_root):
+        status = _git_output(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all")
+        if status.returncode != 0:
+            return [], {
+                "reason": "git-status-unreadable",
+                "message": status.stderr.decode("utf-8", errors="replace").strip(),
+                "repository": _rel_path(repo_root, repo),
+            }
+        entries = _parse_porcelain_z(repo, status.stdout)
+        conflicts = [entry for entry in entries if "U" in entry["xy"] or entry["xy"] in {"AA", "DD"}]
+        staged = [entry for entry in entries if entry["xy"][0] not in {" ", "?"}]
+        integration = _integration_in_progress(repo)
+        if conflicts or staged or integration:
+            return [], {
+                "reason": "git-global-safety-block",
+                "message": "存在 staged、冲突或未完成 Git 集成",
+                "repository": _rel_path(repo_root, repo),
+                "staged": staged,
+                "conflicts": conflicts,
+                "integration": integration,
+            }
+        dirty: list[dict[str, str]] = []
+        for entry in entries:
+            path = entry["path"]
+            dirty.append({
+                "path": path,
+                "xy": entry["xy"],
+                "sha256": _file_sha256(repo / path),
+            })
+        repositories.append({
+            "root": _rel_path(repo_root, repo),
+            "dirty": dirty,
+            "owned_dirty": [],
+            "protected_retained": [],
+        })
+    return repositories, None
+
+
+def _dirty_entries(state: dict[str, Any]) -> list[dict[str, str]]:
+    """展平 manifest 中尚未分类的 dirty baseline。"""
+    entries: list[dict[str, str]] = []
+    repositories = state.get("repositories") if isinstance(state.get("repositories"), list) else []
+    for repository in repositories:
+        if not isinstance(repository, dict):
+            continue
+        root = str(repository.get("root") or ".")
+        dirty = repository.get("dirty") if isinstance(repository.get("dirty"), list) else []
+        for entry in dirty:
+            if isinstance(entry, dict):
+                entries.append({
+                    "repository": root,
+                    "path": str(entry.get("path") or ""),
+                    "xy": str(entry.get("xy") or ""),
+                    "sha256": str(entry.get("sha256") or ""),
+                })
+    return entries
+
+
+def _batch_open_questions(repo_root: Path, state: dict[str, Any]) -> list[dict[str, Any]]:
+    """收集整个队列中由人工拥有的 Open Questions。"""
+    questions: list[dict[str, Any]] = []
+    for item in _queue_items(state):
+        if item.get("status") == "blocked":
+            continue
+        task_ref = str(item.get("task") or "")
+        if _task_status(repo_root, task_ref) != "planning":
+            continue
+        prd = _task_dir(repo_root, task_ref) / "prd.md"
+        if not prd.is_file():
+            continue
+        text = prd.read_text(encoding="utf-8")
+        parsed = _open_questions(text)
+        for kind in ("unchecked", "bare"):
+            for question in parsed[kind]:
+                line = next(
+                    (number for number, raw in enumerate(text.splitlines(), 1) if question in raw),
+                    None,
+                )
+                questions.append({
+                    "task": task_ref,
+                    "question": question,
+                    "kind": kind,
+                    "source": f"{_rel_path(repo_root, prd)}:{line or 1}",
+                    "prd_sha256": _prd_sha256(text.encode("utf-8")),
+                })
+    return questions
+
+
+def _manifest_payload(state: dict[str, Any], revision: int) -> dict[str, Any]:
+    """构造不含自身摘要的确定性 manifest revision。"""
+    queue = _queue_items(state)
+    return {
+        "revision": revision,
+        "created_at": _utc_now(),
+        "authorization": state.get("authorization"),
+        "original_order": state.get("original_order"),
+        "execution_order": [item.get("task") for item in queue],
+        "dependencies": {
+            str(item.get("task")): item.get("depends_on", [])
+            for item in queue
+            if item.get("depends_on")
+        },
+        "route_authorization": state.get("route_authorization"),
+        "check_depth": _requested_check_depth(state),
+        "profile": state.get("profile"),
+        "repositories": state.get("repositories", []),
+        "tasks": [
+            {
+                "task": item.get("task"),
+                "task_status": item.get("task_status"),
+                "prepare_status": item.get("prepare_status"),
+                "planning_sha256": item.get("planning_sha256", ""),
+                "handoff_sha256": item.get("handoff_sha256", ""),
+                "owned_dirty": item.get("owned_dirty", []),
+                "decision_count": item.get("decision_count", 0),
+                "decision_ids": item.get("decision_ids", []),
+            }
+            for item in queue
+        ],
+    }
+
+
+def _append_manifest_revision(state: dict[str, Any], decision_id: str | None = None) -> dict[str, Any]:
+    """追加并激活一个 run manifest revision。"""
+    revisions = state.get("manifest_revisions")
+    if not isinstance(revisions, list):
+        revisions = []
+    payload = _manifest_payload(state, len(revisions) + 1)
+    if decision_id:
+        payload["decision_id"] = decision_id
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    payload["sha256"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+    revisions.append(payload)
+    state["manifest_revisions"] = revisions
+    state["manifest_revision"] = payload["revision"]
+    state["manifest_sha256"] = payload["sha256"]
+    for item in _queue_items(state):
+        item["manifest_revision"] = payload["revision"]
+    return payload
+
+
+def _stable_topological_order(queue: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """根据显式依赖执行稳定拓扑排序。"""
+    by_task = {str(item.get("task")): item for item in queue}
+    original_index = {task: index for index, task in enumerate(by_task)}
+    indegree = {task: 0 for task in by_task}
+    followers: dict[str, list[str]] = {task: [] for task in by_task}
+    for task, item in by_task.items():
+        dependencies = item.get("depends_on") if isinstance(item.get("depends_on"), list) else []
+        for dependency in dependencies:
+            if dependency == task:
+                raise ValueError(f"任务不能依赖自身:{task}")
+            if dependency not in by_task:
+                raise ValueError(f"依赖不在当前队列:{task} -> {dependency}")
+            indegree[task] += 1
+            followers[dependency].append(task)
+
+    ready = sorted((task for task, value in indegree.items() if value == 0), key=original_index.get)
+    ordered: list[dict[str, Any]] = []
+    while ready:
+        task = ready.pop(0)
+        ordered.append(by_task[task])
+        for follower in sorted(followers[task], key=original_index.get):
+            indegree[follower] -= 1
+            if indegree[follower] == 0:
+                ready.append(follower)
+                ready.sort(key=original_index.get)
+    if len(ordered) != len(queue):
+        cycle = sorted(task for task, value in indegree.items() if value > 0)
+        raise ValueError(f"任务依赖存在循环:{','.join(cycle)}")
+    return ordered
 
 
 def _start_gate(
     repo_root: Path,
     task_ref: str,
+    item: dict[str, Any],
     route_authorization: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """检查 planning -> start 前置条件。"""
@@ -357,13 +761,48 @@ def _start_gate(
     if not prd.is_file():
         return "blocked", {"reason": "missing-prd", "message": "缺少 prd.md"}
 
-    questions = _open_questions(prd.read_text(encoding="utf-8"))
-    if questions:
+    try:
+        prd_content = prd.read_bytes()
+    except OSError as exc:
+        return "blocked", {
+            "reason": "missing-prd",
+            "message": f"无法读取 prd.md:{exc}",
+        }
+    questions = _open_questions(prd_content.decode("utf-8"))
+    if questions["unchecked"]:
         return "blocked", {
             "reason": "open-questions",
             "message": "PRD 仍有阻塞性 Open Questions",
-            "questions": questions,
+            "questions": questions["unchecked"],
         }
+    if questions["bare"]:
+        prd_hash = _prd_sha256(prd_content)
+        review = item.get("open_questions_review")
+        if isinstance(review, dict) and review.get("prd_sha256") == prd_hash:
+            verdict = review.get("verdict")
+            if verdict == "resolved":
+                pass
+            elif verdict == "blocking":
+                return "blocked", {
+                    "reason": "open-questions",
+                    "message": "历史 Open Questions 经语义复核仍有未决事项",
+                    "questions": questions["bare"],
+                    "review": review,
+                }
+            else:
+                return "blocked", {
+                    "reason": "open-questions-ambiguous",
+                    "message": "历史 Open Questions 语义复核无法确定，需人工收敛",
+                    "questions": questions["bare"],
+                    "review": review,
+                }
+        else:
+            return "action", {
+                "action": "review_open_questions",
+                "message": "历史 PRD 使用无状态列表，需由 AI 复核是否仍有开放问题",
+                "questions": questions["bare"],
+                "prd_sha256": prd_hash,
+            }
 
     design = task_dir / "design.md"
     implement = task_dir / "implement.md"
@@ -385,10 +824,69 @@ def _start_gate(
             "message": "check.jsonl 未 curated（当前 route 可能需要 sub-agent context）",
         }
 
-    if not (task_dir / "brief.md").is_file():
+    try:
+        planning_hash, planning_files = _planning_digest(task_dir)
+    except OSError as exc:
+        return "blocked", {
+            "reason": "planning-readiness",
+            "message": f"无法读取 planning artifacts:{exc}",
+        }
+    readiness = item.get("planning_readiness_review")
+    if not isinstance(readiness, dict) or readiness.get("planning_sha256") != planning_hash:
+        return "action", {
+            "action": "review_planning_readiness",
+            "message": "需要语义复核 planning artifacts 是否达到可实现状态",
+            "planning_sha256": planning_hash,
+            "planning_files": planning_files,
+        }
+    verdict = readiness.get("verdict")
+    if verdict == "blocking":
+        return "blocked", {
+            "reason": "planning-readiness",
+            "message": "planning artifacts 经语义复核仍不具备实现条件",
+            "review": readiness,
+        }
+    if verdict != "ready":
+        return "blocked", {
+            "reason": "planning-readiness-ambiguous",
+            "message": "planning artifacts 的实现就绪性无法确定，需继续收敛",
+            "review": readiness,
+        }
+
+    try:
+        brief_stale, newer_sources = _brief_is_stale(task_dir)
+    except OSError as exc:
+        return "blocked", {
+            "reason": "planning-readiness",
+            "message": f"无法检查 brief freshness:{exc}",
+        }
+    if brief_stale:
         return "action", {
             "action": "refresh_brief",
-            "message": "缺少 brief.md，需先用 trellis-task-brief 生成任务摘要",
+            "message": "brief.md 缺失或过期，需先用 trellis-task-brief 刷新并展示任务摘要",
+            "planning_sha256": planning_hash,
+            "newer_sources": newer_sources,
+        }
+
+    try:
+        handoff_hash, handoff_files = _artifact_digest([
+            task_dir / "prd.md",
+            task_dir / "design.md",
+            task_dir / "implement.md",
+            task_dir / "brief.md",
+        ])
+    except OSError as exc:
+        return "blocked", {
+            "reason": "planning-readiness",
+            "message": f"无法读取 brief handoff artifacts:{exc}",
+        }
+    confirmation = item.get("brief_confirmation")
+    if not isinstance(confirmation, dict) or confirmation.get("handoff_sha256") != handoff_hash:
+        return "action", {
+            "action": "confirm_brief",
+            "message": "展示当前 brief.md，并等待用户显式确认 planning artifacts 与 brief",
+            "handoff_sha256": handoff_hash,
+            "handoff_files": handoff_files,
         }
 
     return "ok", {"message": "start gate satisfied"}
@@ -421,44 +919,84 @@ def _link_session_run(repo_root: Path, run_id: str) -> None:
     if not context_key:
         return
     path = repo_root / ".trellis/.runtime/sessions" / f"{context_key}.json"
-    context = _read_json(path)
+    result = _read_json_result(path)
+    if result["status"] in {"corrupt", "io_error"}:
+        return
+    context = result["data"] if isinstance(result.get("data"), dict) else {}
     context.setdefault("platform", context_key.split("_", 1)[0] if "_" in context_key else "session")
     context["last_seen_at"] = _utc_now()
     context["current_auto_run"] = run_id
     _write_json(path, context)
 
 
+def _load_run_state(path: Path) -> dict[str, Any]:
+    """读取单个 run；损坏或 I/O 错误时保留证据并报错。"""
+    result = _read_json_result(path)
+    if result["status"] == "missing":
+        raise ValueError(f"auto run 不存在:{path.stem}")
+    if result["status"] != "ok":
+        raise ValueError(f"auto run 状态 {result['status']}:{path}:{result.get('error') or ''}")
+    state = result["data"]
+    _schema_version(state)
+    return state
+
+
+def _healthy_running_runs(repo_root: Path) -> list[tuple[Path, dict[str, Any]]]:
+    """返回所有可解析且仍处于活动阶段的 run。"""
+    running: list[tuple[Path, dict[str, Any]]] = []
+    for path in _run_paths(repo_root):
+        result = _read_json_result(path)
+        state = result.get("data")
+        if result["status"] == "ok" and isinstance(state, dict) and state.get("status") in ACTIVE_RUN_STATUSES:
+            try:
+                _schema_version(state)
+            except ValueError:
+                continue
+            running.append((path, state))
+    return running
+
+
 def _load_current_state(repo_root: Path, run_id: str | None = None) -> tuple[Path, dict[str, Any]]:
     """加载指定或当前 auto run 状态。"""
     if run_id:
         path = _run_path(repo_root, run_id)
-        state = _read_json(path)
-        if not state:
-            raise ValueError(f"auto run 不存在:{run_id}")
-        return path, state
+        return path, _load_run_state(path)
 
-    pointer = _read_json(_current_pointer(repo_root))
+    pointer_path = _current_pointer(repo_root)
+    pointer_result = _read_json_result(pointer_path)
+    if pointer_result["status"] in {"corrupt", "io_error"}:
+        running = _healthy_running_runs(repo_root)
+        if len(running) == 1:
+            path, state = running[0]
+            _write_pointer(repo_root, str(state.get("run_id") or path.stem))
+            return path, state
+        raise ValueError(
+            f"auto current pointer {pointer_result['status']}:{pointer_path}:"
+            f"{pointer_result.get('error') or ''}"
+        )
+    pointer = pointer_result["data"] if isinstance(pointer_result.get("data"), dict) else {}
     current = pointer.get("run_id")
     if isinstance(current, str) and current:
         path = _run_path(repo_root, current)
-        state = _read_json(path)
-        if state and state.get("status") == "running":
+        run_result = _read_json_result(path)
+        if run_result["status"] in {"corrupt", "io_error"}:
+            raise ValueError(
+                f"current auto run {run_result['status']}:{path}:{run_result.get('error') or ''}"
+            )
+        state = run_result["data"] if isinstance(run_result.get("data"), dict) else {}
+        if state and state.get("status") in ACTIVE_RUN_STATUSES:
             return path, state
-        if state and state.get("status") in {"completed", "stopped"}:
+        if state and state.get("status") in TERMINAL_RUN_STATUSES:
             _clear_pointer_if_current(repo_root, current)
+        elif state:
+            return path, state
 
-    running: list[tuple[Path, dict[str, Any]]] = []
-    for path in _run_paths(repo_root):
-        state = _read_json(path)
-        if state.get("status") == "running":
-            running.append((path, state))
+    running = _healthy_running_runs(repo_root)
     if len(running) == 1:
         return running[0]
-    if isinstance(current, str) and current:
-        path = _run_path(repo_root, current)
-        state = _read_json(path)
-        if state:
-            return path, state
+    if len(running) > 1:
+        run_ids = ", ".join(str(state.get("run_id") or path.stem) for path, state in running[:8])
+        raise ValueError(f"存在多个 running auto run，请指定 --run-id。候选:{run_ids}")
     raise ValueError("没有可恢复的唯一 auto run")
 
 
@@ -494,9 +1032,16 @@ def _recent_run_summaries(repo_root: Path, limit: int = 8) -> list[dict[str, Any
     """返回最近 auto run 的轻量状态列表。"""
     runs: list[dict[str, Any]] = []
     for path in _run_paths(repo_root)[:limit]:
-        state = _read_json(path)
-        if not state:
+        result = _read_json_result(path)
+        if result["status"] != "ok":
+            runs.append({
+                "run_id": path.stem,
+                "path": _rel_path(repo_root, path),
+                "run_status": result["status"],
+                "error": result.get("error"),
+            })
             continue
+        state = result["data"]
         counts = _queue_counts(state)
         current = _current_queue_item(state)
         runs.append({
@@ -532,7 +1077,10 @@ def _clear_pointer_if_current(repo_root: Path, run_id: str | None) -> None:
     if not run_id:
         return
     pointer_path = _current_pointer(repo_root)
-    pointer = _read_json(pointer_path)
+    result = _read_json_result(pointer_path)
+    if result["status"] != "ok":
+        return
+    pointer = result["data"]
     if pointer.get("run_id") != run_id:
         return
     try:
@@ -563,10 +1111,12 @@ def _resume_capsule(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _terminal_status(queue: list[Any]) -> str:
+def _terminal_status(queue: list[Any], schema_version: int = SCHEMA_VERSION) -> str:
     """根据队列终态区分全完成和带阻塞结束。"""
     has_blocked = any(isinstance(item, dict) and item.get("status") == "blocked" for item in queue)
-    return "blocked" if has_blocked else "completed"
+    if schema_version == LEGACY_SCHEMA_VERSION:
+        return "blocked" if has_blocked else "completed"
+    return "completed_with_blocked" if has_blocked else "completed"
 
 
 def _queue_items(state: dict[str, Any]) -> list[dict[str, Any]]:
@@ -670,6 +1220,7 @@ def _compact_summary(state: dict[str, Any]) -> dict[str, Any]:
     current = _current_queue_item(state)
     completed_tasks = _completed_task_summaries(state)
     summary = {
+        "schema_version": state.get("schema_version", LEGACY_SCHEMA_VERSION),
         "run_id": state.get("run_id"),
         "run_status": state.get("status"),
         "profile": state.get("profile"),
@@ -684,6 +1235,18 @@ def _compact_summary(state: dict[str, Any]) -> dict[str, Any]:
         "pending_tasks": _pending_task_summaries(state),
         "recent_decisions": _decision_tail(state, 3, include_data=False),
     }
+    if _schema_version(state) == SCHEMA_VERSION:
+        summary.update({
+            "prepare_action": (
+                state.get("prepare_action", {}).get("action")
+                if isinstance(state.get("prepare_action"), dict)
+                else None
+            ),
+            "manifest_revision": state.get("manifest_revision"),
+            "manifest_sha256": state.get("manifest_sha256"),
+            "decision_count": sum(int(item.get("decision_count") or 0) for item in _queue_items(state)),
+            "queue_reordered": bool(state.get("queue_reordered")),
+        })
     if completed_tasks:
         summary["task_lifecycle_note"] = "completed 仅表示 auto-loop item 已本地提交；任务归档仍需显式 finish-work/archive"
     return summary
@@ -698,6 +1261,16 @@ def _summary(state: dict[str, Any]) -> dict[str, Any]:
         "recent_decisions": _decision_tail(state, DECISION_LOG_LIMIT, include_data=True),
         "resume_capsule": _resume_capsule(state),
     })
+    if _schema_version(state) == SCHEMA_VERSION:
+        summary.update({
+            "authorization": state.get("authorization"),
+            "original_order": state.get("original_order"),
+            "queue_reordered_detail": state.get("queue_reordered"),
+            "repositories": state.get("repositories"),
+            "protected_drifts": state.get("protected_drifts", []),
+            "manifest_revisions": state.get("manifest_revisions"),
+            "global_block": state.get("global_block"),
+        })
     return summary
 
 
@@ -718,6 +1291,15 @@ def _make_item(repo_root: Path, task_ref: str) -> dict[str, Any]:
         "status": "pending",
         "task_status": status,
         "current_step": step,
+        "prepare_status": "pending",
+        "planning_attempts": 0,
+        "planning_sha256": "",
+        "handoff_sha256": "",
+        "manifest_revision": 0,
+        "depends_on": [],
+        "blocked_by": [],
+        "owned_dirty": [],
+        "decision_count": 0,
         "attempts": {"fix_recheck": 0},
         "last_failure": None,
         "last_check": None,
@@ -738,11 +1320,43 @@ def _action(action: str, item: dict[str, Any], extra: dict[str, Any] | None = No
         "task": task,
         "current_step": item.get("current_step"),
     }
-    if action == "start_task":
+    if action == "classify_dirty_baseline":
+        base["instruction"] = (
+            "把 baseline 中每个 dirty path 精确分类为某个队列任务的 owned_dirty，或全局 "
+            "protected_retained；然后 record 同名 action。"
+        )
+    elif action == "resolve_open_questions":
+        base["instruction"] = (
+            "按 trellis-brainstorm 一次引导人工处理一个 Open Question；AI 不得代答、改写或勾选。"
+            "全部问题由人工更新到 planning artifacts 后，record --action resolve_open_questions --result ok。"
+        )
+    elif action == "review_open_questions":
+        base["instruction"] = (
+            "语义复核历史 Open Questions 裸列表，并调用 record --action review_open_questions "
+            "--result <ok|blocked> --review-verdict <resolved|blocking|ambiguous> --summary <摘要>。"
+        )
+    elif action == "review_planning_readiness":
+        base["instruction"] = (
+            "按 trellis-brainstorm Quality Bar 复核验收标准是否可测试、范围/非目标是否明确、"
+            "关键决策是否收敛、仓库可回答的问题是否已研究；然后调用 record "
+            "--action review_planning_readiness --result <ok|blocked> "
+            "--readiness-verdict <ready|repairable|blocking> --summary <摘要>。"
+        )
+    elif action == "run_planning_repair":
+        base["instruction"] = (
+            "仅依据现有需求、代码、spec 和仓库证据修复 planning artifacts；不得处理 Open Questions "
+            "或高风险黑名单事项。完成后 record --action run_planning_repair --result ok。"
+        )
+    elif action == "start_task":
         task_name = Path(str(task)).name
         base["command"] = f"python3 ./.trellis/scripts/task.py start {task_name}"
     elif action == "refresh_brief":
-        base["instruction"] = "运行 trellis-task-brief 生成 brief.md，然后 record --result ok。"
+        base["instruction"] = "运行 trellis-task-brief 刷新 brief.md，然后 record --result ok；schema 2 不再逐任务等待确认。"
+    elif action == "confirm_brief":
+        base["instruction"] = (
+            "在对话中展示当前完整 brief.md，并等待用户显式确认；收到确认后才调用 "
+            "record --action confirm_brief --result ok --summary <确认摘要>。"
+        )
     elif action == "run_implement":
         base["instruction"] = "进入 Phase 2.1 implement route，并执行实现。"
     elif action == "run_check_all":
@@ -771,6 +1385,9 @@ def _remember_action(item: dict[str, Any], action_data: dict[str, Any]) -> dict[
         "current_step": action_data.get("current_step"),
         "issued_at": _utc_now(),
     }
+    for key in ("prd_sha256", "planning_sha256", "handoff_sha256"):
+        if action_data.get(key):
+            item["last_action"][key] = action_data[key]
     item["updated_at"] = _utc_now()
     return action_data
 
@@ -812,8 +1429,8 @@ def _block_item(item: dict[str, Any], reason: str, summary: str, detail: dict[st
     )
 
 
-def _next_item(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
-    """计算并更新队列中的下一步动作。"""
+def _next_item_legacy(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """按 schema 1 协议计算下一步动作。"""
     queue = state.get("queue") if isinstance(state.get("queue"), list) else []
     for index, item in enumerate(queue):
         if not isinstance(item, dict) or item.get("status") not in {"pending", "running"}:
@@ -825,13 +1442,19 @@ def _next_item(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any] |
         item["task_status"] = _task_status(repo_root, task)
 
         if item["task_status"] == "planning":
-            gate_status, gate = _start_gate(repo_root, task, _effective_route_authorization(repo_root, task, state.get("route_authorization")))
+            gate_status, gate = _start_gate(
+                repo_root,
+                task,
+                item,
+                _effective_route_authorization(repo_root, task, state.get("route_authorization")),
+            )
             if gate_status == "blocked":
                 _block_item(item, gate["reason"], gate["message"], gate)
                 continue
             if gate_status == "action":
-                item["current_step"] = "refresh_brief"
-                return item, _remember_action(item, _action("refresh_brief", item, gate))
+                action_name = str(gate.get("action") or "refresh_brief")
+                item["current_step"] = action_name
+                return item, _remember_action(item, _action(action_name, item, gate))
             item["current_step"] = "start_task"
             return item, _remember_action(item, _action("start_task", item))
 
@@ -879,7 +1502,7 @@ def _next_item(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any] |
 
         _block_item(item, "unknown-step", f"未知 current_step:{step}")
 
-    state["status"] = _terminal_status(queue)
+    state["status"] = _terminal_status(queue, LEGACY_SCHEMA_VERSION)
     return None, {
         "status": "blocked" if state["status"] == "blocked" else "done",
         "finish_work_required_for_archive": True,
@@ -892,6 +1515,333 @@ def _next_item(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any] |
     }
 
 
+def _prepare_action(state: dict[str, Any], action: str, extra: dict[str, Any]) -> dict[str, Any]:
+    """保存并返回 run 级 prepare action。"""
+    action_data = {"status": "action", "action": action, **extra}
+    state["prepare_action"] = {
+        **action_data,
+        "issued_at": _utc_now(),
+    }
+    return action_data
+
+
+def _planning_gate_v2(
+    repo_root: Path,
+    state: dict[str, Any],
+    item: dict[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    """执行 schema 2 单任务 planning 确定性门禁。"""
+    task_ref = str(item.get("task") or "")
+    task_dir = _task_dir(repo_root, task_ref)
+    prd = task_dir / "prd.md"
+    if not prd.is_file():
+        return "blocked", {"reason": "missing-prd", "message": "缺少 prd.md"}
+    design = task_dir / "design.md"
+    implement = task_dir / "implement.md"
+    if design.exists() != implement.exists():
+        missing = "implement.md" if design.exists() else "design.md"
+        return "blocked", {
+            "reason": "incomplete-complex-artifacts",
+            "message": f"复杂任务缺少 {missing}",
+        }
+
+    authorization = _effective_route_authorization(
+        repo_root,
+        task_ref,
+        state.get("route_authorization"),
+    )
+    if authorization.get("implement") != "inline" and not _has_real_jsonl_entries(
+        task_dir / "implement.jsonl",
+        repo_root,
+    ):
+        return "blocked", {
+            "reason": "missing-implement-context",
+            "message": "implement.jsonl 未 curated",
+        }
+    if authorization.get("check") != "check-all-inline" and not _has_real_jsonl_entries(
+        task_dir / "check.jsonl",
+        repo_root,
+    ):
+        return "blocked", {
+            "reason": "missing-check-context",
+            "message": "check.jsonl 未 curated",
+        }
+
+    planning_hash, planning_files = _planning_digest(task_dir)
+    readiness = item.get("planning_readiness_review")
+    if not isinstance(readiness, dict) or readiness.get("planning_sha256") != planning_hash:
+        return "action", {
+            "action": "review_planning_readiness",
+            "message": "复核 planning artifacts；可确定的问题允许返回 repairable",
+            "planning_sha256": planning_hash,
+            "planning_files": planning_files,
+            "attempt": int(item.get("planning_attempts") or 0),
+            "max_attempts": MAX_PLANNING_REPAIR,
+        }
+    verdict = readiness.get("verdict")
+    if verdict == "repairable":
+        attempts = int(item.get("planning_attempts") or 0)
+        if attempts >= MAX_PLANNING_REPAIR:
+            return "blocked", {
+                "reason": "planning-repair-budget-exhausted",
+                "message": "planning repair 已达到 3 轮预算",
+                "review": readiness,
+            }
+        return "action", {
+            "action": "run_planning_repair",
+            "message": readiness.get("summary") or "修复 planning artifacts",
+            "planning_sha256": planning_hash,
+            "attempt": attempts + 1,
+            "max_attempts": MAX_PLANNING_REPAIR,
+        }
+    if verdict != "ready":
+        return "blocked", {
+            "reason": "planning-readiness",
+            "message": readiness.get("summary") or "planning artifacts 不具备实现条件",
+            "review": readiness,
+        }
+
+    brief_stale, newer_sources = _brief_is_stale(task_dir)
+    if brief_stale:
+        return "action", {
+            "action": "refresh_brief",
+            "message": "brief.md 缺失或过期",
+            "planning_sha256": planning_hash,
+            "newer_sources": newer_sources,
+        }
+    handoff_hash, handoff_files = _artifact_digest([
+        task_dir / "prd.md",
+        task_dir / "design.md",
+        task_dir / "implement.md",
+        task_dir / "brief.md",
+    ])
+    return "ready", {
+        "planning_sha256": planning_hash,
+        "planning_files": planning_files,
+        "handoff_sha256": handoff_hash,
+        "handoff_files": handoff_files,
+    }
+
+
+def _dependency_blockers(state: dict[str, Any], item: dict[str, Any]) -> list[dict[str, Any]]:
+    """返回当前任务已失败的直接依赖及其链摘要。"""
+    by_task = {str(entry.get("task")): entry for entry in _queue_items(state)}
+    blockers: list[dict[str, Any]] = []
+    for dependency in item.get("depends_on", []):
+        target = by_task.get(str(dependency))
+        if not isinstance(target, dict) or target.get("status") != "blocked":
+            continue
+        blocked = target.get("blocked") if isinstance(target.get("blocked"), dict) else {}
+        chain = [str(dependency)] + [
+            str(value)
+            for value in target.get("blocked_by", [])
+            if isinstance(value, str)
+        ]
+        blockers.append({
+            "task": dependency,
+            "reason": blocked.get("reason"),
+            "chain": chain,
+        })
+    return blockers
+
+
+def _current_artifact_hashes(repo_root: Path, item: dict[str, Any]) -> tuple[str, str]:
+    """读取任务当前 planning 与 handoff 摘要。"""
+    task_dir = _task_dir(repo_root, str(item.get("task") or ""))
+    planning_hash, _ = _planning_digest(task_dir)
+    handoff_hash, _ = _artifact_digest([
+        task_dir / "prd.md",
+        task_dir / "design.md",
+        task_dir / "implement.md",
+        task_dir / "brief.md",
+    ])
+    return planning_hash, handoff_hash
+
+
+def _next_running_v2(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """按冻结 manifest 调度 schema 2 running 队列。"""
+    queue = _queue_items(state)
+    for index, item in enumerate(queue):
+        if item.get("status") not in {"pending", "running"}:
+            continue
+        state["current_index"] = index
+        blockers = _dependency_blockers(state, item)
+        if blockers:
+            item["blocked_by"] = [str(entry["task"]) for entry in blockers]
+            _block_item(
+                item,
+                "blocked-dependency",
+                "显式前置任务未完成",
+                {"dependencies": blockers},
+            )
+            continue
+        item["status"] = "running"
+        task_ref = str(item.get("task") or "")
+        task_status = _task_status(repo_root, task_ref)
+        item["task_status"] = task_status
+        if task_status not in ALLOWED_TASK_STATUSES:
+            _block_item(item, "task-status-drift", f"任务状态已变化:{task_status}")
+            continue
+        if item.get("planning_sha256"):
+            try:
+                planning_hash, handoff_hash = _current_artifact_hashes(repo_root, item)
+            except OSError as exc:
+                _block_item(item, "artifact-drift", f"无法读取 planning artifacts:{exc}")
+                continue
+            if (
+                planning_hash != item.get("planning_sha256")
+                or handoff_hash != item.get("handoff_sha256")
+            ):
+                _block_item(
+                    item,
+                    "artifact-drift",
+                    "planning/handoff artifacts 与已授权 manifest 不一致",
+                    {
+                        "expected_planning_sha256": item.get("planning_sha256"),
+                        "actual_planning_sha256": planning_hash,
+                        "expected_handoff_sha256": item.get("handoff_sha256"),
+                        "actual_handoff_sha256": handoff_hash,
+                    },
+                )
+                continue
+
+        step = item.get("current_step") or ("start_task" if task_status == "planning" else "implement")
+        if task_status == "planning" and step == "start_task":
+            return item, _remember_action(item, _action("start_task", item))
+        if step in {"start_task", "implement"}:
+            item["current_step"] = "implement"
+            return item, _remember_action(item, _action("run_implement", item))
+        if step == "check":
+            return item, _remember_action(item, _action("run_check_all", item, {
+                "requested_check_depth": _requested_check_depth(state),
+                "minimum_check_depth": _minimum_check_depth(item, "run_check_all"),
+            }))
+        if step == "fix":
+            attempts = int(item.setdefault("attempts", {}).get("fix_recheck", 0))
+            if attempts >= MAX_FIX_RECHECK:
+                _block_item(item, "retry-budget-exhausted", "fix/recheck 已达到默认 3 轮预算")
+                continue
+            return item, _remember_action(item, _action("run_fix", item, {
+                "attempt": attempts,
+                "max_attempts": MAX_FIX_RECHECK,
+            }))
+        if step == "recheck":
+            return item, _remember_action(item, _action("run_recheck", item, {
+                "requested_check_depth": _requested_check_depth(state),
+                "minimum_check_depth": _minimum_check_depth(item, "run_recheck"),
+            }))
+        if step == "spec_update":
+            return item, _remember_action(item, _action("run_spec_update", item))
+        if step == "commit_only":
+            return item, _remember_action(item, _action("commit_only", item))
+        _block_item(item, "unknown-step", f"未知 current_step:{step}")
+
+    state["status"] = _terminal_status(queue)
+    return None, {
+        "status": "done" if state["status"] == "completed" else "completed_with_blocked",
+        "finish_work_required_for_archive": True,
+        "instruction": (
+            "auto-loop 已处理完整队列；blocked 项可由用户显式运行 retry-blocked。"
+            if state["status"] == "completed_with_blocked"
+            else "auto-loop 队列已结束；归档仍需用户显式运行 trellis-finish-work。"
+        ),
+        "summary": _compact_summary(state),
+    }
+
+
+def _next_prepare(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """推进 schema 2 全队列 prepare，并在就绪后直接进入 running。"""
+    existing = state.get("prepare_action")
+    if isinstance(existing, dict):
+        return None, {key: value for key, value in existing.items() if key != "issued_at"}
+
+    dirty = _dirty_entries(state)
+    if dirty and not state.get("dirty_classified"):
+        state["status"] = "preparing"
+        return None, _prepare_action(state, "classify_dirty_baseline", {
+            "dirty": dirty,
+            "message": "分类启动前已存在的 dirty paths",
+        })
+
+    questions = _batch_open_questions(repo_root, state)
+    if questions:
+        state["status"] = "awaiting_input"
+        return None, _prepare_action(state, "resolve_open_questions", {
+            "questions": questions,
+            "message": "全队列 Open Questions 必须由人工全部收敛",
+        })
+    state["status"] = "preparing"
+
+    for item in _queue_items(state):
+        if item.get("status") == "blocked" or item.get("prepare_status") == "ready":
+            continue
+        task_ref = str(item.get("task") or "")
+        status = _task_status(repo_root, task_ref)
+        item["task_status"] = status
+        if status not in ALLOWED_TASK_STATUSES:
+            item["prepare_status"] = "blocked"
+            _block_item(item, "task-status-not-runnable", f"任务状态不允许 auto-loop:{status}")
+            continue
+        if status == "in_progress":
+            item["prepare_status"] = "ready"
+            if item.get("current_step") not in {"implement", "check", "fix", "recheck", "spec_update", "commit_only"}:
+                item["current_step"] = "implement"
+            continue
+
+        gate_status, gate = _planning_gate_v2(repo_root, state, item)
+        if gate_status == "blocked":
+            item["prepare_status"] = "blocked"
+            _block_item(item, str(gate["reason"]), str(gate["message"]), gate)
+            continue
+        if gate_status == "action":
+            action_name = str(gate["action"])
+            item["current_step"] = "planning_repair" if action_name == "run_planning_repair" else action_name
+            item["prepare_status"] = "repairing" if action_name == "run_planning_repair" else "pending"
+            return item, _remember_action(item, _action(action_name, item, gate))
+        item["prepare_status"] = "ready"
+        item["planning_sha256"] = gate["planning_sha256"]
+        item["handoff_sha256"] = gate["handoff_sha256"]
+        item["current_step"] = "start_task"
+
+    original = [str(value) for value in state.get("original_order", [])]
+    try:
+        ordered = _stable_topological_order(_queue_items(state))
+    except ValueError as exc:
+        state["status"] = "globally_blocked"
+        state["global_block"] = {
+            "reason": "invalid-task-dependencies",
+            "message": str(exc),
+            "blocked_at": _utc_now(),
+        }
+        return None, {
+            "status": "globally_blocked",
+            "reason": "invalid-task-dependencies",
+            "message": str(exc),
+        }
+    execution = [str(item.get("task")) for item in ordered]
+    if execution != original:
+        state["queue"] = ordered
+        state["queue_reordered"] = {
+            "original_order": original,
+            "execution_order": execution,
+            "reason": "explicit-dependencies",
+            "recorded_at": _utc_now(),
+        }
+    _append_manifest_revision(state)
+    state["status"] = "running"
+    state["current_index"] = 0
+    return _next_running_v2(repo_root, state)
+
+
+def _next_item(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    """按 runtime schema 分派 prepare 或 running 状态机。"""
+    if _schema_version(state) == LEGACY_SCHEMA_VERSION:
+        return _next_item_legacy(repo_root, state)
+    if state.get("status") in {"preparing", "awaiting_input"}:
+        return _next_prepare(repo_root, state)
+    return _next_running_v2(repo_root, state)
+
+
 def cmd_start(args: argparse.Namespace) -> int:
     """创建 auto run。"""
     repo_root = _repo_root()
@@ -900,14 +1850,14 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     try:
         current_path, current = _load_current_state(repo_root)
-        if current.get("status") == "running" and not args.force:
+        if current.get("status") in ACTIVE_RUN_STATUSES and not args.force:
             return _print({
                 "status": "error",
                 "reason": "auto-run-already-running",
                 "run_id": current.get("run_id"),
                 "path": _rel_path(repo_root, current_path),
             })
-        if current.get("status") == "blocked" and not args.force:
+        if current.get("status") in {"blocked", "completed_with_blocked"} and not args.force:
             return _print({
                 "status": "error",
                 "reason": "auto-run-blocked-retry-available",
@@ -916,8 +1866,14 @@ def cmd_start(args: argparse.Namespace) -> int:
                 "suggested_command": f"python3 ./.trellis/scripts/auto_loop.py retry-blocked --run-id {current.get('run_id')}",
                 "summary": _format_summary(current, args),
             })
-    except ValueError:
-        pass
+    except ValueError as exc:
+        if str(exc) != "没有可恢复的唯一 auto run":
+            return _print({
+                "status": "error",
+                "reason": "current-auto-state-invalid",
+                "message": str(exc),
+                "runs": _recent_run_summaries(repo_root),
+            })
 
     route_authorization: dict[str, str] = {}
     if args.route_implement:
@@ -927,11 +1883,38 @@ def cmd_start(args: argparse.Namespace) -> int:
 
     run_id = args.run_id or _new_run_id()
     queue = [_make_item(repo_root, task) for task in args.tasks]
+    tasks_by_ref = {str(item["task"]): item for item in queue}
+    invalid_statuses = [
+        {"task": task, "status": item.get("task_status")}
+        for task, item in tasks_by_ref.items()
+        if item.get("task_status") not in ALLOWED_TASK_STATUSES
+    ]
+    if invalid_statuses:
+        return _print({
+            "status": "error",
+            "reason": "task-status-not-runnable",
+            "tasks": invalid_statuses,
+        })
+    for raw in args.depends_on or []:
+        if "=" not in raw:
+            raise ValueError(f"依赖参数必须是 <dependent>=<dependency>:{raw}")
+        dependent_raw, dependency_raw = raw.split("=", 1)
+        dependent = _normalize_task_ref(repo_root, dependent_raw)
+        dependency = _normalize_task_ref(repo_root, dependency_raw)
+        if dependent not in tasks_by_ref or dependency not in tasks_by_ref:
+            raise ValueError(f"依赖双方必须都在当前队列:{raw}")
+        dependencies = tasks_by_ref[dependent].setdefault("depends_on", [])
+        if dependency not in dependencies:
+            dependencies.append(dependency)
+
+    repositories, git_block = _capture_git_baseline(repo_root)
+    if git_block:
+        return _print({"status": "error", **git_block})
     now = _utc_now()
     state = {
         "schema_version": SCHEMA_VERSION,
         "run_id": run_id,
-        "status": "running",
+        "status": "preparing",
         "profile": args.profile,
         "check_depth": args.check_depth,
         "created_at": now,
@@ -939,6 +1922,16 @@ def cmd_start(args: argparse.Namespace) -> int:
         "owner": {"host": socket.gethostname(), "pid": os.getpid()},
         "current_index": 0,
         "route_authorization": route_authorization,
+        "authorization": {
+            "source": "user-auto-loop-start",
+            "authorized_at": now,
+            "profile": args.profile,
+        },
+        "original_order": [str(item["task"]) for item in queue],
+        "repositories": repositories,
+        "dirty_classified": not bool(_dirty_entries({"repositories": repositories})),
+        "prepare_action": None,
+        "manifest_revisions": [],
         "queue": queue,
     }
     path = _run_path(repo_root, run_id)
@@ -974,14 +1967,14 @@ def cmd_next(args: argparse.Namespace) -> int:
     except ValueError as exc:
         return _print({"status": "error", "reason": "next-failed", "message": str(exc)})
     _link_session_run(repo_root, str(state.get("run_id")))
-    if state.get("status") != "running":
+    if state.get("status") not in ACTIVE_RUN_STATUSES:
         output_status = "done" if state.get("status") == "completed" else state.get("status") or "unknown"
         return _print({"run_id": state.get("run_id"), "status": output_status, "summary": _format_summary(state, args)})
     _, action = _next_item(repo_root, state)
     _write_state(path, state)
-    if state.get("status") == "completed":
+    if state.get("status") in TERMINAL_RUN_STATUSES:
         _clear_pointer_if_current(repo_root, str(state.get("run_id") or ""))
-    if action.get("status") in {"done", "blocked"}:
+    if action.get("status") in {"done", "blocked", "completed_with_blocked", "globally_blocked"}:
         action["summary"] = _format_summary(state, args)
     return _print({"run_id": state.get("run_id"), **action})
 
@@ -1078,7 +2071,15 @@ def cmd_retry_blocked(args: argparse.Namespace) -> int:
             "summary": _format_summary(state, args),
         })
 
-    state["status"] = "running"
+    if _schema_version(state) == SCHEMA_VERSION:
+        state["status"] = "preparing"
+        state["prepare_action"] = None
+        state["manifest_sha256"] = None
+        for queue_item in _queue_items(state):
+            if queue_item.get("status") == "pending":
+                queue_item["prepare_status"] = "pending"
+    else:
+        state["status"] = "running"
     _write_state(path, state)
     _write_pointer(repo_root, str(state.get("run_id")))
     _link_session_run(repo_root, str(state.get("run_id")))
@@ -1097,11 +2098,206 @@ def _find_record_item(state: dict[str, Any], task_ref: str | None) -> dict[str, 
     queue = state.get("queue") if isinstance(state.get("queue"), list) else []
     if task_ref:
         for item in queue:
-            if isinstance(item, dict) and item.get("task") == task_ref:
+            if (
+                isinstance(item, dict)
+                and item.get("task") == task_ref
+                and isinstance(item.get("last_action"), dict)
+            ):
                 return item
     for item in queue:
-        if isinstance(item, dict) and item.get("status") == "running":
+        if isinstance(item, dict) and isinstance(item.get("last_action"), dict):
             return item
+    return None
+
+
+def _record_open_questions_review(
+    repo_root: Path,
+    item: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    """校验并保存历史 Open Questions 的 AI 语义复核结果。"""
+    verdict = getattr(args, "review_verdict", None)
+    if verdict not in {"resolved", "blocking", "ambiguous"}:
+        return {
+            "status": "error",
+            "reason": "missing-review-verdict",
+            "message": "review_open_questions 必须提供 --review-verdict。",
+        }
+    expected_result = "ok" if verdict == "resolved" else "blocked"
+    if args.result != expected_result:
+        return {
+            "status": "error",
+            "reason": "review-result-mismatch",
+            "message": f"{verdict} 必须配合 --result {expected_result}。",
+        }
+
+    task_ref = str(item.get("task") or "")
+    prd = _task_dir(repo_root, task_ref) / "prd.md"
+    try:
+        content = prd.read_bytes()
+    except OSError as exc:
+        return {
+            "status": "error",
+            "reason": "review-prd-unreadable",
+            "message": str(exc),
+        }
+    actual_hash = _prd_sha256(content)
+    last_action = item.get("last_action")
+    expected_hash = last_action.get("prd_sha256") if isinstance(last_action, dict) else None
+    if expected_hash != actual_hash:
+        return {
+            "status": "error",
+            "reason": "stale-open-questions-review",
+            "expected_prd_sha256": expected_hash,
+            "actual_prd_sha256": actual_hash,
+            "message": "prd.md 已变化，请重新运行 next 获取新的复核 action。",
+        }
+
+    questions = _open_questions(content.decode("utf-8"))["bare"]
+    review = {
+        "prd_sha256": actual_hash,
+        "verdict": verdict,
+        "items": questions,
+        "summary": args.summary or "",
+        "reviewed_at": _utc_now(),
+    }
+    item["open_questions_review"] = review
+    item["last_action"] = None
+    if verdict == "resolved":
+        item["current_step"] = "start_task"
+        item["updated_at"] = _utc_now()
+        _append_item_decision(
+            item,
+            "open_questions_reviewed",
+            args.summary or "历史 Open Questions 已确认无阻塞事项",
+            review,
+        )
+    else:
+        reason = "open-questions" if verdict == "blocking" else "open-questions-ambiguous"
+        summary = args.summary or (
+            "历史 Open Questions 仍有未决事项"
+            if verdict == "blocking"
+            else "历史 Open Questions 无法确定是否已解决"
+        )
+        _block_item(item, reason, summary, {"questions": questions, "review": review})
+    return None
+
+
+def _record_planning_readiness_review(
+    repo_root: Path,
+    item: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    """校验并保存绑定当前 artifacts 的 planning 语义就绪结论。"""
+    verdict = getattr(args, "readiness_verdict", None)
+    allowed = {"ready", "repairable", "blocking"} if getattr(args, "schema_v2", False) else {
+        "ready",
+        "blocking",
+        "ambiguous",
+    }
+    if verdict not in allowed:
+        return {
+            "status": "error",
+            "reason": "missing-readiness-verdict",
+            "message": "review_planning_readiness 必须提供 --readiness-verdict。",
+        }
+    expected_result = "ok" if verdict in {"ready", "repairable"} else "blocked"
+    if args.result != expected_result:
+        return {
+            "status": "error",
+            "reason": "readiness-result-mismatch",
+            "message": f"{verdict} 必须配合 --result {expected_result}。",
+        }
+
+    task_dir = _task_dir(repo_root, str(item.get("task") or ""))
+    try:
+        actual_hash, files = _planning_digest(task_dir)
+    except OSError as exc:
+        return {"status": "error", "reason": "planning-artifacts-unreadable", "message": str(exc)}
+    last_action = item.get("last_action")
+    expected_hash = last_action.get("planning_sha256") if isinstance(last_action, dict) else None
+    if expected_hash != actual_hash:
+        return {
+            "status": "error",
+            "reason": "stale-planning-readiness-review",
+            "expected_planning_sha256": expected_hash,
+            "actual_planning_sha256": actual_hash,
+            "message": "planning artifacts 已变化，请重新运行 next 获取新的复核 action。",
+        }
+
+    review = {
+        "planning_sha256": actual_hash,
+        "verdict": verdict,
+        "files": files,
+        "summary": args.summary or "",
+        "reviewed_at": _utc_now(),
+    }
+    item["planning_readiness_review"] = review
+    item["last_action"] = None
+    if verdict == "ready":
+        item["current_step"] = "start_task"
+        item["updated_at"] = _utc_now()
+        _append_item_decision(item, "planning_readiness_reviewed", args.summary or "planning artifacts 已具备实现条件", review)
+    elif verdict == "repairable":
+        item["current_step"] = "planning_repair"
+        item["prepare_status"] = "repairing"
+        item["updated_at"] = _utc_now()
+        _append_item_decision(
+            item,
+            "planning_repair_requested",
+            args.summary or "planning artifacts 存在可由 AI 修复的问题",
+            review,
+        )
+    else:
+        reason = "planning-readiness" if verdict == "blocking" else "planning-readiness-ambiguous"
+        summary = args.summary or ("planning artifacts 仍有阻塞项" if verdict == "blocking" else "planning readiness 无法确定")
+        _block_item(item, reason, summary, {"review": review})
+    return None
+
+
+def _record_brief_confirmation(
+    repo_root: Path,
+    item: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    """校验并保存绑定当前 handoff artifacts 的显式 brief 确认。"""
+    if args.result != "ok":
+        return {
+            "status": "error",
+            "reason": "brief-confirmation-result-mismatch",
+            "message": "confirm_brief 只有收到用户显式确认后才能以 --result ok 回写。",
+        }
+    task_dir = _task_dir(repo_root, str(item.get("task") or ""))
+    try:
+        actual_hash, files = _artifact_digest([
+            task_dir / "prd.md",
+            task_dir / "design.md",
+            task_dir / "implement.md",
+            task_dir / "brief.md",
+        ])
+    except OSError as exc:
+        return {"status": "error", "reason": "brief-handoff-unreadable", "message": str(exc)}
+    last_action = item.get("last_action")
+    expected_hash = last_action.get("handoff_sha256") if isinstance(last_action, dict) else None
+    if expected_hash != actual_hash:
+        return {
+            "status": "error",
+            "reason": "stale-brief-confirmation",
+            "expected_handoff_sha256": expected_hash,
+            "actual_handoff_sha256": actual_hash,
+            "message": "planning artifacts 或 brief.md 已变化，请重新运行 next 并展示最新 brief。",
+        }
+    confirmation = {
+        "handoff_sha256": actual_hash,
+        "files": files,
+        "summary": args.summary or "",
+        "confirmed_at": _utc_now(),
+    }
+    item["brief_confirmation"] = confirmation
+    item["last_action"] = None
+    item["current_step"] = "start_task"
+    item["updated_at"] = _utc_now()
+    _append_item_decision(item, "brief_confirmed", args.summary or "用户已确认 planning artifacts 与 brief", confirmation)
     return None
 
 
@@ -1262,6 +2458,325 @@ def _record_check_result(
     )
 
 
+def _baseline_key(repository: str, path: str) -> str:
+    """构造跨仓库唯一的 dirty baseline key。"""
+    return f"{repository}::{path}"
+
+
+def _record_dirty_classification(
+    repo_root: Path,
+    state: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    """校验并保存启动前 dirty path 分类。"""
+    if args.result != "ok":
+        return {
+            "status": "error",
+            "reason": "dirty-classification-result-mismatch",
+            "message": "dirty baseline 分类完成后必须以 --result ok 回写",
+        }
+    entries = {
+        _baseline_key(str(entry["repository"]), str(entry["path"])): entry
+        for entry in _dirty_entries(state)
+    }
+    assignments: dict[str, tuple[str, str]] = {}
+    for raw in args.owned_dirty or []:
+        if "=" not in raw:
+            return {
+                "status": "error",
+                "reason": "invalid-owned-dirty",
+                "message": f"owned-dirty 必须是 <task>=<repository>::<path>:{raw}",
+            }
+        task_raw, key = raw.split("=", 1)
+        task = _normalize_task_ref(repo_root, task_raw)
+        if task not in {str(item.get("task")) for item in _queue_items(state)}:
+            return {"status": "error", "reason": "owned-dirty-task-not-in-queue", "task": task}
+        if key in assignments:
+            return {"status": "error", "reason": "dirty-path-classified-twice", "path": key}
+        assignments[key] = ("owned", task)
+    for key in args.protected_retained or []:
+        if key in assignments:
+            return {"status": "error", "reason": "dirty-path-classified-twice", "path": key}
+        assignments[key] = ("protected", "")
+    if set(assignments) != set(entries):
+        return {
+            "status": "error",
+            "reason": "dirty-classification-incomplete",
+            "missing": sorted(set(entries) - set(assignments)),
+            "unknown": sorted(set(assignments) - set(entries)),
+        }
+
+    repositories = state.get("repositories") if isinstance(state.get("repositories"), list) else []
+    by_task = {str(item.get("task")): item for item in _queue_items(state)}
+    by_repo = {str(repository.get("root")): repository for repository in repositories if isinstance(repository, dict)}
+    for key, entry in entries.items():
+        repository = str(entry["repository"])
+        path = str(entry["path"])
+        root = repo_root if repository == "." else repo_root / repository
+        if _file_sha256(root / path) != entry["sha256"]:
+            return {
+                "status": "error",
+                "reason": "dirty-baseline-drift",
+                "path": key,
+            }
+        kind, task = assignments[key]
+        record = {"repository": repository, "path": path, "sha256": entry["sha256"]}
+        if kind == "owned":
+            by_task[task].setdefault("owned_dirty", []).append(record)
+            by_repo[repository].setdefault("owned_dirty", []).append({"task": task, **record})
+        else:
+            by_repo[repository].setdefault("protected_retained", []).append(record)
+    state["dirty_classified"] = True
+    state["prepare_action"] = None
+    return None
+
+
+def _record_resolved_open_questions(
+    repo_root: Path,
+    state: dict[str, Any],
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    """确认人工已在 artifacts 中收敛全部 Open Questions。"""
+    if args.result != "ok":
+        return {
+            "status": "error",
+            "reason": "open-questions-result-mismatch",
+            "message": "Open Questions 未全部解决时不得完成 prepare action",
+        }
+    questions = _batch_open_questions(repo_root, state)
+    if questions:
+        return {
+            "status": "error",
+            "reason": "open-questions-still-unresolved",
+            "questions": questions,
+        }
+    state["prepare_action"] = None
+    state["status"] = "preparing"
+    return None
+
+
+def _record_prepare_item(
+    repo_root: Path,
+    state: dict[str, Any],
+    item: dict[str, Any],
+    action: str,
+    args: argparse.Namespace,
+) -> dict[str, Any] | None:
+    """记录 schema 2 单任务 prepare action。"""
+    if action == "review_planning_readiness":
+        setattr(args, "schema_v2", True)
+        return _record_planning_readiness_review(repo_root, item, args)
+    if action == "run_planning_repair":
+        if args.result != "ok":
+            _block_item(
+                item,
+                args.failure_type or "planning-repair-failed",
+                args.summary or "planning repair 失败",
+            )
+            item["prepare_status"] = "blocked"
+            item["last_action"] = None
+            return None
+        task_dir = _task_dir(repo_root, str(item.get("task") or ""))
+        actual_hash, files = _planning_digest(task_dir)
+        last_action = item.get("last_action")
+        previous_hash = last_action.get("planning_sha256") if isinstance(last_action, dict) else None
+        if actual_hash == previous_hash:
+            return {
+                "status": "error",
+                "reason": "planning-repair-no-change",
+                "message": "planning repair 未改变 authoritative artifacts",
+            }
+        item["planning_attempts"] = int(item.get("planning_attempts") or 0) + 1
+        item["planning_readiness_review"] = None
+        item["last_action"] = None
+        item["prepare_status"] = "pending"
+        item["current_step"] = "start_task"
+        _append_item_decision(item, "planning_repaired", args.summary or "planning artifacts 已修复", {
+            "attempt": item["planning_attempts"],
+            "files": files,
+            "planning_sha256": actual_hash,
+        })
+        return None
+    if action == "refresh_brief":
+        if args.result != "ok":
+            _block_item(item, args.failure_type or "brief-refresh-failed", args.summary or "brief 刷新失败")
+            item["prepare_status"] = "blocked"
+            item["last_action"] = None
+            return None
+        task_dir = _task_dir(repo_root, str(item.get("task") or ""))
+        stale, newer = _brief_is_stale(task_dir)
+        if stale:
+            return {
+                "status": "error",
+                "reason": "brief-still-stale",
+                "newer_sources": newer,
+            }
+        item["last_action"] = None
+        item["prepare_status"] = "pending"
+        item["current_step"] = "start_task"
+        return None
+    return {"status": "error", "reason": "invalid-prepare-action", "action": action}
+
+
+def _record_schema2_prepare(
+    repo_root: Path,
+    path: Path,
+    state: dict[str, Any],
+    args: argparse.Namespace,
+) -> int:
+    """处理 schema 2 prepare/awaiting_input 阶段的 record。"""
+    action = args.action
+    prepare_action = state.get("prepare_action")
+    if isinstance(prepare_action, dict):
+        expected = prepare_action.get("action")
+        if action != expected:
+            return _print({"status": "error", "reason": "action-mismatch", "expected_action": expected, "actual_action": action})
+        if action == "classify_dirty_baseline":
+            error = _record_dirty_classification(repo_root, state, args)
+        elif action == "resolve_open_questions":
+            error = _record_resolved_open_questions(repo_root, state, args)
+        else:
+            error = {"status": "error", "reason": "invalid-prepare-action", "action": action}
+        if error:
+            return _print(error)
+        _write_state(path, state)
+        return _print({"status": "recorded", "run_id": state.get("run_id"), "summary": _format_summary(state, args)})
+
+    task = _normalize_task_ref(repo_root, args.task) if args.task else None
+    item = _find_record_item(state, task)
+    if item is None:
+        return _print({"status": "error", "reason": "no-outstanding-prepare-action"})
+    expected = _outstanding_action_name(item)
+    if action != expected:
+        return _print({"status": "error", "reason": "action-mismatch", "expected_action": expected, "actual_action": action})
+    error = _record_prepare_item(repo_root, state, item, action, args)
+    if error:
+        return _print(error)
+    _write_state(path, state)
+    return _print({
+        "status": "recorded",
+        "run_id": state.get("run_id"),
+        "task": item.get("task"),
+        "item_status": item.get("status"),
+        "current_step": item.get("current_step"),
+        "summary": _format_summary(state, args),
+    })
+
+
+def _protected_path_conflicts(state: dict[str, Any], files: list[str] | None) -> list[str]:
+    """返回 action 文件列表与 protected-retained 的交集。"""
+    protected = {
+        _baseline_key(str(repository.get("root") or "."), str(entry.get("path") or ""))
+        for repository in state.get("repositories", [])
+        if isinstance(repository, dict)
+        for entry in repository.get("protected_retained", [])
+        if isinstance(entry, dict)
+    }
+    requested = {_normalize_record_file(value) for value in files or []}
+    return sorted(protected & requested)
+
+
+def _consume_protected_baseline_drifts(
+    repo_root: Path,
+    state: dict[str, Any],
+    item: dict[str, Any],
+    action: str,
+) -> list[dict[str, str]]:
+    """检测并记录当前 action 期间发生的 protected 文件漂移。"""
+    drifts: list[dict[str, str]] = []
+    for repository in state.get("repositories", []):
+        if not isinstance(repository, dict):
+            continue
+        repository_root = str(repository.get("root") or ".")
+        root = repo_root if repository_root == "." else repo_root / repository_root
+        for entry in repository.get("protected_retained", []):
+            if not isinstance(entry, dict):
+                continue
+            expected = str(entry.get("current_sha256") or entry.get("sha256") or "")
+            actual = _file_sha256(root / str(entry.get("path") or ""))
+            if actual == expected:
+                continue
+            drift = {
+                "repository": repository_root,
+                "path": str(entry.get("path") or ""),
+                "expected_sha256": expected,
+                "actual_sha256": actual,
+            }
+            drifts.append(drift)
+            # 当前任务被阻塞后，以观察到的内容继续作为 retained 基线，避免误伤独立后续任务。
+            entry["current_sha256"] = actual
+    if drifts:
+        history = state.get("protected_drifts")
+        if not isinstance(history, list):
+            history = []
+        history.append({
+            "detected_at": _utc_now(),
+            "task": item.get("task"),
+            "action": action,
+            "files": drifts,
+        })
+        state["protected_drifts"] = history[-DECISION_LOG_LIMIT:]
+    return drifts
+
+
+def _consume_pending_artifact_decision(
+    repo_root: Path,
+    state: dict[str, Any],
+    item: dict[str, Any],
+) -> dict[str, Any] | None:
+    """使用待处理 AI 决策授权一次 planning/handoff artifact 重绑定。"""
+    pending = item.get("pending_artifact_decision")
+    if not isinstance(pending, dict):
+        return None
+    previous = pending.get("artifact_sha256")
+    if not isinstance(previous, dict):
+        item["pending_artifact_decision"] = None
+        return None
+    current = _task_artifact_hashes(repo_root, item)
+    changed = sorted(
+        key
+        for key in set(previous) | set(current)
+        if previous.get(key) != current.get(key)
+    )
+    if not changed:
+        item["pending_artifact_decision"] = None
+        return None
+    authorized = {
+        _normalize_record_file(value)
+        for value in pending.get("files", [])
+        if isinstance(value, str)
+    }
+    unauthorized = sorted(set(changed) - authorized)
+    if unauthorized:
+        return {
+            "decision_id": pending.get("decision_id"),
+            "changed": changed,
+            "unauthorized": unauthorized,
+        }
+
+    planning_hash, handoff_hash = _current_artifact_hashes(repo_root, item)
+    item["planning_sha256"] = planning_hash
+    item["handoff_sha256"] = handoff_hash
+    item["pending_artifact_decision"] = None
+    manifest = _append_manifest_revision(state, str(pending.get("decision_id") or ""))
+    _append_item_decision(
+        item,
+        "decision_artifacts_rebound",
+        f"{pending.get('decision_id')}: planning/handoff artifacts 已重新绑定",
+        {
+            "decision_id": pending.get("decision_id"),
+            "files": changed,
+            "manifest_revision": manifest["revision"],
+            "manifest_sha256": manifest["sha256"],
+        },
+    )
+    return {
+        "decision_id": pending.get("decision_id"),
+        "changed": changed,
+        "manifest_revision": manifest["revision"],
+    }
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     """记录 agent 执行结果。"""
     repo_root = _repo_root()
@@ -1271,6 +2786,11 @@ def cmd_record(args: argparse.Namespace) -> int:
         path, state = _load_current_state(repo_root, args.run_id)
     except ValueError as exc:
         return _print({"status": "error", "reason": "record-failed", "message": str(exc)})
+    schema_version = _schema_version(state)
+    if schema_version == SCHEMA_VERSION and state.get("status") in {"preparing", "awaiting_input"}:
+        if not args.action:
+            return _print({"status": "error", "reason": "missing-action"})
+        return _record_schema2_prepare(repo_root, path, state, args)
     if state.get("status") != "running":
         return _print({
             "status": "error",
@@ -1306,6 +2826,140 @@ def cmd_record(args: argparse.Namespace) -> int:
         })
 
     action = args.action
+    if action == "review_open_questions":
+        review_error = _record_open_questions_review(repo_root, item, args)
+        if review_error is not None:
+            review_error.update({"task": item.get("task"), "action": action})
+            return _print(review_error)
+        _write_state(path, state)
+        return _print({
+            "status": "recorded",
+            "run_id": state.get("run_id"),
+            "task": item.get("task"),
+            "item_status": item.get("status"),
+            "current_step": item.get("current_step"),
+            "summary": _format_summary(state, args),
+        })
+
+    if action == "review_planning_readiness":
+        review_error = _record_planning_readiness_review(repo_root, item, args)
+        if review_error is not None:
+            review_error.update({"task": item.get("task"), "action": action})
+            return _print(review_error)
+        _write_state(path, state)
+        return _print({
+            "status": "recorded",
+            "run_id": state.get("run_id"),
+            "task": item.get("task"),
+            "item_status": item.get("status"),
+            "current_step": item.get("current_step"),
+            "summary": _format_summary(state, args),
+        })
+
+    if action == "confirm_brief":
+        confirmation_error = _record_brief_confirmation(repo_root, item, args)
+        if confirmation_error is not None:
+            confirmation_error.update({"task": item.get("task"), "action": action})
+            return _print(confirmation_error)
+        _write_state(path, state)
+        return _print({
+            "status": "recorded",
+            "run_id": state.get("run_id"),
+            "task": item.get("task"),
+            "item_status": item.get("status"),
+            "current_step": item.get("current_step"),
+            "summary": _format_summary(state, args),
+        })
+
+    if schema_version == SCHEMA_VERSION:
+        protected_drifts = _consume_protected_baseline_drifts(repo_root, state, item, action)
+        if protected_drifts:
+            item["last_action"] = None
+            _block_item(
+                item,
+                "protected-baseline-drift",
+                "当前 action 期间 protected-retained 文件内容发生变化",
+                {"files": protected_drifts},
+            )
+            _write_state(path, state)
+            return _print({
+                "status": "recorded",
+                "run_id": state.get("run_id"),
+                "task": item.get("task"),
+                "item_status": item.get("status"),
+                "current_step": item.get("current_step"),
+                "summary": _format_summary(state, args),
+            })
+        artifact_rebind = _consume_pending_artifact_decision(repo_root, state, item)
+        if isinstance(artifact_rebind, dict) and artifact_rebind.get("unauthorized"):
+            item["last_action"] = None
+            _block_item(
+                item,
+                "artifact-drift",
+                "planning/handoff artifacts 的变化未被当前 AI 决策文件范围授权",
+                artifact_rebind,
+            )
+            _write_state(path, state)
+            return _print({
+                "status": "recorded",
+                "run_id": state.get("run_id"),
+                "task": item.get("task"),
+                "item_status": item.get("status"),
+                "current_step": item.get("current_step"),
+                "summary": _format_summary(state, args),
+            })
+        if item.get("planning_sha256"):
+            try:
+                planning_hash, handoff_hash = _current_artifact_hashes(repo_root, item)
+            except OSError as exc:
+                planning_hash, handoff_hash = "", ""
+                drift_detail = {"error": str(exc)}
+            else:
+                drift_detail = {
+                    "expected_planning_sha256": item.get("planning_sha256"),
+                    "actual_planning_sha256": planning_hash,
+                    "expected_handoff_sha256": item.get("handoff_sha256"),
+                    "actual_handoff_sha256": handoff_hash,
+                }
+            if (
+                planning_hash != item.get("planning_sha256")
+                or handoff_hash != item.get("handoff_sha256")
+            ):
+                item["last_action"] = None
+                _block_item(
+                    item,
+                    "artifact-drift",
+                    "action 发出后 planning/handoff artifacts 发生未授权变化",
+                    drift_detail,
+                )
+                _write_state(path, state)
+                return _print({
+                    "status": "recorded",
+                    "run_id": state.get("run_id"),
+                    "task": item.get("task"),
+                    "item_status": item.get("status"),
+                    "current_step": item.get("current_step"),
+                    "summary": _format_summary(state, args),
+                })
+        conflicts = _protected_path_conflicts(state, args.files)
+        if conflicts:
+            item["last_action"] = None
+            _block_item(
+                item,
+                "protected-path-conflict",
+                "当前 action 涉及 protected-retained 文件",
+                {"files": conflicts},
+            )
+            _write_state(path, state)
+            return _print({
+                "status": "recorded",
+                "run_id": state.get("run_id"),
+                "task": item.get("task"),
+                "item_status": item.get("status"),
+                "current_step": item.get("current_step"),
+                "summary": _format_summary(state, args),
+            })
+
     check_error = _check_record_error(state, item, action, args)
     if check_error is not None:
         check_error.update({"task": item.get("task"), "action": action})
@@ -1350,11 +3004,16 @@ def cmd_status(args: argparse.Namespace) -> int:
     try:
         path, state = _load_current_state(repo_root, args.run_id)
     except ValueError as exc:
+        message = str(exc)
+        invalid_runtime = any(
+            marker in message
+            for marker in (" corrupt:", " io_error:", "pointer corrupt:", "pointer io_error:")
+        )
         return _print({
             "status": "ok",
-            "run_status": "no-current-run",
-            "reason": "status-list",
-            "message": str(exc),
+            "run_status": "invalid-current-run" if invalid_runtime else "no-current-run",
+            "reason": "runtime-state-invalid" if invalid_runtime else "status-list",
+            "message": message,
             "runs": _recent_run_summaries(repo_root),
         })
     return _print({"status": "ok", "path": _rel_path(repo_root, path), **_format_summary(state, args)})
@@ -1376,6 +3035,97 @@ def cmd_stop(args: argparse.Namespace) -> int:
     return _print({"status": "stopped", "run_id": state.get("run_id"), "path": _rel_path(repo_root, path), "reason": args.reason})
 
 
+def cmd_decide(args: argparse.Namespace) -> int:
+    """记录 AI 在 run 授权边界内作出的低/中风险决策。"""
+    repo_root = _repo_root()
+    if repo_root is None:
+        return _print({"status": "error", "reason": "not-trellis-project"})
+    try:
+        path, state = _load_current_state(repo_root, args.run_id)
+    except ValueError as exc:
+        return _print({"status": "error", "reason": "decide-failed", "message": str(exc)})
+    if _schema_version(state) != SCHEMA_VERSION:
+        return _print({"status": "error", "reason": "decision-log-requires-schema-2"})
+    if state.get("status") not in ACTIVE_RUN_STATUSES:
+        return _print({"status": "error", "reason": "auto-run-not-active", "run_status": state.get("status")})
+    task_ref = _normalize_task_ref(repo_root, args.task)
+    item = next((entry for entry in _queue_items(state) if entry.get("task") == task_ref), None)
+    if item is None:
+        return _print({"status": "error", "reason": "decision-task-not-in-queue", "task": task_ref})
+    if isinstance(item.get("pending_artifact_decision"), dict):
+        return _print({
+            "status": "error",
+            "reason": "decision-artifact-rebind-pending",
+            "message": "上一条决策仍等待当前 action record 消费",
+            "decision_id": item["pending_artifact_decision"].get("decision_id"),
+        })
+
+    decision_files = [_normalize_record_file(value) for value in args.file or []]
+    conflicts = _protected_path_conflicts(state, decision_files)
+    if conflicts:
+        return _print({
+            "status": "error",
+            "reason": "protected-path-conflict",
+            "files": conflicts,
+        })
+
+    task_dir = _task_dir(repo_root, task_ref)
+    planning_hash = ""
+    handoff_hash = ""
+    if (task_dir / "prd.md").is_file():
+        planning_hash, handoff_hash = _current_artifact_hashes(repo_root, item)
+    try:
+        event = append_decision(
+            task_dir,
+            run_id=str(state.get("run_id") or ""),
+            topic=args.topic,
+            options=args.option,
+            choice=args.choice,
+            summary=args.summary,
+            evidence=args.evidence or [],
+            risk=args.risk,
+            confidence=args.confidence,
+            requirements=args.requirement or [],
+            files=decision_files,
+            planning_sha256=planning_hash,
+            handoff_sha256=handoff_hash,
+            verification=args.verification or "",
+        )
+    except DecisionLogError as exc:
+        return _print({"status": "error", "reason": "decision-log-error", "message": str(exc)})
+    item["decision_count"] = int(item.get("decision_count") or 0) + 1
+    decision_ids = item.get("decision_ids")
+    if not isinstance(decision_ids, list):
+        decision_ids = []
+    decision_ids.append(event["decision_id"])
+    item["decision_ids"] = decision_ids
+    _append_item_decision(item, "ai_decision", f"{event['decision_id']}: {event['topic']} -> {event['choice']}", {
+        "decision_id": event["decision_id"],
+        "risk": event["risk"],
+        "confidence": event["confidence"],
+        "files": event["files"],
+    })
+    if state.get("status") == "running" and planning_hash:
+        item["pending_artifact_decision"] = {
+            "decision_id": event["decision_id"],
+            "files": event["files"],
+            "artifact_sha256": _task_artifact_hashes(repo_root, item),
+            "planning_sha256": planning_hash,
+            "handoff_sha256": handoff_hash,
+            "recorded_at": event["recorded_at"],
+        }
+    _write_state(path, state)
+    return _print({
+        "status": "decided",
+        "run_id": state.get("run_id"),
+        "task": task_ref,
+        "decision": event,
+        "artifact_rebind_pending": bool(item.get("pending_artifact_decision")),
+        "manifest_revision": state.get("manifest_revision"),
+        "manifest_sha256": state.get("manifest_sha256"),
+    })
+
+
 def build_parser() -> argparse.ArgumentParser:
     """构造命令行解析器。"""
     parser = argparse.ArgumentParser(description="Trellis auto loop runner.")
@@ -1388,6 +3138,7 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--check-depth", choices=sorted(VALID_CHECK_DEPTHS), default="auto")
     start.add_argument("--route-implement", choices=sorted(VALID_IMPLEMENT_ROUTES))
     start.add_argument("--route-check", choices=sorted(VALID_CHECK_ROUTES))
+    start.add_argument("--depends-on", action="append", default=[])
     start.add_argument("--force", action="store_true")
     start.add_argument("--verbose", action="store_true")
     start.set_defaults(func=cmd_start)
@@ -1414,6 +3165,10 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--route-source")
     record.add_argument("--effective-check-depth", choices=("light", "full"))
     record.add_argument("--check-depth-reason")
+    record.add_argument("--review-verdict", choices=("resolved", "blocking", "ambiguous"))
+    record.add_argument("--readiness-verdict", choices=("ready", "repairable", "blocking", "ambiguous"))
+    record.add_argument("--owned-dirty", action="append", default=[])
+    record.add_argument("--protected-retained", action="append", default=[])
     record.add_argument("--verbose", action="store_true")
     record.set_defaults(func=cmd_record)
 
@@ -1432,6 +3187,21 @@ def build_parser() -> argparse.ArgumentParser:
     stop.add_argument("--reason")
     stop.set_defaults(func=cmd_stop)
 
+    decide = subparsers.add_parser("decide")
+    decide.add_argument("--run-id")
+    decide.add_argument("--task", required=True)
+    decide.add_argument("--topic", required=True)
+    decide.add_argument("--option", action="append", required=True)
+    decide.add_argument("--choice", required=True)
+    decide.add_argument("--summary", required=True)
+    decide.add_argument("--evidence", action="append", default=[])
+    decide.add_argument("--risk", choices=("low", "medium"), required=True)
+    decide.add_argument("--confidence", choices=("low", "medium", "high"), required=True)
+    decide.add_argument("--requirement", action="append", default=[])
+    decide.add_argument("--file", action="append", default=[])
+    decide.add_argument("--verification")
+    decide.set_defaults(func=cmd_decide)
+
     return parser
 
 
@@ -1443,6 +3213,8 @@ def main() -> int:
         return args.func(args)
     except ValueError as exc:
         return _print({"status": "error", "reason": "invalid-input", "message": str(exc)})
+    except OSError as exc:
+        return _print({"status": "error", "reason": "runtime-io-error", "message": str(exc)})
 
 
 if __name__ == "__main__":

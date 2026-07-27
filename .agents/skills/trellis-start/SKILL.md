@@ -48,7 +48,7 @@ From Step 1 you know the current task and status. Check the task directory:
   python3 ./.trellis/scripts/get_context.py --mode phase --step 2.1 --platform codex
   ```
 <!-- BEGIN skill-garden patch start-no-task-routing v0.6 -->
-- **No active task** → infer `discuss`, `inspect`, `direct_edit`, `task_plan`, or `workflow_action`. Proceed with high-confidence reversible routing; inferred complex implementation uses `task_intent.py create`, explicit task planning uses `task.py create`, and material ambiguity or independent safety boundaries still require one focused question.
+- **No active task** -> follow the workflow `Request Triage` contract before acting. Use `task_intent.py create` for inferred complex planning, `task.py create` for explicit task planning, and ask only for material ambiguity or an independent safety boundary.
 <!-- END skill-garden patch start-no-task-routing v0.6 -->
 
 ---

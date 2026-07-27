@@ -18,7 +18,23 @@ Unrelated planning tasks, old archives, and files from other windows remain unto
 
 Follow the steps below in order.
 
-### 1. Current Task Release Audit
+### 1. Decision Audit
+
+Run:
+
+```bash
+python3 ./.trellis/scripts/decision_log.py status --task <task-name> --json
+```
+
+- No decisions, or the current digest is already `accepted`: continue without another confirmation.
+- Unreviewed decisions: show ID, topic, choice, rationale summary, risk, and verification, then wait for one explicit review.
+- Accept all: run `decision_log.py review --task <task-name> --verdict accepted` and continue.
+- Request changes: run `decision_log.py review --task <task-name> --verdict changes-requested --decision-id <id> [...] --notes <text>`, stop before release audit, and return the task for rework.
+- A corrupt decision log fails closed. Do not edit or discard it to bypass review.
+
+`task.py archive` repeats this guard before any status write, session cleanup, or directory move.
+
+### 2. Current Task Release Audit
 
 Run `trellis-release audit-current`. It reads task artifacts and Git evidence and returns `no-op`, `written`, or `needs-review`.
 
@@ -27,7 +43,7 @@ Run `trellis-release audit-current`. It reads task artifacts and Git evidence an
 - A written `<task>/release.md` moves with the task archive.
 - `needs-review` or `Needs human review` does not block archival, but remains visible in the final result.
 
-### 2. Archive to Disk
+### 3. Archive to Disk
 
 Always run:
 
@@ -37,7 +53,7 @@ python3 ./.trellis/scripts/task.py archive <task-name> --no-commit
 
 Use the command result and scoped diff to identify the original task source, actual archive destination, and child `task.json` files changed by parent archival. Never stage the `.trellis/tasks` or `.trellis/tasks/archive` root directory.
 
-### 3. Record the Journal
+### 4. Record the Journal
 
 Always run:
 
@@ -50,7 +66,7 @@ python3 ./.trellis/scripts/add_session.py --no-commit \
 
 Use the command result and scoped diff to determine the exact journal/index paths changed by this invocation.
 
-### 4. Exact Commits
+### 5. Exact Commits
 
 When `session_auto_commit: false`, keep the archive and journal changes on disk without committing or pushing. Report the exact dirty paths.
 
@@ -68,7 +84,7 @@ git commit --only -m "<configured session commit message>" -- <exact journal/ind
 
 Skip the second commit when the journal did not change. After each commit, use `git show --name-status -M --format=` to verify exact paths and renames, and confirm unrelated staged paths remain staged. The whole worktree does not need to be clean.
 
-### 5. Eligible Automatic Push
+### 6. Eligible Automatic Push
 
 Use only the Git baseline captured at the start:
 
@@ -78,10 +94,11 @@ Use only the Git baseline captured at the start:
 
 Never force push. Push eligibility is independent of task progress fields and overall worktree cleanliness.
 
-### 6. Final Result
+### 7. Final Result
 
 Report separately:
 
+- Decision audit status and reviewed decision IDs when present.
 - Release audit status and `release.md` path when present.
 - Archive destination and archive commit when present.
 - Journal paths and journal commit when present.

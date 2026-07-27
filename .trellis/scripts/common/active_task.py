@@ -97,6 +97,50 @@ class ActiveTask:
         if self.source_type == "session-fallback" and self.context_key:
             return f"session-fallback:{self.context_key}"
         return self.source_type
+# BEGIN skill-garden patch active-task-clear-read-result v0.6
+
+
+def _read_json_result(path: Path) -> dict[str, Any]:
+    """Read runtime JSON while preserving missing/corrupt/I/O distinctions."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {"status": "missing", "data": None, "error": None}
+    except json.JSONDecodeError as error:
+        return {"status": "corrupt", "data": None, "error": str(error)}
+    except OSError as error:
+        return {"status": "io_error", "data": None, "error": str(error)}
+    if not isinstance(data, dict):
+        return {"status": "corrupt", "data": None, "error": "JSON root is not an object"}
+    return {"status": "ok", "data": data, "error": None}
+# END skill-garden patch active-task-clear-read-result v0.6
+# BEGIN skill-garden patch active-task-clear-result-type v0.6
+
+
+@dataclass(frozen=True)
+class ClearActiveTaskResult:
+    """Result of clearing a session-scoped active task.
+
+    Args:
+        active: Task resolved before cleanup.
+        cleared: Whether the target session state is absent after the operation.
+        error: Stable diagnostic when cleanup failed.
+    """
+
+    active: ActiveTask
+    cleared: bool
+    error: str | None = None
+
+    @property
+    def task_path(self) -> str | None:
+        """Return the task path resolved before cleanup."""
+        return self.active.task_path
+
+    @property
+    def source(self) -> str:
+        """Return the human-readable source resolved before cleanup."""
+        return self.active.source
+# END skill-garden patch active-task-clear-result-type v0.6
 
 
 def normalize_task_ref(task_ref: str) -> str:
@@ -417,24 +461,32 @@ def resolve_context_key(
     return None
 
 
+# BEGIN skill-garden patch active-task-runtime-json-io v0.6
 def _read_json(path: Path) -> dict[str, Any] | None:
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return None
+    """Return a parsed JSON object for compatibility callers."""
+    result = _read_json_result(path)
+    data = result.get("data")
     return data if isinstance(data, dict) else None
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> bool:
+    """Atomically replace runtime JSON after flushing file contents."""
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.{time.time_ns()}.tmp")
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-            encoding="utf-8",
-        )
+        with temp_path.open("x", encoding="utf-8") as handle:
+            handle.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
         return True
     except OSError:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
         return False
+# END skill-garden patch active-task-runtime-json-io v0.6
 
 
 def _canonical_task_ref(task_path: str, repo_root: Path) -> str | None:
@@ -467,23 +519,19 @@ def _context_path(repo_root: Path, context_key: str) -> Path:
     return _runtime_sessions_dir(repo_root) / f"{context_key}.json"
 
 
+# BEGIN skill-garden patch active-task-runtime-resolution v0.6
 def resolve_active_task(
     repo_root: Path,
     platform_input: dict[str, Any] | None = None,
     platform: str | None = None,
 ) -> ActiveTask:
-    """Resolve the active task from session runtime state only.
-
-    A stale session task is returned as stale. Missing context identity or a
-    missing/empty session context falls back to single-session inference: if
-    exactly one session file exists in the runtime, return its task with
-    source_type="session-fallback" — covers class-2 platform sub-agents (codex,
-    copilot, gemini, qoder) that don't inherit the parent's session id. ≥2
-    files or 0 files yield ActiveTask(None) — refuses to guess across windows.
-    """
+    """Resolve the active task without treating corrupt session state as missing."""
     context_key = resolve_context_key(platform_input, platform)
     if context_key:
-        context = _read_json(_context_path(repo_root, context_key)) or {}
+        result = _read_json_result(_context_path(repo_root, context_key))
+        if result["status"] in {"corrupt", "io_error"}:
+            return ActiveTask(None, f"session-{result['status']}", context_key)
+        context = result["data"] if isinstance(result.get("data"), dict) else {}
         task_ref = _string_value(context.get("current_task"))
         active = _active_from_ref(task_ref, repo_root, "session", context_key)
         if active:
@@ -494,15 +542,12 @@ def resolve_active_task(
         return fallback
 
     return ActiveTask(None, "none", context_key)
+# END skill-garden patch active-task-runtime-resolution v0.6
 
 
+# BEGIN skill-garden patch active-task-runtime-fallback v0.6
 def _resolve_single_session_fallback(repo_root: Path) -> ActiveTask | None:
-    """Return the task pointed at by the sole session file, if exactly one exists.
-
-    Used when context-key resolution fails (typical for class-2 platform
-    sub-agents). Returns None if 0 or ≥2 session files are present — refuses
-    to pick across windows so 04-21's multi-session isolation contract holds.
-    """
+    """Return the sole healthy session task without crossing corrupt state."""
     sessions_dir = _runtime_sessions_dir(repo_root)
     if not sessions_dir.is_dir():
         return None
@@ -512,13 +557,16 @@ def _resolve_single_session_fallback(repo_root: Path) -> ActiveTask | None:
         return None
 
     session_file = session_files[0]
-    context = _read_json(session_file) or {}
+    result = _read_json_result(session_file)
+    fallback_key = session_file.stem
+    if result["status"] in {"corrupt", "io_error"}:
+        return ActiveTask(None, f"session-{result['status']}", fallback_key)
+    context = result["data"] if isinstance(result.get("data"), dict) else {}
     task_ref = _string_value(context.get("current_task"))
     if not task_ref:
         return None
-
-    fallback_key = session_file.stem
     return _active_from_ref(task_ref, repo_root, "session-fallback", fallback_key)
+# END skill-garden patch active-task-runtime-fallback v0.6
 
 
 def _utc_now() -> str:
@@ -547,17 +595,14 @@ def _context_metadata(
     return metadata
 
 
+# BEGIN skill-garden patch active-task-runtime-set v0.6
 def set_active_task(
     task_path: str,
     repo_root: Path,
     platform_input: dict[str, Any] | None = None,
     platform: str | None = None,
 ) -> ActiveTask | None:
-    """Set the active task in session scope.
-
-    Returns None when no context key is available; callers should surface a
-    user-facing error that explains how to provide session identity.
-    """
+    """Set the active task without overwriting corrupt session runtime state."""
     canonical = _canonical_task_ref(task_path, repo_root)
     if canonical is None:
         return None
@@ -567,13 +612,17 @@ def set_active_task(
         return None
 
     context_path = _context_path(repo_root, context_key)
-    context = _read_json(context_path) or {}
+    result = _read_json_result(context_path)
+    if result["status"] in {"corrupt", "io_error"}:
+        return None
+    context = result["data"] if isinstance(result.get("data"), dict) else {}
     context.update(_context_metadata(platform_input, platform, context_key))
     context["current_task"] = canonical
     context.setdefault("current_run", None)
     if not _write_json(context_path, context):
         return None
     return ActiveTask(canonical, "session", context_key)
+# END skill-garden patch active-task-runtime-set v0.6
 
 
 # BEGIN skill-garden patch active-task-clear-session-fallback v0.6
@@ -581,7 +630,7 @@ def clear_active_task(
     repo_root: Path,
     platform_input: dict[str, Any] | None = None,
     platform: str | None = None,
-) -> ActiveTask:
+) -> ClearActiveTaskResult:
     """Clear the active task for the current or sole fallback session.
 
     Args:
@@ -590,21 +639,29 @@ def clear_active_task(
         platform: Explicit platform name.
 
     Returns:
-        The resolved task before cleanup, or an empty task when no session is safe to select.
+        Structured cleanup result with the previously resolved task and deletion status.
     """
     context_key = resolve_context_key(platform_input, platform)
     previous = resolve_active_task(repo_root, platform_input, platform)
 
     # Fallback resolution is safe only when the runtime contains exactly one session file.
-    if previous.source_type == "session-fallback" and previous.context_key:
+    if previous.source_type in {"session-fallback", "session-corrupt", "session-io_error"} and previous.context_key:
         context_key = previous.context_key
     if not context_key:
-        return ActiveTask(None, "none")
+        return ClearActiveTaskResult(ActiveTask(None, "none"), True)
 
     context_path = _context_path(repo_root, context_key)
+    context_result = _read_json_result(context_path)
+    if context_result["status"] in {"corrupt", "io_error"}:
+        return ClearActiveTaskResult(
+            previous,
+            False,
+            f"session-runtime-{context_result['status']}:{context_result.get('error') or ''}",
+        )
     if context_path.is_file():
-        _remove_file(context_path)
-    return previous
+        if not _remove_file(context_path):
+            return ClearActiveTaskResult(previous, False, "session-file-delete-failed")
+    return ClearActiveTaskResult(previous, True)
 # END skill-garden patch active-task-clear-session-fallback v0.6
 
 

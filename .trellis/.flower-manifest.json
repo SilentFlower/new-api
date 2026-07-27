@@ -1,5 +1,5 @@
 {
-  "flowerVersion": "0.5.0-beta.4",
+  "flowerVersion": "0.5.1-beta.1",
   "variant": "0.6",
   "version": "0.6.5",
   "skills": [
@@ -17,25 +17,14 @@
     "trellis-verify-task",
     "trellis-visualize",
     "script:auto_loop.py",
+    "script:decision_log.py",
+    "script:pre_check_state.py",
     "script:spec_router.py",
     "script:task_intent.py",
     "script:task_progress.py",
     "script:flower_update_hook.py"
   ],
   "paths": [
-    ".agents/skills/trellis-auto-loop",
-    ".agents/skills/trellis-check-all",
-    ".agents/skills/trellis-create-command",
-    ".agents/skills/trellis-diff-brief",
-    ".agents/skills/trellis-extract-prd",
-    ".agents/skills/trellis-plan-version",
-    ".agents/skills/trellis-push",
-    ".agents/skills/trellis-release",
-    ".agents/skills/trellis-route",
-    ".agents/skills/trellis-run-full-chain",
-    ".agents/skills/trellis-task-brief",
-    ".agents/skills/trellis-verify-task",
-    ".agents/skills/trellis-visualize",
     ".claude/skills/trellis-auto-loop",
     ".claude/skills/trellis-check-all",
     ".claude/skills/trellis-create-command",
@@ -49,348 +38,1147 @@
     ".claude/skills/trellis-task-brief",
     ".claude/skills/trellis-verify-task",
     ".claude/skills/trellis-visualize",
+    ".agents/skills/trellis-auto-loop",
+    ".agents/skills/trellis-check-all",
+    ".agents/skills/trellis-create-command",
+    ".agents/skills/trellis-diff-brief",
+    ".agents/skills/trellis-extract-prd",
+    ".agents/skills/trellis-plan-version",
+    ".agents/skills/trellis-push",
+    ".agents/skills/trellis-release",
+    ".agents/skills/trellis-route",
+    ".agents/skills/trellis-run-full-chain",
+    ".agents/skills/trellis-task-brief",
+    ".agents/skills/trellis-verify-task",
+    ".agents/skills/trellis-visualize",
     ".trellis/scripts/auto_loop.py",
+    ".trellis/scripts/decision_log.py",
+    ".trellis/scripts/pre_check_state.py",
     ".trellis/scripts/spec_router.py",
     ".trellis/scripts/task_intent.py",
     ".trellis/scripts/task_progress.py",
     ".trellis/scripts/flower_update_hook.py"
   ],
   "patches": {
-    "schemaVersion": 1,
-    "catalogHash": "sha256:13105779fa2eb7f2b8ceab1bd185c5439a41bc29f020f224e33013fcc5614e6f",
+    "schemaVersion": 2,
+    "catalogHash": "sha256:c041b78ae6bcbec56e997d2cb2373dbbf793fdb081a11196892a6b8bca63b24c",
     "applied": [
       {
-        "id": "trellis-finish-work-exact-bookkeeping",
-        "patch": "trellis-finish-work-exact-bookkeeping",
-        "bundle": "trellis-finish-work",
-        "target": ".agents/skills/trellis-finish-work/SKILL.md",
+        "id": "task-store-write-helpers",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-store-write-helpers",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:7188a4b670ae69923d0f55accbea2b872800d776afb3ed87592451f20abb1415"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "trellis-finish-work-exact-bookkeeping",
-        "patch": "trellis-finish-work-exact-bookkeeping",
-        "bundle": "trellis-finish-work",
-        "target": ".claude/commands/trellis/finish-work.md",
+        "id": "task-store-decision-log-import",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-store-decision-log-import",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fecf1628771bc7cdc61fd3294e05452cf86689130a7d0beb7c165d197338f20e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-hub",
-        "patch": "workflow-hub",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "task-create-duplicate-slug",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-create-duplicate-slug",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-active-task-routing",
-        "patch": "workflow-phase-ownership",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "task-create-initial-write",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-create-initial-write",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-phase-2-implement",
-        "patch": "workflow-phase-ownership",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "task-create-parent-link",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-create-parent-link",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-phase-2-check",
-        "patch": "workflow-phase-ownership",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "task-create-active-warning",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-create-active-warning",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-phase-3-update-spec",
-        "patch": "workflow-phase-ownership",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "task-archive-metadata-guard",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-archive-metadata-guard",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-phase-3-commit",
-        "patch": "workflow-phase-ownership",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "task-archive-status-write",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-archive-status-write",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-state-no-task",
-        "patch": "workflow-state-no-task",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "task-add-subtask-pair-write",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-add-subtask-pair-write",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-state-missing-task",
-        "patch": "workflow-state-missing-task",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "task-remove-subtask-pair-write",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-remove-subtask-pair-write",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-state-contract-comment",
-        "patch": "workflow-runtime-contract-reference",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "task-set-branch-write",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-set-branch-write",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-runtime-contract-reference",
-        "patch": "workflow-runtime-contract-reference",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "task-set-base-branch-write",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-set-base-branch-write",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-state-planning",
-        "patch": "workflow-states-planning",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "task-set-scope-write",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-set-scope-write",
+        "patch": "task-store-write-integrity",
+        "qualifiedPatch": "skill-garden/task-store-write-integrity",
+        "bundle": "trellis-auto-loop",
+        "bundles": [
+          "skill-garden/trellis-auto-loop",
+          "skill-garden/control-plane-integrity",
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".trellis/scripts/common/task_store.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:7c47368eaa007ddf0b8aa3ce1c9f006a70ee5431e5317e63f2ca2b3c1c436bec"
       },
       {
-        "id": "workflow-state-planning-inline",
-        "patch": "workflow-states-planning",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "active-task-runtime-json-io",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/active-task-runtime-json-io",
+        "patch": "runtime-state-integrity",
+        "qualifiedPatch": "skill-garden/runtime-state-integrity",
+        "bundle": "control-plane-integrity",
+        "bundles": [
+          "skill-garden/control-plane-integrity"
+        ],
+        "target": ".trellis/scripts/common/active_task.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:ffb8fb1f24f06468ad2c9d702bf50fe98b09623dd05667b8f5d7a3ad1a9f2af5"
       },
       {
-        "id": "workflow-state-in-progress",
-        "patch": "workflow-states-in-progress",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "active-task-runtime-resolution",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/active-task-runtime-resolution",
+        "patch": "runtime-state-integrity",
+        "qualifiedPatch": "skill-garden/runtime-state-integrity",
+        "bundle": "control-plane-integrity",
+        "bundles": [
+          "skill-garden/control-plane-integrity"
+        ],
+        "target": ".trellis/scripts/common/active_task.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:ffb8fb1f24f06468ad2c9d702bf50fe98b09623dd05667b8f5d7a3ad1a9f2af5"
       },
       {
-        "id": "workflow-state-in-progress-inline",
-        "patch": "workflow-states-in-progress",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "active-task-runtime-fallback",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/active-task-runtime-fallback",
+        "patch": "runtime-state-integrity",
+        "qualifiedPatch": "skill-garden/runtime-state-integrity",
+        "bundle": "control-plane-integrity",
+        "bundles": [
+          "skill-garden/control-plane-integrity"
+        ],
+        "target": ".trellis/scripts/common/active_task.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:ffb8fb1f24f06468ad2c9d702bf50fe98b09623dd05667b8f5d7a3ad1a9f2af5"
       },
       {
-        "id": "workflow-phase-summary",
-        "patch": "workflow-phase-summary",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
+        "id": "active-task-runtime-set",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/active-task-runtime-set",
+        "patch": "runtime-state-integrity",
+        "qualifiedPatch": "skill-garden/runtime-state-integrity",
+        "bundle": "control-plane-integrity",
+        "bundles": [
+          "skill-garden/control-plane-integrity"
+        ],
+        "target": ".trellis/scripts/common/active_task.py",
         "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
-      },
-      {
-        "id": "workflow-request-triage",
-        "patch": "workflow-request-triage",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
-        "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
-      },
-      {
-        "id": "workflow-phase-index-create-task",
-        "patch": "workflow-phase-index-create-task",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
-        "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
-      },
-      {
-        "id": "workflow-phase-one-goal",
-        "patch": "workflow-phase-one-goal",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
-        "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
-      },
-      {
-        "id": "workflow-create-task-rule",
-        "patch": "workflow-create-task-rule",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
-        "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
-      },
-      {
-        "id": "workflow-create-task-command",
-        "patch": "workflow-create-task-command",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
-        "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
-      },
-      {
-        "id": "workflow-customization-intent-invariant",
-        "patch": "workflow-customization-intent-invariant",
-        "bundle": "intent-routing",
-        "target": ".trellis/workflow.md",
-        "status": "applied",
-        "resultHash": "sha256:fa94b0b4d0bca7a1c0f2c8003348ee6a0d26429ad58f261a5b11d2102c8f0a9e"
+        "resultHash": "sha256:ffb8fb1f24f06468ad2c9d702bf50fe98b09623dd05667b8f5d7a3ad1a9f2af5"
       },
       {
         "id": "active-task-clear-session-fallback",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/active-task-clear-session-fallback",
         "patch": "workflow-state-missing-task",
+        "qualifiedPatch": "skill-garden/workflow-state-missing-task",
         "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
         "target": ".trellis/scripts/common/active_task.py",
         "status": "applied",
-        "resultHash": "sha256:fbbef48d67aa3710a3dae9e8747d6b2b0a0f9782925b7b229e17917bcec50f94"
+        "resultHash": "sha256:ffb8fb1f24f06468ad2c9d702bf50fe98b09623dd05667b8f5d7a3ad1a9f2af5"
+      },
+      {
+        "id": "active-task-clear-result-type",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/active-task-clear-result-type",
+        "patch": "workflow-state-missing-task",
+        "qualifiedPatch": "skill-garden/workflow-state-missing-task",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/scripts/common/active_task.py",
+        "status": "applied",
+        "resultHash": "sha256:ffb8fb1f24f06468ad2c9d702bf50fe98b09623dd05667b8f5d7a3ad1a9f2af5"
+      },
+      {
+        "id": "active-task-clear-read-result",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/active-task-clear-read-result",
+        "patch": "workflow-state-missing-task",
+        "qualifiedPatch": "skill-garden/workflow-state-missing-task",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/scripts/common/active_task.py",
+        "status": "applied",
+        "resultHash": "sha256:ffb8fb1f24f06468ad2c9d702bf50fe98b09623dd05667b8f5d7a3ad1a9f2af5"
+      },
+      {
+        "id": "trellis-finish-work-exact-bookkeeping",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/trellis-finish-work-exact-bookkeeping",
+        "patch": "trellis-finish-work-exact-bookkeeping",
+        "qualifiedPatch": "skill-garden/trellis-finish-work-exact-bookkeeping",
+        "bundle": "trellis-finish-work",
+        "bundles": [
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".agents/skills/trellis-finish-work/SKILL.md",
+        "status": "applied",
+        "resultHash": "sha256:4a1c5d6ef8faa9cce24fa9f3da9917ccf6523cc1a1eed6d2de69e4d450c7981e"
+      },
+      {
+        "id": "trellis-finish-work-exact-bookkeeping",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/trellis-finish-work-exact-bookkeeping",
+        "patch": "trellis-finish-work-exact-bookkeeping",
+        "qualifiedPatch": "skill-garden/trellis-finish-work-exact-bookkeeping",
+        "bundle": "trellis-finish-work",
+        "bundles": [
+          "skill-garden/trellis-finish-work"
+        ],
+        "target": ".claude/commands/trellis/finish-work.md",
+        "status": "applied",
+        "resultHash": "sha256:15fdd2bcf6bf58b7f9cb572616c546aae5904e6c1c80161b6f72e120665bd7da"
+      },
+      {
+        "id": "workflow-hub",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-hub",
+        "patch": "workflow-hub",
+        "qualifiedPatch": "skill-garden/workflow-hub",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-active-task-routing",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-active-task-routing",
+        "patch": "workflow-phase-ownership",
+        "qualifiedPatch": "skill-garden/workflow-phase-ownership",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-phase-2-implement",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-phase-2-implement",
+        "patch": "workflow-phase-ownership",
+        "qualifiedPatch": "skill-garden/workflow-phase-ownership",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-phase-2-check",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-phase-2-check",
+        "patch": "workflow-phase-ownership",
+        "qualifiedPatch": "skill-garden/workflow-phase-ownership",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-phase-3-update-spec",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-phase-3-update-spec",
+        "patch": "workflow-phase-ownership",
+        "qualifiedPatch": "skill-garden/workflow-phase-ownership",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-phase-3-commit",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-phase-3-commit",
+        "patch": "workflow-phase-ownership",
+        "qualifiedPatch": "skill-garden/workflow-phase-ownership",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-phase-1-activate",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-phase-1-activate",
+        "patch": "workflow-task-brief-review",
+        "qualifiedPatch": "skill-garden/workflow-task-brief-review",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-state-no-task",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-state-no-task",
+        "patch": "workflow-state-no-task",
+        "qualifiedPatch": "skill-garden/workflow-state-no-task",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-state-missing-task",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-state-missing-task",
+        "patch": "workflow-state-missing-task",
+        "qualifiedPatch": "skill-garden/workflow-state-missing-task",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-state-contract-comment",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-state-contract-comment",
+        "patch": "workflow-runtime-contract-reference",
+        "qualifiedPatch": "skill-garden/workflow-runtime-contract-reference",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-runtime-contract-reference",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-runtime-contract-reference",
+        "patch": "workflow-runtime-contract-reference",
+        "qualifiedPatch": "skill-garden/workflow-runtime-contract-reference",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-state-planning",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-state-planning",
+        "patch": "workflow-states-planning",
+        "qualifiedPatch": "skill-garden/workflow-states-planning",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-state-planning-inline",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-state-planning-inline",
+        "patch": "workflow-states-planning",
+        "qualifiedPatch": "skill-garden/workflow-states-planning",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-state-in-progress",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-state-in-progress",
+        "patch": "workflow-states-in-progress",
+        "qualifiedPatch": "skill-garden/workflow-states-in-progress",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-state-in-progress-inline",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-state-in-progress-inline",
+        "patch": "workflow-states-in-progress",
+        "qualifiedPatch": "skill-garden/workflow-states-in-progress",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-phase-summary",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-phase-summary",
+        "patch": "workflow-phase-summary",
+        "qualifiedPatch": "skill-garden/workflow-phase-summary",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-request-triage",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-request-triage",
+        "patch": "workflow-request-triage",
+        "qualifiedPatch": "skill-garden/workflow-request-triage",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-phase-index-create-task",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-phase-index-create-task",
+        "patch": "workflow-phase-index-create-task",
+        "qualifiedPatch": "skill-garden/workflow-phase-index-create-task",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-phase-one-goal",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-phase-one-goal",
+        "patch": "workflow-phase-one-goal",
+        "qualifiedPatch": "skill-garden/workflow-phase-one-goal",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-create-task-rule",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-create-task-rule",
+        "patch": "workflow-create-task-rule",
+        "qualifiedPatch": "skill-garden/workflow-create-task-rule",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-create-task-command",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-create-task-command",
+        "patch": "workflow-create-task-command",
+        "qualifiedPatch": "skill-garden/workflow-create-task-command",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "workflow-customization-intent-invariant",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/workflow-customization-intent-invariant",
+        "patch": "workflow-customization-intent-invariant",
+        "qualifiedPatch": "skill-garden/workflow-customization-intent-invariant",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/workflow.md",
+        "status": "applied",
+        "resultHash": "sha256:ea724402a768b59bf845d72f55acd9ad5acfb8786731952a2ecf16dda38e6ed0"
+      },
+      {
+        "id": "task-finish-clear-result",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-finish-clear-result",
+        "patch": "workflow-state-missing-task",
+        "qualifiedPatch": "skill-garden/workflow-state-missing-task",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/scripts/task.py",
+        "status": "applied",
+        "resultHash": "sha256:a92443e21e9fec403a9642e617a312cf37590cef1a0a0554a55b09d563639971"
+      },
+      {
+        "id": "task-start-brief-validator",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-start-brief-validator",
+        "patch": "task-start-brief-gate",
+        "qualifiedPatch": "skill-garden/task-start-brief-gate",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/scripts/task.py",
+        "status": "applied",
+        "resultHash": "sha256:a92443e21e9fec403a9642e617a312cf37590cef1a0a0554a55b09d563639971"
+      },
+      {
+        "id": "task-start-brief-guard",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-start-brief-guard",
+        "patch": "task-start-brief-gate",
+        "qualifiedPatch": "skill-garden/task-start-brief-gate",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/scripts/task.py",
+        "status": "applied",
+        "resultHash": "sha256:a92443e21e9fec403a9642e617a312cf37590cef1a0a0554a55b09d563639971"
+      },
+      {
+        "id": "task-start-degraded-write-gate",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-start-degraded-write-gate",
+        "patch": "task-start-brief-gate",
+        "qualifiedPatch": "skill-garden/task-start-brief-gate",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/scripts/task.py",
+        "status": "applied",
+        "resultHash": "sha256:a92443e21e9fec403a9642e617a312cf37590cef1a0a0554a55b09d563639971"
+      },
+      {
+        "id": "task-start-session-write-gate",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/task-start-session-write-gate",
+        "patch": "task-start-brief-gate",
+        "qualifiedPatch": "skill-garden/task-start-brief-gate",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/scripts/task.py",
+        "status": "applied",
+        "resultHash": "sha256:a92443e21e9fec403a9642e617a312cf37590cef1a0a0554a55b09d563639971"
+      },
+      {
+        "id": "paths-clear-current-result",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/paths-clear-current-result",
+        "patch": "workflow-state-missing-task",
+        "qualifiedPatch": "skill-garden/workflow-state-missing-task",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".trellis/scripts/common/paths.py",
+        "status": "applied",
+        "resultHash": "sha256:3a3f230ce3f007576b2542820f0af00ca984747e3517920aaff2acc1cf48c23f"
       },
       {
         "id": "inject-workflow-state-shared-runtime",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/inject-workflow-state-shared-runtime",
         "patch": "inject-workflow-state-shared-runtime",
-        "bundle": "shared-hook-runtime",
+        "qualifiedPatch": "skill-garden/inject-workflow-state-shared-runtime",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing",
+          "skill-garden/shared-hook-runtime"
+        ],
         "target": ".codex/hooks/inject-workflow-state.py",
         "status": "applied",
         "resultHash": "sha256:2ae5a38af71f1e07bfa443515129a664750d3dd9f1fe27e3c901f715ec859e48"
       },
       {
         "id": "inject-workflow-state-shared-runtime",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/inject-workflow-state-shared-runtime",
         "patch": "inject-workflow-state-shared-runtime",
-        "bundle": "shared-hook-runtime",
+        "qualifiedPatch": "skill-garden/inject-workflow-state-shared-runtime",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing",
+          "skill-garden/shared-hook-runtime"
+        ],
         "target": ".claude/hooks/inject-workflow-state.py",
         "status": "applied",
         "resultHash": "sha256:2ae5a38af71f1e07bfa443515129a664750d3dd9f1fe27e3c901f715ec859e48"
       },
       {
         "id": "codex-session-start-no-task",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/codex-session-start-no-task",
         "patch": "codex-session-start-no-task",
+        "qualifiedPatch": "skill-garden/codex-session-start-no-task",
         "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
         "target": ".codex/hooks/session-start.py",
         "status": "applied",
-        "resultHash": "sha256:07dffa89b8f73f91178b009c032fb3d2870161131a752eb842561663e71d1e83"
+        "resultHash": "sha256:f52b3537050892503c161ce9350a618e24d961a39bd17769f877a5e0413ceded"
       },
       {
         "id": "codex-session-start-missing-task",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/codex-session-start-missing-task",
         "patch": "codex-session-start-missing-task",
+        "qualifiedPatch": "skill-garden/codex-session-start-missing-task",
         "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
         "target": ".codex/hooks/session-start.py",
         "status": "applied",
-        "resultHash": "sha256:07dffa89b8f73f91178b009c032fb3d2870161131a752eb842561663e71d1e83"
+        "resultHash": "sha256:f52b3537050892503c161ce9350a618e24d961a39bd17769f877a5e0413ceded"
+      },
+      {
+        "id": "codex-session-start-pre-check-hold",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/codex-session-start-pre-check-hold",
+        "patch": "session-start-pre-check-hold",
+        "qualifiedPatch": "skill-garden/session-start-pre-check-hold",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".codex/hooks/session-start.py",
+        "status": "applied",
+        "resultHash": "sha256:f52b3537050892503c161ce9350a618e24d961a39bd17769f877a5e0413ceded"
       },
       {
         "id": "claude-session-start-no-task",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/claude-session-start-no-task",
         "patch": "claude-session-start-no-task",
+        "qualifiedPatch": "skill-garden/claude-session-start-no-task",
         "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
         "target": ".claude/hooks/session-start.py",
         "status": "applied",
-        "resultHash": "sha256:a4dfd4bbd3527652abb7b7af8d485dfcbdb0fd9a0bb4b68bc30f2e08e3e4f5cb"
+        "resultHash": "sha256:d4afae8b76c6d17734d55ab6e7da38a02832410d6ad5a9c18f805d920c218fa8"
       },
       {
         "id": "claude-session-start-missing-task",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/claude-session-start-missing-task",
         "patch": "claude-session-start-missing-task",
+        "qualifiedPatch": "skill-garden/claude-session-start-missing-task",
         "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
         "target": ".claude/hooks/session-start.py",
         "status": "applied",
-        "resultHash": "sha256:a4dfd4bbd3527652abb7b7af8d485dfcbdb0fd9a0bb4b68bc30f2e08e3e4f5cb"
+        "resultHash": "sha256:d4afae8b76c6d17734d55ab6e7da38a02832410d6ad5a9c18f805d920c218fa8"
+      },
+      {
+        "id": "claude-session-start-pre-check-hold",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/claude-session-start-pre-check-hold",
+        "patch": "session-start-pre-check-hold",
+        "qualifiedPatch": "skill-garden/session-start-pre-check-hold",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".claude/hooks/session-start.py",
+        "status": "applied",
+        "resultHash": "sha256:d4afae8b76c6d17734d55ab6e7da38a02832410d6ad5a9c18f805d920c218fa8"
       },
       {
         "id": "start-no-task-routing",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/start-no-task-routing",
         "patch": "start-no-task-routing",
+        "qualifiedPatch": "skill-garden/start-no-task-routing",
         "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
         "target": ".agents/skills/trellis-start/SKILL.md",
         "status": "applied",
-        "resultHash": "sha256:1ec55ec08a3b571ffa0e479d96d0dc7862188e97fe8bd7363d8b2b46ae3487c2"
+        "resultHash": "sha256:30b07f9cf5ee63debca270c8e7c37a55a0fc819da44360e1a9e34bc03502f598"
+      },
+      {
+        "id": "before-dev-project-knowledge-discovery",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/before-dev-project-knowledge-discovery",
+        "patch": "before-dev-project-knowledge-discovery",
+        "qualifiedPatch": "skill-garden/before-dev-project-knowledge-discovery",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".agents/skills/trellis-before-dev/SKILL.md",
+        "status": "applied",
+        "resultHash": "sha256:b18fd4a93dc44422fc6c9b1a706090042c6ad46676879aea968db0db08bade69"
+      },
+      {
+        "id": "before-dev-project-knowledge-discovery",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/before-dev-project-knowledge-discovery",
+        "patch": "before-dev-project-knowledge-discovery",
+        "qualifiedPatch": "skill-garden/before-dev-project-knowledge-discovery",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".claude/skills/trellis-before-dev/SKILL.md",
+        "status": "applied",
+        "resultHash": "sha256:b18fd4a93dc44422fc6c9b1a706090042c6ad46676879aea968db0db08bade69"
       },
       {
         "id": "brainstorm-planning-authorization",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/brainstorm-planning-authorization",
         "patch": "brainstorm-planning-authorization",
+        "qualifiedPatch": "skill-garden/brainstorm-planning-authorization",
         "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
         "target": ".agents/skills/trellis-brainstorm/SKILL.md",
         "status": "applied",
-        "resultHash": "sha256:31fb57539fc05fb4127fe6184cf1ac9cb21f43a0dd9ad3e39a5a6f2bc9faa8aa"
+        "resultHash": "sha256:00d87ccadbd0345767717304a36fd889154e5976f800664773574050d5f9863d"
       },
       {
         "id": "brainstorm-auto-task-create",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/brainstorm-auto-task-create",
         "patch": "brainstorm-auto-task-create",
+        "qualifiedPatch": "skill-garden/brainstorm-auto-task-create",
         "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
         "target": ".agents/skills/trellis-brainstorm/SKILL.md",
         "status": "applied",
-        "resultHash": "sha256:31fb57539fc05fb4127fe6184cf1ac9cb21f43a0dd9ad3e39a5a6f2bc9faa8aa"
+        "resultHash": "sha256:00d87ccadbd0345767717304a36fd889154e5976f800664773574050d5f9863d"
+      },
+      {
+        "id": "brainstorm-planning-handoff",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/brainstorm-planning-handoff",
+        "patch": "brainstorm-planning-handoff",
+        "qualifiedPatch": "skill-garden/brainstorm-planning-handoff",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".agents/skills/trellis-brainstorm/SKILL.md",
+        "status": "applied",
+        "resultHash": "sha256:00d87ccadbd0345767717304a36fd889154e5976f800664773574050d5f9863d"
+      },
+      {
+        "id": "brainstorm-planning-readiness",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/brainstorm-planning-readiness",
+        "patch": "brainstorm-planning-handoff",
+        "qualifiedPatch": "skill-garden/brainstorm-planning-handoff",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".agents/skills/trellis-brainstorm/SKILL.md",
+        "status": "applied",
+        "resultHash": "sha256:00d87ccadbd0345767717304a36fd889154e5976f800664773574050d5f9863d"
       },
       {
         "id": "brainstorm-planning-authorization",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/brainstorm-planning-authorization",
         "patch": "brainstorm-planning-authorization",
+        "qualifiedPatch": "skill-garden/brainstorm-planning-authorization",
         "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
         "target": ".claude/skills/trellis-brainstorm/SKILL.md",
         "status": "applied",
-        "resultHash": "sha256:31fb57539fc05fb4127fe6184cf1ac9cb21f43a0dd9ad3e39a5a6f2bc9faa8aa"
+        "resultHash": "sha256:00d87ccadbd0345767717304a36fd889154e5976f800664773574050d5f9863d"
       },
       {
         "id": "brainstorm-auto-task-create",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/brainstorm-auto-task-create",
         "patch": "brainstorm-auto-task-create",
+        "qualifiedPatch": "skill-garden/brainstorm-auto-task-create",
         "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
         "target": ".claude/skills/trellis-brainstorm/SKILL.md",
         "status": "applied",
-        "resultHash": "sha256:31fb57539fc05fb4127fe6184cf1ac9cb21f43a0dd9ad3e39a5a6f2bc9faa8aa"
+        "resultHash": "sha256:00d87ccadbd0345767717304a36fd889154e5976f800664773574050d5f9863d"
+      },
+      {
+        "id": "brainstorm-planning-handoff",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/brainstorm-planning-handoff",
+        "patch": "brainstorm-planning-handoff",
+        "qualifiedPatch": "skill-garden/brainstorm-planning-handoff",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".claude/skills/trellis-brainstorm/SKILL.md",
+        "status": "applied",
+        "resultHash": "sha256:00d87ccadbd0345767717304a36fd889154e5976f800664773574050d5f9863d"
+      },
+      {
+        "id": "brainstorm-planning-readiness",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/brainstorm-planning-readiness",
+        "patch": "brainstorm-planning-handoff",
+        "qualifiedPatch": "skill-garden/brainstorm-planning-handoff",
+        "bundle": "intent-routing",
+        "bundles": [
+          "skill-garden/intent-routing"
+        ],
+        "target": ".claude/skills/trellis-brainstorm/SKILL.md",
+        "status": "applied",
+        "resultHash": "sha256:00d87ccadbd0345767717304a36fd889154e5976f800664773574050d5f9863d"
+      },
+      {
+        "id": "trellis-continue-task-progress-recovery",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/trellis-continue-task-progress-recovery",
+        "patch": "trellis-continue-task-progress-recovery",
+        "qualifiedPatch": "skill-garden/trellis-continue-task-progress-recovery",
+        "bundle": "trellis-continue",
+        "bundles": [
+          "skill-garden/trellis-continue"
+        ],
+        "target": ".agents/skills/trellis-continue/SKILL.md",
+        "status": "applied",
+        "resultHash": "sha256:4fb59e14cdc458ca5eacfd3e8b882d507b7c2deae2620a023d45d750bdbfae15"
+      },
+      {
+        "id": "trellis-continue-task-progress-recovery",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/trellis-continue-task-progress-recovery",
+        "patch": "trellis-continue-task-progress-recovery",
+        "qualifiedPatch": "skill-garden/trellis-continue-task-progress-recovery",
+        "bundle": "trellis-continue",
+        "bundles": [
+          "skill-garden/trellis-continue"
+        ],
+        "target": ".claude/commands/trellis/continue.md",
+        "status": "applied",
+        "resultHash": "sha256:ff07399ed9ecc103167432fa4b853518111e1a76831878a7060f4b2846934f07"
       },
       {
         "id": "trellis-update-spec-autonomous-evaluation",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/trellis-update-spec-autonomous-evaluation",
         "patch": "trellis-update-spec-autonomous-evaluation",
+        "qualifiedPatch": "skill-garden/trellis-update-spec-autonomous-evaluation",
         "bundle": "trellis-update-spec",
+        "bundles": [
+          "skill-garden/trellis-update-spec"
+        ],
         "target": ".agents/skills/trellis-update-spec/SKILL.md",
         "status": "applied",
-        "resultHash": "sha256:11d908e0ccbfa60afa35e1b1e12d7ad6931adde66df41e9b4ffaab71c190bebd"
+        "resultHash": "sha256:a979d64dda343eb73399b6a3f78b36b8a89706bde5c4a1b86d2de908368573f0"
       },
       {
         "id": "trellis-update-spec-autonomous-evaluation",
+        "catalog": "skill-garden",
+        "qualifiedId": "skill-garden/trellis-update-spec-autonomous-evaluation",
         "patch": "trellis-update-spec-autonomous-evaluation",
+        "qualifiedPatch": "skill-garden/trellis-update-spec-autonomous-evaluation",
         "bundle": "trellis-update-spec",
+        "bundles": [
+          "skill-garden/trellis-update-spec"
+        ],
         "target": ".claude/skills/trellis-update-spec/SKILL.md",
         "status": "applied",
-        "resultHash": "sha256:2a8ef06351c1949d339031fc7e9295f5d1848fe666a2aca882a7de54909570a4"
+        "resultHash": "sha256:bbb333515ddc3bd0dd40a6d2fd1ebad17c02df69aa96a76b0247dbe143889884"
       },
       {
         "id": "flower-codex-trellis-session-start",
+        "catalog": "flower",
+        "qualifiedId": "flower/flower-codex-trellis-session-start",
         "patch": "flower-codex-session-start-hooks",
+        "qualifiedPatch": "flower/flower-codex-session-start-hooks",
         "bundle": "flower-platform-integration",
+        "bundles": [
+          "flower/flower-platform-integration"
+        ],
         "target": ".codex/hooks.json",
         "status": "applied",
         "resultHash": "sha256:543037c3e3be48a2b63cbd2c8511249204a8ddbaa8f366e424e340d5768001fa"
       },
       {
         "id": "flower-codex-update-session-start",
+        "catalog": "flower",
+        "qualifiedId": "flower/flower-codex-update-session-start",
         "patch": "flower-codex-session-start-hooks",
+        "qualifiedPatch": "flower/flower-codex-session-start-hooks",
         "bundle": "flower-platform-integration",
+        "bundles": [
+          "flower/flower-platform-integration"
+        ],
         "target": ".codex/hooks.json",
         "status": "applied",
         "resultHash": "sha256:543037c3e3be48a2b63cbd2c8511249204a8ddbaa8f366e424e340d5768001fa"
       },
       {
         "id": "flower-codex-dispatch-mode",
+        "catalog": "flower",
+        "qualifiedId": "flower/flower-codex-dispatch-mode",
         "patch": "flower-codex-dispatch-mode",
+        "qualifiedPatch": "flower/flower-codex-dispatch-mode",
         "bundle": "flower-platform-integration",
+        "bundles": [
+          "flower/flower-platform-integration"
+        ],
         "target": ".trellis/config.yaml",
         "status": "applied",
         "resultHash": "sha256:094665861878895efdd30f3e8f248ab9d9d1f2a7b207bd5fd52ee40f26dc4d7c"
       },
       {
         "id": "flower-codex-remove-multi-agent-v2",
+        "catalog": "flower",
+        "qualifiedId": "flower/flower-codex-remove-multi-agent-v2",
         "patch": "flower-codex-remove-multi-agent-v2",
+        "qualifiedPatch": "flower/flower-codex-remove-multi-agent-v2",
         "bundle": "flower-platform-integration",
+        "bundles": [
+          "flower/flower-platform-integration"
+        ],
         "target": ".codex/config.toml",
         "status": "applied",
         "resultHash": "sha256:4224eb7df6802a623cb1bee522aed0a23ba6be862b90f1b597a313fc16864b06"
       },
       {
         "id": "flower-claude-startup-update-hook",
+        "catalog": "flower",
+        "qualifiedId": "flower/flower-claude-startup-update-hook",
         "patch": "flower-claude-startup-update-hook",
+        "qualifiedPatch": "flower/flower-claude-startup-update-hook",
         "bundle": "flower-platform-integration",
+        "bundles": [
+          "flower/flower-platform-integration"
+        ],
         "target": ".claude/settings.json",
         "status": "applied",
         "resultHash": "sha256:c4ef7020b6e9eccd9edef98722101a73d8884692edf879230b332d027ae399be"

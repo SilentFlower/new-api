@@ -6,7 +6,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -53,11 +55,25 @@ def _read_json(path: Path) -> dict[str, Any] | None:
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
-    """按 Trellis 任务文件格式写回 JSON。"""
-    path.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
+    """按 Trellis 任务格式原子写回 JSON，失败时保留旧文件。"""
+    descriptor, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
     )
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _rel_path(repo_root: Path, path: Path) -> str:
@@ -174,25 +190,43 @@ def _iter_active_task_dirs(repo_root: Path) -> list[Path]:
         return []
 
 
-def _progress_candidates(repo_root: Path) -> list[dict[str, Any]]:
-    """扫描 in_progress 且带任务进度的候选。"""
+def _progress_candidates(
+    repo_root: Path,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """扫描健康候选，并返回损坏进度与无法判定的任务诊断。"""
     candidates: list[dict[str, Any]] = []
+    invalid_candidates: list[dict[str, Any]] = []
+    scan_warnings: list[dict[str, Any]] = []
     for task_dir in _iter_active_task_dirs(repo_root):
-        data = _read_json(_task_json_path(task_dir))
-        if data is None or data.get("status") != "in_progress":
+        task_json = _task_json_path(task_dir)
+        data = _read_json(task_json)
+        if data is None:
+            scan_warnings.append({
+                "task": _rel_path(repo_root, task_dir),
+                "path": _rel_path(repo_root, task_json),
+                "reason": "invalid-task-json",
+            })
+            continue
+        if data.get("status") != "in_progress":
             continue
         progress, source = _extract_progress(data)
         if progress is None:
             continue
-        validated, _ = _validate_progress(progress)
+        validated, errors = _validate_progress(progress)
         if validated is None:
+            invalid_candidates.append({
+                "task": _rel_path(repo_root, task_dir),
+                "source": source,
+                "reason": "invalid-progress-schema",
+                "errors": errors,
+            })
             continue
         candidates.append({
             "task": _rel_path(repo_root, task_dir),
             "source": source,
             **_progress_summary(validated),
         })
-    return candidates
+    return candidates, invalid_candidates, scan_warnings
 
 
 def _validate_progress(value: Any) -> tuple[dict[str, Any] | None, list[str]]:
@@ -257,12 +291,28 @@ def _print_status_text(data: dict[str, Any]) -> int:
                 print(f"- {item.get('task')}: nextStep={item.get('nextStep') or '(none)'}")
         else:
             print("(none)")
+        invalid = data.get("invalidCandidates")
+        warnings = data.get("scanWarnings")
+        if isinstance(invalid, list) and invalid:
+            print("损坏的任务进度：")
+            for item in invalid:
+                print(f"- {item.get('task')}: {item.get('reason')}")
+        if isinstance(warnings, list) and warnings:
+            print("扫描警告：")
+            for item in warnings:
+                print(f"- {item.get('task')}: {item.get('reason')}")
         return 0
     if status == "no-progress":
         print(f"任务没有进度记录：{data.get('task')}")
         return 0
     if status == "no-current-task":
         print("没有活动任务，也没有可用的任务进度候选。")
+        invalid = data.get("invalidCandidates")
+        warnings = data.get("scanWarnings")
+        if isinstance(invalid, list) and invalid:
+            print(f"发现 {len(invalid)} 个损坏的任务进度候选。")
+        if isinstance(warnings, list) and warnings:
+            print(f"发现 {len(warnings)} 个任务扫描警告。")
         return 0
     print(f"错误：{data.get('reason') or status}", file=sys.stderr)
     return 1
@@ -275,10 +325,12 @@ def cmd_status(args: argparse.Namespace, repo_root: Path) -> int:
     else:
         task_dir = _current_task_dir(repo_root)
         if task_dir is None:
-            candidates = _progress_candidates(repo_root)
+            candidates, invalid_candidates, scan_warnings = _progress_candidates(repo_root)
             result = {
                 "status": "candidates" if candidates else "no-current-task",
                 "candidates": candidates,
+                "invalidCandidates": invalid_candidates,
+                "scanWarnings": scan_warnings,
             }
         else:
             result = _load_task_progress(repo_root, task_dir)

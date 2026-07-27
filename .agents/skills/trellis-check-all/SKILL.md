@@ -362,7 +362,7 @@ interactive 模式完成所有可继续检查后，严格按以下顺序输出�
 结论：<重检结论与下一步>
 ```
 
-检查通过后才指向 Phase 3.3 `trellis-update-spec`，再到 Phase 3.4 `trellis-push`。仍有问题时停留在修复/重检循环。
+检查通过后的动作由下方 `Interactive Post-Check Stop Gate` 判断：普通交互停止等待，符合 direct Git 严格通过条件时同轮进入 Phase 3.3 `trellis-update-spec`，再到 Phase 3.4 `trellis-push`。仍有问题时停留在修复/重检循环。
 
 ---
 
@@ -380,7 +380,14 @@ validated auto-loop 复用相同的 audit-only 检查、画像和问题模型，
 
 ## Interactive Post-Check Stop Gate
 
-非 validated auto-loop 的检查报告输出后立即停止并等待用户选择。允许输出的内容只有：
+非 validated auto-loop 先输出上述完整标准报告，再在本 Gate 内按以下顺序分流：
+
+1. 只从触发本轮完成链的最新用户消息识别 direct Git intent：明确请求普通 push，或用户主动 `commit-only`。不得从历史消息、任务标题、摘要、dirty 状态或 auto-loop 内部 action 推断。
+2. direct Git 只有在 Check-All 整体结论通过、问题数为 0、无阻塞、无部分验证、无待用户接受的实质剩余风险时才算严格通过。标准报告输出后，同一轮进入 Phase 3.3 `trellis-update-spec`；`no-op|written` 再由其加载 `trellis-push`，`needs-review` 停止。
+3. findings、blocked、部分验证或实质剩余风险均不满足条件：输出标准报告并停止，不运行 Update-Spec，也不生成 Git 计划。原始 Git 请求不授权自动修复、忽略问题或扩大 Git 权限。
+4. 没有匹配 direct Git intent 的普通 interactive 检查保持原行为：报告后立即停止并等待用户选择。
+
+允许 Check-All 标准报告输出的内容只有：
 
 - 各维度状态、问题数和问题清单；
 - 已执行验证及结果；
@@ -388,7 +395,7 @@ validated auto-loop 复用相同的 audit-only 检查、画像和问题模型，
 - 总体结论；
 - 有问题时的一次修复范围选择，或通过时的 Phase 3.3 / Phase 3.4 下一步指向。
 
-禁止在本轮生成提交计划、commit message、拟提交文件或要求用户确认提交。
+Check-All 不新增 direct Git 专用摘要，也不得自行生成提交计划、commit message、拟提交文件或要求用户确认提交；strict pass 后的 Git 计划仍由 Update-Spec disposition 和 `trellis-push` owner 生成。
 
 ---
 

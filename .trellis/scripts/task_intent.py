@@ -188,10 +188,17 @@ def create_auto_task(args: argparse.Namespace) -> dict:
     if not write_json(task_json, data):
         _rollback_created_task(task_dir, data, task_ref, repo_root)
         raise IntentTaskError("task-json-write-failed", "无法写入自动路由 task 元数据")
+    active = resolve_active_task(repo_root)
+    auto_discard_eligible = bool(
+        context_key
+        and active.context_key == context_key
+        and active.task_path
+        and normalize_task_ref(active.task_path) == normalize_task_ref(task_ref)
+    )
     return {
         "status": "created",
         "task": task_ref,
-        "autoDiscardEligible": context_key is not None,
+        "autoDiscardEligible": auto_discard_eligible,
         "baselineEntries": len(baseline["status"]),
     }
 

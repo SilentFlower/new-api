@@ -53,6 +53,10 @@ from .task_utils import (
     resolve_task_dir,
     run_task_hooks,
 )
+# BEGIN skill-garden patch task-store-decision-log-import v0.6
+
+from decision_log import DecisionLogError, decision_review_status
+# END skill-garden patch task-store-decision-log-import v0.6
 
 
 # =============================================================================
@@ -105,6 +109,44 @@ def _repo_relative_path(path: Path, repo_root: Path) -> str:
         return path.relative_to(repo_root).as_posix()
     except ValueError:
         return str(path)
+# BEGIN skill-garden patch task-store-write-helpers v0.6
+
+
+def _clone_json(data: dict) -> dict:
+    """Return a detached JSON-compatible snapshot for local compensation."""
+    return json.loads(json.dumps(data))
+
+
+def _cleanup_created_task(task_dir: Path) -> bool:
+    """Remove only the directory created by the current create command."""
+    from shutil import rmtree
+
+    try:
+        rmtree(task_dir)
+        return True
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+
+
+def _write_task_pair(
+    first_path: Path,
+    first_data: dict,
+    first_original: dict,
+    second_path: Path,
+    second_data: dict,
+    second_original: dict,
+) -> tuple[bool, bool]:
+    """Write a parent/child pair and restore both snapshots on partial failure."""
+    if not write_json(first_path, first_data):
+        return False, True
+    if write_json(second_path, second_data):
+        return True, True
+    first_restored = write_json(first_path, first_original)
+    second_restored = write_json(second_path, second_original)
+    return False, first_restored and second_restored
+# END skill-garden patch task-store-write-helpers v0.6
 
 
 # =============================================================================
@@ -251,10 +293,12 @@ def cmd_create(args: argparse.Namespace) -> int:
         print("Use a new slug if you intend to create a new task.", file=sys.stderr)
         return 1
 
+# BEGIN skill-garden patch task-create-duplicate-slug v0.6
     if task_dir.exists():
-        print(colored(f"Warning: Task directory already exists: {dir_name}", Colors.YELLOW), file=sys.stderr)
-    else:
-        task_dir.mkdir(parents=True)
+        print(colored(f"Error: Task directory already exists: {dir_name}", Colors.RED), file=sys.stderr)
+        return 1
+    task_dir.mkdir(parents=True)
+# END skill-garden patch task-create-duplicate-slug v0.6
 
     today = datetime.now().strftime("%Y-%m-%d")
 
@@ -289,9 +333,16 @@ def cmd_create(args: argparse.Namespace) -> int:
         "meta": {},
     }
 
-    write_json(task_json_path, task_data)
+# BEGIN skill-garden patch task-create-initial-write v0.6
+    if not write_json(task_json_path, task_data):
+        cleaned = _cleanup_created_task(task_dir)
+        print(colored("Error: Failed to write initial task.json", Colors.RED), file=sys.stderr)
+        if not cleaned:
+            print(colored(f"Error: Failed to clean incomplete task directory: {task_dir}", Colors.RED), file=sys.stderr)
+        return 1
 
     prd_path = task_dir / "prd.md"
+# END skill-garden patch task-create-initial-write v0.6
     if not prd_path.exists():
         prd_path.write_text(
             _default_prd_content(args.title, args.description),
@@ -310,33 +361,53 @@ def cmd_create(args: argparse.Namespace) -> int:
                 _write_seed_jsonl(jsonl_path)
         seeded_jsonl = True
 
-    # Handle --parent: establish bidirectional link
+# BEGIN skill-garden patch task-create-parent-link v0.6
+    # Handle --parent: establish bidirectional link or fail the create command.
     if args.parent:
         parent_dir = resolve_task_dir(args.parent, repo_root)
         parent_json_path = parent_dir / FILE_TASK_JSON
-        if not parent_json_path.is_file():
-            print(colored(f"Warning: Parent task.json not found: {args.parent}", Colors.YELLOW), file=sys.stderr)
-        else:
-            parent_data = read_json(parent_json_path)
-            if parent_data:
-                # Add child to parent's children list
-                parent_children = parent_data.get("children", [])
-                if dir_name not in parent_children:
-                    parent_children.append(dir_name)
-                    parent_data["children"] = parent_children
-                    write_json(parent_json_path, parent_data)
+        parent_data = read_json(parent_json_path) if parent_json_path.is_file() else None
+        if not parent_data:
+            _cleanup_created_task(task_dir)
+            print(colored(f"Error: Parent task.json not found or invalid: {args.parent}", Colors.RED), file=sys.stderr)
+            return 1
 
-                # Set parent in child's task.json
-                task_data["parent"] = parent_dir.name
-                write_json(task_json_path, task_data)
-
-                print(colored(f"Linked as child of: {parent_dir.name}", Colors.GREEN), file=sys.stderr)
+        parent_original = _clone_json(parent_data)
+        child_original = _clone_json(task_data)
+        parent_next = _clone_json(parent_data)
+        child_next = _clone_json(task_data)
+        parent_children = parent_next.get("children", [])
+        if dir_name not in parent_children:
+            parent_children.append(dir_name)
+        parent_next["children"] = parent_children
+        child_next["parent"] = parent_dir.name
+        linked, restored = _write_task_pair(
+            parent_json_path,
+            parent_next,
+            parent_original,
+            task_json_path,
+            child_next,
+            child_original,
+        )
+        if not linked:
+            _cleanup_created_task(task_dir)
+            print(colored("Error: Failed to persist parent/child task relationship", Colors.RED), file=sys.stderr)
+            if not restored:
+                print(colored(
+                    f"Error: Relationship rollback incomplete; inspect {parent_json_path} and {task_json_path}",
+                    Colors.RED,
+                ), file=sys.stderr)
+            return 1
+        task_data = child_next
+        print(colored(f"Linked as child of: {parent_dir.name}", Colors.GREEN), file=sys.stderr)
+# END skill-garden patch task-create-parent-link v0.6
 
     # Auto-activate the new task so the per-turn breadcrumb fires planning
     # state. Best-effort: gracefully degrade if no session identity (CLI run
     # outside an AI session) — the task is still created, the user can run
     # task.py start later. Pointer is session-scoped so this never affects
     # other AI sessions.
+# BEGIN skill-garden patch task-create-active-warning v0.6
     try:
         from .active_task import resolve_context_key, set_active_task
         if resolve_context_key():
@@ -344,9 +415,17 @@ def cmd_create(args: argparse.Namespace) -> int:
                 rel_dir = task_dir.relative_to(repo_root).as_posix()
             except ValueError:
                 rel_dir = str(task_dir)
-            set_active_task(rel_dir, repo_root)
-    except Exception:
-        pass
+            if set_active_task(rel_dir, repo_root) is None:
+                print(colored(
+                    "Warning: Task was created, but the active-task pointer could not be persisted.",
+                    Colors.YELLOW,
+                ), file=sys.stderr)
+    except Exception as error:
+        print(colored(
+            f"Warning: Task was created, but active-task setup failed: {error}",
+            Colors.YELLOW,
+        ), file=sys.stderr)
+# END skill-garden patch task-create-active-warning v0.6
 
     print(colored(f"Created task: {dir_name}", Colors.GREEN), file=sys.stderr)
     print("", file=sys.stderr)
@@ -400,6 +479,25 @@ def cmd_archive(args: argparse.Namespace) -> int:
     task_json_path = task_dir / FILE_TASK_JSON
 
     # Update status before archiving
+# BEGIN skill-garden patch task-archive-metadata-guard v0.6
+
+    if not task_json_path.is_file() or not read_json(task_json_path):
+        print(colored(f"Error: task.json not found or invalid: {task_json_path}", Colors.RED), file=sys.stderr)
+        return 1
+
+    try:
+        decision_status = decision_review_status(task_dir)
+    except DecisionLogError as error:
+        print(colored(f"Error: Decision log is invalid: {error}", Colors.RED), file=sys.stderr)
+        return 1
+    if not decision_status["archive_allowed"]:
+        print(colored("Error: AI decisions require review before archive.", Colors.RED), file=sys.stderr)
+        print(
+            "Hint: Run decision_log.py status --task <task> --json, then record an accepted review.",
+            file=sys.stderr,
+        )
+        return 1
+# END skill-garden patch task-archive-metadata-guard v0.6
     today = datetime.now().strftime("%Y-%m-%d")
     # Names of child task dirs whose task.json gets modified below; passed
     # into safe_archive_paths_to_add so they're staged in this commit.
@@ -407,9 +505,13 @@ def cmd_archive(args: argparse.Namespace) -> int:
     if task_json_path.is_file():
         data = read_json(task_json_path)
         if data:
+# BEGIN skill-garden patch task-archive-status-write v0.6
             data["status"] = "completed"
             data["completedAt"] = today
-            write_json(task_json_path, data)
+            if not write_json(task_json_path, data):
+                print(colored("Error: Failed to persist completed task status", Colors.RED), file=sys.stderr)
+                return 1
+# END skill-garden patch task-archive-status-write v0.6
 
             # Handle subtask relationships on archive.
             # Keep this task in its parent's children list so progress
@@ -595,11 +697,31 @@ def cmd_add_subtask(args: argparse.Namespace) -> int:
     # Set parent in child's task.json
     child_data["parent"] = parent_dir.name
 
-    # Write both
-    write_json(parent_json_path, parent_data)
-    write_json(child_json_path, child_data)
+# BEGIN skill-garden patch task-add-subtask-pair-write v0.6
+    parent_original = read_json(parent_json_path)
+    child_original = read_json(child_json_path)
+    if not parent_original or not child_original:
+        print(colored("Error: Failed to capture task relationship snapshots", Colors.RED), file=sys.stderr)
+        return 1
+    written, restored = _write_task_pair(
+        parent_json_path,
+        parent_data,
+        parent_original,
+        child_json_path,
+        child_data,
+        child_original,
+    )
+    if not written:
+        print(colored("Error: Failed to persist parent/child relationship", Colors.RED), file=sys.stderr)
+        if not restored:
+            print(colored(
+                f"Error: Relationship rollback incomplete; inspect {parent_json_path} and {child_json_path}",
+                Colors.RED,
+            ), file=sys.stderr)
+        return 1
 
     print(colored(f"Linked: {child_dir.name} -> {parent_dir.name}", Colors.GREEN), file=sys.stderr)
+# END skill-garden patch task-add-subtask-pair-write v0.6
     return 0
 
 
@@ -642,11 +764,31 @@ def cmd_remove_subtask(args: argparse.Namespace) -> int:
     # Clear parent in child's task.json
     child_data["parent"] = None
 
-    # Write both
-    write_json(parent_json_path, parent_data)
-    write_json(child_json_path, child_data)
+# BEGIN skill-garden patch task-remove-subtask-pair-write v0.6
+    parent_original = read_json(parent_json_path)
+    child_original = read_json(child_json_path)
+    if not parent_original or not child_original:
+        print(colored("Error: Failed to capture task relationship snapshots", Colors.RED), file=sys.stderr)
+        return 1
+    written, restored = _write_task_pair(
+        parent_json_path,
+        parent_data,
+        parent_original,
+        child_json_path,
+        child_data,
+        child_original,
+    )
+    if not written:
+        print(colored("Error: Failed to persist parent/child relationship removal", Colors.RED), file=sys.stderr)
+        if not restored:
+            print(colored(
+                f"Error: Relationship rollback incomplete; inspect {parent_json_path} and {child_json_path}",
+                Colors.RED,
+            ), file=sys.stderr)
+        return 1
 
     print(colored(f"Unlinked: {child_dir.name} from {parent_dir.name}", Colors.GREEN), file=sys.stderr)
+# END skill-garden patch task-remove-subtask-pair-write v0.6
     return 0
 
 
@@ -674,8 +816,12 @@ def cmd_set_branch(args: argparse.Namespace) -> int:
     if not data:
         return 1
 
+# BEGIN skill-garden patch task-set-branch-write v0.6
     data["branch"] = branch
-    write_json(task_json, data)
+    if not write_json(task_json, data):
+        print(colored("Error: Failed to persist branch", Colors.RED))
+        return 1
+# END skill-garden patch task-set-branch-write v0.6
 
     print(colored(f"✓ Branch set to: {branch}", Colors.GREEN))
     return 0
@@ -708,8 +854,12 @@ def cmd_set_base_branch(args: argparse.Namespace) -> int:
     if not data:
         return 1
 
+# BEGIN skill-garden patch task-set-base-branch-write v0.6
     data["base_branch"] = base_branch
-    write_json(task_json, data)
+    if not write_json(task_json, data):
+        print(colored("Error: Failed to persist base branch", Colors.RED))
+        return 1
+# END skill-garden patch task-set-base-branch-write v0.6
 
     print(colored(f"✓ Base branch set to: {base_branch}", Colors.GREEN))
     print(f"  PR will target: {base_branch}")
@@ -740,8 +890,12 @@ def cmd_set_scope(args: argparse.Namespace) -> int:
     if not data:
         return 1
 
+# BEGIN skill-garden patch task-set-scope-write v0.6
     data["scope"] = scope
-    write_json(task_json, data)
+    if not write_json(task_json, data):
+        print(colored("Error: Failed to persist scope", Colors.RED))
+        return 1
+# END skill-garden patch task-set-scope-write v0.6
 
     print(colored(f"✓ Scope set to: {scope}", Colors.GREEN))
     return 0

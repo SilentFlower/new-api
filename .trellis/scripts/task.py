@@ -66,6 +66,106 @@ from common.task_context import (
 # =============================================================================
 # Command: start / finish
 # =============================================================================
+# BEGIN skill-garden patch task-start-brief-validator v0.6
+def _validate_planning_brief(full_path, task_json_path) -> bool:
+    """Validate that a planning task has a fresh derived brief before start.
+
+    Args:
+        full_path: Absolute task directory path.
+        task_json_path: Absolute path to the task metadata file.
+
+    Returns:
+        True when start may continue, otherwise False.
+    """
+    try:
+        task_json_exists = task_json_path.is_file()
+    except OSError as error:
+        print(colored(f"Error: Unable to validate planning task status: {error}", Colors.RED))
+        print("Hint: Fix task metadata access before retrying task.py start.")
+        return False
+
+    if not task_json_exists:
+        return True
+
+    data = read_json(task_json_path)
+    if not data:
+        print(colored("Error: Unable to read task status for brief validation.", Colors.RED))
+        print("Hint: Fix task.json before retrying task.py start.")
+        return False
+    if data.get("status") != "planning":
+        return True
+
+    brief_path = full_path / "brief.md"
+    try:
+        if not brief_path.is_file():
+            print(colored("Error: Planning task brief.md is missing.", Colors.RED))
+            print("Hint: Run trellis-task-brief, display the full brief, and wait for user confirmation before retrying task.py start.")
+            return False
+        brief_mtime = brief_path.stat().st_mtime_ns
+        authoritative_paths = [
+            full_path / name
+            for name in ("prd.md", "design.md", "implement.md")
+            if (full_path / name).is_file()
+        ]
+        stale_sources = [
+            path.name
+            for path in authoritative_paths
+            if path.stat().st_mtime_ns > brief_mtime
+        ]
+    except OSError as error:
+        print(colored(f"Error: Unable to validate planning brief freshness: {error}", Colors.RED))
+        print("Hint: Fix task artifact access, then refresh and review brief.md before retrying task.py start.")
+        return False
+
+    if stale_sources:
+        print(colored(
+            f"Error: Planning task brief.md is stale; newer artifacts: {', '.join(stale_sources)}.",
+            Colors.RED,
+        ))
+        print("Hint: Run trellis-task-brief, display the refreshed brief, and wait for user confirmation before retrying task.py start.")
+        return False
+
+    return True
+
+
+def _prepare_start_status(task_json_path):
+    """Persist planning -> in_progress before binding the session pointer.
+
+    Args:
+        task_json_path: Absolute path to the task metadata file.
+
+    Returns:
+        Tuple of original metadata, whether status changed, and success status.
+    """
+    if not task_json_path.is_file():
+        return None, False, True
+    data = read_json(task_json_path)
+    if not data:
+        print(colored("Error: Unable to read task.json before start.", Colors.RED))
+        return None, False, False
+    if data.get("status") != "planning":
+        return None, False, True
+    original = dict(data)
+    updated = dict(data)
+    updated["status"] = "in_progress"
+    if not write_json(task_json_path, updated):
+        print(colored("Error: Failed to persist task status before start.", Colors.RED))
+        return original, False, False
+    return original, True, True
+
+
+def _restore_start_status(task_json_path, original) -> bool:
+    """Restore task metadata after session pointer binding fails.
+
+    Args:
+        task_json_path: Absolute path to the task metadata file.
+        original: Metadata captured before the status transition.
+
+    Returns:
+        True when no restore is needed or the original metadata was written.
+    """
+    return original is None or write_json(task_json_path, original)
+# END skill-garden patch task-start-brief-validator v0.6
 
 def cmd_start(args: argparse.Namespace) -> int:
     """Set active task."""
@@ -91,12 +191,16 @@ def cmd_start(args: argparse.Namespace) -> int:
         task_dir = str(full_path)
 
     task_json_path = full_path / FILE_TASK_JSON
+# BEGIN skill-garden patch task-start-brief-guard v0.6
+    if not _validate_planning_brief(full_path, task_json_path):
+        return 1
+# END skill-garden patch task-start-brief-guard v0.6
 
+# BEGIN skill-garden patch task-start-degraded-write-gate v0.6
     if not resolve_context_key():
-        # Degraded mode: no session identity available.
-        # Hook didn't inject TRELLIS_CONTEXT_ID (common on Windows + Claude Code,
-        # --continue resume path, fork distribution, hooks disabled, etc.). Skip
-        # per-session pointer write; AI continues based on conversation context.
+        original, status_changed, status_ok = _prepare_start_status(task_json_path)
+        if not status_ok:
+            return 1
         print(colored(
             "ℹ Session identity not available; active-task pointer not persisted "
             "this session (degraded mode). AI continues based on conversation context.",
@@ -107,58 +211,62 @@ def cmd_start(args: argparse.Namespace) -> int:
             "or set TRELLIS_CONTEXT_ID before running task.py start.",
             Colors.YELLOW,
         ))
-
-        # Still flip task.json status: planning → in_progress so downstream phases proceed.
+        if status_changed:
+            print(colored("✓ Status: planning → in_progress (degraded)", Colors.GREEN))
         if task_json_path.is_file():
-            data = read_json(task_json_path)
-            if data and data.get("status") == "planning":
-                data["status"] = "in_progress"
-                if write_json(task_json_path, data):
-                    print(colored("✓ Status: planning → in_progress (degraded)", Colors.GREEN))
             run_task_hooks("after_start", task_json_path, repo_root)
         return 0
+# END skill-garden patch task-start-degraded-write-gate v0.6
 
-    active = set_active_task(task_dir, repo_root)
-    if active:
-        print(colored(f"✓ Current task set to: {task_dir}", Colors.GREEN))
-        print(f"Source: {active.source}")
-
-        if task_json_path.is_file():
-            data = read_json(task_json_path)
-            if data and data.get("status") == "planning":
-                data["status"] = "in_progress"
-                if write_json(task_json_path, data):
-                    print(colored("✓ Status: planning → in_progress", Colors.GREEN))
-
-        print()
-        print(colored("The hook will now inject context from this task's jsonl files.", Colors.BLUE))
-
-        run_task_hooks("after_start", task_json_path, repo_root)
-        return 0
-    else:
-        print(colored("Error: Failed to set current task", Colors.RED))
+# BEGIN skill-garden patch task-start-session-write-gate v0.6
+    original, status_changed, status_ok = _prepare_start_status(task_json_path)
+    if not status_ok:
         return 1
 
+    active = set_active_task(task_dir, repo_root)
+    if not active:
+        restored = _restore_start_status(task_json_path, original) if status_changed else True
+        print(colored("Error: Failed to set current task", Colors.RED))
+        if not restored:
+            print(colored(
+                "Error: Task status rollback also failed; inspect task.json before retrying.",
+                Colors.RED,
+            ))
+        return 1
 
+    print(colored(f"✓ Current task set to: {task_dir}", Colors.GREEN))
+    print(f"Source: {active.source}")
+    if status_changed:
+        print(colored("✓ Status: planning → in_progress", Colors.GREEN))
+    print()
+    print(colored("The hook will now inject context from this task's jsonl files.", Colors.BLUE))
+    run_task_hooks("after_start", task_json_path, repo_root)
+    return 0
+# END skill-garden patch task-start-session-write-gate v0.6
+
+
+# BEGIN skill-garden patch task-finish-clear-result v0.6
 def cmd_finish(args: argparse.Namespace) -> int:
-    """Clear active task."""
+    """Clear the active task only when session cleanup succeeds."""
     repo_root = get_repo_root()
-    active = clear_active_task(repo_root)
-    current = active.task_path
+    result = clear_active_task(repo_root)
+    current = result.task_path
 
+    if not result.cleared:
+        print(colored(f"Error: Failed to clear current task: {result.error}", Colors.RED))
+        return 1
     if not current:
         print(colored("No current task set", Colors.YELLOW))
         return 0
 
-    # Resolve task.json path before clearing
     task_json_path = repo_root / current / FILE_TASK_JSON
-
     print(colored(f"✓ Cleared current task (was: {current})", Colors.GREEN))
-    print(f"Source: {active.source}")
+    print(f"Source: {result.source}")
 
     if task_json_path.is_file():
         run_task_hooks("after_finish", task_json_path, repo_root)
     return 0
+# END skill-garden patch task-finish-clear-result v0.6
 
 
 def cmd_current(args: argparse.Namespace) -> int:

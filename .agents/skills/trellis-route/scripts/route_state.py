@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -50,22 +52,45 @@ def _utc_now() -> str:
     )
 
 
-def _read_json(path: Path) -> dict[str, Any]:
-    """读取 JSON 对象，失败时返回空对象。"""
+def _read_json_result(path: Path) -> dict[str, Any]:
+    """读取 runtime JSON，并区分缺失、损坏和 I/O 错误。"""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return {}
+    except FileNotFoundError:
+        return {"status": "missing", "data": None, "error": None}
+    except json.JSONDecodeError as exc:
+        return {"status": "corrupt", "data": None, "error": str(exc)}
+    except OSError as exc:
+        return {"status": "io_error", "data": None, "error": str(exc)}
+    if not isinstance(data, dict):
+        return {"status": "corrupt", "data": None, "error": "JSON 根节点不是对象"}
+    return {"status": "ok", "data": data, "error": None}
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    """兼容非关键扫描；仅返回成功解析的 JSON 对象。"""
+    result = _read_json_result(path)
+    data = result.get("data")
     return data if isinstance(data, dict) else {}
 
 
 def _write_json(path: Path, data: dict[str, Any]) -> None:
-    """原子性要求不高的 runtime 状态写入。"""
+    """使用同目录临时文件原子写入 runtime 状态。"""
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(data, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _print(data: dict[str, Any]) -> int:
@@ -187,7 +212,27 @@ def _auto_state_path(repo_root: Path, run_id: Any) -> Path | None:
     return _auto_loop_dir(repo_root) / f"{run_id.strip()}.json"
 
 
-def _auto_route_mode(repo_root: Path, context_key: str, target: str) -> tuple[str | None, Path | None, str | None]:
+def _run_contains_task(state: dict[str, Any], current_task: str) -> bool:
+    """判断当前任务是否属于 run 的未完成队列。"""
+    queue = state.get("queue")
+    if not isinstance(queue, list):
+        return False
+    normalized = current_task.replace("\\", "/")
+    for item in queue:
+        if not isinstance(item, dict) or item.get("status") not in {"pending", "running"}:
+            continue
+        task = item.get("task")
+        if isinstance(task, str) and task.replace("\\", "/") == normalized:
+            return True
+    return False
+
+
+def _auto_route_mode(
+    repo_root: Path,
+    context_key: str,
+    current_task: str,
+    target: str,
+) -> tuple[str | None, Path | None, str | None]:
     """读取当前 running auto-loop run 的临时 route 授权。
 
     auto 授权低于个人 `.route-prefs.tmp`，只在当前 session runtime 绑定了
@@ -195,15 +240,26 @@ def _auto_route_mode(repo_root: Path, context_key: str, target: str) -> tuple[st
     如果这些指针 stale，则忽略 stale pointer，并 fallback 到唯一 running run。
     """
     session_path = _session_path(repo_root, context_key)
-    session = _read_json(session_path)
+    session_result = _read_json_result(session_path)
+    if session_result["status"] in {"corrupt", "io_error"}:
+        return None, session_path, f"session-runtime-{session_result['status']}"
+    session = session_result["data"] if isinstance(session_result.get("data"), dict) else {}
     candidate_paths: list[Path] = []
     stale_paths: list[Path] = []
 
-    for run_id in (session.get("current_auto_run"), _read_json(_auto_loop_pointer(repo_root)).get("run_id")):
+    pointer_result = _read_json_result(_auto_loop_pointer(repo_root))
+    pointer = pointer_result["data"] if isinstance(pointer_result.get("data"), dict) else {}
+    for source, run_id in (
+        ("session", session.get("current_auto_run")),
+        ("pointer", pointer.get("run_id")),
+    ):
         path = _auto_state_path(repo_root, run_id)
         if path is None:
             continue
-        state = _read_json(path)
+        result = _read_json_result(path)
+        if source == "session" and result["status"] in {"corrupt", "io_error"}:
+            return None, path, f"session-auto-run-{result['status']}"
+        state = result["data"] if isinstance(result.get("data"), dict) else {}
         if state.get("status") == "running":
             candidate_paths.append(path)
         else:
@@ -227,6 +283,8 @@ def _auto_route_mode(repo_root: Path, context_key: str, target: str) -> tuple[st
 
     path = unique_paths[0]
     state = _read_json(path)
+    if not _run_contains_task(state, current_task):
+        return None, path, "auto-run-task-mismatch"
 
     auth = state.get("route_authorization")
     if not isinstance(auth, dict):
@@ -302,7 +360,10 @@ def _write_runtime_decision(
 ) -> tuple[Path, dict[str, str]]:
     """写入 session runtime 文件中的 route_decisions 字段。"""
     path = _session_path(repo_root, context_key)
-    context = _read_json(path)
+    context_result = _read_json_result(path)
+    if context_result["status"] in {"corrupt", "io_error"}:
+        raise ValueError(f"session-runtime-{context_result['status']}")
+    context = context_result["data"] if isinstance(context_result.get("data"), dict) else {}
     now = _utc_now()
     context.setdefault("platform", context_key.split("_", 1)[0] if "_" in context_key else "session")
     context["last_seen_at"] = now
@@ -349,7 +410,14 @@ def read_runtime(args: argparse.Namespace) -> int:
     assert current_task is not None and context_key is not None
 
     path = _session_path(repo_root, context_key)
-    context = _read_json(path)
+    context_result = _read_json_result(path)
+    if context_result["status"] in {"corrupt", "io_error"}:
+        return _output(
+            args,
+            {"status": "miss", "reason": f"session-runtime-{context_result['status']}"},
+            {"path": _rel_path(repo_root, path), "error": context_result.get("error")},
+        )
+    context = context_result["data"] if isinstance(context_result.get("data"), dict) else {}
     decision = context.get("route_decisions", {}).get(args.target)
     normalized = _normalized_decision(decision, args.target, current_task)
     if normalized is not None:
@@ -393,7 +461,14 @@ def resolve_route(args: argparse.Namespace) -> int:
     assert current_task is not None and context_key is not None
 
     path = _session_path(repo_root, context_key)
-    context = _read_json(path)
+    context_result = _read_json_result(path)
+    if context_result["status"] in {"corrupt", "io_error"}:
+        return _output(
+            args,
+            {"status": "miss", "reason": f"session-runtime-{context_result['status']}"},
+            {"path": _rel_path(repo_root, path), "error": context_result.get("error")},
+        )
+    context = context_result["data"] if isinstance(context_result.get("data"), dict) else {}
     decision = context.get("route_decisions", {}).get(args.target)
     normalized = _normalized_decision(decision, args.target, current_task)
     if normalized is not None:
@@ -451,7 +526,12 @@ def resolve_route(args: argparse.Namespace) -> int:
             }
         )
 
-    auto_mode, auto_path, auto_reason = _auto_route_mode(repo_root, context_key, args.target)
+    auto_mode, auto_path, auto_reason = _auto_route_mode(
+        repo_root,
+        context_key,
+        current_task,
+        args.target,
+    )
     if auto_mode in PREF_MODES[args.target]:
         written_path, auto_decision = _write_runtime_decision(
             repo_root,
@@ -535,14 +615,17 @@ def write_route(args: argparse.Namespace) -> int:
     if not context_key:
         return _print({"status": "skipped", "reason": "no-session-context", "source": source})
 
-    path, decision = _write_runtime_decision(
-        repo_root,
-        context_key,
-        current_task,
-        args.target,
-        mode,
-        args.source,
-    )
+    try:
+        path, decision = _write_runtime_decision(
+            repo_root,
+            context_key,
+            current_task,
+            args.target,
+            mode,
+            args.source,
+        )
+    except (OSError, ValueError) as exc:
+        return _print({"status": "error", "reason": "runtime-write-failed", "message": str(exc)})
     return _output(
         args,
         {
@@ -617,7 +700,10 @@ def main() -> int:
     """脚本入口。"""
     parser = build_parser()
     args = parser.parse_args()
-    return args.func(args)
+    try:
+        return args.func(args)
+    except (OSError, ValueError) as exc:
+        return _print({"status": "error", "reason": "runtime-io-error", "message": str(exc)})
 
 
 if __name__ == "__main__":

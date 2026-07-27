@@ -5,198 +5,152 @@ description: "启动、恢复和推进 Trellis 自动任务循环。用于用户
 
 # Trellis Auto Loop
 
-用 `.trellis/scripts/auto_loop.py` 驱动一个接近 `/goal` 的任务循环。Python runner 是状态权威；本 skill 只负责把用户意图映射到 runner 命令，并按 runner 返回的 action 调用现有 Trellis workflow / skill / subagent。
+用 `.trellis/scripts/auto_loop.py` 驱动批量无人值守任务。runner 是状态、manifest、hash、依赖和预算的权威；本 skill 只判断语义边界并执行 runner 返回的 action。
 
-## 核心规则
+## Run Contract
 
-- 只有用户明确要求自动跑、auto loop、goal-like、继续自动 run、批量任务队列时才启动或恢复；不要把普通实现请求自动升级为 auto-loop。
-- 每次开始、恢复、压缩后继续时，先运行 runner 的 `resume` 或 `next`，不要凭聊天摘要推断下一步。
-- 每完成一个 action，必须用 `record --action <next 返回的 action>` 精确写回结果；runner 会拒绝缺失或不匹配的 action。写回后立即再调用 `next`，直到 `done`、`blocked` 或需要用户决策。
-- run 进入 `blocked` 后不要用 `start --force` 新建 run 来纠正参数；先补齐缺失 route/context，然后用 `retry-blocked` 在同一个 run 内恢复。
-- runner 默认输出是紧凑 JSON，只包含当前 action、队列计数、简短 blocked/pending/completed 列表和最近少量决策摘要；排障时才给 `status` / `resume` / `next` / `record` / `retry-blocked` 加 `--verbose` 读取完整 item、blocked detail 和 decision data。
-- 默认 profile 是 `commit-only`：自动推进到本地 commit，不 push、不发布、不归档。
-- 普通 `trellis-push` 默认 commit + push 不改变 auto-loop 的授权边界；auto-loop 始终只走专用 commit-only 预授权，不得因普通流程文案而推送远端。
-- 多任务只按用户显式给出的任务顺序执行；同一 worktree 不并发。
-- 启动 runner 前先完成 route 准备度判断：已有当前任务 runtime route 决策或个人 `.trellis/.route-prefs.tmp` 时可启动；没有时先进入 `trellis-route` 正常询问 / fallback，写入真实决策后再启动。
-- auto-loop 不默认写 `route_authorization`；只有用户本次明确给出的临时 route 策略，才能通过 `--route-implement` / `--route-check` 传给 runner，且不能当成模型真实执行结果。
-- auto-loop 启动前若 implement 与 check 都缺 route，优先展示 auto-loop 专用的合并选择，不要把 `trellis-route` 的两套完整 fallback 原样贴给用户。仍允许用户回复高级格式 `implement 1, check 1`。
-- 检查深度由 run 级 `--check-depth auto|light|full` 控制，默认 `auto`，与 `--route-check` 独立；历史 run 缺少该字段时按 `full` 兼容。
-- 代码提交必须复用 `trellis-push` 的内部 commit-only 执行能力；auto-loop 自己负责预授权校验和 runner 回写，不要裸 `git commit` / `git push`。
+- 仅在用户明确要求 auto-loop、自动跑到底、goal-like 或继续既有 run 时使用；普通实现请求不能自动升级。
+- 用户发出启动指令即授权本次 `commit-only` run。prepare 完成后不再确认 manifest，也不逐任务执行 `confirm_brief`。
+- 新 run 先 prepare 全部显式任务，Open Questions 全部收敛后才进入 running。running 中不再询问 route、planning 或普通 Check-All 停止边界。
+- 每个 action 完成后，必须用同名 `record --action ...` 精确回写并立即 `next`。不得根据聊天摘要手改 runtime 或跳步。
+- 本地提交是自动终点。不得 push、merge、release、deploy、finish-work 或 archive；queue item 完成后 Trellis task 仍保持 `in_progress`。
+- 任务顺序只决定稳定调度顺序，不隐含依赖。依赖必须通过 `--depends-on dependent=dependency` 明确传入或由 planning artifacts 明确声明。
+- 任务级失败只阻塞自身及显式依赖项；独立任务继续。fix/recheck 与 planning repair 各最多 3 轮，队列结束后不自动执行第二遍恢复扫描。
+- schema 1 runtime 继续按 runner 返回的旧 action 恢复，包括 outstanding `confirm_brief`；不要把旧 run 改写成 schema 2。
 
-## 启动
-
-用户给了任务列表时，按原顺序传入；用户只说当前任务时，用 `task.py current --source` 的当前任务。
-
-启动前对当前任务执行 route 准备度检查：
+启动或恢复前静默清除交互式 pre-check hold；miss、task mismatch 或损坏诊断不阻断 runner：
 
 ```bash
-python3 .agents/skills/trellis-route/scripts/route_state.py resolve --target implement
-python3 .agents/skills/trellis-route/scripts/route_state.py resolve --target check
+python3 ./.trellis/scripts/pre_check_state.py clear
 ```
 
-如果两个 target 都返回 `status=miss`，优先用 auto-loop 专用合并选择询问用户，避免把两套 route fallback 列表完整贴出：
+## Start
 
-```text
-auto-loop 需要你先选执行路线，才能启动。
-
-推荐：
-1. 本次全 Inline：implement inline + check-all inline（只影响本次 run）
-2. 本次全 Subagent：implement subagent + check-all subagent（只影响本次 run）
-3. 保存默认全 Inline：写入个人默认，后续自动复用
-4. 保存默认全 Subagent：写入个人默认，后续自动复用
-
-高级：也可以回复 `implement 1, check 2` 分别选择。
-```
-
-映射规则：
-
-- `1` → `--route-implement inline --route-check check-all-inline`
-- `2` → `--route-implement subagent --route-check check-all-subagent`
-- `3` → 先用 `trellis-route` helper 分别写入 `implement=inline`、`check=check-all-inline` 且 `--save-pref`，再启动 runner
-- `4` → 先用 `trellis-route` helper 分别写入 `implement=subagent`、`check=check-all-subagent` 且 `--save-pref`，再启动 runner
-
-如果只有一个 target 返回 `status=miss`，再按 `trellis-route` 的对应 target 正常 numbered fallback 询问。不要替用户默认 inline 或 subagent。若用户选择的是本次临时策略，把选择映射为 runner route 参数一起传入，例如 `implement 1, check 1` 对应 `--route-implement inline --route-check check-all-inline`。若用户选择保存默认，则由 `trellis-route` 写入偏好后再启动 runner。
+任务列表必须显式。用户只说当前任务时，先用 `task.py current --source` 解析。启动前为 implement/check 解析可复用 route；已有 session runtime 或 `.trellis/.route-prefs.tmp` 就复用，没有时按 `trellis-route` 询问并写入真实选择。临时选择才传 runner 参数，个人默认由 route helper 自己保存。
 
 ```bash
 python3 ./.trellis/scripts/auto_loop.py start \
   --tasks <task> [<task> ...] \
+  [--depends-on <dependent>=<dependency>] \
   --profile commit-only \
   [--check-depth auto|light|full] \
   [--route-implement inline|subagent] \
   [--route-check check-all-inline|check-all-subagent]
-```
-
-除非用户明确指定 light/full，启动时使用默认 `--check-depth auto`。显式 light 仍必须进入 Check-All，命中 hard-full 时由 Check-All 升级 full；不得把它映射到顶层 `trellis-check`。
-
-多任务队列中，当前任务切换到下一个任务且缺少该任务 route 决策时，回到 `trellis-route` 获取该任务真实选择，再继续 `next` / `record`。个人 `.trellis/.route-prefs.tmp` 会由 `trellis-route` 统一复用并写回 runtime。
-
-启动后立即运行：
-
-```bash
 python3 ./.trellis/scripts/auto_loop.py next
 ```
 
-## 恢复
+默认 check depth 为 `auto`。light/full 只是 Check-All 请求深度，不是 route mode；hard-full 风险仍由 Check-All 升级。
 
-压缩、重开会话、用户说“继续自动跑 / continue auto loop”时：
+用户一次选择全 Inline/Subagent 时可同时映射两个 route：
+
+- Inline：`--route-implement inline --route-check check-all-inline`
+- Subagent：`--route-implement subagent --route-check check-all-subagent`
+
+runner 在 start 时检查任务存在性、task status、staged/conflict/未完成 Git 集成，并捕获主仓及已初始化子仓的 dirty baseline。全局安全错误不得通过 `--force` 绕过。
+
+## Prepare Actions
+
+prepare action 必须先完成并 record，runner 才会继续扫描整个队列。
+
+| action | 主 agent 行为 | record |
+| --- | --- | --- |
+| `classify_dirty_baseline` | 把每个 `repository::path` 精确归到一个任务的 owned dirty，或归为 protected-retained；不猜测归属 | `record --action classify_dirty_baseline --result ok [--owned-dirty <task>=<repository>::<path>] [--protected-retained <repository>::<path>]` |
+| `resolve_open_questions` | 使用 `trellis-brainstorm` 一次引导人工回答一个问题，并更新对应 planning artifacts；AI 不得代答、删除、改写或勾选 | 全部问题消失后 `record --action resolve_open_questions --result ok` |
+| `review_planning_readiness` | 读取 action 绑定的 artifacts，按 Brainstorm Quality Bar 判断 `ready|repairable|blocking` | `record --action review_planning_readiness --result ok --readiness-verdict ready|repairable --summary "..."`；blocking 用 `--result blocked` |
+| `run_planning_repair` | 仅按现有需求、代码、spec 和仓库证据修复 planning；不得处理 Open Questions 或高风险事项 | `record --action run_planning_repair --result ok --summary "..."` |
+| `refresh_brief` | 使用 `trellis-task-brief` 刷新派生的 `brief.md`，无需再次让用户确认 | `record --action refresh_brief --result ok` |
+
+`resolve_open_questions` 是整队列门禁：任一任务仍有 `- [ ]` 或历史裸列表时，run 保持 `awaiting_input`，不得先执行其它任务。`- [x]`、空章节或无章节不阻塞。
+
+readiness 的 `repairable` 仅适用于不改变目标、可由仓库证据确定的问题，例如验收不可测试、design/implement 不完整或 context 未整理。达到 3 轮、需要产品选择或越过风险黑名单时返回 blocking。
+
+## Autonomous Decisions
+
+满足任务目标内、仅影响本地代码、可逆且可验证时，AI可自主选择推荐方案。作出选择后必须先记录，再继续修改或 record；会修改 planning/handoff 时，`--file` 必须列出全部目标 artifact：
+
+```bash
+python3 ./.trellis/scripts/auto_loop.py decide \
+  --task <task> \
+  --topic "<主题>" \
+  --option "<候选>" [--option "<候选>" ...] \
+  --choice "<选择>" \
+  --summary "<依据摘要>" \
+  [--evidence "<证据>" ...] \
+  --risk low|medium \
+  --confidence low|medium|high \
+  [--requirement <id> ...] [--file <repository>::<path> ...] \
+  [--verification "<验证摘要>"]
+```
+
+决策写入 runtime 摘要和任务 `decisions.jsonl`，只保存结论与证据，不保存思维链。下一次同任务 action record 会消费该决策：列明的 planning/handoff 变化生成绑定 decision ID 的 manifest revision；其它变化按 `artifact-drift` 阻塞。
+
+以下事项不得用 `decide`，必须 blocked：
+
+- 不可逆真实数据修改。
+- 扩大权限或降低安全、隐私保护。
+- 公开 API 或数据格式破坏性变更。
+- 费用、生产环境或外部系统影响。
+- push、merge、release、deploy、finish-work、archive。
+- 明显改变任务目标或业务规则且仓库没有倾向证据。
+- `Open Questions` 中人工保留的任何选择。
+
+## Running Actions
+
+| action | 主 agent 行为 | 成功 record |
+| --- | --- | --- |
+| `start_task` | 执行 action 返回的 `task.py start ...` | `record --action start_task --result ok` |
+| `run_implement` | 进入 Phase 2.1，复用 manifest/当前任务 implement route | `record --action run_implement --result ok --route-mode <mode> --route-source <source>` |
+| `run_check_all` | 进入 Phase 2.2，按 requested depth 执行统一 Check-All | `record --action run_check_all --result ok --route-mode <mode> --route-source <source> --effective-check-depth light|full --check-depth-reason "..."` |
+| `run_fix` | 根据 `last_failure` 修复并复用 implement route | `record --action run_fix --result ok --route-mode <mode> --route-source <source>` |
+| `run_recheck` | 复用 check route，且不得低于 `minimum_check_depth` | 同 `run_check_all`，action 改为 `run_recheck` |
+| `run_spec_update` | 执行 `trellis-update-spec` | `no-op|written` 用 ok；`needs-review` 用 blocked + `spec-needs-review` |
+| `commit_only` | 复用 `trellis-push` 内部精确本地提交能力，不 push | `record --action commit_only --result ok --commit <hash> --files <exact...> --commit-message "..."` |
+
+失败或越权时必须回写，runner 决定重试、blocked 或继续队列：
+
+```bash
+python3 ./.trellis/scripts/auto_loop.py record \
+  --action <action> --result failed|blocked \
+  --failure-type <type> --summary "<摘要>" \
+  [--files <repository>::<path> ...]
+python3 ./.trellis/scripts/auto_loop.py next
+```
+
+Check-All 的 ok/failed/blocked 都要带实际 effective depth 与原因。validated auto-loop 不进入普通 Post-Check Stop Gate；检查完成后立即 `record + next`。
+
+## Commit-Only
+
+收到 `commit_only` 后：
+
+1. 用 `status` 确认 active run、profile、outstanding action 和 task 一致。
+2. 读取任务 artifacts、Git status/diff，生成 exact files、message 和归属理由。
+3. staged 必须为空；不得包含冲突、未完成集成、runtime、route prefs、其它任务目录或 protected-retained。
+4. 使用 `trellis-push` 内部 commit-only 提交 exact files。不得裸 `git add .`、`git add -A`、push 或按时间差猜归属。
+5. 用提交 hash 和 exact files record，然后立即 next。
+
+`decisions.jsonl` 属于当前任务文件，发生决策时应进入该任务最终精确提交。任务 `task.json.status` 不因 queue item completed 而改写。
+
+## Resume, Retry, Stop
 
 ```bash
 python3 ./.trellis/scripts/auto_loop.py resume
 python3 ./.trellis/scripts/auto_loop.py next
-```
 
-`resume` 默认只输出紧凑状态；`resume_capsule` 不再持久写入 runtime JSON，仅在 `resume --verbose` / `status --verbose` 等诊断输出中动态生成。下一步以 `next` 返回的 JSON 为准。
-
-## Blocked 后重试
-
-如果 `next` 或 `status` 显示 run 内有 blocked 队列项，先根据 blocked reason 补齐条件，然后复用同一个 run：
-
-```bash
 python3 ./.trellis/scripts/auto_loop.py retry-blocked \
-  [--run-id <run-id>] \
-  [--task <task>] \
-  [--check-depth auto|light|full] \
-  [--route-implement inline|subagent] \
-  [--route-check check-all-inline|check-all-subagent]
+  [--run-id <run-id>] [--task <task>] [--all] \
+  [--check-depth auto|light|full]
 python3 ./.trellis/scripts/auto_loop.py next
-```
 
-常见场景：启动时漏传临时 route，导致 `missing-implement-context` / `missing-check-context`。此时不要 `start --force`，直接用 `retry-blocked --route-implement ... --route-check ...` 重置 blocked 项。
-
-## Action 映射
-
-| runner action | 主 agent 动作 | 成功 record |
-| --- | --- | --- |
-| `refresh_brief` | 使用 `trellis-task-brief` 生成并展示 brief | `record --action refresh_brief --result ok` |
-| `start_task` | 执行返回的 `task.py start ...` 命令 | `record --action start_task --result ok` |
-| `run_implement` | 进入 Phase 2.1，先用 `trellis-route(target=implement)` 决定 inline/subagent，再实现 | `record --action run_implement --result ok --route-mode <mode> --route-source <source>` |
-| `run_check_all` | 进入 Phase 2.2，先用 `trellis-route(target=check)`，按 action 的 requested depth 执行 Check-All | `record --action run_check_all --result ok --route-mode <mode> --route-source <source> --effective-check-depth <light|full> --check-depth-reason "<摘要>"` |
-| `run_fix` | 根据 `last_failure` 修复，复用当前任务 implement route | `record --action run_fix --result ok --route-mode <mode> --route-source <source>` |
-| `run_recheck` | 复用当前任务 check route，按 action 的 requested/minimum depth 重新 Check-All | `record --action run_recheck --result ok --route-mode <mode> --route-source <source> --effective-check-depth <light|full> --check-depth-reason "<摘要>"` |
-| `run_spec_update` | 调用 `trellis-update-spec` 自主返回三态 | `no-op` / `written`：`record --action run_spec_update --result ok` 后立即 `next`；`needs-review`：`record --action run_spec_update --result blocked --failure-type spec-needs-review` |
-| `commit_only` | 校验本 run 的预授权与文件归属，再把 exact files/message 交给 `trellis-push` 内部 commit-only 执行 | auto-loop 执行 `record --action commit_only --result ok --commit <hash>` |
-
-失败时写回：
-
-```bash
-python3 ./.trellis/scripts/auto_loop.py record \
-  --action <action> \
-  --result failed \
-  --failure-type <type> \
-  --summary "<失败摘要>" \
-  [--effective-check-depth light|full] \
-  [--check-depth-reason "<深度原因>"] \
-  --files <file> [<file> ...]
-```
-
-需要用户产品决策或越权时写回 blocked：
-
-```bash
-python3 ./.trellis/scripts/auto_loop.py record \
-  --action <action> \
-  --result blocked \
-  --failure-type <type> \
-  --summary "<阻塞原因>" \
-  [--effective-check-depth light|full] \
-  [--check-depth-reason "<深度原因>"]
-```
-
-runner 会按 3 轮 fix/recheck 预算决定继续、跳过当前任务或结束队列。
-
-`record` 默认只返回当前 item 的 `task`、`item_status`、`current_step`、`commit` 和紧凑 `summary`；只有排查状态漂移时才加 `--verbose` 查看完整 `item`。
-
-route action 成功回写时必须带上 `trellis-route` 输出里的真实 `mode` / `source`，例如
-`--route-mode inline --route-source route-prefs` 或
-`--route-mode check-all-subagent --route-source trellis-route`；不要写 auto-loop 默认值。
-
-`run_check_all` / `run_recheck` 无论结果为 ok、failed 还是 blocked，都必须回写 Check-All 实际产生的 effective depth 和原因。更新后的 runner 会保存 `item.last_check`；旧调用缺字段时只能按 `full / legacy-default-full` 记录，不能推断为 light。recheck action 的 `minimum_check_depth=full` 时不得降级。
-
-检查 action 完成后，validated auto-loop 不适用普通 Post-Check Stop Gate：inline Check-All 直接执行匹配 action 的 `record` 并立即 `next`；subagent 只返回 audit-only 报告和 `check_profile`，主会话收到后立即完成同样的 `record + next`。只有 runner action mismatch、真正产品决策、越权、生产副作用或破坏性安全边界才停止等待用户。
-
-## Commit-Only 预授权
-
-auto-loop 的 `commit-only` profile 是用户对“当前 run 内任务相关本地提交”的一次性预授权。预授权判断和 runner 状态写回全部由本 skill 负责，不能下放给 `trellis-push`。
-
-收到 `commit_only` action 后，按顺序执行：
-
-1. 读取 `auto_loop.py status`，确认 `run_status=running`、profile 为 `commit-only`，且 `outstanding_action.action/task` 与本次 action 和活动任务一致。
-2. 读取当前任务 artifacts、`git status`、`git diff` 和必要文件内容，由 AI 生成 exact files、commit message 与逐文件归属理由。
-3. 确认 staged 区为空、没有冲突或未完成的 Git 集成状态，所有 planned files 均属于当前任务，且不包含 `.trellis/.runtime/`、`.trellis/.route-prefs.tmp`、其他任务目录或未解释文件。
-4. 调用 `trellis-push` 内部 commit-only，只传 exact files 与 message。该调用只执行精确本地提交，不读取 auto-loop 状态、不 push、不写任务进度。
-5. 提交成功后，本 skill 执行：
-
-```bash
-python3 ./.trellis/scripts/auto_loop.py record \
-  --action commit_only \
-  --result ok \
-  --commit <hash> \
-  --files <exact files> \
-  --commit-message "<message>"
-```
-
-6. `record` 成功后立即再次调用 `next`。
-
-如果预检或内部提交失败，由本 skill 使用匹配的 action 写回 `failed` 或 `blocked`，并保留未识别 dirty 文件。不要用时间差或 dirty baseline 猜测文件归属。普通 dirty 文件不自动纳入提交；未识别 staged 文件、冲突、远端推送、上线/归档动作、真实外部系统或生产数据效果都必须阻止本次 commit-only。
-
-`trellis-push` 在这个路径中只是精确提交执行器，不得自行调用 `status`、`record` 或决定队列项是 blocked/skipped。当前 item 失败后的继续、跳过或停止仍由 runner 的既有预算和 `next` 结果决定。
-
-## 状态与停止
-
-查看：
-
-```bash
-python3 ./.trellis/scripts/auto_loop.py status
-```
-
-停止：
-
-```bash
+python3 ./.trellis/scripts/auto_loop.py status [--verbose]
 python3 ./.trellis/scripts/auto_loop.py stop --reason "<原因>"
 ```
 
-## 不要做
+默认使用紧凑输出；只有诊断 manifest、dirty、漂移、依赖链或决策详情时加 `--verbose`。`completed_with_blocked` 已是本次 run 的可审计终态，后续恢复由用户显式调用 `retry-blocked`。
 
-- 不要手写或手改 `.trellis/.runtime/auto-loop/*.json`。
-- 不要把 `.trellis/.runtime/` 或 `.trellis/.route-prefs.tmp` 加入提交。
-- 不要在 auto-loop 外把普通 check 的 post-check stop gate 当成可跳过。
-- 不要为模糊需求自动创建任务并开跑；先回到 Trellis planning。
+## 禁止事项
+
+- 不手写 `.trellis/.runtime/auto-loop/*.json`，不提交 runtime 或 `.route-prefs.tmp`。
+- 不覆盖、暂存或提交 protected-retained 文件；发生路径冲突只阻塞涉及任务。
+- 不用 `start --force` 代替 `retry-blocked`。
+- 不把 queue item completed 解释为任务已归档。
+- 不在无人值守执行中替用户回答 Open Questions。
