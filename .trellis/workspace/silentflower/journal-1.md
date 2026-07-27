@@ -840,3 +840,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 25: 完成渠道单用户并发限制与错误日志补丁
+
+**Date**: 2026-07-27
+**Task**: 完成渠道单用户并发限制与错误日志补丁
+**Branch**: `build-bak`
+
+### Summary
+
+完成渠道级同用户最大并发限制、渠道 80 配置为 4、并发拒绝错误日志持久化与请求级去重，已通过完整检查并推送；归档时记录部署验证要求。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `8b74cf21c` | (see git log) |
+| `38b08dad0` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
