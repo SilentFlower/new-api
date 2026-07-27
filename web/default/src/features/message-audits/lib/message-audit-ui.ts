@@ -1,4 +1,4 @@
-import type { MessageAuditCleanupTask } from '../types'
+import type { MessageAuditCleanupTask, MessageAuditMessage } from '../types'
 
 export const MESSAGE_AUDIT_CLEAR_CONFIRMATION = 'CLEAR'
 
@@ -64,4 +64,43 @@ export function getMessageAuditErrorMessage(
   fallback: string
 ): string {
   return error instanceof Error && error.message ? error.message : fallback
+}
+
+/**
+ * 按角色和内容类型过滤详情消息，并保持服务端返回顺序。
+ *
+ * @param messages 服务端按 sequence 排列的消息。
+ * @param hiddenRoles 当前隐藏的角色。
+ * @param hiddenContentTypes 当前隐藏的内容类型。
+ * @returns 保持原始顺序的可见消息。
+ */
+export function filterMessageAuditMessages(
+  messages: MessageAuditMessage[],
+  hiddenRoles: string[],
+  hiddenContentTypes: string[]
+): MessageAuditMessage[] {
+  return messages.filter(
+    (message) =>
+      !hiddenRoles.includes(message.role) &&
+      !hiddenContentTypes.includes(message.content_type)
+  )
+}
+
+/**
+ * 仅在同一推断会话翻页时复用上一页数据。
+ *
+ * @param previousData 上一次查询成功返回的数据。
+ * @param previousSessionId 上一次查询键中的推断会话 ID。
+ * @param currentSessionId 当前准备查询的推断会话 ID。
+ * @returns 会话一致时返回旧数据，切换会话时返回 undefined。
+ */
+export function keepMessageAuditSessionPlaceholder<T>(
+  previousData: T | undefined,
+  previousSessionId: unknown,
+  currentSessionId: string | null
+): T | undefined {
+  if (!currentSessionId || previousSessionId !== currentSessionId) {
+    return undefined
+  }
+  return previousData
 }

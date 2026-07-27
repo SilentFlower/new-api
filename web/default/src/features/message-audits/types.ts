@@ -21,6 +21,10 @@ import type { SystemTask } from '@/features/system-settings/types'
 export type MessageAuditRequest = {
   id: number
   request_id: string
+  audit_session_id: string
+  parent_request_id: string
+  session_match: 'new' | 'exact' | 'prefix' | 'compressed' | string
+  session_request_count: number
   user_id: number
   username: string
   token_id: number
@@ -75,6 +79,11 @@ export type MessageAuditStatus = {
   retries: number
   failed: number
   dropped: number
+  storage_bytes: number
+  storage_estimated: boolean
+  request_count: number
+  blob_count: number
+  item_count: number
 }
 
 export type MessageAuditCleanupTask = SystemTask<
@@ -94,4 +103,5 @@ export type MessageAuditSearch = {
   status?: string
   startTime?: number
   endTime?: number
+  auditSessionId?: string
 }

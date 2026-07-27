@@ -33,6 +33,7 @@ func GetMessageAudits(c *gin.Context) {
 		RequestID:      c.Query("request_id"),
 		RequestPath:    c.Query("request_path"),
 		Status:         c.Query("status"),
+		AuditSessionID: c.Query("audit_session_id"),
 		Offset:         pageInfo.GetStartIdx(),
 		Limit:          pageInfo.GetPageSize(),
 	})

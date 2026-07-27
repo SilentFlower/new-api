@@ -19,7 +19,13 @@ For commercial licensing, please contact support@quantumnous.com
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { getRouteApi, Link } from '@tanstack/react-router'
 import type { ColumnDef } from '@tanstack/react-table'
-import { AlertTriangle, RefreshCw, Settings, Trash2 } from 'lucide-react'
+import {
+  AlertTriangle,
+  History,
+  RefreshCw,
+  Settings,
+  Trash2,
+} from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -71,6 +77,7 @@ import {
   startMessageAuditCleanup,
 } from './api'
 import { MessageAuditDetailPanel } from './components/message-audit-detail'
+import { MessageAuditSessionDialog } from './components/message-audit-session-dialog'
 import {
   getMessageAuditCleanupProgress,
   getMessageAuditCleanupTitleKey,
@@ -131,6 +138,9 @@ export function MessageAudits() {
   const search = route.useSearch()
   const navigate = route.useNavigate()
   const [selectedRequestId, setSelectedRequestId] = useState<string | null>(
+    null
+  )
+  const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     null
   )
   const [clearOpen, setClearOpen] = useState(false)
@@ -236,6 +246,32 @@ export function MessageAudits() {
       },
       { accessorKey: 'model_name', header: t('Model'), size: 170 },
       { accessorKey: 'request_path', header: t('Request path'), size: 180 },
+      {
+        id: 'audit_session_id',
+        header: t('Inferred session'),
+        size: 130,
+        cell: ({ row }) => (
+          <Button
+            type='button'
+            variant='ghost'
+            size='sm'
+            className='max-w-full'
+            title={row.original.audit_session_id}
+            disabled={!row.original.audit_session_id}
+            onClick={(event) => {
+              event.stopPropagation()
+              setSelectedSessionId(row.original.audit_session_id)
+            }}
+          >
+            <History aria-hidden='true' />
+            <span className='truncate'>
+              {t('{{count}} requests', {
+                count: row.original.session_request_count || 1,
+              })}
+            </span>
+          </Button>
+        ),
+      },
       {
         accessorKey: 'message_count',
         header: t('Messages'),
@@ -399,7 +435,7 @@ export function MessageAudits() {
               />
             )}
             {!statusQuery.isLoading && !statusQuery.isError && status && (
-              <div className='bg-muted/30 grid gap-x-6 gap-y-2 border px-3 py-2 text-xs sm:grid-cols-4 lg:grid-cols-8'>
+              <div className='bg-muted/30 grid gap-x-6 gap-y-2 border px-3 py-2 text-xs sm:grid-cols-4 lg:grid-cols-6 xl:grid-cols-12'>
                 <span>
                   {t('Capture')}:{' '}
                   <strong>
@@ -435,6 +471,27 @@ export function MessageAudits() {
                 </span>
                 <span>
                   {t('Dropped')}: <strong>{status.dropped}</strong>
+                </span>
+                <span>
+                  {t('Audit storage')}:{' '}
+                  <strong>{formatBytes(status.storage_bytes ?? 0)}</strong>
+                  {status.storage_estimated && (
+                    <span className='text-muted-foreground ml-1'>
+                      ({t('Estimated')})
+                    </span>
+                  )}
+                </span>
+                <span>
+                  {t('Audited requests')}:{' '}
+                  <strong>{status.request_count ?? 0}</strong>
+                </span>
+                <span>
+                  {t('Unique message blocks')}:{' '}
+                  <strong>{status.blob_count ?? 0}</strong>
+                </span>
+                <span>
+                  {t('Message references')}:{' '}
+                  <strong>{status.item_count ?? 0}</strong>
                 </span>
               </div>
             )}
@@ -648,43 +705,64 @@ export function MessageAudits() {
                   mobile={
                     <div className='divide-y border-y'>
                       {table.getRowModel().rows.map((row) => (
-                        <button
-                          key={row.id}
-                          type='button'
-                          className='hover:bg-muted/40 block w-full px-1 py-3 text-left'
-                          onClick={() =>
-                            setSelectedRequestId(row.original.request_id)
-                          }
-                        >
-                          <div className='flex items-center justify-between gap-3 text-sm'>
-                            <strong className='truncate'>
-                              {row.original.model_name}
-                            </strong>
-                            <Badge
-                              variant={
-                                row.original.status === 'failed'
-                                  ? 'destructive'
-                                  : 'outline'
-                              }
-                            >
-                              {t(row.original.status)}
-                            </Badge>
-                          </div>
-                          <div className='text-muted-foreground mt-1 truncate font-mono text-xs'>
-                            {row.original.request_id}
-                          </div>
-                          <div className='text-muted-foreground mt-1 flex justify-between gap-3 text-xs'>
-                            <span>
-                              {row.original.username ||
-                                `#${row.original.user_id}`}
+                        <div key={row.id} className='px-1 py-3'>
+                          <button
+                            type='button'
+                            className='hover:bg-muted/40 block w-full text-left'
+                            onClick={() =>
+                              setSelectedRequestId(row.original.request_id)
+                            }
+                          >
+                            <div className='flex items-center justify-between gap-3 text-sm'>
+                              <strong className='truncate'>
+                                {row.original.model_name}
+                              </strong>
+                              <Badge
+                                variant={
+                                  row.original.status === 'failed'
+                                    ? 'destructive'
+                                    : 'outline'
+                                }
+                              >
+                                {t(row.original.status)}
+                              </Badge>
+                            </div>
+                            <div className='text-muted-foreground mt-1 truncate font-mono text-xs'>
+                              {row.original.request_id}
+                            </div>
+                            <div className='text-muted-foreground mt-1 flex justify-between gap-3 text-xs'>
+                              <span>
+                                {row.original.username ||
+                                  `#${row.original.user_id}`}
+                              </span>
+                              <span>
+                                {dayjs
+                                  .unix(row.original.captured_at)
+                                  .format('MM-DD HH:mm')}
+                              </span>
+                            </div>
+                          </button>
+                          <Button
+                            type='button'
+                            variant='ghost'
+                            size='sm'
+                            className='mt-2 max-w-full px-0'
+                            title={row.original.audit_session_id}
+                            disabled={!row.original.audit_session_id}
+                            onClick={() => {
+                              setSelectedSessionId(
+                                row.original.audit_session_id
+                              )
+                            }}
+                          >
+                            <History aria-hidden='true' />
+                            <span className='truncate'>
+                              {t('{{count}} requests', {
+                                count: row.original.session_request_count || 1,
+                              })}
                             </span>
-                            <span>
-                              {dayjs
-                                .unix(row.original.captured_at)
-                                .format('MM-DD HH:mm')}
-                            </span>
-                          </div>
-                        </button>
+                          </Button>
+                        </div>
                       ))}
                     </div>
                   }
@@ -698,6 +776,12 @@ export function MessageAudits() {
       <MessageAuditDetailPanel
         requestId={selectedRequestId}
         onOpenChange={(open) => !open && setSelectedRequestId(null)}
+      />
+
+      <MessageAuditSessionDialog
+        sessionId={selectedSessionId}
+        onOpenChange={(open) => !open && setSelectedSessionId(null)}
+        onSelectRequest={setSelectedRequestId}
       />
 
       <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>

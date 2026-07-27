@@ -17,8 +17,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
-import { Check, Copy, Loader2 } from 'lucide-react'
-import { useState } from 'react'
+import { Check, Copy, ListFilter, Loader2, RotateCcw } from 'lucide-react'
+import { type ReactNode, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
 import { Badge } from '@/components/ui/badge'
@@ -31,6 +31,14 @@ import {
   DrawerTitle,
 } from '@/components/ui/drawer'
 import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import {
   Sheet,
   SheetContent,
   SheetDescription,
@@ -41,6 +49,7 @@ import { useMediaQuery } from '@/hooks'
 import dayjs from '@/lib/dayjs'
 
 import { getMessageAuditDetail } from '../api'
+import { filterMessageAuditMessages } from '../lib/message-audit-ui'
 import type { MessageAuditMessage } from '../types'
 
 type MessageAuditDetailPanelProps = {
@@ -50,73 +59,152 @@ type MessageAuditDetailPanelProps = {
 
 type AuditMessageListProps = {
   messages: MessageAuditMessage[]
-  collapseContent?: boolean
   copiedSequence: number | null
   onCopy: (sequence: number, content: unknown) => void
 }
 
-function AuditMessageList({
-  messages,
-  collapseContent = false,
-  copiedSequence,
-  onCopy,
-}: AuditMessageListProps) {
+function AuditMessageList(props: AuditMessageListProps) {
   const { t } = useTranslation()
 
-  return messages.map((message) => (
-    <article key={message.sequence} className='border-b pb-4 last:border-b-0'>
-      <header className='mb-2 flex items-center justify-between gap-3'>
-        <div className='flex min-w-0 items-center gap-2'>
-          <Badge variant='outline'>{message.role || t('Unknown')}</Badge>
-          <span className='text-muted-foreground truncate text-xs'>
-            {message.content_type}
-          </span>
-        </div>
-        <Button
-          type='button'
-          variant='ghost'
-          size='icon-sm'
-          title={t('Copy message')}
-          aria-label={t('Copy message')}
-          onClick={() => onCopy(message.sequence, message.content)}
-        >
-          {copiedSequence === message.sequence ? (
-            <Check aria-hidden='true' />
-          ) : (
-            <Copy aria-hidden='true' />
-          )}
-        </Button>
-      </header>
-      {collapseContent ? (
-        <details>
-          <summary className='text-muted-foreground cursor-pointer text-xs'>
-            {t('Details')}
-          </summary>
-          <pre className='bg-muted/50 mt-2 max-h-96 overflow-auto rounded-md border p-3 text-xs leading-5 break-words whitespace-pre-wrap'>
-            {typeof message.content === 'string'
-              ? message.content
-              : JSON.stringify(message.content, null, 2)}
-          </pre>
-        </details>
-      ) : (
-        <pre className='bg-muted/50 max-h-96 overflow-auto rounded-md border p-3 text-xs leading-5 break-words whitespace-pre-wrap'>
-          {typeof message.content === 'string'
-            ? message.content
-            : JSON.stringify(message.content, null, 2)}
-        </pre>
-      )}
-    </article>
-  ))
+  return (
+    <ol className='relative space-y-0' aria-label={t('Message timeline')}>
+      <span
+        className='bg-border absolute top-3 bottom-3 left-3 w-px'
+        aria-hidden='true'
+      />
+      {props.messages.map((message) => {
+        const collapseContent = ['tools', 'functions'].includes(
+          message.content_type
+        )
+        return (
+          <li key={message.sequence} className='relative pb-6 pl-9 last:pb-0'>
+            <span
+              className='bg-background absolute top-1 left-0 flex size-6 items-center justify-center rounded-full border font-mono text-[10px]'
+              aria-hidden='true'
+            >
+              {message.sequence + 1}
+            </span>
+            <article>
+              <header className='mb-2 flex items-start justify-between gap-3'>
+                <div className='flex min-w-0 flex-wrap items-center gap-2'>
+                  <Badge variant='outline'>
+                    {message.role || t('Unknown')}
+                  </Badge>
+                  <span className='text-muted-foreground truncate text-xs'>
+                    {message.content_type}
+                  </span>
+                </div>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='icon-sm'
+                  title={t('Copy message')}
+                  aria-label={t('Copy message')}
+                  onClick={() =>
+                    props.onCopy(message.sequence, message.content)
+                  }
+                >
+                  {props.copiedSequence === message.sequence ? (
+                    <Check aria-hidden='true' />
+                  ) : (
+                    <Copy aria-hidden='true' />
+                  )}
+                </Button>
+              </header>
+              {collapseContent ? (
+                <details>
+                  <summary className='text-muted-foreground cursor-pointer text-xs'>
+                    {t('Details')}
+                  </summary>
+                  <pre className='bg-muted/50 mt-2 max-h-96 overflow-auto rounded-md border p-3 text-xs leading-5 break-words whitespace-pre-wrap'>
+                    {typeof message.content === 'string'
+                      ? message.content
+                      : JSON.stringify(message.content, null, 2)}
+                  </pre>
+                </details>
+              ) : (
+                <pre className='bg-muted/50 max-h-96 overflow-auto rounded-md border p-3 text-xs leading-5 break-words whitespace-pre-wrap'>
+                  {typeof message.content === 'string'
+                    ? message.content
+                    : JSON.stringify(message.content, null, 2)}
+                </pre>
+              )}
+            </article>
+          </li>
+        )
+      })}
+    </ol>
+  )
+}
+
+type MessageFilterMenuProps = {
+  label: string
+  options: string[]
+  hiddenOptions: string[]
+  onToggle: (option: string, visible: boolean) => void
+}
+
+function MessageFilterMenu(props: MessageFilterMenuProps) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<Button variant='outline' size='sm' />}>
+        <ListFilter aria-hidden='true' />
+        {props.label}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align='start' className='max-h-72 min-w-48'>
+        <DropdownMenuLabel>{props.label}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        {props.options.map((option) => (
+          <DropdownMenuCheckboxItem
+            key={option}
+            checked={!props.hiddenOptions.includes(option)}
+            onCheckedChange={(checked) => props.onToggle(option, checked)}
+          >
+            {option}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
 }
 
 function DetailBody(props: { requestId: string }) {
   const { t } = useTranslation()
   const [copiedSequence, setCopiedSequence] = useState<number | null>(null)
+  const [hiddenRoles, setHiddenRoles] = useState<string[]>([])
+  const [hiddenContentTypes, setHiddenContentTypes] = useState<string[]>([])
   const detailQuery = useQuery({
     queryKey: ['message-audit-detail', props.requestId],
     queryFn: () => getMessageAuditDetail(props.requestId),
   })
   const detail = detailQuery.data
+  const roles = useMemo(
+    () =>
+      [...new Set(detail?.messages.map((message) => message.role) ?? [])]
+        .filter(Boolean)
+        .sort(),
+    [detail?.messages]
+  )
+  const contentTypes = useMemo(
+    () =>
+      [
+        ...new Set(
+          detail?.messages.map((message) => message.content_type) ?? []
+        ),
+      ]
+        .filter(Boolean)
+        .sort(),
+    [detail?.messages]
+  )
+  const visibleMessages = useMemo(
+    () =>
+      filterMessageAuditMessages(
+        detail?.messages ?? [],
+        hiddenRoles,
+        hiddenContentTypes
+      ),
+    [detail?.messages, hiddenContentTypes, hiddenRoles]
+  )
 
   if (detailQuery.isLoading) {
     return (
@@ -144,13 +232,42 @@ function DetailBody(props: { requestId: string }) {
     setCopiedSequence(sequence)
     window.setTimeout(() => setCopiedSequence(null), 1200)
   }
-
-  const toolMessages = detail.messages.filter((message) =>
-    ['tools', 'functions'].includes(message.content_type)
-  )
-  const regularMessages = detail.messages.filter(
-    (message) => !['tools', 'functions'].includes(message.content_type)
-  )
+  const toggleRole = (role: string, visible: boolean) => {
+    setHiddenRoles((current) =>
+      visible ? current.filter((value) => value !== role) : [...current, role]
+    )
+  }
+  const toggleContentType = (contentType: string, visible: boolean) => {
+    setHiddenContentTypes((current) =>
+      visible
+        ? current.filter((value) => value !== contentType)
+        : [...current, contentType]
+    )
+  }
+  const hasActiveFilters =
+    hiddenRoles.length > 0 || hiddenContentTypes.length > 0
+  let messageContent: ReactNode
+  if (detail.messages.length === 0) {
+    messageContent = (
+      <p className='text-muted-foreground py-8 text-center text-sm'>
+        {t('Message body was not captured for this request.')}
+      </p>
+    )
+  } else if (visibleMessages.length === 0) {
+    messageContent = (
+      <p className='text-muted-foreground py-8 text-center text-sm'>
+        {t('No messages match the selected filters.')}
+      </p>
+    )
+  } else {
+    messageContent = (
+      <AuditMessageList
+        messages={visibleMessages}
+        copiedSequence={copiedSequence}
+        onCopy={copyMessage}
+      />
+    )
+  }
 
   return (
     <div className='space-y-5 px-1 pb-8'>
@@ -169,38 +286,64 @@ function DetailBody(props: { requestId: string }) {
         <dd className='font-mono text-xs break-all'>
           {detail.request.request_path}
         </dd>
+        <dt className='text-muted-foreground'>{t('Inferred session')}</dt>
+        <dd className='font-mono text-xs break-all'>
+          {detail.request.audit_session_id}
+        </dd>
       </dl>
 
       <section className='space-y-3'>
-        <h3 className='text-sm font-medium'>{t('Messages')}</h3>
-        {detail.messages.length === 0 ? (
-          <p className='text-muted-foreground py-8 text-center text-sm'>
-            {t('Message body was not captured for this request.')}
-          </p>
-        ) : (
-          <AuditMessageList
-            messages={regularMessages}
-            copiedSequence={copiedSequence}
-            onCopy={copyMessage}
-          />
-        )}
+        <div className='flex flex-wrap items-center justify-between gap-2'>
+          <div>
+            <h3 className='text-sm font-medium'>{t('Messages')}</h3>
+            <p className='text-muted-foreground mt-0.5 text-xs'>
+              {t('{{visible}} of {{total}} messages visible', {
+                visible: visibleMessages.length,
+                total: detail.messages.length,
+              })}
+            </p>
+          </div>
+          <div className='flex flex-wrap items-center gap-2'>
+            <MessageFilterMenu
+              label={t('Roles')}
+              options={roles}
+              hiddenOptions={hiddenRoles}
+              onToggle={toggleRole}
+            />
+            <MessageFilterMenu
+              label={t('Content types')}
+              options={contentTypes}
+              hiddenOptions={hiddenContentTypes}
+              onToggle={toggleContentType}
+            />
+            {hasActiveFilters && (
+              <Button
+                type='button'
+                variant='ghost'
+                size='sm'
+                onClick={() => {
+                  setHiddenRoles([])
+                  setHiddenContentTypes([])
+                }}
+              >
+                <RotateCcw aria-hidden='true' />
+                {t('Show all')}
+              </Button>
+            )}
+          </div>
+        </div>
+        {messageContent}
       </section>
-
-      {toolMessages.length > 0 && (
-        <section className='space-y-3'>
-          <h3 className='text-sm font-medium'>{t('Tools')}</h3>
-          <AuditMessageList
-            messages={toolMessages}
-            collapseContent
-            copiedSequence={copiedSequence}
-            onCopy={copyMessage}
-          />
-        </section>
-      )}
     </div>
   )
 }
 
+/**
+ * 展示单次消息审计详情，并按屏幕宽度选择 Sheet 或 Drawer。
+ *
+ * @param props 请求 ID 和开关回调。
+ * @returns 响应式消息审计详情面板。
+ */
 export function MessageAuditDetailPanel(props: MessageAuditDetailPanelProps) {
   const { t } = useTranslation()
   const isMobile = useMediaQuery('(max-width: 640px)')

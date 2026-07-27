@@ -43,6 +43,47 @@ func messageAuditCaptureRecord(requestID string, userID int, capturedAt int64, h
 	}
 }
 
+func messageAuditSessionCaptureRecord(requestID string, userID int, capturedAt int64, fingerprints []string, anchors []string) *MessageAuditCaptureRecord {
+	blobs := make([]MessageAuditStoredBlob, 0, len(anchors))
+	for _, anchor := range anchors {
+		blobs = append(blobs, MessageAuditStoredBlob{
+			SchemaVersion:  1,
+			ContentHMAC:    anchor,
+			KeyFingerprint: "fingerprint",
+			ContentType:    "input",
+			PlaintextBytes: 12,
+			Nonce:          []byte("nonce-value!"),
+			Ciphertext:     []byte("ciphertext"),
+			Role:           "user",
+		})
+	}
+	sequenceFingerprint := ""
+	if len(fingerprints) > 0 {
+		sequenceFingerprint = fingerprints[len(fingerprints)-1]
+	}
+	return &MessageAuditCaptureRecord{
+		Request: MessageAuditRequest{
+			RequestID:             requestID,
+			UserID:                userID,
+			Protocol:              "openai_responses",
+			Status:                "pending",
+			AuditStatus:           "captured",
+			MessageCount:          len(anchors),
+			PlaintextBytes:        int64(len(anchors) * 12),
+			CapturedAt:            capturedAt,
+			CapturedAtNano:        time.Unix(capturedAt, 0).UnixNano(),
+			CreatedAt:             capturedAt,
+			UpdatedAt:             capturedAt,
+			SequenceFingerprint:   sequenceFingerprint,
+			ConversationItemCount: len(fingerprints),
+			SessionAnchorCount:    len(anchors),
+		},
+		Blobs:                          blobs,
+		ConversationPrefixFingerprints: fingerprints,
+		SessionAnchorHMACs:             anchors,
+	}
+}
+
 func TestCreateMessageAuditCaptureDeduplicatesWithinUser(t *testing.T) {
 	truncateTables(t)
 
@@ -73,6 +114,208 @@ func TestCreateMessageAuditCaptureDeduplicatesWithinUser(t *testing.T) {
 	require.NoError(t, DB.Where("audit_request_id = ?", first.Request.ID).First(&firstItem).Error)
 	require.NoError(t, DB.Where("audit_request_id = ?", second.Request.ID).First(&secondItem).Error)
 	assert.Equal(t, firstItem.BlobID, secondItem.BlobID)
+}
+
+func TestMessageAuditSessionInferenceAndGroupedList(t *testing.T) {
+	truncateTables(t)
+
+	first := messageAuditSessionCaptureRecord("session-request-1", 31, 501, []string{"p1", "p2"}, []string{"a1", "a2"})
+	second := messageAuditSessionCaptureRecord("session-request-2", 31, 502, []string{"p1", "p2", "p3"}, []string{"a1", "a2", "a3"})
+	duplicate := messageAuditSessionCaptureRecord("session-request-3", 31, 503, []string{"p1", "p2", "p3"}, []string{"a1", "a2", "a3"})
+
+	_, err := CreateMessageAuditCapture(first)
+	require.NoError(t, err)
+	_, err = CreateMessageAuditCapture(second)
+	require.NoError(t, err)
+	_, err = CreateMessageAuditCapture(duplicate)
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, first.Request.AuditSessionID)
+	assert.Equal(t, first.Request.AuditSessionID, second.Request.AuditSessionID)
+	assert.Equal(t, first.Request.RequestID, second.Request.ParentRequestID)
+	assert.Equal(t, "prefix", second.Request.SessionMatch)
+	assert.Equal(t, first.Request.AuditSessionID, duplicate.Request.AuditSessionID)
+	assert.Equal(t, second.Request.RequestID, duplicate.Request.ParentRequestID)
+	assert.Equal(t, "exact", duplicate.Request.SessionMatch)
+
+	requests, total, err := ListMessageAudits(MessageAuditListFilter{Limit: 20})
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), total)
+	require.Len(t, requests, 1)
+	assert.Equal(t, duplicate.Request.RequestID, requests[0].RequestID)
+	assert.Equal(t, int64(3), requests[0].SessionRequestCount)
+
+	sessionRequests, sessionTotal, err := ListMessageAudits(MessageAuditListFilter{
+		AuditSessionID: first.Request.AuditSessionID,
+		Limit:          20,
+	})
+	require.NoError(t, err)
+	assert.Equal(t, int64(3), sessionTotal)
+	require.Len(t, sessionRequests, 3)
+	assert.Equal(t, duplicate.Request.RequestID, sessionRequests[0].RequestID)
+	assert.Equal(t, second.Request.RequestID, sessionRequests[1].RequestID)
+	assert.Equal(t, first.Request.RequestID, sessionRequests[2].RequestID)
+}
+
+func TestMessageAuditSessionInferenceRejectsAmbiguousPrefix(t *testing.T) {
+	truncateTables(t)
+
+	first := messageAuditSessionCaptureRecord("ambiguous-prefix-1", 35, 521, []string{"p1", "shared-prefix"}, []string{"a1", "a2"})
+	second := messageAuditSessionCaptureRecord("ambiguous-prefix-2", 35, 522, []string{"other-1", "other-2"}, []string{"b1", "b2"})
+	current := messageAuditSessionCaptureRecord("ambiguous-prefix-current", 35, 523, []string{"p1", "shared-prefix", "current"}, []string{"a1", "a2", "a3"})
+
+	_, err := CreateMessageAuditCapture(first)
+	require.NoError(t, err)
+	_, err = CreateMessageAuditCapture(second)
+	require.NoError(t, err)
+	require.NoError(t, DB.Model(&MessageAuditRequest{}).
+		Where("id = ?", second.Request.ID).
+		Updates(map[string]any{
+			"audit_session_id":        "audsess_ambiguous_second",
+			"sequence_fingerprint":    "shared-prefix",
+			"conversation_item_count": 2,
+		}).Error)
+	_, err = CreateMessageAuditCapture(current)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, first.Request.AuditSessionID, current.Request.AuditSessionID)
+	assert.NotEqual(t, "audsess_ambiguous_second", current.Request.AuditSessionID)
+	assert.Empty(t, current.Request.ParentRequestID)
+	assert.Equal(t, "new", current.Request.SessionMatch)
+}
+
+func TestMessageAuditGroupedListKeepsHistoricalRowsStandalone(t *testing.T) {
+	truncateTables(t)
+
+	for index, requestID := range []string{"legacy-session-1", "legacy-session-2"} {
+		require.NoError(t, DB.Create(&MessageAuditRequest{
+			RequestID:   requestID,
+			UserID:      31,
+			Protocol:    "openai_responses",
+			Status:      "succeeded",
+			AuditStatus: "captured",
+			CapturedAt:  int64(510 + index),
+			CreatedAt:   int64(510 + index),
+			UpdatedAt:   int64(510 + index),
+		}).Error)
+	}
+
+	requests, total, err := ListMessageAudits(MessageAuditListFilter{Limit: 20})
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), total)
+	require.Len(t, requests, 2)
+	assert.Equal(t, "legacy-session-2", requests[0].RequestID)
+	assert.Equal(t, int64(1), requests[0].SessionRequestCount)
+	assert.Equal(t, "legacy-session-1", requests[1].RequestID)
+}
+
+func TestMessageAuditSessionInferenceRecognizesCompressedSubsequence(t *testing.T) {
+	truncateTables(t)
+
+	previous := messageAuditSessionCaptureRecord(
+		"compressed-parent",
+		41,
+		601,
+		[]string{"old-p1", "old-p2", "old-p3", "old-p4", "old-p5", "old-p6", "old-p7", "old-p8"},
+		[]string{"h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8"},
+	)
+	compressed := messageAuditSessionCaptureRecord(
+		"compressed-child",
+		41,
+		602,
+		[]string{"new-p1", "new-p2", "new-p3", "new-p4", "new-p5"},
+		[]string{"h1", "h3", "h5", "summary-new", "h8"},
+	)
+
+	_, err := CreateMessageAuditCapture(previous)
+	require.NoError(t, err)
+	_, err = CreateMessageAuditCapture(compressed)
+	require.NoError(t, err)
+
+	assert.Equal(t, previous.Request.AuditSessionID, compressed.Request.AuditSessionID)
+	assert.Equal(t, previous.Request.RequestID, compressed.Request.ParentRequestID)
+	assert.Equal(t, "compressed", compressed.Request.SessionMatch)
+}
+
+func TestMessageAuditSessionInferenceRejectsWeakCompressionEvidence(t *testing.T) {
+	truncateTables(t)
+
+	previous := messageAuditSessionCaptureRecord(
+		"weak-parent",
+		51,
+		701,
+		[]string{"old-p1", "old-p2", "old-p3", "old-p4", "old-p5", "old-p6", "old-p7", "old-p8"},
+		[]string{"h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8"},
+	)
+	weak := messageAuditSessionCaptureRecord(
+		"weak-child",
+		51,
+		702,
+		[]string{"new-p1", "new-p2", "new-p3", "new-p4", "new-p5", "new-p6"},
+		[]string{"h1", "new-2", "new-3", "new-4", "new-5", "h8"},
+	)
+
+	_, err := CreateMessageAuditCapture(previous)
+	require.NoError(t, err)
+	_, err = CreateMessageAuditCapture(weak)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, previous.Request.AuditSessionID, weak.Request.AuditSessionID)
+	assert.Empty(t, weak.Request.ParentRequestID)
+	assert.Equal(t, "new", weak.Request.SessionMatch)
+}
+
+func TestMessageAuditSessionInferenceRejectsAmbiguousCompression(t *testing.T) {
+	truncateTables(t)
+
+	first := messageAuditSessionCaptureRecord(
+		"ambiguous-compression-1",
+		55,
+		721,
+		[]string{"first-1", "first-2", "first-3", "first-4", "first-5", "first-6", "first-7", "first-8"},
+		[]string{"h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8"},
+	)
+	second := messageAuditSessionCaptureRecord(
+		"ambiguous-compression-2",
+		55,
+		722,
+		[]string{"second-1", "second-2", "second-3", "second-4", "second-5", "second-6", "second-7", "second-8"},
+		[]string{"h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8"},
+	)
+	current := messageAuditSessionCaptureRecord(
+		"ambiguous-compression-current",
+		55,
+		723,
+		[]string{"current-1", "current-2", "current-3", "current-4", "current-5"},
+		[]string{"h1", "h3", "h5", "summary-new", "h8"},
+	)
+
+	_, err := CreateMessageAuditCapture(first)
+	require.NoError(t, err)
+	_, err = CreateMessageAuditCapture(second)
+	require.NoError(t, err)
+	assert.NotEqual(t, first.Request.AuditSessionID, second.Request.AuditSessionID)
+	_, err = CreateMessageAuditCapture(current)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, first.Request.AuditSessionID, current.Request.AuditSessionID)
+	assert.NotEqual(t, second.Request.AuditSessionID, current.Request.AuditSessionID)
+	assert.Empty(t, current.Request.ParentRequestID)
+	assert.Equal(t, "new", current.Request.SessionMatch)
+}
+
+func TestMessageAuditStorageStatsReturnsAuditTableUsage(t *testing.T) {
+	truncateTables(t)
+
+	_, err := CreateMessageAuditCapture(messageAuditCaptureRecord("storage-request", 61, 801, "storage-hmac"))
+	require.NoError(t, err)
+
+	stats, err := GetMessageAuditStorageStats()
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), stats.RequestCount)
+	assert.Equal(t, int64(1), stats.BlobCount)
+	assert.Equal(t, int64(1), stats.ItemCount)
+	assert.Positive(t, stats.StorageBytes)
 }
 
 func TestMessageAuditPurgeWatermarkRejectsLateOldCapture(t *testing.T) {

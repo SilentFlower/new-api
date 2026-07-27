@@ -3,11 +3,13 @@ import { describe, test } from 'node:test'
 
 import type { MessageAuditCleanupTask } from '../types'
 import {
+  filterMessageAuditMessages,
   getMessageAuditCleanupProgress,
   getMessageAuditCleanupTitleKey,
   getMessageAuditErrorMessage,
   isMessageAuditCleanupActive,
   isMessageAuditClearConfirmed,
+  keepMessageAuditSessionPlaceholder,
 } from './message-audit-ui'
 
 function cleanupTask(
@@ -76,5 +78,66 @@ describe('消息审计清理交互状态', () => {
       'database unavailable'
     )
     assert.equal(getMessageAuditErrorMessage(null, 'fallback'), 'fallback')
+  })
+})
+
+describe('消息审计详情过滤', () => {
+  const messages = [
+    {
+      sequence: 0,
+      role: 'developer',
+      content_type: 'instructions',
+      content: 'a',
+    },
+    { sequence: 1, role: 'user', content_type: 'input', content: 'b' },
+    { sequence: 2, role: 'assistant', content_type: 'input', content: 'c' },
+    { sequence: 3, role: 'system', content_type: 'tools', content: {} },
+  ]
+
+  test('角色和内容类型可组合过滤且不改变原始顺序', () => {
+    const visible = filterMessageAuditMessages(
+      messages,
+      ['developer'],
+      ['tools']
+    )
+
+    assert.deepEqual(
+      visible.map((message) => message.sequence),
+      [1, 2]
+    )
+  })
+
+  test('没有筛选时返回全部消息', () => {
+    assert.deepEqual(filterMessageAuditMessages(messages, [], []), messages)
+  })
+})
+
+describe('消息审计会话分页占位', () => {
+  const previousData = { items: [{ request_id: 'request-old' }], total: 1 }
+
+  test('同一会话翻页时保留上一页数据', () => {
+    assert.equal(
+      keepMessageAuditSessionPlaceholder(
+        previousData,
+        'session-1',
+        'session-1'
+      ),
+      previousData
+    )
+  })
+
+  test('切换会话时不展示上一会话数据', () => {
+    assert.equal(
+      keepMessageAuditSessionPlaceholder(
+        previousData,
+        'session-1',
+        'session-2'
+      ),
+      undefined
+    )
+    assert.equal(
+      keepMessageAuditSessionPlaceholder(previousData, 'session-1', null),
+      undefined
+    )
   })
 })

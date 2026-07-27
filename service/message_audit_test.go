@@ -108,6 +108,33 @@ func TestMessageAuditEncryptionAndDedupAreUserScoped(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestMessageAuditSessionFingerprintIgnoresStandaloneToolDefinitions(t *testing.T) {
+	manager := newMessageAuditTestManager(t)
+	request := model.MessageAuditRequest{UserID: 71, Protocol: string(types.RelayFormatOpenAIResponses)}
+	first, err := manager.encryptCapture(&messageAuditCaptureEvent{
+		request: request,
+		entries: []messageAuditPlaintext{
+			{Role: "user", ContentType: "input", Content: "hello"},
+			{Role: "assistant", ContentType: "input", Content: "world"},
+			{Role: "tool", ContentType: "tools", Content: map[string]any{"name": "first"}},
+		},
+	})
+	require.NoError(t, err)
+	second, err := manager.encryptCapture(&messageAuditCaptureEvent{
+		request: request,
+		entries: []messageAuditPlaintext{
+			{Role: "user", ContentType: "input", Content: "hello"},
+			{Role: "assistant", ContentType: "input", Content: "world"},
+			{Role: "tool", ContentType: "tools", Content: map[string]any{"name": "changed"}},
+		},
+	})
+	require.NoError(t, err)
+
+	assert.Equal(t, first.Request.SequenceFingerprint, second.Request.SequenceFingerprint)
+	assert.Equal(t, first.ConversationPrefixFingerprints, second.ConversationPrefixFingerprints)
+	assert.Equal(t, []string{first.Blobs[0].ContentHMAC, first.Blobs[1].ContentHMAC}, first.SessionAnchorHMACs)
+}
+
 func TestMessageAuditProtocolExcludesResponsesCompaction(t *testing.T) {
 	assert.True(t, isMessageAuditProtocolSupported(types.RelayFormatOpenAI))
 	assert.True(t, isMessageAuditProtocolSupported(types.RelayFormatOpenAIResponses))

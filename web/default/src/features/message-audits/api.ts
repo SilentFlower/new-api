@@ -51,10 +51,27 @@ export async function getMessageAudits(search: MessageAuditSearch) {
         status: search.status,
         start_timestamp: search.startTime,
         end_timestamp: search.endTime,
+        audit_session_id: search.auditSessionId,
       },
     }
   )
   return unwrapMessageAuditResponse(res.data)
+}
+
+/**
+ * 返回指定推断会话内的单次请求，按最新请求优先排列。
+ *
+ * @param auditSessionId 服务端生成的推断会话 ID。
+ * @param page 页码，从 1 开始。
+ * @param pageSize 每页请求数。
+ * @returns 会话内单次请求分页数据。
+ */
+export async function getMessageAuditSessionRequests(
+  auditSessionId: string,
+  page: number,
+  pageSize: number
+) {
+  return getMessageAudits({ auditSessionId, page, pageSize })
 }
 
 /**

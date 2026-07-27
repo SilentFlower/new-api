@@ -5,39 +5,54 @@ import (
 	"errors"
 	"time"
 
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-const messageAuditStateID = 1
+const (
+	messageAuditStateID                   = 1
+	messageAuditCompressionMinAnchors     = 4
+	messageAuditCompressionCoverageBase   = 10
+	messageAuditCompressionCoverageTarget = 7
+	messageAuditCompressionCandidateLimit = 20
+	messageAuditCompressionMaxAnchors     = 512
+)
 
 // MessageAuditRequest 保存一次已接收 AI 请求的审计元数据。
 type MessageAuditRequest struct {
-	ID              int64  `json:"id" gorm:"primaryKey"`
-	RequestID       string `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`
-	UserID          int    `json:"user_id" gorm:"index"`
-	Username        string `json:"username" gorm:"type:varchar(128);index"`
-	TokenID         int    `json:"token_id" gorm:"index"`
-	TokenName       string `json:"token_name" gorm:"type:varchar(128);index"`
-	ModelName       string `json:"model_name" gorm:"type:varchar(256);index"`
-	RequestPath     string `json:"request_path" gorm:"type:varchar(512);index"`
-	Protocol        string `json:"protocol" gorm:"type:varchar(64);index"`
-	Status          string `json:"status" gorm:"type:varchar(32);index"`
-	AuditStatus     string `json:"audit_status" gorm:"type:varchar(32);index"`
-	ErrorCode       string `json:"error_code" gorm:"type:varchar(128)"`
-	FinishReason    string `json:"finish_reason" gorm:"type:varchar(128)"`
-	HTTPStatus      int    `json:"http_status"`
-	IsStream        bool   `json:"is_stream"`
-	MessageCount    int    `json:"message_count"`
-	ToolCount       int    `json:"tool_count"`
-	PlaintextBytes  int64  `json:"plaintext_bytes"`
-	DedupSavedBytes int64  `json:"dedup_saved_bytes"`
-	DurationMS      int64  `json:"duration_ms"`
-	CapturedAt      int64  `json:"captured_at" gorm:"index"`
-	CapturedAtNano  int64  `json:"-" gorm:"index"`
-	FinalizedAt     int64  `json:"finalized_at"`
-	CreatedAt       int64  `json:"created_at"`
-	UpdatedAt       int64  `json:"updated_at"`
+	ID                    int64  `json:"id" gorm:"primaryKey"`
+	RequestID             string `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`
+	AuditSessionID        string `json:"audit_session_id" gorm:"type:varchar(64);index"`
+	ParentRequestID       string `json:"parent_request_id" gorm:"type:varchar(64);index"`
+	SessionMatch          string `json:"session_match" gorm:"type:varchar(16);index"`
+	SequenceFingerprint   string `json:"-" gorm:"type:varchar(64);index:idx_message_audit_session_candidate,priority:3"`
+	ConversationItemCount int    `json:"-"`
+	SessionAnchorCount    int    `json:"-"`
+	SessionRequestCount   int64  `json:"session_request_count" gorm:"-:all"`
+	UserID                int    `json:"user_id" gorm:"index;index:idx_message_audit_session_candidate,priority:1"`
+	Username              string `json:"username" gorm:"type:varchar(128);index"`
+	TokenID               int    `json:"token_id" gorm:"index"`
+	TokenName             string `json:"token_name" gorm:"type:varchar(128);index"`
+	ModelName             string `json:"model_name" gorm:"type:varchar(256);index"`
+	RequestPath           string `json:"request_path" gorm:"type:varchar(512);index"`
+	Protocol              string `json:"protocol" gorm:"type:varchar(64);index;index:idx_message_audit_session_candidate,priority:2"`
+	Status                string `json:"status" gorm:"type:varchar(32);index"`
+	AuditStatus           string `json:"audit_status" gorm:"type:varchar(32);index"`
+	ErrorCode             string `json:"error_code" gorm:"type:varchar(128)"`
+	FinishReason          string `json:"finish_reason" gorm:"type:varchar(128)"`
+	HTTPStatus            int    `json:"http_status"`
+	IsStream              bool   `json:"is_stream"`
+	MessageCount          int    `json:"message_count"`
+	ToolCount             int    `json:"tool_count"`
+	PlaintextBytes        int64  `json:"plaintext_bytes"`
+	DedupSavedBytes       int64  `json:"dedup_saved_bytes"`
+	DurationMS            int64  `json:"duration_ms"`
+	CapturedAt            int64  `json:"captured_at" gorm:"index"`
+	CapturedAtNano        int64  `json:"-" gorm:"index"`
+	FinalizedAt           int64  `json:"finalized_at"`
+	CreatedAt             int64  `json:"created_at"`
+	UpdatedAt             int64  `json:"updated_at"`
 }
 
 // MessageAuditBlob 保存按用户隔离去重后的加密消息块。
@@ -86,8 +101,10 @@ type MessageAuditStoredBlob struct {
 
 // MessageAuditCaptureRecord 描述一次需要原子写入的请求元数据和有序消息块。
 type MessageAuditCaptureRecord struct {
-	Request MessageAuditRequest
-	Blobs   []MessageAuditStoredBlob
+	Request                        MessageAuditRequest
+	Blobs                          []MessageAuditStoredBlob
+	ConversationPrefixFingerprints []string
+	SessionAnchorHMACs             []string
 }
 
 // MessageAuditFinalizeRecord 描述请求结束后需要补充的轻量状态。
@@ -113,8 +130,18 @@ type MessageAuditListFilter struct {
 	RequestID      string
 	RequestPath    string
 	Status         string
+	AuditSessionID string
 	Offset         int
 	Limit          int
+}
+
+// MessageAuditStorageStats 描述消息审计表的存储占用和行数。
+type MessageAuditStorageStats struct {
+	StorageBytes     int64
+	StorageEstimated bool
+	RequestCount     int64
+	BlobCount        int64
+	ItemCount        int64
 }
 
 // MessageAuditEncryptedItem 描述详情查询返回给 service 解密的有序密文块。
@@ -158,6 +185,9 @@ func CreateMessageAuditCapture(record *MessageAuditCaptureRecord) (bool, error) 
 			return nil
 		}
 		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		if err := assignMessageAuditSession(tx, record); err != nil {
 			return err
 		}
 		if err := tx.Create(&record.Request).Error; err != nil {
@@ -206,6 +236,206 @@ func CreateMessageAuditCapture(record *MessageAuditCaptureRecord) (bool, error) 
 	return skipped, err
 }
 
+type messageAuditSessionCandidate struct {
+	ID                    int64
+	RequestID             string
+	AuditSessionID        string
+	SequenceFingerprint   string
+	ConversationItemCount int
+}
+
+type messageAuditCompressionCandidate struct {
+	ID             int64
+	RequestID      string
+	AuditSessionID string
+	MatchedAnchors int
+}
+
+type messageAuditCompressionMatch struct {
+	RequestID      string
+	AuditSessionID string
+	MatchedAnchors int
+	RequestIDValue int64
+}
+
+func assignMessageAuditSession(tx *gorm.DB, record *MessageAuditCaptureRecord) error {
+	record.Request.ParentRequestID = ""
+	record.Request.SessionMatch = "new"
+
+	candidate, match, err := findMessageAuditPrefixSession(tx, record)
+	if err != nil {
+		return err
+	}
+	if candidate == nil {
+		candidate, match, err = findMessageAuditCompressedSession(tx, record)
+		if err != nil {
+			return err
+		}
+	}
+	if candidate != nil {
+		record.Request.AuditSessionID = candidate.AuditSessionID
+		record.Request.ParentRequestID = candidate.RequestID
+		record.Request.SessionMatch = match
+		return nil
+	}
+
+	randomID, err := common.GenerateRandomCharsKey(24)
+	if err != nil {
+		return err
+	}
+	record.Request.AuditSessionID = "audsess_" + randomID
+	return nil
+}
+
+func findMessageAuditPrefixSession(tx *gorm.DB, record *MessageAuditCaptureRecord) (*messageAuditSessionCandidate, string, error) {
+	if len(record.ConversationPrefixFingerprints) == 0 || record.Request.SequenceFingerprint == "" {
+		return nil, "", nil
+	}
+
+	var candidates []messageAuditSessionCandidate
+	err := tx.Model(&MessageAuditRequest{}).
+		Select("id, request_id, audit_session_id, sequence_fingerprint, conversation_item_count").
+		Where("user_id = ? AND protocol = ?", record.Request.UserID, record.Request.Protocol).
+		Where("audit_session_id <> '' AND sequence_fingerprint IN ?", record.ConversationPrefixFingerprints).
+		Order("conversation_item_count desc, id desc").
+		Find(&candidates).Error
+	if err != nil || len(candidates) == 0 {
+		return nil, "", err
+	}
+
+	longestCount := candidates[0].ConversationItemCount
+	longestSessions := make(map[string]messageAuditSessionCandidate)
+	for _, candidate := range candidates {
+		if candidate.ConversationItemCount != longestCount {
+			break
+		}
+		if existing, ok := longestSessions[candidate.AuditSessionID]; !ok || candidate.ID > existing.ID {
+			longestSessions[candidate.AuditSessionID] = candidate
+		}
+	}
+	if len(longestSessions) != 1 {
+		return nil, "", nil
+	}
+	for _, candidate := range longestSessions {
+		match := "prefix"
+		if candidate.ConversationItemCount == record.Request.ConversationItemCount && candidate.SequenceFingerprint == record.Request.SequenceFingerprint {
+			match = "exact"
+		}
+		return &candidate, match, nil
+	}
+	return nil, "", nil
+}
+
+func findMessageAuditCompressedSession(tx *gorm.DB, record *MessageAuditCaptureRecord) (*messageAuditSessionCandidate, string, error) {
+	currentAnchors := record.SessionAnchorHMACs
+	if len(currentAnchors) < messageAuditCompressionMinAnchors || len(currentAnchors) > messageAuditCompressionMaxAnchors {
+		return nil, "", nil
+	}
+
+	var summaries []messageAuditCompressionCandidate
+	err := tx.Table("message_audit_items").
+		Select("message_audit_requests.id, message_audit_requests.request_id, message_audit_requests.audit_session_id, COUNT(DISTINCT message_audit_items.blob_id) AS matched_anchors").
+		Joins("JOIN message_audit_requests ON message_audit_requests.id = message_audit_items.audit_request_id").
+		Joins("JOIN message_audit_blobs ON message_audit_blobs.id = message_audit_items.blob_id").
+		Where("message_audit_requests.user_id = ? AND message_audit_requests.protocol = ?", record.Request.UserID, record.Request.Protocol).
+		Where("message_audit_requests.audit_session_id <> '' AND message_audit_requests.session_anchor_count > ?", len(currentAnchors)).
+		Where("message_audit_blobs.user_id = ? AND message_audit_blobs.content_hmac IN ?", record.Request.UserID, currentAnchors).
+		Where("message_audit_items.role NOT IN ?", []string{"developer", "system"}).
+		Where("message_audit_items.content_type NOT IN ?", []string{"tools", "functions"}).
+		Group("message_audit_requests.id, message_audit_requests.request_id, message_audit_requests.audit_session_id").
+		Order("matched_anchors desc, message_audit_requests.id desc").
+		Limit(messageAuditCompressionCandidateLimit).
+		Scan(&summaries).Error
+	if err != nil {
+		return nil, "", err
+	}
+
+	matchesBySession := make(map[string]messageAuditCompressionMatch)
+	for _, summary := range summaries {
+		if summary.MatchedAnchors < messageAuditCompressionMinAnchors {
+			continue
+		}
+		var previousAnchors []string
+		err := tx.Table("message_audit_items").
+			Joins("JOIN message_audit_blobs ON message_audit_blobs.id = message_audit_items.blob_id").
+			Where("message_audit_items.audit_request_id = ?", summary.ID).
+			Where("message_audit_items.role NOT IN ?", []string{"developer", "system"}).
+			Where("message_audit_items.content_type NOT IN ?", []string{"tools", "functions"}).
+			Order("message_audit_items.sequence asc").
+			Pluck("message_audit_blobs.content_hmac", &previousAnchors).Error
+		if err != nil {
+			return nil, "", err
+		}
+		if len(previousAnchors) <= len(currentAnchors) || len(previousAnchors) > messageAuditCompressionMaxAnchors*4 {
+			continue
+		}
+
+		matchedAnchors := messageAuditLCSLength(currentAnchors, previousAnchors)
+		if matchedAnchors < messageAuditCompressionMinAnchors || matchedAnchors*messageAuditCompressionCoverageBase < len(currentAnchors)*messageAuditCompressionCoverageTarget {
+			continue
+		}
+		tailStart := len(previousAnchors) * 3 / 4
+		if tailStart <= 0 || matchedAnchors == messageAuditLCSLength(currentAnchors, previousAnchors[:tailStart]) {
+			continue
+		}
+
+		match := messageAuditCompressionMatch{
+			RequestID:      summary.RequestID,
+			AuditSessionID: summary.AuditSessionID,
+			MatchedAnchors: matchedAnchors,
+			RequestIDValue: summary.ID,
+		}
+		existing, ok := matchesBySession[summary.AuditSessionID]
+		if !ok || match.MatchedAnchors > existing.MatchedAnchors || (match.MatchedAnchors == existing.MatchedAnchors && match.RequestIDValue > existing.RequestIDValue) {
+			matchesBySession[summary.AuditSessionID] = match
+		}
+	}
+
+	var best *messageAuditCompressionMatch
+	secondBestScore := -1
+	for _, match := range matchesBySession {
+		candidate := match
+		if best == nil || candidate.MatchedAnchors > best.MatchedAnchors || (candidate.MatchedAnchors == best.MatchedAnchors && candidate.RequestIDValue > best.RequestIDValue) {
+			if best != nil {
+				secondBestScore = best.MatchedAnchors
+			}
+			best = &candidate
+			continue
+		}
+		if candidate.MatchedAnchors > secondBestScore {
+			secondBestScore = candidate.MatchedAnchors
+		}
+	}
+	if best == nil || secondBestScore >= best.MatchedAnchors-1 {
+		return nil, "", nil
+	}
+	return &messageAuditSessionCandidate{
+		ID:             best.RequestIDValue,
+		RequestID:      best.RequestID,
+		AuditSessionID: best.AuditSessionID,
+	}, "compressed", nil
+}
+
+func messageAuditLCSLength(current []string, previous []string) int {
+	if len(current) == 0 || len(previous) == 0 {
+		return 0
+	}
+	dp := make([]int, len(previous)+1)
+	for _, currentValue := range current {
+		previousDiagonal := 0
+		for previousIndex, previousValue := range previous {
+			oldValue := dp[previousIndex+1]
+			if currentValue == previousValue {
+				dp[previousIndex+1] = previousDiagonal + 1
+			} else if dp[previousIndex] > dp[previousIndex+1] {
+				dp[previousIndex+1] = dp[previousIndex]
+			}
+			previousDiagonal = oldValue
+		}
+	}
+	return dp[len(previous)]
+}
+
 // FinalizeMessageAuditRequest 更新已采集请求的最终状态。
 //
 // 参数 record 是不含正文的结束元数据。
@@ -231,7 +461,74 @@ func FinalizeMessageAuditRequest(record MessageAuditFinalizeRecord) error {
 // 参数 filter 包含筛选和分页条件。
 // 返回值不包含消息密文或正文。
 func ListMessageAudits(filter MessageAuditListFilter) ([]MessageAuditRequest, int64, error) {
-	query := DB.Model(&MessageAuditRequest{})
+	query := messageAuditFilteredQuery(DB.Model(&MessageAuditRequest{}), filter)
+	selectColumns := "id, request_id, audit_session_id, parent_request_id, session_match, user_id, username, token_id, token_name, model_name, request_path, protocol, status, audit_status, error_code, finish_reason, http_status, is_stream, message_count, tool_count, plaintext_bytes, dedup_saved_bytes, duration_ms, captured_at, finalized_at, created_at, updated_at"
+	if filter.AuditSessionID != "" {
+		var total int64
+		if err := query.Where("audit_session_id = ?", filter.AuditSessionID).Count(&total).Error; err != nil {
+			return nil, 0, err
+		}
+		var requests []MessageAuditRequest
+		err := query.Where("audit_session_id = ?", filter.AuditSessionID).
+			Select(selectColumns).
+			Order("id desc").
+			Offset(filter.Offset).
+			Limit(filter.Limit).
+			Find(&requests).Error
+		return requests, total, err
+	}
+
+	groupedQuery := query.
+		Select("MAX(id) AS latest_id, COUNT(*) AS session_request_count").
+		Group("audit_session_id, CASE WHEN audit_session_id IS NULL OR audit_session_id = '' THEN id ELSE 0 END")
+	var total int64
+	if err := DB.Table("(?) AS message_audit_sessions", groupedQuery).Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+	type messageAuditSessionRow struct {
+		LatestID            int64
+		SessionRequestCount int64
+	}
+	var sessionRows []messageAuditSessionRow
+	if err := DB.Table("(?) AS message_audit_sessions", groupedQuery).
+		Order("latest_id desc").
+		Offset(filter.Offset).
+		Limit(filter.Limit).
+		Scan(&sessionRows).Error; err != nil {
+		return nil, 0, err
+	}
+	if len(sessionRows) == 0 {
+		return []MessageAuditRequest{}, total, nil
+	}
+
+	latestIDs := make([]int64, 0, len(sessionRows))
+	countsByID := make(map[int64]int64, len(sessionRows))
+	for _, row := range sessionRows {
+		latestIDs = append(latestIDs, row.LatestID)
+		countsByID[row.LatestID] = row.SessionRequestCount
+	}
+	var unorderedRequests []MessageAuditRequest
+	if err := DB.Model(&MessageAuditRequest{}).
+		Select(selectColumns).
+		Where("id IN ?", latestIDs).
+		Find(&unorderedRequests).Error; err != nil {
+		return nil, 0, err
+	}
+	requestsByID := make(map[int64]MessageAuditRequest, len(unorderedRequests))
+	for _, request := range unorderedRequests {
+		request.SessionRequestCount = countsByID[request.ID]
+		requestsByID[request.ID] = request
+	}
+	requests := make([]MessageAuditRequest, 0, len(sessionRows))
+	for _, row := range sessionRows {
+		if request, ok := requestsByID[row.LatestID]; ok {
+			requests = append(requests, request)
+		}
+	}
+	return requests, total, nil
+}
+
+func messageAuditFilteredQuery(query *gorm.DB, filter MessageAuditListFilter) *gorm.DB {
 	if filter.StartTimestamp > 0 {
 		query = query.Where("captured_at >= ?", filter.StartTimestamp)
 	}
@@ -262,15 +559,48 @@ func ListMessageAudits(filter MessageAuditListFilter) ([]MessageAuditRequest, in
 	if filter.Status != "" {
 		query = query.Where("status = ?", filter.Status)
 	}
+	return query
+}
 
-	var total int64
-	if err := query.Count(&total).Error; err != nil {
-		return nil, 0, err
+// GetMessageAuditStorageStats 返回消息审计表占用空间和行数。
+//
+// 返回值优先使用数据库表级物理分配空间，能力不足时回退为密文逻辑大小。
+func GetMessageAuditStorageStats() (MessageAuditStorageStats, error) {
+	stats := MessageAuditStorageStats{}
+	if err := DB.Model(&MessageAuditRequest{}).Count(&stats.RequestCount).Error; err != nil {
+		return stats, err
 	}
-	var requests []MessageAuditRequest
-	selectColumns := "id, request_id, user_id, username, token_id, token_name, model_name, request_path, protocol, status, audit_status, error_code, finish_reason, http_status, is_stream, message_count, tool_count, plaintext_bytes, dedup_saved_bytes, duration_ms, captured_at, finalized_at, created_at, updated_at"
-	err := query.Select(selectColumns).Order("id desc").Offset(filter.Offset).Limit(filter.Limit).Find(&requests).Error
-	return requests, total, err
+	if err := DB.Model(&MessageAuditBlob{}).Count(&stats.BlobCount).Error; err != nil {
+		return stats, err
+	}
+	if err := DB.Model(&MessageAuditItem{}).Count(&stats.ItemCount).Error; err != nil {
+		return stats, err
+	}
+
+	var storageBytes int64
+	var err error
+	switch common.MainDatabaseType() {
+	case common.DatabaseTypeMySQL:
+		err = DB.Raw("SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states')").Scan(&storageBytes).Error
+	case common.DatabaseTypePostgreSQL:
+		err = DB.Raw("SELECT COALESCE(SUM(pg_total_relation_size((quote_ident(schemaname) || '.' || quote_ident(tablename))::regclass)), 0) FROM pg_tables WHERE schemaname = current_schema() AND tablename IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states')").Scan(&storageBytes).Error
+	case common.DatabaseTypeSQLite:
+		err = DB.Raw("SELECT COALESCE(SUM(pgsize), 0) FROM dbstat WHERE name IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states') OR name IN (SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states'))").Scan(&storageBytes).Error
+	default:
+		err = errors.New("unsupported message audit storage database")
+	}
+	if err == nil {
+		stats.StorageBytes = storageBytes
+		return stats, nil
+	}
+
+	stats.StorageEstimated = true
+	if fallbackErr := DB.Model(&MessageAuditBlob{}).
+		Select("COALESCE(SUM(LENGTH(ciphertext) + LENGTH(nonce)), 0)").
+		Scan(&stats.StorageBytes).Error; fallbackErr != nil {
+		return stats, fallbackErr
+	}
+	return stats, nil
 }
 
 // GetMessageAuditEncryptedDetail 返回单个请求元数据及其有序密文消息块。

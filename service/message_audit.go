@@ -80,6 +80,11 @@ type MessageAuditStatus struct {
 	Retries           uint64 `json:"retries"`
 	Failed            uint64 `json:"failed"`
 	Dropped           uint64 `json:"dropped"`
+	StorageBytes      int64  `json:"storage_bytes"`
+	StorageEstimated  bool   `json:"storage_estimated"`
+	RequestCount      int64  `json:"request_count"`
+	BlobCount         int64  `json:"blob_count"`
+	ItemCount         int64  `json:"item_count"`
 }
 
 // MessageAuditMessage 是详情接口返回的单个规范化消息块。
@@ -203,6 +208,16 @@ func GetMessageAuditStatus() MessageAuditStatus {
 		RetentionDays:     MessageAuditRetentionDays(),
 		QueueCapacity:     messageAuditQueueCapacity,
 		QueueByteCapacity: messageAuditQueueByteLimit,
+	}
+	storageStats, err := model.GetMessageAuditStorageStats()
+	if err != nil {
+		logger.LogWarn(context.Background(), fmt.Sprintf("消息审计存储统计失败: %v", err))
+	} else {
+		status.StorageBytes = storageStats.StorageBytes
+		status.StorageEstimated = storageStats.StorageEstimated
+		status.RequestCount = storageStats.RequestCount
+		status.BlobCount = storageStats.BlobCount
+		status.ItemCount = storageStats.ItemCount
 	}
 	if manager == nil {
 		return status
@@ -606,6 +621,7 @@ func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureE
 		Request: capture.request,
 		Blobs:   make([]model.MessageAuditStoredBlob, 0, len(capture.entries)),
 	}
+	previousFingerprint := ""
 	for _, entry := range capture.entries {
 		plaintext, err := common.Marshal(entry)
 		if err != nil {
@@ -615,7 +631,7 @@ func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureE
 		if err != nil {
 			return nil, err
 		}
-		record.Blobs = append(record.Blobs, model.MessageAuditStoredBlob{
+		stored := model.MessageAuditStoredBlob{
 			SchemaVersion:  messageAuditSchemaVersion,
 			ContentHMAC:    manager.contentHMAC(capture.request.UserID, messageAuditSchemaVersion, plaintext),
 			KeyFingerprint: manager.keyFingerprint,
@@ -624,9 +640,51 @@ func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureE
 			Nonce:          nonce,
 			Ciphertext:     ciphertext,
 			Role:           entry.Role,
-		})
+		}
+		record.Blobs = append(record.Blobs, stored)
+		if !isMessageAuditConversationBlob(stored) {
+			continue
+		}
+		previousFingerprint = manager.nextMessageAuditSessionFingerprint(capture.request.UserID, capture.request.Protocol, previousFingerprint, stored)
+		record.ConversationPrefixFingerprints = append(record.ConversationPrefixFingerprints, previousFingerprint)
+		if isMessageAuditSessionAnchor(stored) {
+			record.SessionAnchorHMACs = append(record.SessionAnchorHMACs, stored.ContentHMAC)
+		}
 	}
+	record.Request.SequenceFingerprint = previousFingerprint
+	record.Request.ConversationItemCount = len(record.ConversationPrefixFingerprints)
+	record.Request.SessionAnchorCount = len(record.SessionAnchorHMACs)
 	return record, nil
+}
+
+func isMessageAuditConversationBlob(stored model.MessageAuditStoredBlob) bool {
+	return stored.ContentType != "tools" && stored.ContentType != "functions"
+}
+
+func isMessageAuditSessionAnchor(stored model.MessageAuditStoredBlob) bool {
+	if !isMessageAuditConversationBlob(stored) {
+		return false
+	}
+	role := strings.ToLower(stored.Role)
+	return role != "developer" && role != "system"
+}
+
+func (manager *messageAuditManager) nextMessageAuditSessionFingerprint(userID int, protocol string, previous string, stored model.MessageAuditStoredBlob) string {
+	mac := hmac.New(sha256.New, manager.dedupKey)
+	_, _ = mac.Write([]byte("message-audit-session-prefix-v1"))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(strconv.Itoa(userID)))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(protocol))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(previous))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(stored.Role))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(stored.ContentType))
+	_, _ = mac.Write([]byte{0})
+	_, _ = mac.Write([]byte(stored.ContentHMAC))
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 func (manager *messageAuditManager) sanitizeValue(value any, parentType string, depth int) any {
