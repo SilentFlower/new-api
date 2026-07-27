@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"实现独立敏感消息审计时必须保持普通系统/数据库日志不记录正文，并补充受控例外。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"审计表、去重唯一约束、事务清理水位和批量删除必须兼容 SQLite、MySQL、PostgreSQL。"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"root-only 列表、详情、状态和系统清理任务需遵循现有管理 API 查询与响应契约。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"配置、查询、解密和清理错误必须使用管理 API 错误格式且不泄露正文或密钥。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"实现与测试需遵循 JSON 包装、跨库、testify、Bun 和安全检查要求。"}
+{"file":".trellis/spec/frontend/index.md","reason":"web/default 管理页需遵循项目前端规范索引与 i18n 约束。"}

@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"检查正文只进入加密审计表，普通日志、错误和管理审计不泄露消息内容。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"检查迁移、唯一约束、锁、事务和清理在三种主数据库上的一致性。"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"检查筛选参数、分页、root-only 权限、列表/详情数据边界与系统任务契约。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查所有失败路径 fail-open 且管理 API 错误不暴露密钥、密文或内部数据。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"执行后端测试、race、vet、前端 Bun 检查和受保护信息审查。"}
+{"file":".trellis/spec/frontend/index.md","reason":"检查管理页面响应式、i18n、路由和项目现有 UI 模式一致。"}

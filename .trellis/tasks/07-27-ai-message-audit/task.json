@@ -1,0 +1,54 @@
+{
+  "id": "ai-message-audit",
+  "name": "ai-message-audit",
+  "title": "AI 消息持久化审计",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-07-27",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-07-27T14:33:24Z",
+      "contextKey": "codex_019fa3ed-88c5-7f50-83c9-23ab137041b4",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "9cec1cc1c1e153a087523d588375246c2a8baecf",
+        "status": [
+          {
+            "status": " M",
+            "path": "docker-compose.yml"
+          }
+        ]
+      }
+    }
+  },
+  "progress": {
+    "updatedAt": "2026-07-27T16:57:04.725Z",
+    "completedSteps": [
+      "实现入站消息审计的加密去重存储、异步采集、清理任务与 root 管理 API",
+      "完成 web/default 管理页面、系统设置、七语言 i18n 与前后端回归测试",
+      "修复 Check-All CHK-001 至 CHK-006，并更新消息审计日志规范",
+      "业务提交已推送至 origin/build-bak"
+    ],
+    "partialStep": "远端部署与 root 登录态浏览器验收尚未执行",
+    "nextStep": "部署最新 build-bak，并验证审计启停、筛选、详情解密、移动布局和一键清空",
+    "notes": "任务范围自动化验证通过；前端全量 lint/format 仍存在与本任务无关的仓库基线问题。"
+  }
+}
