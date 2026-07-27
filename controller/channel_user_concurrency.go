@@ -16,7 +16,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const maxChannelUserConcurrencyLimit = 1000
+const (
+	maxChannelUserConcurrencyLimit             = 1000
+	channelUserConcurrencyErrorLogRecordedKey  = "channel_user_concurrency_error_log_recorded"
+	channelUserConcurrencyErrorLogAdminInfoKey = "channel_user_concurrency"
+)
 
 type channelUserConcurrencyGuard struct {
 	lease       *service.ChannelUserConcurrencyLease
@@ -77,6 +81,7 @@ func acquireChannelUserConcurrencyGuard(c *gin.Context) (*channelUserConcurrency
 		}
 		apiErr := newChannelUserConcurrencyAPIError(err)
 		logger.LogWarn(baseContext, fmt.Sprintf("获取渠道单用户并发租约失败: channel_id=%d user_id=%d limit=%d error_code=%s", channelID, userID, limit, apiErr.GetErrorCode()))
+		recordRelayErrorLog(c, apiErr)
 		return nil, apiErr
 	}
 	guard.lease = lease
@@ -109,7 +114,9 @@ func finishChannelUserConcurrencyGuard(c *gin.Context, guard *channelUserConcurr
 		c.Request = c.Request.WithContext(guard.baseContext)
 	}
 	if guard.lease.IsLost() {
-		return newChannelUserConcurrencyAPIError(service.ErrChannelUserConcurrencyUnavailable)
+		apiErr := newChannelUserConcurrencyAPIError(service.ErrChannelUserConcurrencyUnavailable)
+		recordRelayErrorLog(c, apiErr)
+		return apiErr
 	}
 	return currentErr
 }
@@ -137,6 +144,52 @@ func isChannelUserConcurrencyAPIError(err *types.NewAPIError) bool {
 	}
 	return err.GetErrorCode() == types.ErrorCodeChannelUserConcurrencyExceeded ||
 		err.GetErrorCode() == types.ErrorCodeChannelUserConcurrencyUnavailable
+}
+
+func prepareChannelUserConcurrencyErrorLog(c *gin.Context, err *types.NewAPIError) bool {
+	if !isChannelUserConcurrencyAPIError(err) {
+		return true
+	}
+	if c.GetBool(channelUserConcurrencyErrorLogRecordedKey) {
+		return false
+	}
+	c.Set(channelUserConcurrencyErrorLogRecordedKey, true)
+
+	logOther, _ := common.GetContextKeyType[map[string]interface{}](c, constant.ContextKeyLogOther)
+	if logOther == nil {
+		logOther = map[string]interface{}{}
+	}
+	adminInfo, _ := logOther["admin_info"].(map[string]interface{})
+	if adminInfo == nil {
+		adminInfo = map[string]interface{}{}
+		logOther["admin_info"] = adminInfo
+	}
+	adminInfo[channelUserConcurrencyErrorLogAdminInfoKey] = map[string]interface{}{
+		"channel_id": common.GetContextKeyInt(c, constant.ContextKeyChannelId),
+		"user_id":    common.GetContextKeyInt(c, constant.ContextKeyUserId),
+		"limit":      common.GetContextKeyInt(c, constant.ContextKeyChannelUserConcurrencyLimit),
+		"error_code": err.GetErrorCode(),
+	}
+	common.SetContextKey(c, constant.ContextKeyLogOther, logOther)
+	return true
+}
+
+func channelUserConcurrencyAPIErrorFromCode(code types.ErrorCode) *types.NewAPIError {
+	switch code {
+	case types.ErrorCodeChannelUserConcurrencyExceeded:
+		return newChannelUserConcurrencyAPIError(service.ErrChannelUserConcurrencyExceeded)
+	case types.ErrorCodeChannelUserConcurrencyUnavailable:
+		return newChannelUserConcurrencyAPIError(service.ErrChannelUserConcurrencyUnavailable)
+	default:
+		return nil
+	}
+}
+
+func recordChannelUserConcurrencyErrorCode(c *gin.Context, code types.ErrorCode) {
+	apiErr := channelUserConcurrencyAPIErrorFromCode(code)
+	if apiErr != nil {
+		recordRelayErrorLog(c, apiErr)
+	}
 }
 
 func channelUserConcurrencyMidjourneyHTTPStatus(response *dto.MidjourneyResponse) (int, bool) {

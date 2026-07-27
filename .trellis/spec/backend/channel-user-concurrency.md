@@ -6,7 +6,7 @@
 
 ### 1. Scope / Trigger
 
-- Trigger：修改渠道 `user_concurrency_limit` 字段、渠道缓存上下文、并发租约存储、Relay 重试、流式/非流式 HTTP、Realtime/Responses WebSocket、异步任务实时查询、Midjourney、Claude `count_tokens` 或视觉辅助上游调用。
+- Trigger：修改渠道 `user_concurrency_limit` 字段、渠道缓存上下文、并发租约存储、Relay 重试、流式/非流式 HTTP、Realtime/Responses WebSocket、异步任务实时查询、Midjourney、Claude `count_tokens`、视觉辅助上游调用或管理端错误日志记录。
 - 统计维度固定为 `channel_id + user_id`；同一用户的多个 API Token 共享限制，不同用户或不同渠道互不影响。
 - 限制只覆盖实际上游调用。管理端渠道测试、纯数据库任务查询和异步任务在上游响应结束后的后台运行时间不占名额。
 - 定制逻辑必须保持薄层：Redis、内存、续租和释放归属 `service/channel_user_concurrency.go`；协议错误与 Gin 生命周期归属独立 Controller/Relay 领域文件；既有热点只保留获取、持有、取消和释放调用。
@@ -72,6 +72,23 @@ ErrorCodeChannelUserConcurrencyExceeded    = "channel_user_concurrency_exceeded"
 ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailable"
 ```
 
+管理员错误日志审计字段：
+
+```json
+{
+  "other": {
+    "admin_info": {
+      "channel_user_concurrency": {
+        "channel_id": 80,
+        "user_id": 123,
+        "limit": 4,
+        "error_code": "channel_user_concurrency_exceeded"
+      }
+    }
+  }
+}
+```
+
 ### 3. Contracts
 
 #### 配置与持久化
@@ -103,6 +120,15 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 - 视觉辅助按实际辅助渠道和当前用户独立获取；主渠道必须在视觉辅助预处理完成后再获取，避免同渠道自占两个名额。
 - 本地超限或租约不可用必须发生在计费与上游调用前，不得进入渠道自动禁用逻辑。
 
+#### 错误日志
+
+- 获取租约时立即返回的 `429/503` 与运行中租约丢失产生的 `503`，都必须经过统一 `recordRelayErrorLog` 入口写入数据库错误日志。
+- Task 和 Midjourney 必须先保留稳定错误码，再由 Controller 将错误码还原为对应 API 错误并写入统一错误日志。
+- 同一请求即使同时经过 guard 和外围既有日志入口，也只能写入一条并发错误日志；去重范围固定为请求级，不能跨请求吞日志。
+- 数据库日志必须继续服从全局 `ERROR_LOG_ENABLED` 开关；关闭时不写数据库，但运行时 `LogWarn` 仍保留，便于运维排查。
+- 管理员审计信息固定写入 `other.admin_info.channel_user_concurrency`，包含 `channel_id`、`user_id`、`limit` 和 `error_code`；不得把这些字段放到普通用户可见区域。
+- 日志补录不得改变 HTTP 状态码、协议错误体、重试、计费、渠道自动禁用或租约释放行为。
+
 #### 取消传播
 
 - 获取 guard 后会把尝试级可取消 context 写回 `c.Request`；租约丢失时取消该 context。
@@ -119,9 +145,12 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 | 配置小于 `0`、含小数或大于 `1000` | 管理 API 参数错误 | 不保存配置 |
 | 同渠道同用户达到上限 | `429 channel_user_concurrency_exceeded` | 不排队、不预扣、不访问上游、不重试、不自动禁用 |
 | Redis 已启用但不可用 | `503 channel_user_concurrency_unavailable` | 失败关闭，不回退内存、不预扣、不访问上游、不重试、不自动禁用 |
-| 运行中租约续租失败或丢失 | `503 channel_user_concurrency_unavailable`，若响应已提交则终止连接 | 取消实际上游请求或关闭 WebSocket，记录告警 |
+| 运行中租约续租失败或丢失 | `503 channel_user_concurrency_unavailable`，若响应已提交则终止连接 | 取消实际上游请求或关闭 WebSocket，记录运行时告警和数据库错误日志 |
 | 释放 Redis member 失败 | 保留当前业务结果 | 记录脱敏告警，依赖 TTL 回收 |
 | Task/Midjourney 本地并发错误 | 保留各自协议错误体，并映射 `429/503` | 必须标记本地错误，不能按普通 `429/5xx` 重试 |
+| `ERROR_LOG_ENABLED=true` | 保持原 `429/503` 响应 | 每个请求写入一条 `LogTypeError`，附带管理员审计信息 |
+| `ERROR_LOG_ENABLED=false` | 保持原 `429/503` 响应 | 不写数据库错误日志，仍记录运行时告警 |
+| guard 与外围入口重复记录 | 保持原 `429/503` 响应 | 请求级去重后只保留一条数据库错误日志 |
 
 两类并发错误都必须设置 `skipRetry`，错误码不得使用 `channel:` 前缀，也不得传入 `processChannelError`。日志只包含 request ID、channel ID、user ID、limit 和脱敏错误摘要，不得包含 API Key、Redis 地址、请求体或响应体。
 
@@ -131,11 +160,15 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 - Good：首个上游渠道真实失败，释放旧租约后重试到新渠道；两个渠道的计数互不串联。
 - Good：Responses WebSocket 完成普通、Compact、普通三轮请求，整个客户端连接只获取一次租约。
 - Good：Redis 续租失败后取消 Vertex OAuth/任务查询或关闭 WebSocket，而不是只修改 Gin context 中未被上游请求使用的值。
+- Good：渠道 `80` 的第 5 个同用户并发请求被拒绝后，管理端错误日志只出现一条记录，并能在管理员信息中看到渠道、用户、限制和稳定错误码。
 - Base：历史渠道缺少新字段，所有 Relay 路径保持原行为。
 - Base：异步任务提交成功后立即释放；任务在上游继续运行不占并发名额。
+- Base：关闭 `ERROR_LOG_ENABLED` 后不产生数据库错误日志，但运行时日志仍能定位并发拒绝。
 - Bad：Redis 故障时回退内存，会让多实例分别放行并突破全局上限。
 - Bad：在视觉辅助前先获取主渠道租约，辅助渠道与主渠道相同时可能自阻塞。
 - Bad：Task 本地 `503` 先进入通用 `5xx` 判断再检查 `LocalError`，会错误换渠重试。
+- Bad：只调用 `LogWarn` 而不进入统一错误日志入口，管理端无法检索并发拒绝。
+- Bad：guard 与外围入口各写一条日志，同一个请求在管理端出现重复记录。
 
 ### 6. Tests Required
 
@@ -144,6 +177,8 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 - Service 内存模式：断言同用户同渠道上限、用户/渠道隔离、过期清理、幂等释放和不限流时跳过 Redis。
 - Service Redis 模式：断言 Lua 获取原子性、并发竞争不突破上限、续租、释放、member 丢失和 Redis 不可用时失败关闭。
 - Controller/Relay：断言 `429/503` 的稳定错误码、`skipRetry`、不自动禁用、不预扣和不上游。
+- 错误日志：使用真实测试日志库断言 `429/503` 均持久化稳定错误码、用户/渠道/request ID 与管理员审计信息；重复调用统一入口仍只产生一条记录。
+- 日志开关：断言 `ERROR_LOG_ENABLED=false` 时不写数据库，且不改变并发拒绝响应。
 - 上下文传播：断言通用 HTTP、Realtime WebSocket、Claude `count_tokens`、Midjourney、Gemini/Vertex 任务查询及 Vertex OAuth 在取消后不发出上游请求或及时返回取消错误。
 - Responses WebSocket：断言首轮重试释放旧租约，多轮连接只获取一次，断开后释放。
 - 视觉辅助：断言并发拒绝发生在辅助上游和预扣之前。
@@ -200,3 +235,26 @@ if taskErr.StatusCode/100 == 5 {
 ```
 
 本地并发保护不是上游故障，必须在通用 `429/5xx` 重试分支之前返回。
+
+#### Wrong：并发 guard 只返回错误，不进入统一错误日志入口
+
+```go
+guard, apiErr := acquireChannelUserConcurrencyGuard(c)
+if apiErr != nil {
+	return apiErr
+}
+```
+
+问题：运行时告警仍存在，但管理端错误日志没有可检索记录；若外围路径另行补记，还可能出现协议间行为不一致。
+
+#### Correct：guard 负责触发统一日志入口，由请求级标记防止外围重复写入
+
+```go
+guard, apiErr := acquireChannelUserConcurrencyGuard(c)
+if apiErr != nil {
+	recordRelayErrorLog(c, apiErr)
+	return apiErr
+}
+```
+
+统一入口必须继续检查 `ERROR_LOG_ENABLED`，并把审计字段嵌套在 `other.admin_info.channel_user_concurrency`，不能复制一套独立的数据库写入逻辑。
