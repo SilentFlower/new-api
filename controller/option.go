@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/console_setting"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -221,6 +222,19 @@ func UpdateOption(c *gin.Context) {
 				"success": false,
 				"message": "无效的主题值，可选值：default（新版前端）、classic（经典前端）",
 			})
+			return
+		}
+	case "MessageAuditEnabled":
+		if option.Value == "true" {
+			if err := service.ValidateMessageAuditConfiguration(); err != nil {
+				common.ApiErrorMsg(c, err.Error())
+				return
+			}
+		}
+	case "MessageAuditRetentionDays":
+		retentionDays, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || retentionDays < 1 || retentionDays > 30 {
+			common.ApiErrorMsg(c, "消息审计保留天数必须在 1 到 30 之间")
 			return
 		}
 	case "GroupRatio":

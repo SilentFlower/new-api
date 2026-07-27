@@ -80,12 +80,16 @@ import type { LogCleanupTask } from '../types'
 
 const logSettingsSchema = z.object({
   LogConsumeEnabled: z.boolean(),
+  MessageAuditEnabled: z.boolean(),
+  MessageAuditRetentionDays: z.number().int().min(1).max(30),
 })
 
 type LogSettingsFormValues = z.infer<typeof logSettingsSchema>
 
 type LogSettingsSectionProps = {
   defaultEnabled: boolean
+  defaultMessageAuditEnabled: boolean
+  defaultMessageAuditRetentionDays: number
 }
 
 type ServerLogInfo = {
@@ -141,6 +145,8 @@ function isActiveLogCleanupTask(task: LogCleanupTask | null) {
 
 export function LogSettingsSection({
   defaultEnabled,
+  defaultMessageAuditEnabled,
+  defaultMessageAuditRetentionDays,
 }: LogSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -148,6 +154,8 @@ export function LogSettingsSection({
     resolver: zodResolver(logSettingsSchema),
     defaultValues: {
       LogConsumeEnabled: defaultEnabled,
+      MessageAuditEnabled: defaultMessageAuditEnabled,
+      MessageAuditRetentionDays: defaultMessageAuditRetentionDays,
     },
   })
 
@@ -163,6 +171,8 @@ export function LogSettingsSection({
   const [serverLogCleanupMode, setServerLogCleanupMode] = useState('by_count')
   const [serverLogCleanupValue, setServerLogCleanupValue] = useState(10)
   const [serverLogCleanupLoading, setServerLogCleanupLoading] = useState(false)
+  const [messageAuditKeyConfigured, setMessageAuditKeyConfigured] =
+    useState(false)
 
   const fetchServerLogInfo = useCallback(async () => {
     try {
@@ -174,12 +184,39 @@ export function LogSettingsSection({
   }, [])
 
   useEffect(() => {
-    form.reset({ LogConsumeEnabled: defaultEnabled })
-  }, [defaultEnabled, form])
+    form.reset({
+      LogConsumeEnabled: defaultEnabled,
+      MessageAuditEnabled: defaultMessageAuditEnabled,
+      MessageAuditRetentionDays: defaultMessageAuditRetentionDays,
+    })
+  }, [
+    defaultEnabled,
+    defaultMessageAuditEnabled,
+    defaultMessageAuditRetentionDays,
+    form,
+  ])
 
   useEffect(() => {
     fetchServerLogInfo()
   }, [fetchServerLogInfo])
+
+  useEffect(() => {
+    let cancelled = false
+    async function fetchMessageAuditStatus() {
+      try {
+        const res = await api.get('/api/message-audit/status')
+        if (!cancelled && res.data.success) {
+          setMessageAuditKeyConfigured(Boolean(res.data.data?.key_configured))
+        }
+      } catch {
+        /* 状态提示不阻断其他日志设置。 */
+      }
+    }
+    void fetchMessageAuditStatus()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -257,11 +294,24 @@ export function LogSettingsSection({
   }, [logCleanupActive, logCleanupTaskId, t])
 
   const onSubmit = async (values: LogSettingsFormValues) => {
-    if (values.LogConsumeEnabled === defaultEnabled) return
-    await updateOption.mutateAsync({
-      key: 'LogConsumeEnabled',
-      value: values.LogConsumeEnabled,
-    })
+    if (values.LogConsumeEnabled !== defaultEnabled) {
+      await updateOption.mutateAsync({
+        key: 'LogConsumeEnabled',
+        value: values.LogConsumeEnabled,
+      })
+    }
+    if (values.MessageAuditEnabled !== defaultMessageAuditEnabled) {
+      await updateOption.mutateAsync({
+        key: 'MessageAuditEnabled',
+        value: values.MessageAuditEnabled,
+      })
+    }
+    if (values.MessageAuditRetentionDays !== defaultMessageAuditRetentionDays) {
+      await updateOption.mutateAsync({
+        key: 'MessageAuditRetentionDays',
+        value: values.MessageAuditRetentionDays,
+      })
+    }
   }
 
   const handleRequestCleanLogs = () => {
@@ -366,6 +416,69 @@ export function LogSettingsSection({
               </SettingsSwitchItem>
             )}
           />
+
+          <SettingsControlGroup className='space-y-4'>
+            <div>
+              <h4 className='text-sm font-medium'>{t('Message auditing')}</h4>
+              <p className='text-muted-foreground text-sm'>
+                {t(
+                  'Persist encrypted inbound AI messages for root security review. Relay requests remain fail-open when audit storage is unavailable.'
+                )}
+              </p>
+            </div>
+            <FormField
+              control={form.control}
+              name='MessageAuditEnabled'
+              render={({ field }) => (
+                <SettingsSwitchItem>
+                  <SettingsSwitchContent>
+                    <FormLabel>{t('Capture inbound messages')}</FormLabel>
+                    <FormDescription>
+                      {messageAuditKeyConfigured
+                        ? t('Encryption key is configured on this node.')
+                        : t(
+                            'MESSAGE_AUDIT_SECRET is missing or invalid. Configure it on every node before enabling auditing.'
+                          )}
+                    </FormDescription>
+                  </SettingsSwitchContent>
+                  <FormControl>
+                    <Switch
+                      checked={field.value}
+                      onCheckedChange={field.onChange}
+                      disabled={!messageAuditKeyConfigured && !field.value}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </SettingsSwitchItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name='MessageAuditRetentionDays'
+              render={({ field }) => (
+                <div className='grid max-w-xs gap-2'>
+                  <FormLabel>{t('Audit retention days')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={1}
+                      max={30}
+                      value={field.value}
+                      onChange={(event) =>
+                        field.onChange(Number(event.target.value))
+                      }
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Encrypted message audits are retained for 1 to 30 days.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </div>
+              )}
+            />
+          </SettingsControlGroup>
 
           <SettingsControlGroup className='space-y-3'>
             <div>

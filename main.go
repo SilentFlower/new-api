@@ -152,6 +152,7 @@ func main() {
 	// switch are enforced inside the runner and each handler's Enabled().
 	controller.RegisterScheduledSystemTasks()
 	service.StartSystemTaskRunner()
+	service.StartMessageAuditManager()
 
 	if os.Getenv("BATCH_UPDATE_ENABLED") == "true" {
 		common.BatchUpdateEnabled = true
@@ -242,6 +243,11 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		common.SysError(fmt.Sprintf("server forced to shutdown: %v", err))
 	}
+	auditShutdownCtx, auditShutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := service.StopMessageAuditManager(auditShutdownCtx); err != nil {
+		common.SysError(fmt.Sprintf("message audit queue drain failed: %v", err))
+	}
+	auditShutdownCancel()
 	// 内存中的看板数据保存入库，避免重启丢失未落库数据 (issue #5679)
 	if common.DataExportEnabled {
 		model.SaveQuotaDataCache()

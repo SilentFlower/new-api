@@ -98,6 +98,10 @@ const OPERATIONS_SECTIONS = [
     build: (settings: OperationsSettings) => (
       <LogSettingsSection
         defaultEnabled={Boolean(settings.LogConsumeEnabled)}
+        defaultMessageAuditEnabled={Boolean(settings.MessageAuditEnabled)}
+        defaultMessageAuditRetentionDays={
+          settings.MessageAuditRetentionDays ?? 7
+        }
       />
     ),
   },

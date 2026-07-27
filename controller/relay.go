@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -133,6 +134,38 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	if err != nil {
 		newAPIError = types.NewError(err, types.ErrorCodeGenRelayInfoFailed)
 		return
+	}
+	auditCaptured := service.CaptureMessageAudit(service.MessageAuditCaptureInput{
+		RequestID:   relayInfo.RequestId,
+		UserID:      relayInfo.UserId,
+		Username:    c.GetString("username"),
+		TokenID:     relayInfo.TokenId,
+		TokenName:   c.GetString("token_name"),
+		ModelName:   relayInfo.OriginModelName,
+		RequestPath: c.Request.URL.Path,
+		Protocol:    relayInfo.RelayFormat,
+		IsStream:    relayInfo.IsStream,
+		CapturedAt:  relayInfo.StartTime,
+		Request:     request,
+	})
+	if auditCaptured {
+		defer func() {
+			status := "succeeded"
+			errorCode := ""
+			httpStatus := c.Writer.Status()
+			if newAPIError != nil {
+				status = "failed"
+				errorCode = string(newAPIError.GetErrorCode())
+				httpStatus = newAPIError.StatusCode
+			}
+			service.FinalizeMessageAudit(service.MessageAuditFinalizeInput{
+				RequestID:  relayInfo.RequestId,
+				Status:     status,
+				ErrorCode:  errorCode,
+				HTTPStatus: httpStatus,
+				Duration:   time.Since(relayInfo.StartTime),
+			})
+		}()
 	}
 
 	originalRequest, err := cloneRelayRequest(request)

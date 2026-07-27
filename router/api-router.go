@@ -280,10 +280,19 @@ func SetApiRouter(router *gin.Engine) {
 		logRoute.GET("/self", middleware.UserAuth(), controller.GetUserLogs)
 		logRoute.GET("/self/search", middleware.UserAuth(), middleware.SearchRateLimit(), controller.SearchUserLogs)
 
+		messageAuditRoute := apiRouter.Group("/message-audit")
+		messageAuditRoute.Use(middleware.RootAuth())
+		{
+			messageAuditRoute.GET("/", controller.GetMessageAudits)
+			messageAuditRoute.GET("/status", controller.GetMessageAuditStatus)
+			messageAuditRoute.GET("/:request_id", controller.GetMessageAuditDetail)
+		}
+
 		systemTaskRoute := apiRouter.Group("/system-task")
 		systemTaskRoute.Use(middleware.RootAuth())
 		{
 			systemTaskRoute.POST("/log-cleanup", controller.CreateLogCleanupSystemTask)
+			systemTaskRoute.POST("/message-audit-cleanup", controller.CreateMessageAuditCleanupSystemTask)
 			systemTaskRoute.GET("/list", controller.ListSystemTasks)
 			systemTaskRoute.GET("/current", controller.GetCurrentSystemTask)
 			systemTaskRoute.GET("/:task_id", controller.GetSystemTask)

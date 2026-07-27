@@ -444,3 +444,183 @@ syncAnthropicReasoningEffortFromRequestBody(info, jsonData)
 // 透传不执行参数覆盖，已解析 DTO 就是安全且足够的字段来源。
 syncAnthropicReasoningEffort(info, request.OutputConfig)
 ```
+
+## 场景：AI 入站消息持久化审计
+
+### 1. Scope / Trigger
+
+- Trigger：修改消息审计开关、`MESSAGE_AUDIT_SECRET`、Relay capture/finalize 钩子、协议规范化、审计表、root 管理 API、保留清理、一键清空任务或消息审计管理页面。
+- 普通应用日志、消费日志和错误日志继续禁止保存 AI 对话正文；本场景仅允许独立的消息审计表在默认关闭、root-only、加密和限期清理条件下保存过滤后的入站可见内容。
+- 第一阶段按单次请求审计，不读取或推断 session、thread、conversation，也不保存当前模型响应正文。
+
+### 2. Signatures
+
+Relay 薄层入口：
+
+```go
+type MessageAuditCaptureInput struct {
+	RequestID string
+	UserID    int
+	Request   dto.Request
+}
+
+type MessageAuditFinalizeInput struct {
+	RequestID  string
+	Status     string
+	ErrorCode  string
+	HTTPStatus int
+	Duration   time.Duration
+}
+
+func CaptureMessageAudit(input MessageAuditCaptureInput) bool
+func FinalizeMessageAudit(input MessageAuditFinalizeInput)
+```
+
+持久化与清理：
+
+```go
+type MessageAuditRequest struct {
+	RequestID      string
+	CapturedAt     int64
+	CapturedAtNano int64
+}
+
+type MessageAuditState struct {
+	PurgeBefore     int64
+	PurgeBeforeNano int64
+}
+
+func CreateMessageAuditCapture(record *MessageAuditCaptureRecord) (bool, error)
+func AdvanceMessageAuditPurgeBefore(cutoff int64) (int64, error)
+func DeleteMessageAuditsBeforeBatch(ctx context.Context, cutoff int64, batchSize int) (int64, error)
+func DeleteOrphanMessageAuditBlobsBatch(ctx context.Context, batchSize int) (int64, error)
+```
+
+管理 API：
+
+```text
+GET  /api/message-audit/
+GET  /api/message-audit/status
+GET  /api/message-audit/:request_id
+POST /api/system-task/message-audit-cleanup
+GET  /api/system-task/current?type=message_audit_cleanup
+GET  /api/system-task/:task_id
+```
+
+环境与配置：
+
+```text
+MESSAGE_AUDIT_SECRET          必填于启用阶段，所有节点必须一致，至少 32 字节
+MessageAuditEnabled           默认 false
+MessageAuditRetentionDays     默认 7，范围 1..30
+```
+
+### 3. Contracts
+
+- 只支持 OpenAI Chat Completions、OpenAI Responses（不含 Compact）、Claude Messages 和 Gemini GenerateContent 的已验证入站 DTO。控制器只组装最小上下文并调用 service，不实现协议解析、过滤、加密、去重或数据库访问。
+- 可见 system/developer/user/assistant/tool 消息、工具定义、工具调用和工具结果可以进入快照；reasoning、thinking、signature、encrypted content、认证头和渠道密钥必须排除。媒体只保存类型、MIME、大小、来源类别和 HMAC 摘要。
+- 工具调用数量只统计实际调用，不统计工具定义或工具结果。OpenAI `tool_calls` 按数组元素计数，Responses/Claude/Gemini 的调用节点各计一次。
+- 正文使用 `MESSAGE_AUDIT_SECRET` 派生的 AES-256-GCM 子密钥加密；去重使用独立 HMAC-SHA256 子密钥，并把用户 ID 与 schema version 纳入指纹。禁止跨用户复用消息块，禁止把密钥、nonce、密文或普通明文哈希返回列表 API。
+- capture 在请求验证后生成不可变安全快照并非阻塞入队；finalize 在请求结束时非阻塞入队。队列满、字节预算不足、快照超限或持久化失败均 fail-open，不得改变 Relay 响应、重试、并发控制或计费。
+- 列表只选择元数据列；详情仅在 root 打开单条记录时读取并解密。详情成功或失败尝试以及清空操作必须写 `LogTypeManage`，管理日志不得包含正文。
+- 清理任务 payload 的 `target_timestamp` 使用 Unix 纳秒并在任务创建时固定。`CapturedAtNano <= PurgeBeforeNano` 的旧 capture 必须跳过；秒级 `CapturedAt/PurgeBefore` 只作为历史数据兼容回退。
+- 清理消息块必须在事务中选择候选，并在实际删除语句中再次使用 `NOT EXISTS` 校验引用。MySQL/PostgreSQL 候选查询通过 `lockForUpdate` 锁定，SQLite 依赖写事务串行化；不得采用“先查 ID、事务外直接删除”的两阶段实现。
+- 前端启动时通过 `/api/system-task/current?type=message_audit_cleanup` 恢复活动任务，轮询任务详情并持续展示进度、删除请求数、删除消息块数或失败信息。业务响应 `success=false` 必须进入错误态，不能伪装成空列表、Disabled 或 Missing。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 审计关闭 | 不创建正文审计记录，Relay 与现有日志行为不变 |
+| 密钥缺失或不足 32 字节时尝试启用 | 管理 API 拒绝更新，不回显密钥 |
+| 支持协议且队列有容量 | 非阻塞接收 capture，后台加密、去重并持久化 |
+| 不支持协议、队列满或字节预算耗尽 | 跳过或丢弃审计，增加无正文指标/告警，业务请求继续 |
+| 快照超过单请求上限 | 只保存 metadata-only 状态，不复制剩余正文 |
+| 密钥指纹不匹配或密文被篡改 | 详情返回解密错误，并记录不含正文的管理审计 |
+| 普通用户、普通管理员访问 | 后端 `RootAuth` 拒绝，前端不显示入口 |
+| 清空后收到截止时间之前的排队 capture | 写入事务读取水位并跳过，旧数据不得重现 |
+| 截止时间之后的新请求与清空发生在同一秒 | 依靠纳秒水位保留新请求 |
+| 消息块仍被较新请求引用 | 孤立块清理不得删除该消息块 |
+| 页面恢复时存在 pending/running 清理任务 | 恢复任务并继续轮询，禁用重复清空 |
+| API HTTP 成功但 `success=false` | React Query 进入错误态并提供重试 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：同一用户连续请求携带相同历史消息，只新增有序引用；详情仍按每次请求当时的顺序完整还原。
+- Good：管理员点击清空后，同一秒稍晚到达的新请求因 `CapturedAtNano` 大于固定水位而保留。
+- Good：清理候选消息块在删除前被新请求复用，删除语句再次校验引用并保留该块。
+- Base：历史记录只有秒级时间字段，查询和清理按秒级字段兼容处理；新写入始终填充纳秒字段。
+- Base：管理员刷新页面时存在活动清理任务，页面从 current 接口恢复进度，不要求重新点击清空。
+- Bad：把正文写入 `logs.content`、`logs.other`、普通运行日志或 ClickHouse 日志表。
+- Bad：使用 session ID 聚合请求，或要求客户端增加自定义会话请求头。
+- Bad：把工具定义数组长度计为工具调用数，导致列表统计失真。
+- Bad：使用秒级点击时间作为唯一清理水位，误删同一秒内稍后产生的新请求。
+- Bad：先查询孤立块 ID，再无条件删除，导致并发写入产生悬空引用。
+
+### 6. Tests Required
+
+- 密钥测试：缺失、过短、随机 nonce、密文篡改、跨用户 HMAC 隔离和密钥指纹不匹配。
+- 协议表驱动测试：四种协议的可见文本、工具定义、实际工具调用/结果、媒体过滤、隐藏思考过滤和 metadata-only 超限状态。
+- 异步生命周期测试：禁用跳过、队列满不阻塞、capture/finalize 顺序、有限重试、字节预算释放、优雅关闭排空和 `go test -race`。
+- 数据库测试：同用户去重、跨用户隔离、有序重复引用、列表不选择密文、详情解密、秒级历史字段兼容、同秒纳秒边界和孤立块删除前复查。
+- 三库测试：SQLite 始终执行；临时 MySQL/PostgreSQL 实例验证迁移、去重、清理水位、共享块保留和孤立块回收。
+- API/权限测试：RootAuth、筛选参数、统一响应、列表不泄密、详情查看管理审计和清空任务去重。
+- 前端测试：业务响应解包、current 任务恢复、确认文本精确匹配、任务活动状态、进度边界、错误回退和结果展示。
+- 回归命令：
+  - `go test ./model ./service ./controller ./router -count=1`
+  - `go test -race ./service -run 'MessageAudit' -count=1`
+  - `go vet ./model ./service ./controller ./router`
+  - `go test ./... -count=1`
+  - `cd web/default && bun test src/features/message-audits`
+  - `cd web/default && bun run typecheck && bun run build && bun run i18n:sync`
+  - 对本任务前端文件运行 `oxlint` 和 `oxfmt --check`
+  - `git diff --check`
+
+### 7. Wrong vs Correct
+
+#### Wrong：使用秒级水位清空
+
+```go
+cutoff := time.Now().Unix()
+state.PurgeBefore = cutoff
+db.Where("captured_at <= ?", cutoff).Delete(&MessageAuditRequest{})
+```
+
+问题：点击清空后同一秒稍晚产生的新请求仍满足 `captured_at <= cutoff`，会被误删。
+
+#### Correct：固定纳秒水位并兼容历史数据
+
+```go
+cutoff := time.Now().UnixNano()
+state.PurgeBeforeNano = cutoff
+state.PurgeBefore = time.Unix(0, cutoff).Unix()
+
+query.Where(
+	"(captured_at_nano > 0 AND captured_at_nano <= ?) OR ((captured_at_nano IS NULL OR captured_at_nano = 0) AND captured_at <= ?)",
+	cutoff,
+	time.Unix(0, cutoff).Unix(),
+)
+```
+
+#### Wrong：按过期候选 ID 无条件删除消息块
+
+```go
+var ids []int64
+db.Where("NOT EXISTS (?)", itemQuery).Pluck("id", &ids)
+db.Where("id IN ?", ids).Delete(&MessageAuditBlob{})
+```
+
+#### Correct：事务锁定候选，并在删除时再次校验
+
+```go
+err := db.Transaction(func(tx *gorm.DB) error {
+	if err := lockForUpdate(tx).Model(&MessageAuditBlob{}).
+		Where("NOT EXISTS (?)", orphanCheck).
+		Pluck("id", &ids).Error; err != nil {
+		return err
+	}
+	return tx.Where("id IN ?", ids).
+		Where("NOT EXISTS (?)", stillOrphan).
+		Delete(&MessageAuditBlob{}).Error
+})
+```
