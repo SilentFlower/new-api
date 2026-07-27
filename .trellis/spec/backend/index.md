@@ -23,6 +23,7 @@
 | [Relay WebSearch 模拟契约](./relay-websearch-emulation.md) | Claude Code 纯 WebSearch 渠道级模拟、provider、密钥脱敏和请求体稳定性 | 已完成 |
 | [Relay 计费模型快照契约](./relay-billing-model.md) | 模型映射后的计费模型选择、冻结、重试清理、任务历史兼容和日志一致性 | 已完成 |
 | [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) | JSON 空白心跳、响应提交、重试、错误体、响应头和并发 writer 生命周期 | 已完成 |
+| [渠道单用户并发限制契约](./channel-user-concurrency.md) | 渠道配置、Redis/内存租约、HTTP/WebSocket/任务生命周期、429/503 错误与取消传播 | 已完成 |
 | [错误处理](./error-handling.md) | 错误类型、传播流程、API 响应格式 | 已完成 |
 | [代码质量标准](./quality-guidelines.md) | 禁止模式、必需模式、测试、构建流程 | 已完成 |
 | [日志规范](./logging-guidelines.md) | 日志层级、格式、敏感数据处理 | 已完成 |
@@ -72,6 +73,10 @@
 ### 涉及 Relay 非流式响应保活
 
 - [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) — JSON 允许列表、Flush、状态码提交、渠道重试、响应头和 writer 并发清理
+
+### 涉及渠道单用户并发、Redis 租约或 Relay 取消传播
+
+- [渠道单用户并发限制契约](./channel-user-concurrency.md) — 配置边界、租约存储、各协议生命周期、本地错误隔离和实际网络请求 context 传播
 
 ### 涉及新渠道适配器
 

@@ -18,10 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
-import {
-  CHANNEL_STATUS,
-  ERROR_MESSAGES,
-} from '../constants'
+import { CHANNEL_STATUS, ERROR_MESSAGES } from '../constants'
 import type { Channel } from '../types'
 import {
   CHANNEL_TYPE_ADVANCED_CUSTOM,
@@ -156,6 +153,14 @@ export const channelFormSchema = z
       ),
     priority: z.number().optional(),
     weight: z.number().optional(),
+    user_concurrency_limit: z
+      .number()
+      .int('User concurrency limit must be an integer between 0 and 1000')
+      .min(0, 'User concurrency limit must be an integer between 0 and 1000')
+      .max(
+        1000,
+        'User concurrency limit must be an integer between 0 and 1000'
+      ),
     test_model: z.string().optional(),
     auto_ban: z.number().optional(),
     status: z.number(),
@@ -320,6 +325,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   model_mapping: '',
   priority: 0,
   weight: 0,
+  user_concurrency_limit: 0,
   test_model: '',
   auto_ban: 1,
   status: CHANNEL_STATUS.ENABLED,
@@ -459,6 +465,7 @@ export function transformChannelToFormDefaults(
     model_mapping: channel.model_mapping || '',
     priority: channel.priority || 0,
     weight: channel.weight || 0,
+    user_concurrency_limit: channel.user_concurrency_limit ?? 0,
     test_model: channel.test_model || '',
     auto_ban: channel.auto_ban ?? 1,
     status: channel.status,
@@ -654,6 +661,7 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     model_mapping: formData.model_mapping || null,
     priority: formData.priority || null,
     weight: formData.weight || null,
+    user_concurrency_limit: formData.user_concurrency_limit ?? 0,
     test_model: formData.test_model || null,
     auto_ban: formData.auto_ban ?? 1,
     status: formData.status,
@@ -702,6 +710,7 @@ export function transformFormDataToUpdatePayload(
     model_mapping: formData.model_mapping || null,
     priority: formData.priority ?? 0,
     weight: formData.weight ?? 0,
+    user_concurrency_limit: formData.user_concurrency_limit ?? 0,
     test_model: formData.test_model || null,
     auto_ban: formData.auto_ban ?? 1,
     status_code_mapping: formData.status_code_mapping || null,

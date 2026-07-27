@@ -21,7 +21,9 @@ import { test } from 'node:test'
 
 import type { Channel } from '../types'
 import {
+  channelFormSchema,
   transformChannelToFormDefaults,
+  transformFormDataToCreatePayload,
   transformFormDataToUpdatePayload,
 } from './channel-form'
 
@@ -49,6 +51,7 @@ function createChannel(setting: string, settings = '{}'): Channel {
     status_code_mapping: null,
     priority: 0,
     auto_ban: 1,
+    user_concurrency_limit: 0,
     other_info: '',
     tag: null,
     setting,
@@ -65,6 +68,41 @@ function createChannel(setting: string, settings = '{}'): Channel {
     settings,
   }
 }
+
+test('渠道单用户并发限制保持 API 与表单往返一致', () => {
+  const channel = createChannel('{}')
+  channel.user_concurrency_limit = 4
+
+  const defaults = transformChannelToFormDefaults(channel)
+  assert.equal(defaults.user_concurrency_limit, 4)
+
+  const payload = transformFormDataToUpdatePayload(defaults, channel.id)
+  assert.equal(payload.user_concurrency_limit, 4)
+
+  channel.user_concurrency_limit = null
+  const historicalDefaults = transformChannelToFormDefaults(channel)
+  assert.equal(historicalDefaults.user_concurrency_limit, 0)
+  assert.equal(
+    transformFormDataToCreatePayload(historicalDefaults).channel
+      .user_concurrency_limit,
+    0
+  )
+  assert.equal(
+    transformFormDataToUpdatePayload(historicalDefaults, channel.id)
+      .user_concurrency_limit,
+    0
+  )
+})
+
+test('渠道单用户并发限制拒绝非法边界', () => {
+  for (const invalidValue of [-1, 1.5, 1001]) {
+    const result = channelFormSchema.safeParse({
+      ...transformChannelToFormDefaults(createChannel('{}')),
+      user_concurrency_limit: invalidValue,
+    })
+    assert.equal(result.success, false)
+  }
+})
 
 test('Responses Compact 透传开关保持 setting JSON 往返兼容', () => {
   const channel = createChannel('{"future_flag":"keep"}')

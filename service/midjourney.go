@@ -162,6 +162,11 @@ func ConvertSimpleChangeParams(content string) *dto.MidjourneyRequest {
 	return changeParams
 }
 
+// DoMidjourneyHttpRequest 使用当前请求上下文调用 Midjourney 上游。
+// @param c 当前 Gin 请求上下文。
+// @param timeout 上游请求超时时间。
+// @param fullRequestURL 完整上游地址。
+// @return Midjourney 响应、原始响应体和请求错误。
 func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestURL string) (*dto.MidjourneyResponseWithStatusCode, []byte, error) {
 	var nullBytes []byte
 	//var requestBody io.Reader
@@ -200,7 +205,11 @@ func DoMidjourneyHttpRequest(c *gin.Context, timeout time.Duration, fullRequestU
 	if err != nil {
 		return MidjourneyErrorWithStatusCodeWrapper(constant.MjErrorUnknown, "create_request_failed", http.StatusInternalServerError), nullBytes, err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	baseContext := context.Background()
+	if c != nil && c.Request != nil {
+		baseContext = c.Request.Context()
+	}
+	ctx, cancel := context.WithTimeout(baseContext, timeout)
 	// 使用带有超时的 context 创建新的请求
 	req = req.WithContext(ctx)
 	req.Header.Set("Content-Type", c.Request.Header.Get("Content-Type"))

@@ -16,6 +16,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
@@ -498,7 +499,17 @@ func TestProxyResponsesWebSocketForwardsCancelPongAndCloseCode(t *testing.T) {
 func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	oldLogConsumeEnabled := common.LogConsumeEnabled
+	oldGuardAcquirer := responsesWebSocketConcurrencyGuardAcquirer
 	common.LogConsumeEnabled = false
+	guardAcquireCalls := 0
+	responsesWebSocketConcurrencyGuardAcquirer = func(c *gin.Context) (*channelUserConcurrencyGuard, *types.NewAPIError) {
+		guardAcquireCalls++
+		return &channelUserConcurrencyGuard{
+			lease:       &service.ChannelUserConcurrencyLease{},
+			baseContext: c.Request.Context(),
+			cancel:      func() {},
+		}, nil
+	}
 	quotaSetting := operation_setting.GetQuotaSetting()
 	oldFreeModelPreConsume := quotaSetting.EnableFreeModelPreConsume
 	quotaSetting.EnableFreeModelPreConsume = false
@@ -512,6 +523,7 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(modelRatios)))
 	t.Cleanup(func() {
 		common.LogConsumeEnabled = oldLogConsumeEnabled
+		responsesWebSocketConcurrencyGuardAcquirer = oldGuardAcquirer
 		quotaSetting.EnableFreeModelPreConsume = oldFreeModelPreConsume
 		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(savedModelRatios))
 	})
@@ -622,7 +634,6 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	_, firstCompleted, err := clientConn.ReadMessage()
 	require.NoError(t, err)
 	require.Equal(t, "response.completed", gjson.GetBytes(firstCompleted, "type").String())
-
 	secondTurn := []byte(`{"type":"response.create","model":"ws-model-b","stream":true,"input":[{"type":"compaction_trigger"}],"client_metadata":{"turn":2}}`)
 	require.NoError(t, clientConn.WriteMessage(websocket.TextMessage, secondTurn))
 	_, itemDone, err := clientConn.ReadMessage()
@@ -661,6 +672,7 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	default:
 	}
 	require.NoError(t, <-proxyResults)
+	assert.Equal(t, 1, guardAcquireCalls)
 }
 
 func TestPrepareResponsesWebSocketTurnAttemptRejectsAdvancedCustomConverter(t *testing.T) {

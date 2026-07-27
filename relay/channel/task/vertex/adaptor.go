@@ -2,6 +2,7 @@ package vertex
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -112,7 +113,7 @@ func (a *TaskAdaptor) BuildRequestHeader(c *gin.Context, req *http.Request, info
 	if info != nil {
 		proxy = info.ChannelSetting.Proxy
 	}
-	token, err := vertexcore.AcquireAccessToken(*adc, proxy)
+	token, err := vertexcore.AcquireAccessTokenWithContext(c.Request.Context(), *adc, proxy)
 	if err != nil {
 		return fmt.Errorf("failed to acquire access token: %w", err)
 	}
@@ -241,8 +242,24 @@ func buildFetchOperationURL(baseURL, upstreamName string) (string, error) {
 	return vertexcore.BuildGoogleModelURL(baseURL, vertexcore.DefaultAPIVersion, project, region, modelName, "fetchPredictOperation"), nil
 }
 
-// FetchTask fetch task status
+// FetchTask 查询 Vertex 任务状态。
+// @param baseUrl Vertex 上游基础地址。
+// @param key Vertex 服务账号凭据。
+// @param body 包含任务 ID 和动作的查询参数。
+// @param proxy 可选代理地址。
+// @return 上游 HTTP 响应和请求错误。
 func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
+	return a.FetchTaskWithContext(context.Background(), baseUrl, key, body, proxy)
+}
+
+// FetchTaskWithContext 使用指定上下文查询 Vertex 任务状态。
+// @param ctx 控制上游请求取消和超时的上下文。
+// @param baseUrl Vertex 上游基础地址。
+// @param key Vertex 服务账号凭据。
+// @param body 包含任务 ID 和动作的查询参数。
+// @param proxy 可选代理地址。
+// @return 上游 HTTP 响应和请求错误。
+func (a *TaskAdaptor) FetchTaskWithContext(ctx context.Context, baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
 	taskID, ok := body["task_id"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid task_id")
@@ -264,11 +281,11 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	if err := common.Unmarshal([]byte(key), adc); err != nil {
 		return nil, fmt.Errorf("failed to decode credentials: %w", err)
 	}
-	token, err := vertexcore.AcquireAccessToken(*adc, proxy)
+	token, err := vertexcore.AcquireAccessTokenWithContext(ctx, *adc, proxy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to acquire access token: %w", err)
 	}
-	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}

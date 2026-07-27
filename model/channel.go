@@ -50,6 +50,8 @@ type Channel struct {
 	ParamOverride     *string `json:"param_override" gorm:"type:text"`
 	HeaderOverride    *string `json:"header_override" gorm:"type:text"`
 	Remark            *string `json:"remark" gorm:"type:varchar(255)" validate:"max=255"`
+
+	UserConcurrencyLimit *int `json:"user_concurrency_limit"`
 	// add after v0.8.5
 	ChannelInfo ChannelInfo `json:"channel_info" gorm:"type:json"`
 
@@ -57,6 +59,16 @@ type Channel struct {
 
 	// cache info
 	Keys []string `json:"-" gorm:"-"`
+}
+
+// GetUserConcurrencyLimit 返回渠道按用户限制的最大并发数。
+//
+// @return int 归一化后的并发上限，零表示不限制。
+func (channel *Channel) GetUserConcurrencyLimit() int {
+	if channel == nil || channel.UserConcurrencyLimit == nil || *channel.UserConcurrencyLimit <= 0 {
+		return 0
+	}
+	return *channel.UserConcurrencyLimit
 }
 
 type ChannelInfo struct {

@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -8,11 +9,14 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay/channel/openai"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
+	"github.com/QuantumNous/new-api/setting/ratio_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
@@ -236,4 +240,80 @@ func TestBuildVisionAssistGeminiRequestUsesCleanUserContent(t *testing.T) {
 	assert.NotContains(t, body, "max_tokens")
 	assert.NotContains(t, body, "stream_options")
 	assert.NotContains(t, body, "历史回复")
+}
+
+func TestCallVisionAssistModelRejectsConcurrencyBeforeUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	oldRedisEnabled := common.RedisEnabled
+	oldMemoryCacheEnabled := common.MemoryCacheEnabled
+	oldFreeModelPreConsume := operation_setting.GetQuotaSetting().EnableFreeModelPreConsume
+	savedModelRatios := ratio_setting.ModelRatio2JSONString()
+	common.RedisEnabled = false
+	common.MemoryCacheEnabled = true
+	operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = false
+	modelRatios, err := common.Marshal(map[string]float64{"vision-concurrency-model": 0})
+	require.NoError(t, err)
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(modelRatios)))
+	t.Cleanup(func() {
+		common.RedisEnabled = oldRedisEnabled
+		common.MemoryCacheEnabled = oldMemoryCacheEnabled
+		operation_setting.GetQuotaSetting().EnableFreeModelPreConsume = oldFreeModelPreConsume
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(savedModelRatios))
+	})
+
+	baseURL := "https://assist.example.com"
+	assistChannel := &model.Channel{
+		Id:                   990,
+		Type:                 constant.ChannelTypeOpenAI,
+		Key:                  "assist-key",
+		Status:               common.ChannelStatusEnabled,
+		Name:                 "vision-assist-concurrency",
+		BaseURL:              &baseURL,
+		Models:               "vision-concurrency-model",
+		Group:                "default",
+		UserConcurrencyLimit: common.GetPointer(1),
+	}
+	assistChannel.SetSetting(dto.ChannelSettings{})
+	model.CacheUpdateChannel(assistChannel)
+
+	lease, err := service.AcquireChannelUserConcurrency(context.Background(), assistChannel.Id, 334, 1, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, lease.Release(context.Background()))
+	})
+
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	common.SetContextKey(c, constant.ContextKeyUserId, 334)
+	common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+	common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
+	parent := &relaycommon.RelayInfo{
+		UserId:          334,
+		UserQuota:       100000,
+		UsingGroup:      "default",
+		UserGroup:       "default",
+		RequestHeaders:  map[string]string{"Content-Type": "application/json"},
+		OriginModelName: "target-model",
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelSetting: dto.ChannelSettings{
+				VisionAssist: dto.ChannelVisionAssistSettings{
+					AssistChannelId: assistChannel.Id,
+					AssistModel:     "vision-concurrency-model",
+				},
+			},
+		},
+	}
+	request := &dto.GeneralOpenAIRequest{
+		Model: "vision-concurrency-model",
+		Messages: []dto.Message{{
+			Role:    "user",
+			Content: "描述图片",
+		}},
+	}
+
+	results, apiErr := callVisionAssistModel(c, parent, request, nil)
+
+	require.Nil(t, results)
+	require.NotNil(t, apiErr)
+	assert.Equal(t, types.ErrorCodeChannelUserConcurrencyExceeded, apiErr.GetErrorCode())
 }

@@ -97,16 +97,33 @@ func relayClaudeCountTokens(c *gin.Context) *types.NewAPIError {
 	if err = buildClaudeCountTokensHeaders(c, req, info); err != nil {
 		return types.NewError(err, types.ErrorCodeChannelHeaderOverrideInvalid, types.ErrOptionWithSkipRetry())
 	}
+	concurrencyGuard, apiErr := acquireChannelUserConcurrencyGuard(c)
+	if apiErr != nil {
+		return apiErr
+	}
+	req = req.WithContext(c.Request.Context())
+	defer func() {
+		_ = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
+	}()
 
 	resp, err := claudeCountTokensDoRequest(c, req, info)
 	if err != nil {
-		return types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry())
+		apiErr = finishChannelUserConcurrencyGuard(c, concurrencyGuard, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithSkipRetry()))
+		concurrencyGuard = nil
+		return apiErr
 	}
 	defer service.CloseResponseBodyGracefully(resp)
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return types.NewError(err, types.ErrorCodeReadResponseBodyFailed, types.ErrOptionWithSkipRetry())
+		apiErr = finishChannelUserConcurrencyGuard(c, concurrencyGuard, types.NewError(err, types.ErrorCodeReadResponseBodyFailed, types.ErrOptionWithSkipRetry()))
+		concurrencyGuard = nil
+		return apiErr
+	}
+	apiErr = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
+	concurrencyGuard = nil
+	if apiErr != nil {
+		return apiErr
 	}
 
 	copyClaudeCountTokensResponseHeaders(c, resp.Header)

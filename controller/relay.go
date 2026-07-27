@@ -93,6 +93,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		if newAPIError != nil {
 			logger.LogError(c, fmt.Sprintf("relay error: %s", common.LocalLogPreview(newAPIError.Error())))
 			newAPIError.SetMessage(common.MessageWithRequestId(newAPIError.Error(), requestId))
+			if isChannelUserConcurrencyAPIError(newAPIError) && relayFormat != types.RelayFormatOpenAIRealtime && c.Writer.Written() {
+				return
+			}
 			if active, committed := helper.PrepareResponsesCompactSSEFinal(c); active && committed {
 				if err := helper.WriteResponsesCompactSSEFailed(c, newAPIError.ToOpenAIError()); err != nil {
 					logger.LogError(c, "write Responses Compact SSE failure event failed: "+err.Error())
@@ -159,6 +162,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 	}
 	relayInfo.RetryIndex = 0
 	relayInfo.LastError = nil
+	var concurrencyGuard *channelUserConcurrencyGuard
+	defer func() {
+		newAPIError = finishChannelUserConcurrencyGuard(c, concurrencyGuard, newAPIError)
+	}()
 
 	for ; retryParam.GetRetry() <= common.RetryTimes; retryParam.IncreaseRetry() {
 		relayInfo.RetryIndex = retryParam.GetRetry()
@@ -187,6 +194,10 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		if newAPIError != nil {
 			recordRelayErrorLog(c, newAPIError)
+			break
+		}
+		concurrencyGuard, newAPIError = acquireChannelUserConcurrencyGuard(c)
+		if newAPIError != nil {
 			break
 		}
 		if relayFormat == types.RelayFormatOpenAIAlphaSearch {
@@ -219,6 +230,12 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = geminiRelayHandler(c, relayInfo)
 		default:
 			newAPIError = relayHandler(c, relayInfo)
+		}
+		newAPIError = finishChannelUserConcurrencyGuard(c, concurrencyGuard, newAPIError)
+		concurrencyGuard = nil
+		if isChannelUserConcurrencyAPIError(newAPIError) {
+			recordRelayErrorLog(c, newAPIError)
+			break
 		}
 
 		if newAPIError == nil {
@@ -369,7 +386,9 @@ func RelayMidjourney(c *gin.Context) {
 	log.Println(mjErr)
 	if mjErr != nil {
 		statusCode := http.StatusBadRequest
-		if mjErr.Code == 30 {
+		if concurrencyStatus, ok := channelUserConcurrencyMidjourneyHTTPStatus(mjErr); ok {
+			statusCode = concurrencyStatus
+		} else if mjErr.Code == 30 {
 			mjErr.Result = "当前分组负载已饱和，请稍后再试，或升级账户以提升服务质量。"
 			statusCode = http.StatusTooManyRequests
 		}
@@ -440,7 +459,9 @@ func RelayTask(c *gin.Context) {
 
 	var result *relay.TaskSubmitResult
 	var taskErr *dto.TaskError
+	var taskConcurrencyGuard *channelUserConcurrencyGuard
 	defer func() {
+		_ = finishChannelUserConcurrencyGuard(c, taskConcurrencyGuard, nil)
 		if taskErr != nil && relayInfo.Billing != nil {
 			relayInfo.Billing.Refund(c)
 		}
@@ -486,8 +507,21 @@ func RelayTask(c *gin.Context) {
 			break
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
+		var concurrencyErr *types.NewAPIError
+		taskConcurrencyGuard, concurrencyErr = acquireChannelUserConcurrencyGuard(c)
+		if concurrencyErr != nil {
+			taskErr = service.TaskErrorFromAPIError(concurrencyErr)
+			taskErr.LocalError = true
+			break
+		}
 
 		result, taskErr = relay.RelayTaskSubmit(c, relayInfo)
+		concurrencyErr = finishChannelUserConcurrencyGuard(c, taskConcurrencyGuard, nil)
+		taskConcurrencyGuard = nil
+		if concurrencyErr != nil {
+			taskErr = service.TaskErrorFromAPIError(concurrencyErr)
+			taskErr.LocalError = true
+		}
 		if taskErr == nil {
 			break
 		}
@@ -566,6 +600,9 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 	if _, ok := c.Get("specific_channel_id"); ok {
 		return false
 	}
+	if taskErr.LocalError {
+		return false
+	}
 	if taskErr.StatusCode == http.StatusTooManyRequests {
 		return true
 	}
@@ -584,9 +621,6 @@ func shouldRetryTaskRelay(c *gin.Context, channelId int, taskErr *dto.TaskError,
 	}
 	if taskErr.StatusCode == 408 {
 		// azure处理超时不重试
-		return false
-	}
-	if taskErr.LocalError {
 		return false
 	}
 	if taskErr.StatusCode/100 == 2 {

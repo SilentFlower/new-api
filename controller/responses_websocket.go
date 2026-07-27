@@ -41,6 +41,7 @@ var responsesWebSocketUpgrader = websocket.Upgrader{
 }
 
 var responsesWebSocketTurnConnector = connectResponsesWebSocketTurn
+var responsesWebSocketConcurrencyGuardAcquirer = acquireChannelUserConcurrencyGuard
 
 type responsesWebSocketTurn struct {
 	messageType            int
@@ -51,6 +52,7 @@ type responsesWebSocketTurn struct {
 	info                   *relaycommon.RelayInfo
 	retryIndex             int
 	downstreamEventWritten bool
+	concurrencyGuard       *channelUserConcurrencyGuard
 }
 
 type responsesWebSocketReadResult struct {
@@ -183,10 +185,20 @@ func connectResponsesWebSocketTurn(c *gin.Context, turn *responsesWebSocketTurn,
 			lastErr = types.NewError(errors.New("Responses WebSocket channel is nil"), types.ErrorCodeGetChannelFailed)
 			break
 		}
+		concurrencyGuard, apiErr := responsesWebSocketConcurrencyGuardAcquirer(c)
+		if apiErr != nil {
+			lastErr = apiErr
+			break
+		}
 
 		upstreamPayload, apiErr := prepareResponsesWebSocketTurnAttempt(c, turn)
 		if apiErr != nil {
+			apiErr = finishChannelUserConcurrencyGuard(c, concurrencyGuard, apiErr)
 			lastErr = apiErr
+			if isChannelUserConcurrencyAPIError(apiErr) {
+				recordRelayErrorLog(c, apiErr)
+				break
+			}
 			if types.IsChannelError(apiErr) {
 				processResponsesWebSocketChannelError(c, turn, channel, apiErr, "prepare_failed")
 			}
@@ -206,10 +218,17 @@ func connectResponsesWebSocketTurn(c *gin.Context, turn *responsesWebSocketTurn,
 		}
 		if apiErr == nil {
 			service.SetResponsesCompactAudit(c, turn.info, "connected")
+			detachChannelUserConcurrencyGuardContext(c, concurrencyGuard)
+			turn.concurrencyGuard = concurrencyGuard
 			return upstreamConn, channel, nil
 		}
 
+		apiErr = finishChannelUserConcurrencyGuard(c, concurrencyGuard, apiErr)
 		lastErr = apiErr
+		if isChannelUserConcurrencyAPIError(apiErr) {
+			recordRelayErrorLog(c, apiErr)
+			break
+		}
 		processResponsesWebSocketChannelError(c, turn, channel, apiErr, "connect_failed")
 		if !shouldRetry(c, apiErr, common.RetryTimes-retryIndex) {
 			break
@@ -407,10 +426,12 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 	upstreamConn := initialUpstream
 	selectedChannel := initialChannel
 	currentTurn := initialTurn
+	concurrencyGuard := initialTurn.concurrencyGuard
 	upstreamGeneration := 1
 	startResponsesWebSocketReader(clientConn, 0, clientResults)
 	startResponsesWebSocketReader(upstreamConn, upstreamGeneration, upstreamResults)
 	defer func() {
+		_ = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
 		cancel()
 		_ = clientConn.Close()
 		_ = upstreamConn.Close()
@@ -419,6 +440,11 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 
 	for {
 		select {
+		case <-channelUserConcurrencyLostSignal(concurrencyGuard):
+			apiErr := newChannelUserConcurrencyAPIError(service.ErrChannelUserConcurrencyUnavailable)
+			writeResponsesWebSocketError(c, clientConn, apiErr)
+			refundResponsesWebSocketTurn(c, currentTurn)
+			return apiErr
 		case <-ctx.Done():
 			refundResponsesWebSocketTurn(c, currentTurn)
 			return nil
@@ -464,6 +490,8 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 				_ = upstreamConn.SetWriteDeadline(time.Time{})
 				if err != nil {
 					_ = upstreamConn.Close()
+					_ = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
+					concurrencyGuard = nil
 					newUpstream, newChannel, connectErr := responsesWebSocketTurnConnector(c, turn, nil, 1)
 					if connectErr != nil {
 						writeResponsesWebSocketError(c, clientConn, connectErr)
@@ -472,6 +500,7 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 					}
 					upstreamConn = newUpstream
 					selectedChannel = newChannel
+					concurrencyGuard = turn.concurrencyGuard
 					upstreamGeneration++
 					startResponsesWebSocketReader(upstreamConn, upstreamGeneration, upstreamResults)
 				}
@@ -495,11 +524,14 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 					processResponsesWebSocketChannelError(c, currentTurn, selectedChannel, apiErr, "upstream_closed")
 				}
 				if currentTurn != nil && !currentTurn.downstreamEventWritten && shouldRetry(c, apiErr, common.RetryTimes-currentTurn.retryIndex) {
+					_ = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
+					concurrencyGuard = nil
 					newUpstream, newChannel, connectErr := responsesWebSocketTurnConnector(c, currentTurn, nil, currentTurn.retryIndex+1)
 					if connectErr == nil {
 						_ = upstreamConn.Close()
 						upstreamConn = newUpstream
 						selectedChannel = newChannel
+						concurrencyGuard = currentTurn.concurrencyGuard
 						upstreamGeneration++
 						startResponsesWebSocketReader(upstreamConn, upstreamGeneration, upstreamResults)
 						continue
@@ -524,11 +556,15 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 			if businessErr != nil && currentTurn != nil {
 				processResponsesWebSocketChannelError(c, currentTurn, selectedChannel, businessErr, businessErrorEvent)
 				if !currentTurn.downstreamEventWritten && shouldRetry(c, businessErr, common.RetryTimes-currentTurn.retryIndex) {
+					_ = upstreamConn.Close()
+					_ = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
+					concurrencyGuard = nil
 					newUpstream, newChannel, connectErr := responsesWebSocketTurnConnector(c, currentTurn, nil, currentTurn.retryIndex+1)
 					if connectErr == nil {
 						_ = upstreamConn.Close()
 						upstreamConn = newUpstream
 						selectedChannel = newChannel
+						concurrencyGuard = currentTurn.concurrencyGuard
 						upstreamGeneration++
 						startResponsesWebSocketReader(upstreamConn, upstreamGeneration, upstreamResults)
 						continue

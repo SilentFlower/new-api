@@ -1,17 +1,21 @@
 package controller
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -127,9 +131,12 @@ func TestBuildClaudeCountTokensRequestBodyRemovesGenerationFields(t *testing.T) 
 
 func TestRelayClaudeCountTokensProxiesSuccessResponse(t *testing.T) {
 	oldDoRequest := claudeCountTokensDoRequest
+	oldRedisEnabled := common.RedisEnabled
 	defer func() {
 		claudeCountTokensDoRequest = oldDoRequest
+		common.RedisEnabled = oldRedisEnabled
 	}()
+	common.RedisEnabled = false
 
 	c, recorder := newClaudeCountTokensTestContext(
 		http.MethodPost,
@@ -139,6 +146,9 @@ func TestRelayClaudeCountTokensProxiesSuccessResponse(t *testing.T) {
 	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://upstream.example")
 	common.SetContextKey(c, constant.ContextKeyChannelKey, "upstream-key")
 	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeAnthropic)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 801)
+	common.SetContextKey(c, constant.ContextKeyUserId, 331)
+	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, 1)
 	common.SetContextKey(c, constant.ContextKeyChannelSetting, dto.ChannelSettings{})
 	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{})
 
@@ -146,6 +156,7 @@ func TestRelayClaudeCountTokensProxiesSuccessResponse(t *testing.T) {
 	var upstreamBody map[string]any
 	var upstreamBeta string
 	claudeCountTokensDoRequest = func(_ *gin.Context, req *http.Request, _ *relaycommon.RelayInfo) (*http.Response, error) {
+		require.Equal(t, c.Request.Context(), req.Context())
 		upstreamPath = req.URL.String()
 		upstreamBeta = req.Header.Get("anthropic-beta")
 		bodyBytes, err := io.ReadAll(req.Body)
@@ -169,6 +180,48 @@ func TestRelayClaudeCountTokensProxiesSuccessResponse(t *testing.T) {
 	require.Equal(t, "claude-opus-4-8", upstreamBody["model"])
 	require.NotContains(t, upstreamBody, "stream")
 	require.NotContains(t, upstreamBody, "max_tokens")
+}
+
+func TestRelayClaudeCountTokensRejectsConcurrencyBeforeUpstream(t *testing.T) {
+	oldDoRequest := claudeCountTokensDoRequest
+	oldRedisEnabled := common.RedisEnabled
+	common.RedisEnabled = false
+	t.Cleanup(func() {
+		claudeCountTokensDoRequest = oldDoRequest
+		common.RedisEnabled = oldRedisEnabled
+	})
+
+	lease, err := service.AcquireChannelUserConcurrency(context.Background(), 802, 332, 1, nil)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		require.NoError(t, lease.Release(context.Background()))
+	})
+
+	c, recorder := newClaudeCountTokensTestContext(
+		http.MethodPost,
+		"/v1/messages/count_tokens?beta=true",
+		`{"model":"claude-opus-4-8","messages":[{"role":"user","content":"hi"}]}`,
+	)
+	common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, "https://upstream.example")
+	common.SetContextKey(c, constant.ContextKeyChannelKey, "upstream-key")
+	common.SetContextKey(c, constant.ContextKeyChannelType, constant.ChannelTypeAnthropic)
+	common.SetContextKey(c, constant.ContextKeyChannelId, 802)
+	common.SetContextKey(c, constant.ContextKeyUserId, 332)
+	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, 1)
+	common.SetContextKey(c, constant.ContextKeyChannelSetting, dto.ChannelSettings{})
+	common.SetContextKey(c, constant.ContextKeyChannelOtherSetting, dto.ChannelOtherSettings{})
+
+	var upstreamCalls atomic.Int32
+	claudeCountTokensDoRequest = func(_ *gin.Context, _ *http.Request, _ *relaycommon.RelayInfo) (*http.Response, error) {
+		upstreamCalls.Add(1)
+		return nil, nil
+	}
+
+	RelayClaudeCountTokens(c)
+
+	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Zero(t, upstreamCalls.Load())
+	require.Contains(t, recorder.Body.String(), string(types.ErrorCodeChannelUserConcurrencyExceeded))
 }
 
 func TestRelayClaudeCountTokensProxiesErrorResponse(t *testing.T) {

@@ -125,13 +125,24 @@ func callVisionAssistModel(c *gin.Context, info *relaycommon.RelayInfo, request 
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
 	}
+	concurrencyGuard, apiErr := acquireChannelUserConcurrency(c)
+	if apiErr != nil {
+		return nil, apiErr
+	}
+	defer func() {
+		_ = finishChannelUserConcurrency(c, concurrencyGuard, nil)
+	}()
 	if !priceData.FreeModel {
 		if apiErr := service.PreConsumeBilling(c, priceData.QuotaToPreConsume, assistInfo); apiErr != nil {
+			apiErr = finishChannelUserConcurrency(c, concurrencyGuard, apiErr)
+			concurrencyGuard = nil
 			return nil, apiErr
 		}
 	}
 
 	text, usage, apiErr := doVisionAssistRequest(c, assistInfo, prepared.req, prepared.mode)
+	apiErr = finishChannelUserConcurrency(c, concurrencyGuard, apiErr)
+	concurrencyGuard = nil
 	if apiErr != nil {
 		if assistInfo.Billing != nil {
 			assistInfo.Billing.Refund(c)
@@ -638,6 +649,7 @@ func switchContextToVisionAssistChannel(c *gin.Context, channelModel *model.Chan
 		constant.ContextKeyChannelHeaderOverride,
 		constant.ContextKeyChannelOrganization,
 		constant.ContextKeyChannelAutoBan,
+		constant.ContextKeyChannelUserConcurrencyLimit,
 		constant.ContextKeyChannelModelMapping,
 		constant.ContextKeyChannelStatusCodeMapping,
 		constant.ContextKeyChannelIsMultiKey,

@@ -1,15 +1,16 @@
 package vertex
 
 import (
+	"context"
 	"crypto/rsa"
 	"crypto/x509"
-	"encoding/json"
 	"encoding/pem"
 	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/QuantumNous/new-api/common"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
 
@@ -37,7 +38,7 @@ var Cache = asynccache.NewAsyncCache(asynccache.Options{
 	},
 })
 
-func getAccessToken(a *Adaptor, info *relaycommon.RelayInfo) (string, error) {
+func getAccessToken(ctx context.Context, a *Adaptor, info *relaycommon.RelayInfo) (string, error) {
 	var cacheKey string
 	if info.ChannelIsMultiKey {
 		cacheKey = fmt.Sprintf("access-token-%d-%d", info.ChannelId, info.ChannelMultiKeyIndex)
@@ -53,7 +54,7 @@ func getAccessToken(a *Adaptor, info *relaycommon.RelayInfo) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create signed JWT: %w", err)
 	}
-	newToken, err := exchangeJwtForAccessToken(signedJWT, info)
+	newToken, err := exchangeJwtForAccessToken(ctx, signedJWT, info)
 	if err != nil {
 		return "", fmt.Errorf("failed to exchange JWT for access token: %w", err)
 	}
@@ -104,7 +105,7 @@ func createSignedJWT(email, privateKeyPEM string) (string, error) {
 	return signedToken, nil
 }
 
-func exchangeJwtForAccessToken(signedJWT string, info *relaycommon.RelayInfo) (string, error) {
+func exchangeJwtForAccessToken(ctx context.Context, signedJWT string, info *relaycommon.RelayInfo) (string, error) {
 
 	authURL := "https://www.googleapis.com/oauth2/v4/token"
 	data := url.Values{}
@@ -122,14 +123,19 @@ func exchangeJwtForAccessToken(signedJWT string, info *relaycommon.RelayInfo) (s
 		client = service.GetHttpClient()
 	}
 
-	resp, err := client.PostForm(authURL, data)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := common.DecodeJson(resp.Body, &result); err != nil {
 		return "", err
 	}
 
@@ -140,15 +146,32 @@ func exchangeJwtForAccessToken(signedJWT string, info *relaycommon.RelayInfo) (s
 	return "", fmt.Errorf("failed to get access token: %v", result)
 }
 
+// AcquireAccessToken 获取 Vertex 服务账号访问令牌。
+// @param creds Vertex 服务账号凭据。
+// @param proxy 可选代理地址。
+// @return 访问令牌和请求错误。
 func AcquireAccessToken(creds Credentials, proxy string) (string, error) {
+	return AcquireAccessTokenWithContext(context.Background(), creds, proxy)
+}
+
+// AcquireAccessTokenWithContext 使用指定上下文获取 Vertex 服务账号访问令牌。
+// @param ctx 控制令牌请求取消和超时的上下文。
+// @param creds Vertex 服务账号凭据。
+// @param proxy 可选代理地址。
+// @return 访问令牌和请求错误。
+func AcquireAccessTokenWithContext(ctx context.Context, creds Credentials, proxy string) (string, error) {
 	signedJWT, err := createSignedJWT(creds.ClientEmail, creds.PrivateKey)
 	if err != nil {
 		return "", fmt.Errorf("failed to create signed JWT: %w", err)
 	}
-	return exchangeJwtForAccessTokenWithProxy(signedJWT, proxy)
+	return exchangeJwtForAccessTokenWithProxyContext(ctx, signedJWT, proxy)
 }
 
 func exchangeJwtForAccessTokenWithProxy(signedJWT string, proxy string) (string, error) {
+	return exchangeJwtForAccessTokenWithProxyContext(context.Background(), signedJWT, proxy)
+}
+
+func exchangeJwtForAccessTokenWithProxyContext(ctx context.Context, signedJWT string, proxy string) (string, error) {
 	authURL := "https://www.googleapis.com/oauth2/v4/token"
 	data := url.Values{}
 	data.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
@@ -165,14 +188,19 @@ func exchangeJwtForAccessTokenWithProxy(signedJWT string, proxy string) (string,
 		client = service.GetHttpClient()
 	}
 
-	resp, err := client.PostForm(authURL, data)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	var result map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := common.DecodeJson(resp.Body, &result); err != nil {
 		return "", err
 	}
 

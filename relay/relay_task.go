@@ -98,6 +98,7 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		common.SetContextKey(c, constant.ContextKeyChannelType, ch.Type)
 		common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, ch.GetBaseURL())
 		common.SetContextKey(c, constant.ContextKeyChannelId, originTask.ChannelId)
+		common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, ch.GetUserConcurrencyLimit())
 
 		info.ChannelBaseUrl = ch.GetBaseURL()
 		info.ChannelId = originTask.ChannelId
@@ -387,7 +388,10 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 	isOpenAIVideoAPI := strings.HasPrefix(c.Request.RequestURI, "/v1/videos/")
 
 	// Gemini/Vertex 支持实时查询：用户 fetch 时直接从上游拉取最新状态
-	if realtimeResp := tryRealtimeFetch(originTask, isOpenAIVideoAPI); len(realtimeResp) > 0 {
+	if realtimeResp, concurrencyErr := tryRealtimeFetch(c, originTask, isOpenAIVideoAPI); concurrencyErr != nil {
+		taskResp = concurrencyErr
+		return
+	} else if len(realtimeResp) > 0 {
 		respBody = realtimeResp
 		return
 	}
@@ -424,15 +428,15 @@ func videoFetchByIDRespBodyBuilder(c *gin.Context) (respBody []byte, taskResp *d
 }
 
 // tryRealtimeFetch 尝试从上游实时拉取 Gemini/Vertex 任务状态。
-// 仅当渠道类型为 Gemini 或 Vertex 时触发；其他渠道或出错时返回 nil。
+// 仅当渠道类型为 Gemini 或 Vertex 时触发；普通上游错误继续回退数据库快照，并发保护错误直接返回。
 // 当非 OpenAI Video API 时，还会构建自定义格式的响应体。
-func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
+func tryRealtimeFetch(c *gin.Context, task *model.Task, isOpenAIVideoAPI bool) ([]byte, *dto.TaskError) {
 	channelModel, err := model.GetChannelById(task.ChannelId, true)
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	if channelModel.Type != constant.ChannelTypeVertexAi && channelModel.Type != constant.ChannelTypeGemini {
-		return nil
+		return nil, nil
 	}
 
 	baseURL := constant.ChannelBaseURLs[channelModel.Type]
@@ -442,25 +446,50 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 	proxy := channelModel.GetSetting().Proxy
 	adaptor := GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(channelModel.Type)))
 	if adaptor == nil {
-		return nil
+		return nil, nil
 	}
+	common.SetContextKey(c, constant.ContextKeyChannelId, channelModel.Id)
+	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channelModel.GetUserConcurrencyLimit())
+	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrency(c)
+	if concurrencyErr != nil {
+		taskErr := service.TaskErrorFromAPIError(concurrencyErr)
+		taskErr.LocalError = true
+		return nil, taskErr
+	}
+	defer func() {
+		_ = finishChannelUserConcurrency(c, concurrencyGuard, nil)
+	}()
 
-	resp, err := adaptor.FetchTask(baseURL, channelModel.Key, map[string]any{
+	resp, err := channel.FetchTaskWithContext(c.Request.Context(), adaptor, baseURL, channelModel.Key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
 	}, proxy)
 	if err != nil || resp == nil {
-		return nil
+		concurrencyErr = finishChannelUserConcurrency(c, concurrencyGuard, nil)
+		concurrencyGuard = nil
+		if concurrencyErr != nil {
+			taskErr := service.TaskErrorFromAPIError(concurrencyErr)
+			taskErr.LocalError = true
+			return nil, taskErr
+		}
+		return nil, nil
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
+	concurrencyErr = finishChannelUserConcurrency(c, concurrencyGuard, nil)
+	concurrencyGuard = nil
+	if concurrencyErr != nil {
+		taskErr := service.TaskErrorFromAPIError(concurrencyErr)
+		taskErr.LocalError = true
+		return nil, taskErr
+	}
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 
 	ti, err := adaptor.ParseTaskResult(body)
 	if err != nil || ti == nil {
-		return nil
+		return nil, nil
 	}
 
 	snap := task.Snapshot()
@@ -487,7 +516,7 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 
 	// OpenAI Video API 由调用者的 ConvertToOpenAIVideo 分支处理
 	if isOpenAIVideoAPI {
-		return nil
+		return nil, nil
 	}
 
 	// 非 OpenAI Video API: 构建自定义格式响应
@@ -504,7 +533,7 @@ func tryRealtimeFetch(task *model.Task, isOpenAIVideoAPI bool) []byte {
 		Code: "success",
 		Data: out,
 	})
-	return respBody
+	return respBody, nil
 }
 
 // detectVideoFormat 从 Gemini/Vertex 原始响应中探测视频格式

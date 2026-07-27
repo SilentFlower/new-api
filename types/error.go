@@ -42,6 +42,9 @@ const (
 	ErrorCodeSensitiveWordsDetected ErrorCode = "sensitive_words_detected"
 	ErrorCodeViolationFeeGrokCSAM   ErrorCode = "violation_fee.grok.csam"
 
+	ErrorCodeChannelUserConcurrencyExceeded    ErrorCode = "channel_user_concurrency_exceeded"
+	ErrorCodeChannelUserConcurrencyUnavailable ErrorCode = "channel_user_concurrency_unavailable"
+
 	// new api error
 	ErrorCodeCountTokenFailed   ErrorCode = "count_token_failed"
 	ErrorCodeModelPriceError    ErrorCode = "model_price_error"

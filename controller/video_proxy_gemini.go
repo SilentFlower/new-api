@@ -10,9 +10,12 @@ import (
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
+	relaychannel "github.com/QuantumNous/new-api/relay/channel"
+
+	"github.com/gin-gonic/gin"
 )
 
-func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) (string, error) {
+func getGeminiVideoURL(c *gin.Context, channel *model.Channel, task *model.Task, apiKey string) (string, error) {
 	if channel == nil || task == nil {
 		return "", fmt.Errorf("invalid channel or task")
 	}
@@ -35,8 +38,18 @@ func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) 
 		return "", fmt.Errorf("api key not available for task")
 	}
 
+	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
+	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channel.GetUserConcurrencyLimit())
+	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrencyGuard(c)
+	if concurrencyErr != nil {
+		return "", concurrencyErr
+	}
+	defer func() {
+		_ = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
+	}()
+
 	proxy := channel.GetSetting().Proxy
-	resp, err := adaptor.FetchTask(baseURL, apiKey, map[string]any{
+	resp, err := relaychannel.FetchTaskWithContext(c.Request.Context(), adaptor, baseURL, apiKey, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
 	}, proxy)
@@ -48,6 +61,11 @@ func getGeminiVideoURL(channel *model.Channel, task *model.Task, apiKey string) 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read task response failed: %w", err)
+	}
+	concurrencyErr = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
+	concurrencyGuard = nil
+	if concurrencyErr != nil {
+		return "", concurrencyErr
 	}
 
 	taskInfo, parseErr := adaptor.ParseTaskResult(body)
@@ -145,7 +163,7 @@ func extractGeminiVideoURLFromGeneratedSamples(gvr map[string]any) string {
 	return ""
 }
 
-func getVertexVideoURL(channel *model.Channel, task *model.Task) (string, error) {
+func getVertexVideoURL(c *gin.Context, channel *model.Channel, task *model.Task) (string, error) {
 	if channel == nil || task == nil {
 		return "", fmt.Errorf("invalid channel or task")
 	}
@@ -171,7 +189,17 @@ func getVertexVideoURL(channel *model.Channel, task *model.Task) (string, error)
 		return "", fmt.Errorf("vertex key not available for task")
 	}
 
-	resp, err := adaptor.FetchTask(baseURL, key, map[string]any{
+	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
+	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channel.GetUserConcurrencyLimit())
+	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrencyGuard(c)
+	if concurrencyErr != nil {
+		return "", concurrencyErr
+	}
+	defer func() {
+		_ = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
+	}()
+
+	resp, err := relaychannel.FetchTaskWithContext(c.Request.Context(), adaptor, baseURL, key, map[string]any{
 		"task_id": task.GetUpstreamTaskID(),
 		"action":  task.Action,
 	}, channel.GetSetting().Proxy)
@@ -183,6 +211,11 @@ func getVertexVideoURL(channel *model.Channel, task *model.Task) (string, error)
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return "", fmt.Errorf("read task response failed: %w", err)
+	}
+	concurrencyErr = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
+	concurrencyGuard = nil
+	if concurrencyErr != nil {
+		return "", concurrencyErr
 	}
 
 	taskInfo, parseErr := adaptor.ParseTaskResult(body)

@@ -228,7 +228,19 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	requestURL := getMjRequestPath(c.Request.URL.String())
 	baseURL := c.GetString("base_url")
 	fullRequestURL := fmt.Sprintf("%s%s", baseURL, requestURL)
+	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrency(c)
+	if concurrencyErr != nil {
+		return channelUserConcurrencyMidjourneyError(concurrencyErr)
+	}
+	defer func() {
+		_ = finishChannelUserConcurrency(c, concurrencyGuard, nil)
+	}()
 	mjResp, _, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
+	concurrencyErr = finishChannelUserConcurrency(c, concurrencyGuard, nil)
+	concurrencyGuard = nil
+	if concurrencyErr != nil {
+		return channelUserConcurrencyMidjourneyError(concurrencyErr)
+	}
 	if err != nil {
 		return &mjResp.Response
 	}
@@ -307,11 +319,24 @@ func RelayMidjourneyTaskImageSeed(c *gin.Context) *dto.MidjourneyResponse {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "该任务所属渠道已被禁用")
 	}
 	c.Set("channel_id", originTask.ChannelId)
+	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channel.GetUserConcurrencyLimit())
 	c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
 
 	requestURL := getMjRequestPath(c.Request.URL.String())
 	fullRequestURL := fmt.Sprintf("%s%s", channel.GetBaseURL(), requestURL)
+	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrency(c)
+	if concurrencyErr != nil {
+		return channelUserConcurrencyMidjourneyError(concurrencyErr)
+	}
+	defer func() {
+		_ = finishChannelUserConcurrency(c, concurrencyGuard, nil)
+	}()
 	midjResponseWithStatus, _, err := service.DoMidjourneyHttpRequest(c, time.Second*30, fullRequestURL)
+	concurrencyErr = finishChannelUserConcurrency(c, concurrencyGuard, nil)
+	concurrencyGuard = nil
+	if concurrencyErr != nil {
+		return channelUserConcurrencyMidjourneyError(concurrencyErr)
+	}
 	if err != nil {
 		return &midjResponseWithStatus.Response
 	}
@@ -482,6 +507,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			}
 			c.Set("base_url", channel.GetBaseURL())
 			c.Set("channel_id", originTask.ChannelId)
+			common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channel.GetUserConcurrencyLimit())
 			c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
 			logger.LogDebug(c, "Midjourney action uses origin channel: id=%s, base_url=%s", strconv.Itoa(originTask.ChannelId), channel.GetBaseURL())
 		}
@@ -533,7 +559,19 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 
+	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrency(c)
+	if concurrencyErr != nil {
+		return channelUserConcurrencyMidjourneyError(concurrencyErr)
+	}
+	defer func() {
+		_ = finishChannelUserConcurrency(c, concurrencyGuard, nil)
+	}()
 	midjResponseWithStatus, responseBody, err := service.DoMidjourneyHttpRequest(c, time.Second*60, fullRequestURL)
+	concurrencyErr = finishChannelUserConcurrency(c, concurrencyGuard, nil)
+	concurrencyGuard = nil
+	if concurrencyErr != nil {
+		return channelUserConcurrencyMidjourneyError(concurrencyErr)
+	}
 	if err != nil {
 		return &midjResponseWithStatus.Response
 	}

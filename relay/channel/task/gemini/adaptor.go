@@ -2,6 +2,7 @@ package gemini
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -178,8 +179,24 @@ func (a *TaskAdaptor) EstimateBilling(c *gin.Context, info *relaycommon.RelayInf
 	}
 }
 
-// FetchTask polls task status via the Gemini operations GET endpoint.
+// FetchTask 查询 Gemini 任务状态。
+// @param baseUrl Gemini 上游基础地址。
+// @param key Gemini API Key。
+// @param body 包含任务 ID 和动作的查询参数。
+// @param proxy 可选代理地址。
+// @return 上游 HTTP 响应和请求错误。
 func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
+	return a.FetchTaskWithContext(context.Background(), baseUrl, key, body, proxy)
+}
+
+// FetchTaskWithContext 使用指定上下文查询 Gemini 任务状态。
+// @param ctx 控制上游请求取消和超时的上下文。
+// @param baseUrl Gemini 上游基础地址。
+// @param key Gemini API Key。
+// @param body 包含任务 ID 和动作的查询参数。
+// @param proxy 可选代理地址。
+// @return 上游 HTTP 响应和请求错误。
+func (a *TaskAdaptor) FetchTaskWithContext(ctx context.Context, baseUrl, key string, body map[string]any, proxy string) (*http.Response, error) {
 	taskID, ok := body["task_id"].(string)
 	if !ok {
 		return nil, fmt.Errorf("invalid task_id")
@@ -193,7 +210,7 @@ func (a *TaskAdaptor) FetchTask(baseUrl, key string, body map[string]any, proxy 
 	version := model_setting.GetGeminiVersionSetting("default")
 	url := fmt.Sprintf("%s/%s/%s", baseUrl, version, upstreamName)
 
-	req, err := http.NewRequest(http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
