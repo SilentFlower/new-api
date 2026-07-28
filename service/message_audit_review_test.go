@@ -1,11 +1,13 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -100,6 +102,105 @@ func TestMessageAuditReviewUncoveredUsesVirtualChunkCursors(t *testing.T) {
 	uncovered := buildMessageAuditReviewUncovered(files, coverage)
 	require.Len(t, uncovered, 1)
 	assert.Equal(t, "partially_read", uncovered[0].Reason)
+}
+
+func TestPrepareMessageAuditReviewTextToolRequestIncludesProtocolInBudget(t *testing.T) {
+	input := MessageAuditReviewModelRequest{
+		Model: "gpt-4o", Messages: []dto.Message{{Role: "user", Content: "manifest"}},
+		Tools: messageAuditReviewTools(), RequireToolCall: true, TextToolFallback: true,
+	}
+	prepared, err := prepareMessageAuditReviewModelRequest(input)
+	require.NoError(t, err)
+	require.Len(t, prepared.Messages, 2)
+	assert.Empty(t, prepared.Tools)
+	assert.Contains(t, prepared.Messages[1].StringContent(), "本轮必须先调用工具")
+	assert.Contains(t, prepared.Messages[1].StringContent(), "read_file")
+	require.NoError(t, ensureMessageAuditReviewContextBudget(prepared.Messages, prepared.Tools, input.Model))
+
+	nativePayload, err := common.Marshal(map[string]any{"messages": input.Messages, "tools": input.Tools})
+	require.NoError(t, err)
+	fallbackPayload, err := common.Marshal(map[string]any{"messages": prepared.Messages, "tools": prepared.Tools})
+	require.NoError(t, err)
+	assert.Greater(t, CountTextToken(string(fallbackPayload), input.Model), CountTextToken(string(nativePayload), input.Model))
+
+	boundaryInput := input
+	boundaryInput.TextToolFallback = false
+	boundaryInput.Messages = []dto.Message{{Role: "user", Content: strings.Repeat("token ", 13200)}}
+	require.NoError(t, ensureMessageAuditReviewContextBudget(boundaryInput.Messages, boundaryInput.Tools, boundaryInput.Model))
+	boundaryInput.TextToolFallback = true
+	preparedBoundary, err := prepareMessageAuditReviewModelRequest(boundaryInput)
+	require.NoError(t, err)
+	var taskErr *messageAuditReviewTaskError
+	require.ErrorAs(t, ensureMessageAuditReviewContextBudget(preparedBoundary.Messages, preparedBoundary.Tools, boundaryInput.Model), &taskErr)
+	assert.Equal(t, "context_limit", taskErr.code)
+}
+
+func TestExecuteMessageAuditReviewCompletesTextToolFallbackLoop(t *testing.T) {
+	truncate(t)
+	manager := newMessageAuditTestManager(t)
+	previousManager := messageAuditManagerInst
+	messageAuditManagerInst = manager
+	t.Cleanup(func() {
+		messageAuditManagerInst = previousManager
+	})
+
+	now := time.Now().Unix()
+	record, err := manager.encryptCapture(&messageAuditCaptureEvent{
+		request: model.MessageAuditRequest{
+			RequestID: "review-fallback-request", AuditSessionID: "review-fallback-session", UserID: 21,
+			Status: "succeeded", AuditStatus: "captured", CapturedAt: now, CreatedAt: now, UpdatedAt: now,
+		},
+		entries: []messageAuditPlaintext{{Role: "user", ContentType: "message", Content: "需要审核的文本"}},
+	})
+	require.NoError(t, err)
+	_, err = model.CreateMessageAuditCapture(record)
+	require.NoError(t, err)
+
+	messageAuditReviewCallerMu.Lock()
+	previousCaller := messageAuditReviewCaller
+	callCount := 0
+	messageAuditReviewCaller = func(_ context.Context, input MessageAuditReviewModelRequest) (MessageAuditReviewModelResponse, error) {
+		callCount++
+		switch callCount {
+		case 1:
+			assert.False(t, input.TextToolFallback)
+			assert.NotEmpty(t, input.Tools)
+			return MessageAuditReviewModelResponse{ToolFallbackRequired: true}, nil
+		case 2:
+			assert.True(t, input.TextToolFallback)
+			assert.Empty(t, input.Tools)
+			assert.Contains(t, input.Messages[len(input.Messages)-1].StringContent(), "受控文本工具协议")
+			return MessageAuditReviewModelResponse{
+				Content: `{"tool_call":{"name":"read_file","arguments":{"file_id":"request:review-fallback-request","cursor":0,"limit":1}}}`,
+				ToolCalls: []MessageAuditReviewToolCall{{
+					ID: "text-tool-1", Name: "read_file", Arguments: `{"file_id":"request:review-fallback-request","cursor":0,"limit":1}`,
+				}},
+			}, nil
+		case 3:
+			assert.True(t, input.TextToolFallback)
+			assert.Empty(t, input.Tools)
+			assert.Contains(t, input.Messages[len(input.Messages)-2].StringContent(), "AUDIT_TOOL_RESULT read_file")
+			return MessageAuditReviewModelResponse{Content: `{"summary":"已完成受限审核","risk_level":"none","categories":[],"findings":[]}`}, nil
+		default:
+			return MessageAuditReviewModelResponse{}, assert.AnError
+		}
+	}
+	messageAuditReviewCallerMu.Unlock()
+	t.Cleanup(func() {
+		messageAuditReviewCallerMu.Lock()
+		messageAuditReviewCaller = previousCaller
+		messageAuditReviewCallerMu.Unlock()
+	})
+
+	result, err := executeMessageAuditReview(context.Background(), MessageAuditReviewPayload{
+		UserID: 21, AuditSessionID: "review-fallback-session", TargetRequestID: "review-fallback-request",
+		SourceRequestIDs: []string{"review-fallback-request"},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "已完成受限审核", result.Summary)
+	assert.Equal(t, "none", result.RiskLevel)
+	require.Len(t, result.Coverage, 1)
+	assert.Equal(t, 3, callCount)
 }
 
 func TestMessageAuditReviewResultAADIsBoundToUser(t *testing.T) {

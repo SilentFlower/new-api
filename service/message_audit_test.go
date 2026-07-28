@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -206,6 +207,62 @@ func TestStartMessageAuditCleanupTaskPreservesNanosecondCutoff(t *testing.T) {
 	payload := MessageAuditCleanupPayload{}
 	require.NoError(t, task.DecodePayload(&payload))
 	assert.Equal(t, cutoff, payload.TargetTimestamp)
+}
+
+func TestManualMessageAuditCleanupUsesFastClearAndFinishesTask(t *testing.T) {
+	truncate(t)
+
+	now := time.Now()
+	request := model.MessageAuditRequest{
+		RequestID: "manual-clear-request", Status: "succeeded", AuditStatus: "captured",
+		CapturedAt: now.Unix(), CapturedAtNano: now.UnixNano(), CreatedAt: now.Unix(), UpdatedAt: now.Unix(),
+	}
+	require.NoError(t, model.DB.Create(&request).Error)
+	blob := model.MessageAuditBlob{
+		UserID: 1, SchemaVersion: 1, ContentHMAC: "manual-clear-hmac",
+		KeyFingerprint: "fingerprint", ContentType: "message", Nonce: []byte("nonce"), Ciphertext: []byte("ciphertext"),
+		CreatedAt: now.Unix(),
+	}
+	require.NoError(t, model.DB.Create(&blob).Error)
+	require.NoError(t, model.DB.Create(&model.MessageAuditItem{
+		AuditRequestID: request.ID, Sequence: 0, BlobID: blob.ID, Role: "user", ContentType: "message",
+	}).Error)
+
+	task, created, err := StartMessageAuditCleanupTask(now.UnixNano())
+	require.NoError(t, err)
+	require.True(t, created)
+	claimed, acquired, err := model.ClaimSystemTask(
+		task.ID,
+		model.SystemTaskTypeMessageAuditCleanup,
+		"manual-clear-runner",
+		now.Add(time.Minute).Unix(),
+	)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.NotNil(t, claimed)
+	messageAuditStatsCache.mutex.Lock()
+	messageAuditStatsCache.valid = true
+	messageAuditStatsCache.mutex.Unlock()
+
+	messageAuditCleanupHandler{}.Run(context.Background(), claimed, "manual-clear-runner")
+
+	stored, err := model.GetSystemTaskByTaskID(task.TaskID)
+	require.NoError(t, err)
+	require.NotNil(t, stored)
+	assert.Equal(t, model.SystemTaskStatusSucceeded, stored.Status)
+	state := MessageAuditCleanupState{}
+	require.NoError(t, stored.DecodeState(&state))
+	assert.Equal(t, MessageAuditCleanupState{Total: 1, Processed: 1, Progress: 100}, state)
+	result := MessageAuditCleanupResult{}
+	require.NoError(t, common.UnmarshalJsonStr(stored.Result, &result))
+	assert.Equal(t, MessageAuditCleanupResult{DeletedRequests: 1, DeletedBlobs: 1}, result)
+	var requestCount int64
+	require.NoError(t, model.DB.Model(&model.MessageAuditRequest{}).Count(&requestCount).Error)
+	assert.Zero(t, requestCount)
+	messageAuditStatsCache.mutex.Lock()
+	cacheValid := messageAuditStatsCache.valid
+	messageAuditStatsCache.mutex.Unlock()
+	assert.False(t, cacheValid)
 }
 
 func TestMessageAuditOversizedSnapshotKeepsSafeMetadata(t *testing.T) {

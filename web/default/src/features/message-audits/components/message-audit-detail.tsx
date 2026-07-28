@@ -221,6 +221,9 @@ function MessageAuditReviewSection(props: { auditSessionId: string }) {
           <AlertTitle>{t('AI review failed')}</AlertTitle>
           <AlertDescription>
             {t(getMessageAuditReviewFailureLabelKey(review.failure_code))}
+            {review.failure_code && (
+              <code className='mt-1 block text-xs'>{review.failure_code}</code>
+            )}
           </AlertDescription>
         </Alert>
       )}

@@ -438,12 +438,10 @@ func TestMessageAuditStorageStatsReturnsAuditTableUsage(t *testing.T) {
 
 	cutoff, err := AdvanceMessageAuditPurgeBefore(time.Unix(802, 0).UnixNano())
 	require.NoError(t, err)
-	deletedRequests, err := DeleteMessageAuditsBeforeBatch(context.Background(), cutoff, 10)
+	deleted, err := DeleteMessageAuditsBeforeBatch(context.Background(), cutoff, 10)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), deletedRequests)
-	deletedBlobs, err := DeleteOrphanMessageAuditBlobsBatch(context.Background(), 10)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), deletedBlobs)
+	assert.Equal(t, int64(1), deleted.DeletedRequests)
+	assert.Equal(t, int64(1), deleted.DeletedBlobs)
 
 	stats, err = GetMessageAuditStorageStats()
 	require.NoError(t, err)
@@ -452,6 +450,67 @@ func TestMessageAuditStorageStatsReturnsAuditTableUsage(t *testing.T) {
 	assert.Zero(t, stats.ItemCount)
 	assert.Zero(t, stats.PayloadBytes)
 	assert.Positive(t, stats.StorageBytes)
+}
+
+func TestClearMessageAuditsPreservesWatermarkAndUnrelatedTasks(t *testing.T) {
+	truncateTables(t)
+
+	now := time.Now()
+	_, err := CreateMessageAuditCapture(messageAuditCaptureRecord("clear-request", 61, now.Unix(), "clear-hmac"))
+	require.NoError(t, err)
+	reviewTask := SystemTask{
+		TaskID: "clear-review-task", Type: SystemTaskTypeMessageAuditReview,
+		Status: SystemTaskStatusRunning, CreatedAt: now.Unix(), UpdatedAt: now.Unix(),
+	}
+	cleanupTask := SystemTask{
+		TaskID: "clear-cleanup-task", Type: SystemTaskTypeMessageAuditCleanup,
+		Status: SystemTaskStatusRunning, CreatedAt: now.Unix(), UpdatedAt: now.Unix(),
+	}
+	require.NoError(t, DB.Create(&reviewTask).Error)
+	require.NoError(t, DB.Create(&cleanupTask).Error)
+	require.NoError(t, DB.Create(&SystemTaskLock{
+		Type: SystemTaskTypeMessageAuditReview, TaskID: reviewTask.TaskID,
+		LockedBy: "runner", LockedUntil: now.Add(time.Minute).Unix(), UpdatedAt: now.Unix(),
+	}).Error)
+	review := MessageAuditReview{
+		AuditSessionID: "clear-session", ReviewedRequestID: "clear-request",
+		CurrentTaskID: reviewTask.TaskID, Status: "running", CreatedAt: now.Unix(), UpdatedAt: now.Unix(),
+	}
+	require.NoError(t, DB.Create(&review).Error)
+	require.NoError(t, DB.Create(&MessageAuditReviewSource{
+		ReviewID: review.ID, RequestID: "clear-request", CreatedAt: now.Unix(),
+	}).Error)
+	cutoff, err := AdvanceMessageAuditPurgeBefore(now.UnixNano())
+	require.NoError(t, err)
+
+	result, err := ClearMessageAudits(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), result.DeletedRequests)
+	assert.Equal(t, int64(1), result.DeletedBlobs)
+
+	for _, value := range []any{
+		&MessageAuditReviewSource{},
+		&MessageAuditReview{},
+		&MessageAuditItem{},
+		&MessageAuditRequest{},
+		&MessageAuditBlob{},
+	} {
+		var count int64
+		require.NoError(t, DB.Model(value).Count(&count).Error)
+		assert.Zero(t, count)
+	}
+	var state MessageAuditState
+	require.NoError(t, DB.First(&state, messageAuditStateID).Error)
+	assert.Equal(t, cutoff, messageAuditPurgeBeforeNano(&state))
+	storedCleanupTask, err := GetSystemTaskByTaskID(cleanupTask.TaskID)
+	require.NoError(t, err)
+	require.NotNil(t, storedCleanupTask)
+	storedReviewTask, err := GetSystemTaskByTaskID(reviewTask.TaskID)
+	require.NoError(t, err)
+	assert.Nil(t, storedReviewTask)
+	var reviewLockCount int64
+	require.NoError(t, DB.Model(&SystemTaskLock{}).Where("type = ?", SystemTaskTypeMessageAuditReview).Count(&reviewLockCount).Error)
+	assert.Zero(t, reviewLockCount)
 }
 
 func TestMessageAuditPurgeWatermarkRejectsLateOldCapture(t *testing.T) {
@@ -510,7 +569,8 @@ func TestMessageAuditPurgeWatermarkKeepsLaterCaptureInSameSecond(t *testing.T) {
 	assert.Zero(t, count)
 	deleted, err := DeleteMessageAuditsBeforeBatch(context.Background(), cutoff, 10)
 	require.NoError(t, err)
-	assert.Zero(t, deleted)
+	assert.Zero(t, deleted.DeletedRequests)
+	assert.Zero(t, deleted.DeletedBlobs)
 }
 
 func TestMessageAuditCleanupHandlesLegacySecondPrecisionRows(t *testing.T) {
@@ -529,7 +589,8 @@ func TestMessageAuditCleanupHandlesLegacySecondPrecisionRows(t *testing.T) {
 	assert.Equal(t, int64(1), count)
 	deleted, err := DeleteMessageAuditsBeforeBatch(context.Background(), cutoff, 10)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), deleted)
+	assert.Equal(t, int64(1), deleted.DeletedRequests)
+	assert.Equal(t, int64(1), deleted.DeletedBlobs)
 }
 
 func TestMessageAuditCleanupPreservesSharedBlobUntilOrphaned(t *testing.T) {
@@ -544,17 +605,13 @@ func TestMessageAuditCleanupPreservesSharedBlobUntilOrphaned(t *testing.T) {
 
 	deleted, err := DeleteMessageAuditsBeforeBatch(context.Background(), time.Unix(301, 0).UnixNano(), 10)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), deleted)
-	deletedBlobs, err := DeleteOrphanMessageAuditBlobsBatch(context.Background(), 10)
-	require.NoError(t, err)
-	assert.Zero(t, deletedBlobs)
+	assert.Equal(t, int64(1), deleted.DeletedRequests)
+	assert.Zero(t, deleted.DeletedBlobs)
 
 	deleted, err = DeleteMessageAuditsBeforeBatch(context.Background(), time.Unix(302, 0).UnixNano(), 10)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), deleted)
-	deletedBlobs, err = DeleteOrphanMessageAuditBlobsBatch(context.Background(), 10)
-	require.NoError(t, err)
-	assert.Equal(t, int64(1), deletedBlobs)
+	assert.Equal(t, int64(1), deleted.DeletedRequests)
+	assert.Equal(t, int64(1), deleted.DeletedBlobs)
 }
 
 func TestMessageAuditOrphanCleanupRechecksStaleCandidate(t *testing.T) {
@@ -618,7 +675,10 @@ func runMessageAuditExternalDatabaseTest(t *testing.T, dialect string, dsn strin
 	LOG_DB = db
 	common.SetDatabaseTypes(dbType, dbType)
 	t.Cleanup(func() {
-		_ = db.Migrator().DropTable(&MessageAuditItem{}, &MessageAuditRequest{}, &MessageAuditBlob{}, &MessageAuditState{})
+		_ = db.Migrator().DropTable(
+			&MessageAuditReviewSource{}, &MessageAuditReview{}, &MessageAuditItem{}, &MessageAuditRequest{}, &MessageAuditBlob{}, &MessageAuditState{},
+			&SystemTaskLock{}, &SystemTask{},
+		)
 		if sqlDB, dbErr := db.DB(); dbErr == nil {
 			_ = sqlDB.Close()
 		}
@@ -628,7 +688,10 @@ func runMessageAuditExternalDatabaseTest(t *testing.T, dialect string, dsn strin
 	})
 
 	require.False(t, db.Migrator().HasTable(&MessageAuditRequest{}), "外部测试数据库必须使用隔离 schema")
-	require.NoError(t, db.AutoMigrate(&MessageAuditRequest{}, &MessageAuditBlob{}, &MessageAuditItem{}, &MessageAuditState{}))
+	require.NoError(t, db.AutoMigrate(
+		&MessageAuditRequest{}, &MessageAuditBlob{}, &MessageAuditItem{}, &MessageAuditState{},
+		&MessageAuditReview{}, &MessageAuditReviewSource{}, &SystemTask{}, &SystemTaskLock{},
+	))
 
 	record := messageAuditCaptureRecord(dialect+"-request", 9, 401, dialect+"-hmac")
 	skipped, err := CreateMessageAuditCapture(record)
@@ -643,10 +706,37 @@ func runMessageAuditExternalDatabaseTest(t *testing.T, dialect string, dsn strin
 
 	deleted, err := DeleteMessageAuditsBeforeBatch(context.Background(), time.Unix(401, 0).UnixNano(), 10)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), deleted)
-	deletedBlobs, err := DeleteOrphanMessageAuditBlobsBatch(context.Background(), 10)
+	assert.Equal(t, int64(1), deleted.DeletedRequests)
+	assert.Equal(t, int64(1), deleted.DeletedBlobs)
+
+	clearRecord := messageAuditCaptureRecord(dialect+"-clear-request", 9, 402, dialect+"-clear-hmac")
+	skipped, err = CreateMessageAuditCapture(clearRecord)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), deletedBlobs)
+	assert.False(t, skipped)
+	reviewTask := SystemTask{
+		TaskID: dialect + "-review-task", Type: SystemTaskTypeMessageAuditReview,
+		Status: SystemTaskStatusPending, CreatedAt: 402, UpdatedAt: 402,
+	}
+	require.NoError(t, DB.Create(&reviewTask).Error)
+	review := MessageAuditReview{
+		AuditSessionID: dialect + "-clear-session", ReviewedRequestID: clearRecord.Request.RequestID,
+		CurrentTaskID: reviewTask.TaskID, Status: string(SystemTaskStatusPending), CreatedAt: 402, UpdatedAt: 402,
+	}
+	require.NoError(t, DB.Create(&review).Error)
+	require.NoError(t, DB.Create(&MessageAuditReviewSource{ReviewID: review.ID, RequestID: clearRecord.Request.RequestID, CreatedAt: 402}).Error)
+
+	cleared, err := ClearMessageAudits(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, int64(1), cleared.DeletedRequests)
+	assert.Equal(t, int64(1), cleared.DeletedBlobs)
+	for _, value := range []any{&MessageAuditReviewSource{}, &MessageAuditReview{}, &MessageAuditItem{}, &MessageAuditRequest{}, &MessageAuditBlob{}} {
+		var count int64
+		require.NoError(t, DB.Model(value).Count(&count).Error)
+		assert.Zero(t, count)
+	}
+	storedReviewTask, err := GetSystemTaskByTaskID(reviewTask.TaskID)
+	require.NoError(t, err)
+	assert.Nil(t, storedReviewTask)
 }
 
 func TestMessageAuditMySQLCompatibility(t *testing.T) {

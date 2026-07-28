@@ -1,17 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import type {
-  MessageAuditCleanupTask,
-  MessageAuditListData,
-  MessageAuditReview,
-} from '../types'
+import type { MessageAuditCleanupTask, MessageAuditReview } from '../types'
 import {
   filterMessageAuditMessages,
   getMessageAuditCleanupProgress,
   getMessageAuditCleanupTitleKey,
   getMessageAuditErrorMessage,
-  getMessageAuditListPollInterval,
   getMessageAuditRequestFailureLabelKey,
   getMessageAuditReviewPollInterval,
   getMessageAuditReviewUncoveredLabelKey,
@@ -179,36 +174,6 @@ describe('消息审计 AI 审核状态', () => {
     assert.equal(
       getMessageAuditReviewUncoveredLabelKey('content_unavailable'),
       'The source content was unavailable.'
-    )
-  })
-})
-
-describe('消息审计列表轮询', () => {
-  test('待完成状态快速刷新，稳定状态自动降频', () => {
-    const data = (status: string, reviewStatus: string) =>
-      ({
-        page: 1,
-        page_size: 20,
-        total: 1,
-        items: [{ status, review_status: reviewStatus }],
-      }) as MessageAuditListData
-
-    assert.equal(getMessageAuditListPollInterval(undefined), 30000)
-    assert.equal(
-      getMessageAuditListPollInterval(data('pending', 'unreviewed')),
-      5000
-    )
-    assert.equal(
-      getMessageAuditListPollInterval(data('succeeded', 'pending')),
-      5000
-    )
-    assert.equal(
-      getMessageAuditListPollInterval(data('failed', 'running')),
-      5000
-    )
-    assert.equal(
-      getMessageAuditListPollInterval(data('succeeded', 'succeeded')),
-      30000
     )
   })
 })

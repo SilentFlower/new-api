@@ -8,7 +8,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 )
 
-const messageAuditCleanupBatchSize = 100
+const messageAuditCleanupBatchSize = 200
 
 // MessageAuditCleanupPayload 描述消息审计清理任务的固定截止时间和来源。
 type MessageAuditCleanupPayload struct {
@@ -71,6 +71,30 @@ func (messageAuditCleanupHandler) Run(ctx context.Context, task *model.SystemTas
 		failSystemTask(task, runnerID, err)
 		return
 	}
+	if payload.Source == "manual" {
+		deleted, err := ClearMessageAudits(ctx)
+		if err != nil {
+			failSystemTask(task, runnerID, err)
+			return
+		}
+		state := MessageAuditCleanupState{
+			Total:     deleted.DeletedRequests,
+			Processed: deleted.DeletedRequests,
+			Progress:  100,
+		}
+		if err := model.UpdateSystemTaskState(task.TaskID, runnerID, state); err != nil {
+			logSystemTaskLockError(ctx, task, err)
+			return
+		}
+		result := MessageAuditCleanupResult{
+			DeletedRequests: deleted.DeletedRequests,
+			DeletedBlobs:    deleted.DeletedBlobs,
+		}
+		if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
+			logSystemTaskLockError(ctx, task, err)
+		}
+		return
+	}
 	total, err := model.CountMessageAuditsBefore(ctx, cutoff)
 	if err != nil {
 		failSystemTask(task, runnerID, err)
@@ -85,6 +109,7 @@ func (messageAuditCleanupHandler) Run(ctx context.Context, task *model.SystemTas
 		return
 	}
 
+	var deletedBlobs int64
 	for state.Remaining > 0 {
 		if err := ctx.Err(); err != nil {
 			failSystemTask(task, runnerID, err)
@@ -95,11 +120,12 @@ func (messageAuditCleanupHandler) Run(ctx context.Context, task *model.SystemTas
 			failSystemTask(task, runnerID, err)
 			return
 		}
-		if deleted == 0 {
+		if deleted.DeletedRequests == 0 {
 			failSystemTask(task, runnerID, errors.New("no message audit rows were deleted"))
 			return
 		}
-		state.Processed += deleted
+		state.Processed += deleted.DeletedRequests
+		deletedBlobs += deleted.DeletedBlobs
 		if state.Processed >= state.Total {
 			state.Processed = state.Total
 			state.Remaining = 0
@@ -114,7 +140,6 @@ func (messageAuditCleanupHandler) Run(ctx context.Context, task *model.SystemTas
 		}
 	}
 
-	var deletedBlobs int64
 	for {
 		if err := ctx.Err(); err != nil {
 			failSystemTask(task, runnerID, err)
@@ -132,6 +157,7 @@ func (messageAuditCleanupHandler) Run(ctx context.Context, task *model.SystemTas
 	}
 
 	result := MessageAuditCleanupResult{DeletedRequests: state.Processed, DeletedBlobs: deletedBlobs}
+	messageAuditStatsCache.clear()
 	if err := model.FinishSystemTask(task.TaskID, runnerID, model.SystemTaskStatusSucceeded, result, ""); err != nil {
 		logSystemTaskLockError(ctx, task, err)
 	}

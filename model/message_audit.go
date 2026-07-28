@@ -3,6 +3,8 @@ package model
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
@@ -18,6 +20,7 @@ const (
 	messageAuditCompressionCandidateLimit = 20
 	messageAuditCompressionMaxAnchors     = 512
 	messageAuditDatabaseBatchSize         = 64
+	messageAuditCleanupBlobBatchSize      = 500
 )
 
 // MessageAuditRequest 保存一次已接收 AI 请求的审计元数据。
@@ -125,6 +128,18 @@ type MessageAuditFinalizeRecord struct {
 	HTTPStatus   int
 	DurationMS   int64
 	FinalizedAt  int64
+}
+
+// MessageAuditDeleteBatchResult 描述单批清理删除的请求与孤立消息块数量。
+type MessageAuditDeleteBatchResult struct {
+	DeletedRequests int64
+	DeletedBlobs    int64
+}
+
+// MessageAuditClearResult 描述一次整表清空删除的请求和消息块数量。
+type MessageAuditClearResult struct {
+	DeletedRequests int64
+	DeletedBlobs    int64
 }
 
 // MessageAuditListFilter 描述 root 管理端列表查询条件。
@@ -799,21 +814,143 @@ func CountMessageAuditsBefore(ctx context.Context, cutoff int64) (int64, error) 
 	return count, err
 }
 
+// ClearMessageAudits 快速清空全部消息审计正文、引用和审核结果。
+//
+// @param ctx 控制数据库操作取消。
+// @return 清空前的请求与消息块数量，以及数据库错误。
+func ClearMessageAudits(ctx context.Context) (MessageAuditClearResult, error) {
+	result := MessageAuditClearResult{}
+	db := DB.WithContext(ctx)
+	if err := db.Model(&MessageAuditRequest{}).Count(&result.DeletedRequests).Error; err != nil {
+		return MessageAuditClearResult{}, err
+	}
+	if err := db.Model(&MessageAuditBlob{}).Count(&result.DeletedBlobs).Error; err != nil {
+		return MessageAuditClearResult{}, err
+	}
+
+	switch common.MainDatabaseType() {
+	case common.DatabaseTypeMySQL:
+		tables := []string{
+			"message_audit_review_sources",
+			"message_audit_reviews",
+			"message_audit_items",
+			"message_audit_requests",
+			"message_audit_blobs",
+		}
+		if err := clearMessageAuditsMySQL(db, tables); err != nil {
+			return MessageAuditClearResult{}, err
+		}
+		if err := deleteMessageAuditReviewSystemTasks(db); err != nil {
+			return MessageAuditClearResult{}, err
+		}
+		return result, nil
+	case common.DatabaseTypePostgreSQL:
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := deleteMessageAuditReviewSystemTasks(tx); err != nil {
+				return err
+			}
+			return tx.Exec("TRUNCATE TABLE message_audit_review_sources, message_audit_reviews, message_audit_items, message_audit_requests, message_audit_blobs RESTART IDENTITY").Error
+		})
+		return result, err
+	case common.DatabaseTypeSQLite:
+		err := db.Transaction(func(tx *gorm.DB) error {
+			if err := deleteMessageAuditReviewSystemTasks(tx); err != nil {
+				return err
+			}
+			// SQLite 对无 WHERE、无触发器的 DELETE 使用整表清除优化。
+			for _, table := range []string{
+				"message_audit_review_sources",
+				"message_audit_reviews",
+				"message_audit_items",
+				"message_audit_requests",
+				"message_audit_blobs",
+			} {
+				if err := tx.Exec("DELETE FROM " + table).Error; err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		return result, err
+	default:
+		return MessageAuditClearResult{}, errors.New("unsupported message audit database")
+	}
+}
+
+func clearMessageAuditsMySQL(db *gorm.DB, tables []string) error {
+	nextTables := make([]string, 0, len(tables))
+	retiredTables := make([]string, 0, len(tables))
+	staleTables := make([]string, 0, len(tables)*2)
+	for _, table := range tables {
+		nextTable := table + "_clear_next"
+		retiredTable := table + "_clear_retired"
+		nextTables = append(nextTables, nextTable)
+		retiredTables = append(retiredTables, retiredTable)
+		staleTables = append(staleTables, "`"+nextTable+"`", "`"+retiredTable+"`")
+	}
+	if err := db.Exec("DROP TABLE IF EXISTS " + strings.Join(staleTables, ", ")).Error; err != nil {
+		return err
+	}
+	createdTables := make([]string, 0, len(tables))
+	for index, table := range tables {
+		nextTable := nextTables[index]
+		if err := db.Exec(fmt.Sprintf("CREATE TABLE `%s` LIKE `%s`", nextTable, table)).Error; err != nil {
+			if len(createdTables) > 0 {
+				_ = db.Exec("DROP TABLE IF EXISTS " + strings.Join(createdTables, ", ")).Error
+			}
+			return err
+		}
+		createdTables = append(createdTables, "`"+nextTable+"`")
+	}
+	renames := make([]string, 0, len(tables)*2)
+	for index, table := range tables {
+		renames = append(renames,
+			fmt.Sprintf("`%s` TO `%s`", table, retiredTables[index]),
+			fmt.Sprintf("`%s` TO `%s`", nextTables[index], table),
+		)
+	}
+	// 单条 RENAME TABLE 原子切换全部审计表，其他实例的写入只能落在切换前或切换后的完整表组。
+	if err := db.Exec("RENAME TABLE " + strings.Join(renames, ", ")).Error; err != nil {
+		_ = db.Exec("DROP TABLE IF EXISTS " + strings.Join(createdTables, ", ")).Error
+		return err
+	}
+	retired := make([]string, 0, len(retiredTables))
+	for _, table := range retiredTables {
+		retired = append(retired, "`"+table+"`")
+	}
+	return db.Exec("DROP TABLE IF EXISTS " + strings.Join(retired, ", ")).Error
+}
+
+func deleteMessageAuditReviewSystemTasks(tx *gorm.DB) error {
+	if err := tx.Where("type = ?", SystemTaskTypeMessageAuditReview).Delete(&SystemTaskLock{}).Error; err != nil {
+		return err
+	}
+	return tx.Where("type = ?", SystemTaskTypeMessageAuditReview).Delete(&SystemTask{}).Error
+}
+
 // DeleteMessageAuditsBeforeBatch 分批删除清理水位之前的请求和引用。
 //
 // 参数 ctx 控制取消，cutoff 是固定水位，batchSize 是单批上限。
-// 返回值为本批删除的请求数。
-func DeleteMessageAuditsBeforeBatch(ctx context.Context, cutoff int64, batchSize int) (int64, error) {
+// 返回值包含本批删除的请求数和同步回收的孤立消息块数。
+func DeleteMessageAuditsBeforeBatch(ctx context.Context, cutoff int64, batchSize int) (MessageAuditDeleteBatchResult, error) {
+	result := MessageAuditDeleteBatchResult{}
 	var ids []int64
 	if err := messageAuditsBefore(DB.WithContext(ctx).Model(&MessageAuditRequest{}), cutoff).Order("id asc").Limit(batchSize).Pluck("id", &ids).Error; err != nil {
-		return 0, err
+		return result, err
 	}
 	if len(ids) == 0 {
-		return 0, nil
+		return result, nil
 	}
 	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var requestIDs []string
 		if err := tx.Model(&MessageAuditRequest{}).Where("id IN ?", ids).Pluck("request_id", &requestIDs).Error; err != nil {
+			return err
+		}
+		var blobIDs []int64
+		if err := tx.Model(&MessageAuditItem{}).
+			Where("audit_request_id IN ?", ids).
+			Distinct().
+			Pluck("blob_id", &blobIDs).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("audit_request_id IN ?", ids).Delete(&MessageAuditItem{}).Error; err != nil {
@@ -822,9 +959,25 @@ func DeleteMessageAuditsBeforeBatch(ctx context.Context, cutoff int64, batchSize
 		if err := tx.Where("id IN ?", ids).Delete(&MessageAuditRequest{}).Error; err != nil {
 			return err
 		}
-		return DeleteMessageAuditReviewsForRequestIDs(tx, requestIDs)
+		if err := DeleteMessageAuditReviewsForRequestIDs(tx, requestIDs); err != nil {
+			return err
+		}
+		// 只检查本批实际引用过的 blob，避免清空后反复全表寻找孤儿记录。
+		for start := 0; start < len(blobIDs); start += messageAuditCleanupBlobBatchSize {
+			end := min(start+messageAuditCleanupBlobBatchSize, len(blobIDs))
+			deleted, err := deleteMessageAuditBlobIDsIfOrphan(tx, blobIDs[start:end])
+			if err != nil {
+				return err
+			}
+			result.DeletedBlobs += deleted
+		}
+		return nil
 	})
-	return int64(len(ids)), err
+	if err != nil {
+		return MessageAuditDeleteBatchResult{}, err
+	}
+	result.DeletedRequests = int64(len(ids))
+	return result, nil
 }
 
 // DeleteOrphanMessageAuditBlobsBatch 分批回收没有请求引用的加密消息块。

@@ -84,7 +84,6 @@ import {
   getMessageAuditCleanupProgress,
   getMessageAuditCleanupTitleKey,
   getMessageAuditErrorMessage,
-  getMessageAuditListPollInterval,
   getMessageAuditRequestFailureLabelKey,
   getMessageAuditReviewStatusLabelKey,
   getMessageAuditRiskLabelKey,
@@ -188,13 +187,10 @@ export function MessageAudits() {
         pageSize: pagination.pageSize,
       }),
     placeholderData: (previousData) => previousData,
-    refetchInterval: (query) =>
-      getMessageAuditListPollInterval(query.state.data),
   })
   const statusQuery = useQuery({
     queryKey: ['message-audit-status'],
     queryFn: getMessageAuditStatus,
-    refetchInterval: 30000,
   })
   const currentCleanupQuery = useQuery({
     queryKey: ['message-audit-cleanup', 'current'],
@@ -638,7 +634,7 @@ export function MessageAudits() {
                       </span>
                       <span className='basis-full'>
                         {t(
-                          'Audit remains enabled, so requests received after cleanup started are retained. Database allocated space is reusable and may not shrink after records are deleted.'
+                          'Audit remains enabled. Requests received around the clear operation may also be removed. Database allocated space is reusable and may not shrink after records are deleted.'
                         )}
                       </span>
                     </>
@@ -946,7 +942,7 @@ export function MessageAudits() {
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t(
-                'Existing audited messages will be permanently deleted. New requests can continue to be captured during cleanup.'
+                'Existing audited messages will be permanently deleted. Requests received around the clear operation may also be removed.'
               )}{' '}
               {t(
                 'Database allocated space is reusable and may not shrink after records are deleted.'

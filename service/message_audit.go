@@ -68,6 +68,12 @@ func (cache *messageAuditStorageStatsCache) get(now time.Time, loader func() (mo
 	return stats, nil
 }
 
+func (cache *messageAuditStorageStatsCache) clear() {
+	cache.mutex.Lock()
+	cache.valid = false
+	cache.mutex.Unlock()
+}
+
 // MessageAuditCaptureInput 是 controller 传给审计 service 的最小请求上下文。
 type MessageAuditCaptureInput struct {
 	RequestID   string
@@ -158,6 +164,7 @@ type messageAuditManager struct {
 	stop                 chan struct{}
 	done                 chan struct{}
 	stopOnce             sync.Once
+	storageMutex         sync.RWMutex
 	stopping             atomic.Bool
 	queuedBytes          atomic.Int64
 	succeeded            atomic.Uint64
@@ -272,6 +279,23 @@ func GetMessageAuditStatus() MessageAuditStatus {
 	status.Failed = manager.failed.Load()
 	status.Dropped = manager.dropped.Load()
 	return status
+}
+
+// ClearMessageAudits 在暂停本节点审计写入期间快速清空全部消息审计数据。
+//
+// @param ctx 控制数据库操作取消。
+// @return 清空前的请求与消息块数量，以及数据库错误。
+func ClearMessageAudits(ctx context.Context) (model.MessageAuditClearResult, error) {
+	manager := messageAuditManagerInst
+	if manager != nil {
+		manager.storageMutex.Lock()
+		defer manager.storageMutex.Unlock()
+	}
+	result, err := model.ClearMessageAudits(ctx)
+	if err == nil {
+		messageAuditStatsCache.clear()
+	}
+	return result, err
 }
 
 // CaptureMessageAudit 规范化已验证请求并尝试非阻塞投递入站快照。
@@ -536,11 +560,13 @@ func (manager *messageAuditManager) processWithRetry(event messageAuditEvent) {
 		}
 	}
 	for attempt := 0; attempt < messageAuditRetryCount; attempt++ {
+		manager.storageMutex.RLock()
 		if event.kind == "capture" {
 			_, err = model.CreateMessageAuditCapture(captureRecord)
 		} else {
 			err = model.FinalizeMessageAuditRequest(*event.finalize)
 		}
+		manager.storageMutex.RUnlock()
 		if err == nil {
 			manager.succeeded.Add(1)
 			return

@@ -43,9 +43,19 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 	}
 	stream := false
 	parallel := false
+	messages := input.Messages
+	tools := input.Tools
+	var toolChoice any
+	var responseFormat *dto.ResponseFormat
+	if input.TextToolFallback {
+		tools = nil
+		responseFormat = &dto.ResponseFormat{Type: "json_object"}
+	} else if input.RequireToolCall {
+		toolChoice = "required"
+	}
 	request := &dto.GeneralOpenAIRequest{
-		Model: input.Model, Messages: input.Messages, Tools: input.Tools,
-		Stream: &stream, ParallelTooCalls: &parallel, MaxCompletionTokens: &input.MaxTokens,
+		Model: input.Model, Messages: messages, Tools: tools, ToolChoice: toolChoice,
+		ResponseFormat: responseFormat, Stream: &stream, ParallelTooCalls: &parallel, MaxCompletionTokens: &input.MaxTokens,
 	}
 	info := relaycommon.GenRelayInfoOpenAI(c, request)
 	info.RelayMode = relayconstant.RelayModeChatCompletions
@@ -103,7 +113,57 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 	if _, apiErr := adaptor.DoResponse(c, response, info); apiErr != nil {
 		return service.MessageAuditReviewModelResponse{}, errors.New("review upstream response conversion failed")
 	}
-	return parseMessageAuditReviewResponse(recorder.Body.Bytes())
+	result, err := parseMessageAuditReviewResponse(recorder.Body.Bytes())
+	if messageAuditReviewNeedsTextToolFallback(input, result, err) {
+		return service.MessageAuditReviewModelResponse{ToolFallbackRequired: true}, nil
+	}
+	if err != nil {
+		return service.MessageAuditReviewModelResponse{}, err
+	}
+	if input.TextToolFallback {
+		result, err = parseMessageAuditReviewTextToolResponse(result.Content)
+		if err != nil {
+			return service.MessageAuditReviewModelResponse{}, err
+		}
+	}
+	return result, nil
+}
+
+func messageAuditReviewNeedsTextToolFallback(input service.MessageAuditReviewModelRequest, response service.MessageAuditReviewModelResponse, responseErr error) bool {
+	return !input.TextToolFallback && input.RequireToolCall && (responseErr != nil || len(response.ToolCalls) == 0)
+}
+
+func parseMessageAuditReviewTextToolResponse(content string) (service.MessageAuditReviewModelResponse, error) {
+	content = strings.TrimSpace(content)
+	if strings.HasPrefix(content, "```") {
+		if newline := strings.IndexByte(content, '\n'); newline >= 0 && strings.HasSuffix(content, "```") {
+			content = strings.TrimSpace(strings.TrimSuffix(content[newline+1:], "```"))
+		}
+	}
+	result := service.MessageAuditReviewModelResponse{Content: content}
+	var envelope struct {
+		ToolCall *struct {
+			Name      string `json:"name"`
+			Arguments any    `json:"arguments"`
+		} `json:"tool_call"`
+	}
+	if err := common.UnmarshalJsonStr(result.Content, &envelope); err != nil {
+		return result, nil
+	}
+	if envelope.ToolCall == nil {
+		return result, nil
+	}
+	if strings.TrimSpace(envelope.ToolCall.Name) == "" {
+		return service.MessageAuditReviewModelResponse{}, errors.New("review text tool name missing")
+	}
+	arguments, err := common.Marshal(envelope.ToolCall.Arguments)
+	if err != nil {
+		return service.MessageAuditReviewModelResponse{}, err
+	}
+	result.ToolCalls = []service.MessageAuditReviewToolCall{{
+		ID: "text_tool_" + common.GetRandomString(8), Name: envelope.ToolCall.Name, Arguments: string(arguments),
+	}}
+	return result, nil
 }
 
 func parseMessageAuditReviewResponse(body []byte) (service.MessageAuditReviewModelResponse, error) {

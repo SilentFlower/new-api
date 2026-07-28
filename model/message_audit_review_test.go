@@ -95,7 +95,7 @@ func TestDeleteMessageAuditsRemovesReferencedReview(t *testing.T) {
 
 	deleted, err := DeleteMessageAuditsBeforeBatch(context.Background(), now.Add(time.Second).UnixNano(), 10)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), deleted)
+	assert.Equal(t, int64(1), deleted.DeletedRequests)
 	var reviewCount int64
 	require.NoError(t, DB.Model(&MessageAuditReview{}).Count(&reviewCount).Error)
 	assert.Zero(t, reviewCount)
@@ -121,7 +121,7 @@ func TestDeleteMessageAuditsRemovesRunningReviewByFixedTaskSources(t *testing.T)
 
 	deleted, err := DeleteMessageAuditsBeforeBatch(context.Background(), now.Add(500*time.Millisecond).UnixNano(), 10)
 	require.NoError(t, err)
-	assert.Equal(t, int64(1), deleted)
+	assert.Equal(t, int64(1), deleted.DeletedRequests)
 	review, err := GetMessageAuditReview("session-running")
 	require.NoError(t, err)
 	assert.Nil(t, review)
