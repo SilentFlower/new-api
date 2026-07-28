@@ -34,7 +34,7 @@
    - 在 service 定义 caller 接口，relay 注册具体 adaptor 调用实现。
    - 复用渠道上下文、模型映射、请求转换和上游请求能力。
    - 解析 OpenAI Chat/Responses、Claude、Gemini 非流式文本和 Tool Call。
-   - 明确绕过公开 Relay、预扣/结算、消费日志、Token/成本记录、渠道 System Prompt、Param Override 和消息审计 capture/finalize。
+   - 明确绕过公开 Relay、预扣/结算、Token/成本记录、渠道 System Prompt、Param Override 和消息审计 capture/finalize；调用结束后只写零额度渠道调用日志或错误日志，日志内容必须脱敏。
 
 7. 增加固定审核配置与管理 API
    - 新增 `message_audit_review.config` 默认配置和后端完整校验。
@@ -94,7 +94,8 @@
     - 在审核固定配置中增加正整数 Tool 调用次数，默认 24、不设固定最大值并兼容旧配置；删除独立累计 Tool Token 和本地估算输入 Token 停止条件，Tool 结果只返回剩余调用与累计 Token，模型真实上下文溢出由上游稳定归类。
     - 使用 `system_tasks.state` 持久化脱敏审核调用诊断；relay 只上报稳定失败阶段和 HTTP 状态，不上报上游正文或原始错误。
     - Default 会话详情 AI 审核区展示渠道、模型、总调用/Tool/Token/耗时和逐次调用阶段；补齐全部语言 i18n 与后端、前端回归测试。
-    - 调整原生 Tool 请求构造，不发送 `tool_choice=required`；扩大 `read_file` / search 单次请求范围并由服务端按安全 Token 上限缩小返回；结果增加服务端任务概览，前端将完整明细迁入弹窗并增强长滚动区可见性。
+   - 调整原生 Tool 请求构造，不发送 `tool_choice=required`，并设置 `parallel_tool_calls=true`；文本 Tool 回退支持一次输出多个 `tool_calls`，由 service 逐个执行同一套范围和次数校验。
+   - 扩大 `read_file` / search 单次请求范围并由服务端按安全 Token 上限缩小返回；结果增加服务端任务概览，前端将完整明细迁入弹窗并增强长滚动区可见性。
 
 ## 主要文件
 
@@ -172,7 +173,7 @@ git diff --check
 - Tool 不能访问其他会话、真实路径、网络或任意数据库数据。
 - 审计材料中的提示词不能改变系统规则或 Tool 参数边界。
 - 管理端只配置固定渠道和模型，不提供自定义审核提示词；正文通过虚拟分片按需读取，达到上下文或 Tool 上限时明确失败。
-- 内部调用不产生消费日志、扣费、Token/成本记录或递归消息审计。
+- 内部调用不产生扣费、Token/成本记录或递归消息审计；API 日志中只出现零额度渠道调用日志或错误日志，且不含正文、Tool 参数、Tool 结果或模型输出。
 - 原 1 MiB 附近的大请求优先保存精简文本；真正 metadata-only 仍可 exact/prefix 归并。
 - 失败列表显示安全原因但不泄露上游原文。
 - finalize 后列表和详情的同一请求模型最终一致。

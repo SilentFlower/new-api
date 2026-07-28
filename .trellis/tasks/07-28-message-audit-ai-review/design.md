@@ -7,7 +7,7 @@
 核心约束：
 
 - 审核粒度固定为 `audit_session_id`，不改变现有单次请求详情和会话切换模型。
-- 审核调用走内部控制面，不经过公开 Relay Controller，不计费、不写消费日志、不产生新的消息审计。
+- 审核调用走内部控制面，不经过公开 Relay Controller，不计费、不记录 Token/成本、不产生新的消息审计；为便于定位渠道问题，内部调用可写入零额度渠道调用日志或错误日志，但日志只包含脱敏元数据。
 - AI 只通过受限虚拟文件 Tool 按需读取本次资料集，不能访问真实文件系统、网络、数据库或其他会话。
 - 审计正文和完整审核结果均加密保存；普通日志、管理审计和系统任务只记录无正文元数据。
 - SQLite、MySQL、PostgreSQL 使用同一 GORM 数据合同。
@@ -159,9 +159,9 @@ available
 
 ## 调用诊断
 
-审核任务复用 `system_tasks.state` 保存一份脱敏运行快照，不新增消息审计正文表或调用日志表。快照包含审核渠道/模型、开始与结束时间、总耗时、模型调用次数、Tool 调用次数、Tool 返回 Token、文本 Tool 回退状态、当前阶段和失败码；每次模型调用记录阶段、协议、耗时、返回 Tool 数、HTTP 状态和稳定错误阶段。
+审核任务复用 `system_tasks.state` 保存一份脱敏运行快照，不新增消息审计正文表或专用调用日志表。快照包含审核渠道/模型、开始与结束时间、总耗时、模型调用次数、Tool 调用次数、Tool 返回 Token、文本 Tool 回退状态、当前阶段和失败码；每次模型调用记录阶段、协议、耗时、返回 Tool 数、HTTP 状态和稳定错误阶段。relay 同时写入既有日志体系中的零额度渠道调用日志或错误日志，便于在 API 日志中按渠道、模型和请求 ID 排查上游失败。
 
-relay 内部 caller 使用结构化安全错误把 `config`、`setup`、`model_mapping`、`request_conversion`、`request_serialization`、`request_filtering`、`upstream_request`、`upstream_http`、`response_conversion`、`response_parse` 等阶段传给 service。只允许 HTTP 状态和稳定枚举跨层返回；上游响应正文、错误原文、请求正文、Tool 参数与模型输出不得进入任务 state、普通日志或管理审计。会话详情在 AI 审核区展示该快照，运行中轮询时可看到最新调用数，失败后可直接定位安全失败阶段。
+relay 内部 caller 使用结构化安全错误把 `config`、`setup`、`model_mapping`、`request_conversion`、`request_serialization`、`request_filtering`、`upstream_request`、`upstream_http`、`response_conversion`、`response_parse` 等阶段传给 service。只允许 HTTP 状态和稳定枚举跨层返回；上游响应正文、错误原文、请求正文、Tool 参数与模型输出不得进入任务 state、普通日志、管理审计或渠道调用日志。会话详情在 AI 审核区展示该快照，运行中轮询时可看到最新调用数，失败后可直接定位安全失败阶段。
 
 ## 默认提示词与输出
 
@@ -211,9 +211,10 @@ Relay 实现直接使用配置渠道的 adaptor：
 2. 通过 `middleware.SetupContextForSelectedChannel` 初始化渠道密钥、地址、模型映射和多 Key 状态。
 3. 调用 adaptor 的 `ConvertOpenAIRequest`、`DoRequest`，直接解析非流式上游响应中的文本和 Tool Call。
 4. 兼容 OpenAI Chat、OpenAI Responses、Claude 和 Gemini 非流式响应格式。
-5. 不调用 `controller.Relay`、`TextHelper` 的计费收口、`PreConsumeBilling`、`PostTextConsumeQuota`、消费日志或消息审计入口。
+5. 不调用 `controller.Relay`、`TextHelper` 的计费收口、`PreConsumeBilling`、`PostTextConsumeQuota` 或消息审计入口；调用结束后只写零额度渠道调用日志或错误日志，不写入任何正文、Tool 参数、Tool 结果或模型输出。
 6. 不应用渠道 System Prompt 和可能改写消息/Tool 的 Param Override；仅保留模型映射、必要请求头和渠道适配。
 7. 原生 Tool 请求不发送 API 级 `tool_choice=required`，避免 OpenAI-compatible 渠道拒绝或忽略该字段；首轮必须读资料由内置提示词、`RequireToolCall` 降级判断和后端覆盖校验共同保证。
+8. 原生 Tool 请求设置 `parallel_tool_calls=true`；文本 Tool 回退允许模型一次输出多个独立 `tool_calls`，service 仍逐个执行同一套文件范围、参数和次数校验。
 
 配置渠道必须启用且模型仍存在于渠道模型列表。渠道/模型原生 Tool 被忽略或不可解析时，service 可对同一渠道和模型切换为文本 Tool 协议；文本协议仍不能完成受控 Tool 流程时任务以稳定类别 `tool_unsupported` 失败，不自动切换其他渠道。
 
@@ -313,7 +314,7 @@ POST /api/message-audit/session/:audit_session_id/review
 - Tool 越权、游标、查询、轮数、Token、超时边界。
 - 提示词注入材料不能扩展 Tool 范围。
 - 结构化输出校验和一次修复。
-- 内部调用无计费、无消费日志、无递归消息审计。
+- 内部调用无计费、无 Token/成本记录、无递归消息审计；零额度渠道调用日志和错误日志只含脱敏元数据。
 - 超大正文 `content_reduced`、最终 metadata-only 指纹归并和去重载荷统计。
 - finalize 后列表/详情模型一致，失败原因不包含上游原文。
 
@@ -376,7 +377,7 @@ POST /api/message-audit/session/:audit_session_id/review
 
 ### Tool 兼容回退
 
-审核调用优先使用渠道原生函数调用。若首轮要求 Tool 时上游返回成功但忽略函数调用或返回无法解析的空响应，relay 只返回需要降级的无正文信号，由 service 对同一渠道和模型构造严格 JSON 文本工具协议。service 必须构造实际发送的协议系统消息和工具定义；模型只能输出单个 `tool_call` JSON 或最终审核 JSON，服务端继续使用原 `executeMessageAuditReviewTool` 执行并校验范围、游标、参数和调用次数，工具结果以固定 `AUDIT_TOOL_RESULT` 消息返回。该回退不允许模型直接访问文件、数据库或网络。
+审核调用优先使用渠道原生函数调用。若首轮要求 Tool 时上游返回成功但忽略函数调用或返回无法解析的空响应，relay 只返回需要降级的无正文信号，由 service 对同一渠道和模型构造严格 JSON 文本工具协议。service 必须构造实际发送的协议系统消息和工具定义；模型可以输出单个 `tool_call` JSON，也可以一次输出多个独立 `tool_calls` JSON，或在完成时输出最终审核 JSON。服务端继续使用原 `executeMessageAuditReviewTool` 逐个执行并校验范围、游标、参数和调用次数，工具结果以固定 `AUDIT_TOOL_RESULT` 消息返回。该回退不允许模型直接访问文件、数据库或网络。
 
 ### 定向 blob 回收
 
