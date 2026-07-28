@@ -84,6 +84,7 @@ import {
   getMessageAuditCleanupProgress,
   getMessageAuditCleanupTitleKey,
   getMessageAuditErrorMessage,
+  getMessageAuditListPollInterval,
   getMessageAuditRequestFailureLabelKey,
   getMessageAuditReviewStatusLabelKey,
   getMessageAuditRiskLabelKey,
@@ -187,12 +188,13 @@ export function MessageAudits() {
         pageSize: pagination.pageSize,
       }),
     placeholderData: (previousData) => previousData,
-    refetchInterval: 5000,
+    refetchInterval: (query) =>
+      getMessageAuditListPollInterval(query.state.data),
   })
   const statusQuery = useQuery({
     queryKey: ['message-audit-status'],
     queryFn: getMessageAuditStatus,
-    refetchInterval: 5000,
+    refetchInterval: 30000,
   })
   const currentCleanupQuery = useQuery({
     queryKey: ['message-audit-cleanup', 'current'],

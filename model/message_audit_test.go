@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"testing"
 	"time"
@@ -114,6 +115,47 @@ func TestCreateMessageAuditCaptureDeduplicatesWithinUser(t *testing.T) {
 	require.NoError(t, DB.Where("audit_request_id = ?", first.Request.ID).First(&firstItem).Error)
 	require.NoError(t, DB.Where("audit_request_id = ?", second.Request.ID).First(&secondItem).Error)
 	assert.Equal(t, firstItem.BlobID, secondItem.BlobID)
+}
+
+func TestCreateMessageAuditCaptureBatchesItemsAndRequestDuplicates(t *testing.T) {
+	truncateTables(t)
+
+	record := messageAuditCaptureRecord("batched-capture", 12, 104, "batch-hmac-0")
+	record.Blobs = record.Blobs[:0]
+	for index := 0; index < messageAuditDatabaseBatchSize*2+2; index++ {
+		record.Blobs = append(record.Blobs, MessageAuditStoredBlob{
+			SchemaVersion:  1,
+			ContentHMAC:    fmt.Sprintf("batch-hmac-%d", index),
+			KeyFingerprint: "fingerprint",
+			ContentType:    "message",
+			PlaintextBytes: 12,
+			Nonce:          []byte("nonce-value!"),
+			Ciphertext:     []byte("ciphertext"),
+			Role:           "user",
+		})
+	}
+	record.Blobs = append(record.Blobs, record.Blobs[0])
+
+	skipped, err := CreateMessageAuditCapture(record)
+	require.NoError(t, err)
+	assert.False(t, skipped)
+
+	var request MessageAuditRequest
+	require.NoError(t, DB.Where("request_id = ?", record.Request.RequestID).First(&request).Error)
+	assert.Equal(t, int64(12), request.DedupSavedBytes)
+	assert.Equal(t, int64((messageAuditDatabaseBatchSize*2+2)*22), *request.StoredPayloadBytes)
+
+	var blobs int64
+	require.NoError(t, DB.Model(&MessageAuditBlob{}).Count(&blobs).Error)
+	assert.Equal(t, int64(messageAuditDatabaseBatchSize*2+2), blobs)
+
+	var items []MessageAuditItem
+	require.NoError(t, DB.Where("audit_request_id = ?", request.ID).Order("sequence asc").Find(&items).Error)
+	require.Len(t, items, messageAuditDatabaseBatchSize*2+3)
+	for sequence, item := range items {
+		assert.Equal(t, sequence, item.Sequence)
+	}
+	assert.Equal(t, items[0].BlobID, items[len(items)-1].BlobID)
 }
 
 func TestFinalizeMessageAuditRequestUpdatesNonEmptyModelName(t *testing.T) {
@@ -280,6 +322,37 @@ func TestMessageAuditSessionInferenceRecognizesCompressedSubsequence(t *testing.
 	detailRequest, _, err := GetMessageAuditEncryptedDetail(compressed.Request.RequestID)
 	require.NoError(t, err)
 	assert.Equal(t, int64(1), detailRequest.CompressedCount)
+}
+
+func TestMessageAuditSessionInferenceKeepsCompressionSchemaIsolated(t *testing.T) {
+	truncateTables(t)
+
+	anchors := []string{"h1", "h2", "h3", "h4", "h5", "h6", "h7", "h8"}
+	previous := messageAuditSessionCaptureRecord(
+		"compressed-schema-parent",
+		42,
+		603,
+		[]string{"old-p1", "old-p2", "old-p3", "old-p4", "old-p5", "old-p6", "old-p7", "old-p8"},
+		anchors,
+	)
+	current := messageAuditSessionCaptureRecord(
+		"compressed-schema-current",
+		42,
+		604,
+		[]string{"new-p1", "new-p2", "new-p3", "new-p4", "new-p5"},
+		[]string{"h1", "h3", "h5", "summary-new", "h8"},
+	)
+	for index := range current.Blobs {
+		current.Blobs[index].SchemaVersion = 2
+	}
+
+	_, err := CreateMessageAuditCapture(previous)
+	require.NoError(t, err)
+	_, err = CreateMessageAuditCapture(current)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, previous.Request.AuditSessionID, current.Request.AuditSessionID)
+	assert.Equal(t, "new", current.Request.SessionMatch)
 }
 
 func TestMessageAuditSessionInferenceRejectsWeakCompressionEvidence(t *testing.T) {

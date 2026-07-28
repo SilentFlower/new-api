@@ -275,12 +275,15 @@ message_audit_review_sources
 - capture/finalize 均非阻塞入队。队列容量为 1024 条、总字节上限为 64 MiB；完整快照不超过 1 MiB 时保存全部过滤后角色内容，超过后先剥离工具定义、系统/开发者指令和媒体信息并保留有界文本，精简文本仍超过硬上限时才降级为 `metadata_only`。任何降级或持久化失败不得使 relay 或计费失败。
 - capture 可以先保存 `OriginModelName`；请求结束时 finalize 必须在计费收口之后调用 `ConsumeLogModelName()`，异步覆盖为消费日志同源模型名。最终模型名为空时不得覆盖采集值，历史记录不自动回填。
 - 正文使用 AES-256-GCM 加密；去重指纹使用独立密钥的 HMAC-SHA256，并包含用户 ID 和 schema version。去重只允许发生在同一用户内；每次请求仍保留独立元数据和有序引用。
+- capture 持久化必须先按 `(user_id, schema_version, content_hmac)` 对请求内 blob 去重，分批查询既有 blob、批量插入缺失 blob，并在插入后批量回查最终 ID；唯一键冲突通过 `OnConflict DoNothing` 幂等收敛，不能依赖某一数据库对批量自增 ID 的回填行为。消息引用必须保持原 sequence 并使用受 SQLite 参数上限约束的批次写入。
 - 支持 OpenAI Chat、OpenAI Responses、Claude Messages 和 Gemini GenerateContent 的入站可见内容；Responses Compact、Realtime、Alpha Search、Embedding、Rerank、图片/音频任务及异步任务正文不进入审计。
 - 媒体只记录类型、MIME、大小、来源类别和摘要；Authorization、API Key、Cookie、密码、OAuth/Webhook 密钥、Base64/文件二进制和隐藏 reasoning/thinking/signature 必须过滤。
 - 推断会话仅在同一用户、同一协议内工作。唯一最长完整前缀标记 `prefix`，完全一致标记 `exact`；前缀失败时只允许使用非公共会话内容 HMAC 的高覆盖严格有序子序列标记 `compressed`；无匹配、低覆盖或多候选歧义必须标记 `new`。即使最终为 `metadata_only`，也必须保留无明文滚动 HMAC 和前缀指纹以支持 exact/prefix 归并。
+- compressed 候选查询必须先按用户、schema version 和锚点 HMAC 解析既有 blob ID，再从 `message_audit_items.blob_id` 索引反查候选请求；不得从用户历史请求及其全部 item 开始关联扫描。候选仍须加载完整历史锚点并执行有序子序列、尾部覆盖和歧义复核。
 - 默认列表先应用筛选，再按 `audit_session_id` 聚合并返回每个会话的最新请求、`session_request_count` 和 `compressed_request_count`；`audit_session_id` 查询返回该会话的单次请求且最新在前。历史空会话 ID 和 metadata-only 请求必须单独展示。
 - 列表和状态接口不得返回密文、nonce 或正文。详情接口按单个 `request_id` 解密有序消息，每次成功或失败的查看尝试都写不含正文的管理审计日志。
 - 状态接口返回 `payload_bytes`、`storage_bytes`、`storage_estimated`、`request_count`、`blob_count` 和 `item_count`。`payload_bytes` 始终表示仍被引用的密文与 nonce 逻辑字节；`storage_bytes` 优先表示四张审计表及其索引的实际分配空间，数据库能力不足时回退为 `payload_bytes` 并标记估算。
+- 状态接口中的表行数、payload 和物理空间统计使用 60 秒进程内缓存，刷新失败不得覆盖最后一次正确缓存；启停配置、保留期、队列深度、队列字节和 writer 计数仍须实时组装。Default 列表存在请求 `pending` 或审核 `pending/running` 时每 5 秒刷新，稳定状态降为 30 秒；状态统计固定每 30 秒刷新。
 - 一键清空使用异步系统任务和持久化纳秒清理水位；清理截止时间之后的新请求继续保留，截止时间之前尚在队列中的旧 capture 不能在任务结束后重新出现。
 - Default 会话历史查询只能在同一 `audit_session_id` 翻页时复用上一页占位数据；切换 session 时必须立即清空旧数据，避免在新会话标识下展示上一会话记录。
 - Default 详情在当前 Sheet/Drawer 内提供推断会话历史选择器；切换请求只更新详情请求 ID，不关闭容器。分页列表不含当前请求时必须把当前请求补入选项，确保受控 Select 的 value 始终有效。
@@ -295,11 +298,16 @@ message_audit_review_sources
 | 完整快照超过 1 MiB，但精简文本未超过硬上限 | 保存有界精简文本并标记 `content_reduced`，不保存被剥离内容 |
 | 精简文本仍超过硬上限 | 只保留安全元数据、计数和 HMAC 指纹并标记 `metadata_only` |
 | 后台写入失败 | 最多重试 3 次，最终增加 `failed` 并记录不含正文的请求关联告警 |
+| 批量插入时 blob 唯一键已存在 | 忽略冲突并批量回查最终 ID，继续写入有序 item，不回滚整次 capture |
+| 批量回查后仍缺少任一 blob ID | 回滚本次 capture，禁止写入悬空或错序 item |
 | 完整前缀落入多个会话 | 创建新的 `audit_session_id`，`session_match=new` |
 | 压缩子序列候选相同或差距不足 | 不强行归并，创建新会话 |
+| 当前锚点的 schema version 与历史 blob 不同 | 不复用其他 schema 的 blob ID，不形成 compressed 匹配 |
 | finalize 模型名非空 | 使用 `ConsumeLogModelName()` 的结果覆盖审计 `model_name` |
 | finalize 模型名为空 | 保留 capture 阶段模型名，不写空字符串 |
 | 物理表空间查询不可用 | `storage_bytes=payload_bytes`，`storage_estimated=true` |
+| 存储统计缓存未过期 | 复用缓存，不重复执行全表 COUNT、SUM 或物理表空间查询 |
+| 存储统计缓存过期且刷新失败 | 返回统计失败，不把零值或错误结果写入缓存；下次请求允许重试 |
 | 清空后数据库未收缩 | `payload_bytes` 降低或归零；`storage_bytes` 可保持不变并作为可复用空间展示 |
 | 历史记录没有会话 ID | 按单次请求独立显示，不与其他空值记录合并 |
 | 前端从会话 A 切换到会话 B | B 加载期间不得把 A 的请求作为 placeholder 展示 |
@@ -308,6 +316,8 @@ message_audit_review_sources
 ### 5. Good / Base / Bad Cases
 
 - Good：同一用户的长会话后续请求复用已有加密消息块，只新增变化内容和有序引用；列表聚合为一个推断会话，详情仍能还原每次请求。
+- Good：一个请求包含数百条消息和大量重复上下文时，只分批解析唯一 blob，批量写入有序 item；重复消息仍指向同一 blob，`dedup_saved_bytes` 与新增 payload 保持正确。
+- Good：压缩匹配先通过少量锚点 blob ID 命中 `message_audit_items.blob_id` 索引，再对有限候选执行完整 LCS 复核。
 - Good：客户端压缩上下文后保留足够多且顺序一致的旧消息 HMAC，系统标记 `compressed`，不解密正文做匹配。
 - Good：模型映射后消费日志显示冻结计费模型，消息审计 finalize 使用同一归一化函数更新为相同名称。
 - Base：功能关闭或请求协议不支持正文审计，普通消费日志、计费和转发行为保持不变。
@@ -316,6 +326,8 @@ message_audit_review_sources
 - Bad：把请求 JSON、提示词或响应正文写入 `logger.LogDebug`、`logs.content` 或 `logs.other`。
 - Bad：使用普通 SHA 哈希去重、跨用户共享消息块或把客户端 session/thread 头作为唯一归属依据。
 - Bad：为了保证审计必达而同步等待数据库写入，导致 relay 延迟或失败。
+- Bad：对每条消息分别尝试插入 blob、冲突后单独查询 ID、再单独插入 item；该模式会把大上下文放大为大量数据库往返。
+- Bad：compressed 查询从历史请求的全部 item 开始联表，再用 blob HMAC 过滤不匹配数据。
 - Bad：详情切换请求时关闭 Sheet/Drawer，或在分页选项不含当前值时继续渲染受控 Select。
 
 ### 6. Tests Required
@@ -323,7 +335,10 @@ message_audit_review_sources
 - service 规范化测试必须覆盖四种支持协议、隐藏思考/签名过滤、媒体二进制剥离、超大快照降级和 Responses Compact 排除。
 - 超限测试必须分别覆盖 `content_reduced`、真正 `metadata_only`、同内容精确归并和递增前缀归并，并断言两种降级都不保存被禁止的工具定义或媒体正文。
 - 加密与去重测试必须断言相同用户复用消息块、不同用户不共享、密文不能直接还原正文、工具定义不改变会话前缀。
+- 批量持久化测试必须跨越至少两个数据库批次，断言请求内重复 HMAC 只创建一个 blob、全部 item 顺序不变、重复 item 指向同一 blob、载荷与去重字节正确；SQLite、MySQL 和 PostgreSQL 隔离测试都必须执行同一 capture/detail/cleanup 合同。
 - model 测试必须覆盖 SQLite 写入/查询/清理、共享块回收、纳秒水位、历史秒级水位、精确/前缀/压缩/新建归属，以及前缀和压缩多候选歧义拒绝。
+- compressed 测试必须覆盖 blob ID 候选入口、schema version 隔离、弱证据和多会话歧义，不能只断言最终 session ID。
+- 状态缓存测试必须断言 TTL 内 loader 只执行一次、到期后刷新、刷新失败不覆盖最后一次正确值；前端测试必须断言活动状态为 5 秒、稳定状态为 30 秒。
 - model/service 测试必须断言 finalize 非空模型名会覆盖、空模型名保留旧值，异步 capture 先于 finalize 持久化，并覆盖消费日志模型归一化。
 - 外部数据库测试通过隔离 schema 的 `MESSAGE_AUDIT_MYSQL_DSN`、`MESSAGE_AUDIT_POSTGRES_DSN` 验证迁移、事务、详情和清理；未提供 DSN 时必须明确记录为未执行，不能声称三库已实测。
 - controller/router 测试必须断言非 root 拒绝、列表不泄露正文、详情查看产生管理审计、`audit_session_id` 参数原样传递。
@@ -372,6 +387,21 @@ placeholderData: (previousData, previousQuery) =>
     previousQuery?.queryKey[1],
     sessionId
   )
+```
+
+```go
+// 错误：逐消息查写并依赖批量 insert 回填的主键。
+for _, stored := range record.Blobs {
+	tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&blob)
+	tx.Where("content_hmac = ?", stored.ContentHMAC).First(&blob)
+	tx.Create(&item)
+}
+
+// 正确：批量解析、插入、回查最终 ID，再按原顺序批量写 item。
+blobsByKey := loadExistingBlobs(record.Blobs)
+insertMissingBlobs(record.Blobs, blobsByKey)
+blobsByKey = loadExistingBlobs(record.Blobs)
+tx.CreateInBatches(buildOrderedItems(record.Blobs, blobsByKey), 64)
 ```
 
 ## 场景：消息审计 AI 辅助审核

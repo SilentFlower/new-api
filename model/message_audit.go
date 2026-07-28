@@ -17,6 +17,7 @@ const (
 	messageAuditCompressionCoverageTarget = 7
 	messageAuditCompressionCandidateLimit = 20
 	messageAuditCompressionMaxAnchors     = 512
+	messageAuditDatabaseBatchSize         = 64
 )
 
 // MessageAuditRequest 保存一次已接收 AI 请求的审计元数据。
@@ -203,40 +204,27 @@ func CreateMessageAuditCapture(record *MessageAuditCaptureRecord) (bool, error) 
 			return err
 		}
 
-		var dedupSavedBytes int64
-		var storedPayloadBytes int64
+		blobsByKey, dedupSavedBytes, storedPayloadBytes, err := resolveMessageAuditBlobs(tx, record)
+		if err != nil {
+			return err
+		}
+		items := make([]MessageAuditItem, 0, len(record.Blobs))
 		for sequence, stored := range record.Blobs {
-			blob := MessageAuditBlob{
-				UserID:         record.Request.UserID,
-				SchemaVersion:  stored.SchemaVersion,
-				ContentHMAC:    stored.ContentHMAC,
-				KeyFingerprint: stored.KeyFingerprint,
-				ContentType:    stored.ContentType,
-				PlaintextBytes: stored.PlaintextBytes,
-				Nonce:          stored.Nonce,
-				Ciphertext:     stored.Ciphertext,
-				CreatedAt:      record.Request.CreatedAt,
+			key := messageAuditBlobKey{SchemaVersion: stored.SchemaVersion, ContentHMAC: stored.ContentHMAC}
+			blob, ok := blobsByKey[key]
+			if !ok || blob.ID == 0 {
+				return errors.New("message audit blob id was not resolved")
 			}
-			result := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&blob)
-			if result.Error != nil {
-				return result.Error
-			}
-			if result.RowsAffected == 0 {
-				dedupSavedBytes += stored.PlaintextBytes
-				if err := tx.Where("user_id = ? AND schema_version = ? AND content_hmac = ?", record.Request.UserID, stored.SchemaVersion, stored.ContentHMAC).First(&blob).Error; err != nil {
-					return err
-				}
-			} else {
-				storedPayloadBytes += int64(len(stored.Nonce) + len(stored.Ciphertext))
-			}
-			item := MessageAuditItem{
+			items = append(items, MessageAuditItem{
 				AuditRequestID: record.Request.ID,
 				Sequence:       sequence,
 				BlobID:         blob.ID,
 				Role:           stored.Role,
 				ContentType:    stored.ContentType,
-			}
-			if err := tx.Create(&item).Error; err != nil {
+			})
+		}
+		if len(items) > 0 {
+			if err := tx.CreateInBatches(&items, messageAuditDatabaseBatchSize).Error; err != nil {
 				return err
 			}
 		}
@@ -247,6 +235,83 @@ func CreateMessageAuditCapture(record *MessageAuditCaptureRecord) (bool, error) 
 		return tx.Model(&MessageAuditRequest{}).Where("id = ?", record.Request.ID).Updates(updates).Error
 	})
 	return skipped, err
+}
+
+func resolveMessageAuditBlobs(tx *gorm.DB, record *MessageAuditCaptureRecord) (map[messageAuditBlobKey]MessageAuditBlob, int64, int64, error) {
+	hmacsBySchema := make(map[int][]string)
+	seenKeys := make(map[messageAuditBlobKey]struct{})
+	for _, stored := range record.Blobs {
+		key := messageAuditBlobKey{SchemaVersion: stored.SchemaVersion, ContentHMAC: stored.ContentHMAC}
+		if _, ok := seenKeys[key]; ok {
+			continue
+		}
+		seenKeys[key] = struct{}{}
+		hmacsBySchema[stored.SchemaVersion] = append(hmacsBySchema[stored.SchemaVersion], stored.ContentHMAC)
+	}
+	blobsByKey, err := loadMessageAuditBlobsByHMAC(tx, record.Request.UserID, hmacsBySchema)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+
+	missingKeys := make(map[messageAuditBlobKey]struct{})
+	missingBlobs := make([]MessageAuditBlob, 0, len(seenKeys)-len(blobsByKey))
+	var dedupSavedBytes int64
+	var storedPayloadBytes int64
+	for _, stored := range record.Blobs {
+		key := messageAuditBlobKey{SchemaVersion: stored.SchemaVersion, ContentHMAC: stored.ContentHMAC}
+		if _, ok := blobsByKey[key]; ok {
+			dedupSavedBytes += stored.PlaintextBytes
+			continue
+		}
+		if _, ok := missingKeys[key]; ok {
+			dedupSavedBytes += stored.PlaintextBytes
+			continue
+		}
+		missingKeys[key] = struct{}{}
+		storedPayloadBytes += int64(len(stored.Nonce) + len(stored.Ciphertext))
+		missingBlobs = append(missingBlobs, MessageAuditBlob{
+			UserID:         record.Request.UserID,
+			SchemaVersion:  stored.SchemaVersion,
+			ContentHMAC:    stored.ContentHMAC,
+			KeyFingerprint: stored.KeyFingerprint,
+			ContentType:    stored.ContentType,
+			PlaintextBytes: stored.PlaintextBytes,
+			Nonce:          stored.Nonce,
+			Ciphertext:     stored.Ciphertext,
+			CreatedAt:      record.Request.CreatedAt,
+		})
+	}
+	if len(missingBlobs) > 0 {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).CreateInBatches(&missingBlobs, messageAuditDatabaseBatchSize).Error; err != nil {
+			return nil, 0, 0, err
+		}
+	}
+	// 不依赖各数据库对批量自增主键的回填差异，并让唯一键冲突统一收敛到已存在记录。
+	blobsByKey, err = loadMessageAuditBlobsByHMAC(tx, record.Request.UserID, hmacsBySchema)
+	if err != nil {
+		return nil, 0, 0, err
+	}
+	if len(blobsByKey) != len(seenKeys) {
+		return nil, 0, 0, errors.New("message audit blob ids were not fully resolved")
+	}
+	return blobsByKey, dedupSavedBytes, storedPayloadBytes, nil
+}
+
+func loadMessageAuditBlobsByHMAC(tx *gorm.DB, userID int, hmacsBySchema map[int][]string) (map[messageAuditBlobKey]MessageAuditBlob, error) {
+	blobsByKey := make(map[messageAuditBlobKey]MessageAuditBlob)
+	for schemaVersion, hmacs := range hmacsBySchema {
+		for start := 0; start < len(hmacs); start += messageAuditDatabaseBatchSize {
+			end := min(start+messageAuditDatabaseBatchSize, len(hmacs))
+			var blobs []MessageAuditBlob
+			if err := tx.Where("user_id = ? AND schema_version = ? AND content_hmac IN ?", userID, schemaVersion, hmacs[start:end]).Find(&blobs).Error; err != nil {
+				return nil, err
+			}
+			for _, blob := range blobs {
+				blobsByKey[messageAuditBlobKey{SchemaVersion: blob.SchemaVersion, ContentHMAC: blob.ContentHMAC}] = blob
+			}
+		}
+	}
+	return blobsByKey, nil
 }
 
 type messageAuditSessionCandidate struct {
@@ -269,6 +334,11 @@ type messageAuditCompressionMatch struct {
 	AuditSessionID string
 	MatchedAnchors int
 	RequestIDValue int64
+}
+
+type messageAuditBlobKey struct {
+	SchemaVersion int
+	ContentHMAC   string
 }
 
 func assignMessageAuditSession(tx *gorm.DB, record *MessageAuditCaptureRecord) error {
@@ -344,15 +414,48 @@ func findMessageAuditCompressedSession(tx *gorm.DB, record *MessageAuditCaptureR
 	if len(currentAnchors) < messageAuditCompressionMinAnchors || len(currentAnchors) > messageAuditCompressionMaxAnchors {
 		return nil, "", nil
 	}
+	anchorSchemas := make(map[string]int)
+	for _, stored := range record.Blobs {
+		anchorSchemas[stored.ContentHMAC] = stored.SchemaVersion
+	}
+	hmacsBySchema := make(map[int][]string)
+	seenAnchors := make(map[messageAuditBlobKey]struct{})
+	for _, contentHMAC := range currentAnchors {
+		schemaVersion, ok := anchorSchemas[contentHMAC]
+		if !ok {
+			continue
+		}
+		key := messageAuditBlobKey{SchemaVersion: schemaVersion, ContentHMAC: contentHMAC}
+		if _, ok := seenAnchors[key]; ok {
+			continue
+		}
+		seenAnchors[key] = struct{}{}
+		hmacsBySchema[schemaVersion] = append(hmacsBySchema[schemaVersion], contentHMAC)
+	}
+	anchorBlobIDs := make([]int64, 0, len(seenAnchors))
+	for schemaVersion, hmacs := range hmacsBySchema {
+		for start := 0; start < len(hmacs); start += messageAuditDatabaseBatchSize {
+			end := min(start+messageAuditDatabaseBatchSize, len(hmacs))
+			var blobIDs []int64
+			if err := tx.Model(&MessageAuditBlob{}).
+				Where("user_id = ? AND schema_version = ? AND content_hmac IN ?", record.Request.UserID, schemaVersion, hmacs[start:end]).
+				Pluck("id", &blobIDs).Error; err != nil {
+				return nil, "", err
+			}
+			anchorBlobIDs = append(anchorBlobIDs, blobIDs...)
+		}
+	}
+	if len(anchorBlobIDs) < messageAuditCompressionMinAnchors {
+		return nil, "", nil
+	}
 
 	var summaries []messageAuditCompressionCandidate
 	err := tx.Table("message_audit_items").
 		Select("message_audit_requests.id, message_audit_requests.request_id, message_audit_requests.audit_session_id, COUNT(DISTINCT message_audit_items.blob_id) AS matched_anchors").
 		Joins("JOIN message_audit_requests ON message_audit_requests.id = message_audit_items.audit_request_id").
-		Joins("JOIN message_audit_blobs ON message_audit_blobs.id = message_audit_items.blob_id").
 		Where("message_audit_requests.user_id = ? AND message_audit_requests.protocol = ?", record.Request.UserID, record.Request.Protocol).
 		Where("message_audit_requests.audit_session_id <> '' AND message_audit_requests.session_anchor_count > ?", len(currentAnchors)).
-		Where("message_audit_blobs.user_id = ? AND message_audit_blobs.content_hmac IN ?", record.Request.UserID, currentAnchors).
+		Where("message_audit_items.blob_id IN ?", anchorBlobIDs).
 		Where("message_audit_items.role NOT IN ?", []string{"developer", "system"}).
 		Where("message_audit_items.content_type NOT IN ?", []string{"tools", "functions"}).
 		Group("message_audit_requests.id, message_audit_requests.request_id, message_audit_requests.audit_session_id").

@@ -32,6 +32,34 @@ func newMessageAuditTestManager(t *testing.T) *messageAuditManager {
 	}
 }
 
+func TestMessageAuditStorageStatsCacheUsesTTLAndPreservesLastGoodValue(t *testing.T) {
+	cache := messageAuditStorageStatsCache{}
+	now := time.Unix(1000, 0)
+	loadCount := 0
+	loader := func() (model.MessageAuditStorageStats, error) {
+		loadCount++
+		return model.MessageAuditStorageStats{RequestCount: int64(loadCount)}, nil
+	}
+
+	first, err := cache.get(now, loader)
+	require.NoError(t, err)
+	second, err := cache.get(now.Add(messageAuditStorageStatsCacheTTL-time.Second), loader)
+	require.NoError(t, err)
+	assert.Equal(t, first, second)
+	assert.Equal(t, 1, loadCount)
+
+	third, err := cache.get(now.Add(messageAuditStorageStatsCacheTTL), loader)
+	require.NoError(t, err)
+	assert.Equal(t, int64(2), third.RequestCount)
+	assert.Equal(t, 2, loadCount)
+
+	_, err = cache.get(now.Add(messageAuditStorageStatsCacheTTL*2), func() (model.MessageAuditStorageStats, error) {
+		return model.MessageAuditStorageStats{RequestCount: 99}, assert.AnError
+	})
+	require.ErrorIs(t, err, assert.AnError)
+	assert.Equal(t, int64(2), cache.stats.RequestCount)
+}
+
 func TestConsumeLogModelNameMatchesConsumptionLogNormalization(t *testing.T) {
 	tests := []struct {
 		name      string

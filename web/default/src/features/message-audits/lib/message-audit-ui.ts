@@ -1,5 +1,6 @@
 import type {
   MessageAuditCleanupTask,
+  MessageAuditListData,
   MessageAuditMessage,
   MessageAuditReview,
   MessageAuditReviewStatus,
@@ -7,6 +8,9 @@ import type {
 } from '../types'
 
 export const MESSAGE_AUDIT_CLEAR_CONFIRMATION = 'CLEAR'
+
+const MESSAGE_AUDIT_ACTIVE_POLL_INTERVAL = 5000
+const MESSAGE_AUDIT_IDLE_POLL_INTERVAL = 30000
 
 /**
  * 判断消息审计清理任务是否仍在执行。
@@ -252,6 +256,26 @@ export function getMessageAuditReviewPollInterval(
   return review?.status === 'pending' || review?.status === 'running'
     ? 1000
     : false
+}
+
+/**
+ * 根据当前页是否还有待完成状态返回列表刷新间隔。
+ *
+ * @param data 当前消息审计分页数据。
+ * @returns 活动状态返回 5 秒，稳定状态返回 30 秒。
+ */
+export function getMessageAuditListPollInterval(
+  data: MessageAuditListData | undefined
+): number {
+  const hasActiveItem = data?.items.some(
+    (item) =>
+      item.status === 'pending' ||
+      item.review_status === 'pending' ||
+      item.review_status === 'running'
+  )
+  return hasActiveItem
+    ? MESSAGE_AUDIT_ACTIVE_POLL_INTERVAL
+    : MESSAGE_AUDIT_IDLE_POLL_INTERVAL
 }
 
 /**

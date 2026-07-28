@@ -36,12 +36,37 @@ const (
 	messageAuditBatchSize                 = 32
 	messageAuditRetryCount                = 3
 	messageAuditSecretMinLength           = 32
+	messageAuditStorageStatsCacheTTL      = time.Minute
 )
 
 var (
 	messageAuditManagerOnce sync.Once
 	messageAuditManagerInst *messageAuditManager
+	messageAuditStatsCache  messageAuditStorageStatsCache
 )
+
+type messageAuditStorageStatsCache struct {
+	mutex     sync.Mutex
+	stats     model.MessageAuditStorageStats
+	expiresAt time.Time
+	valid     bool
+}
+
+func (cache *messageAuditStorageStatsCache) get(now time.Time, loader func() (model.MessageAuditStorageStats, error)) (model.MessageAuditStorageStats, error) {
+	cache.mutex.Lock()
+	defer cache.mutex.Unlock()
+	if cache.valid && now.Before(cache.expiresAt) {
+		return cache.stats, nil
+	}
+	stats, err := loader()
+	if err != nil {
+		return model.MessageAuditStorageStats{}, err
+	}
+	cache.stats = stats
+	cache.expiresAt = now.Add(messageAuditStorageStatsCacheTTL)
+	cache.valid = true
+	return stats, nil
+}
 
 // MessageAuditCaptureInput 是 controller 传给审计 service 的最小请求上下文。
 type MessageAuditCaptureInput struct {
@@ -224,7 +249,7 @@ func GetMessageAuditStatus() MessageAuditStatus {
 		QueueCapacity:     messageAuditQueueCapacity,
 		QueueByteCapacity: messageAuditQueueByteLimit,
 	}
-	storageStats, err := model.GetMessageAuditStorageStats()
+	storageStats, err := messageAuditStatsCache.get(time.Now(), model.GetMessageAuditStorageStats)
 	if err != nil {
 		logger.LogWarn(context.Background(), fmt.Sprintf("消息审计存储统计失败: %v", err))
 	} else {
