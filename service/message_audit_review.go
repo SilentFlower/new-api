@@ -75,6 +75,11 @@ type MessageAuditReviewModelRequest struct {
 	MaxTokens        uint
 	RequireToolCall  bool
 	TextToolFallback bool
+	UserID           int
+	OperatorID       int
+	AuditSessionID   string
+	TargetRequestID  string
+	TaskID           string
 }
 
 // MessageAuditReviewModelResponse 描述内部模型调用的文本与工具请求。
@@ -476,7 +481,7 @@ func (messageAuditReviewHandler) Run(parent context.Context, task *model.SystemT
 		}
 	}
 	persistDiagnostics()
-	result, err := executeMessageAuditReview(ctx, payload, diagnostics, persistDiagnostics)
+	result, err := executeMessageAuditReview(ctx, task.TaskID, payload, diagnostics, persistDiagnostics)
 	if err != nil {
 		code := "internal_error"
 		var taskErr *messageAuditReviewTaskError
@@ -529,7 +534,7 @@ func (messageAuditReviewHandler) Run(parent context.Context, task *model.SystemT
 	}
 }
 
-func executeMessageAuditReview(ctx context.Context, payload MessageAuditReviewPayload, diagnostics *MessageAuditReviewDiagnostics, reportDiagnostics func()) (*MessageAuditReviewResult, error) {
+func executeMessageAuditReview(ctx context.Context, taskID string, payload MessageAuditReviewPayload, diagnostics *MessageAuditReviewDiagnostics, reportDiagnostics func()) (*MessageAuditReviewResult, error) {
 	messageAuditReviewCallerMu.RLock()
 	caller := messageAuditReviewCaller
 	messageAuditReviewCallerMu.RUnlock()
@@ -614,6 +619,8 @@ func executeMessageAuditReview(ctx context.Context, payload MessageAuditReviewPa
 		request, err := prepareMessageAuditReviewModelRequest(MessageAuditReviewModelRequest{
 			ChannelID: payload.Config.ChannelID, Model: payload.Config.Model, Messages: messages, Tools: tools, MaxTokens: messageAuditReviewOutputReserve,
 			RequireToolCall: len(coverage) == 0, TextToolFallback: textToolFallback,
+			UserID: payload.UserID, OperatorID: payload.OperatorID, AuditSessionID: payload.AuditSessionID,
+			TargetRequestID: payload.TargetRequestID, TaskID: taskID,
 		})
 		if err != nil {
 			return nil, err
@@ -642,7 +649,7 @@ func executeMessageAuditReview(ctx context.Context, payload MessageAuditReviewPa
 			if parseErr != nil {
 				output, parseErr = repairMessageAuditReviewOutput(ctx, func(ctx context.Context, request MessageAuditReviewModelRequest) (MessageAuditReviewModelResponse, error) {
 					return callModel("format_repair", request)
-				}, payload.Config, messages, response.Content, files, coverage, textToolFallback)
+				}, payload.Config, taskID, payload, messages, response.Content, files, coverage, textToolFallback)
 			}
 			if parseErr != nil {
 				var modelErr *MessageAuditReviewModelError
@@ -809,7 +816,7 @@ func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest)
 		return MessageAuditReviewModelRequest{}, err
 	}
 	instruction := "当前上游不支持原生函数调用，改用受控文本工具协议。可用工具定义：" + string(toolDefinitions) +
-		"。只能使用定义中的工具名和完整参数。需要工具时只输出一个 JSON：{\"tool_call\":{\"name\":\"工具名\",\"arguments\":{}}}。收到 AUDIT_TOOL_RESULT 后继续；完成审核时直接输出原定最终审核 JSON，不得包含 tool_call。"
+		"。只能使用定义中的工具名和完整参数。需要工具时输出 JSON：{\"tool_call\":{\"name\":\"工具名\",\"arguments\":{}}}；也可以一次输出多个独立工具调用：{\"tool_calls\":[{\"name\":\"工具名\",\"arguments\":{}}]}。收到 AUDIT_TOOL_RESULT 后继续；完成审核时直接输出原定最终审核 JSON，不得包含 tool_call 或 tool_calls。"
 	if input.RequireToolCall {
 		instruction += fmt.Sprintf(" 本轮必须先调用工具，不能直接给出最终结论；连续读取时优先使用 read_file limit=%d。", messageAuditReviewReadFileMaxLimit)
 	}
@@ -1088,7 +1095,7 @@ func parseAndValidateMessageAuditReviewOutput(raw string, files []messageAuditRe
 	return &MessageAuditReviewResult{Summary: output.Summary, RiskLevel: output.RiskLevel, Categories: output.Categories, Findings: output.Findings}, nil
 }
 
-func repairMessageAuditReviewOutput(ctx context.Context, caller MessageAuditReviewCaller, config MessageAuditReviewConfig, messages []dto.Message, invalid string, files []messageAuditReviewVirtualFile, coverage []MessageAuditReviewCoverage, textToolFallback bool) (*MessageAuditReviewResult, error) {
+func repairMessageAuditReviewOutput(ctx context.Context, caller MessageAuditReviewCaller, config MessageAuditReviewConfig, taskID string, payload MessageAuditReviewPayload, messages []dto.Message, invalid string, files []messageAuditReviewVirtualFile, coverage []MessageAuditReviewCoverage, textToolFallback bool) (*MessageAuditReviewResult, error) {
 	repairMessages := append([]dto.Message{}, messages...)
 	repairMessages = append(repairMessages, dto.Message{Role: "assistant", Content: invalid}, dto.Message{Role: "user", Content: "上一条输出不符合固定 JSON 合同。不要调用工具，只按原结论重新输出合法 JSON。"})
 	repairTools := []dto.ToolCallRequest(nil)
@@ -1098,6 +1105,8 @@ func repairMessageAuditReviewOutput(ctx context.Context, caller MessageAuditRevi
 	request, err := prepareMessageAuditReviewModelRequest(MessageAuditReviewModelRequest{
 		ChannelID: config.ChannelID, Model: config.Model, Messages: repairMessages, Tools: repairTools,
 		MaxTokens: messageAuditReviewOutputReserve, TextToolFallback: textToolFallback,
+		UserID: payload.UserID, OperatorID: payload.OperatorID, AuditSessionID: payload.AuditSessionID,
+		TargetRequestID: payload.TargetRequestID, TaskID: taskID,
 	})
 	if err != nil {
 		return nil, err

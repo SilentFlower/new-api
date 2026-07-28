@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/stretchr/testify/assert"
@@ -22,7 +23,7 @@ func TestMessageAuditReviewNeedsTextToolFallbackWhenNativeToolIsIgnored(t *testi
 
 func TestMessageAuditReviewOpenAIRequestDoesNotForceRequiredToolChoice(t *testing.T) {
 	stream := false
-	parallel := false
+	parallel := true
 	maxTokens := uint(256)
 	request := buildMessageAuditReviewOpenAIRequest(service.MessageAuditReviewModelRequest{
 		Model: "review-model", RequireToolCall: true, MaxTokens: maxTokens,
@@ -34,13 +35,14 @@ func TestMessageAuditReviewOpenAIRequestDoesNotForceRequiredToolChoice(t *testin
 	require.NotNil(t, request.MaxCompletionTokens)
 	assert.Equal(t, maxTokens, *request.MaxCompletionTokens)
 	assert.False(t, *request.Stream)
-	assert.False(t, *request.ParallelTooCalls)
+	assert.True(t, *request.ParallelTooCalls)
 
 	fallbackRequest := buildMessageAuditReviewOpenAIRequest(service.MessageAuditReviewModelRequest{
 		Model: "review-model", TextToolFallback: true, MaxTokens: maxTokens,
 		Tools: []dto.ToolCallRequest{{Type: "function", Function: dto.FunctionRequest{Name: "read_file"}}},
 	}, &stream, &parallel)
 	assert.Empty(t, fallbackRequest.Tools)
+	assert.Nil(t, fallbackRequest.ParallelTooCalls)
 	require.NotNil(t, fallbackRequest.ResponseFormat)
 	assert.Equal(t, "json_object", fallbackRequest.ResponseFormat.Type)
 }
@@ -63,10 +65,41 @@ func TestParseMessageAuditReviewTextToolResponse(t *testing.T) {
 	require.Len(t, fenced.ToolCalls, 1)
 	assert.Equal(t, "list_files", fenced.ToolCalls[0].Name)
 
+	multi, err := parseMessageAuditReviewTextToolResponse(`{"tool_calls":[{"name":"list_files","arguments":{}},{"name":"read_file","arguments":{"file_id":"request:one","cursor":0,"limit":10}}]}`)
+	require.NoError(t, err)
+	require.Len(t, multi.ToolCalls, 2)
+	assert.Equal(t, "list_files", multi.ToolCalls[0].Name)
+	assert.Equal(t, "read_file", multi.ToolCalls[1].Name)
+	assert.JSONEq(t, `{"file_id":"request:one","cursor":0,"limit":10}`, multi.ToolCalls[1].Arguments)
+
 	final, err := parseMessageAuditReviewTextToolResponse(`{"summary":"done","risk_level":"none","categories":[],"findings":[]}`)
 	require.NoError(t, err)
 	assert.Empty(t, final.ToolCalls)
 	assert.Contains(t, final.Content, `"summary":"done"`)
+}
+
+func TestMessageAuditReviewModelLogOtherKeepsDiagnosticsSafe(t *testing.T) {
+	other := messageAuditReviewModelLogOther(service.MessageAuditReviewModelRequest{
+		TextToolFallback: true, UserID: 12, OperatorID: 1,
+		AuditSessionID: "audsess_safe", TargetRequestID: "req_safe", TaskID: "task_safe",
+	}, service.MessageAuditReviewModelResponse{
+		HTTPStatus: 415,
+		ToolCalls: []service.MessageAuditReviewToolCall{{
+			Name: "read_file", Arguments: `{"file_id":"request:secret","cursor":0,"limit":1}`,
+		}},
+	}, &service.MessageAuditReviewModelError{Stage: "upstream_http", HTTPStatus: 415})
+
+	assert.Equal(t, "/internal/message-audit/review", other["request_path"])
+	assert.Equal(t, "text_tool_fallback", other["review_protocol"])
+	assert.Equal(t, "failed", other["outcome"])
+	assert.Equal(t, "upstream_http", other["error_stage"])
+	assert.Equal(t, 415, other["status_code"])
+	assert.Equal(t, []string{"read_file"}, other["tool_names"])
+	assert.NotContains(t, common.GetJsonString(other), "request:secret")
+	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, adminInfo["message_audit_review"])
+	assert.Equal(t, "audsess_safe", adminInfo["audit_session_id"])
 }
 
 func TestMessageAuditReviewModelErrorKeepsOnlySafeStageAndStatus(t *testing.T) {

@@ -177,6 +177,14 @@ function MessageAuditReviewOverviewGrid(props: { review: MessageAuditReview }) {
   )
 }
 
+function getLastFailedReviewCall(review: MessageAuditReview | undefined) {
+  const calls = review?.diagnostics?.calls ?? []
+  for (let index = calls.length - 1; index >= 0; index -= 1) {
+    if (calls[index]?.outcome === 'failed') return calls[index]
+  }
+  return undefined
+}
+
 function MessageAuditReviewDetailsDialog(props: {
   review: MessageAuditReview
   open: boolean
@@ -422,6 +430,7 @@ function MessageAuditReviewSection(props: { auditSessionId: string }) {
     review?.status === 'pending' ||
     review?.status === 'running'
   const hasDetails = Boolean(review?.result || review?.diagnostics)
+  const lastFailedCall = getLastFailedReviewCall(review)
 
   return (
     <section className='space-y-3 border-b pb-5'>
@@ -488,6 +497,34 @@ function MessageAuditReviewSection(props: { auditSessionId: string }) {
             {t(getMessageAuditReviewFailureLabelKey(review.failure_code))}
             {review.failure_code && (
               <code className='mt-1 block text-xs'>{review.failure_code}</code>
+            )}
+            {lastFailedCall && (
+              <div className='mt-2 space-y-1 text-xs'>
+                <div>
+                  {t(getMessageAuditReviewCallOutcomeLabelKey('failed'))}:{' '}
+                  {t(getMessageAuditReviewCallPhaseLabelKey(lastFailedCall.phase))}
+                  {' · '}
+                  {t(
+                    getMessageAuditReviewProtocolLabelKey(
+                      lastFailedCall.protocol
+                    )
+                  )}
+                </div>
+                {lastFailedCall.error_stage && (
+                  <div>
+                    {t('Failure stage')}:{' '}
+                    {t(
+                      getMessageAuditReviewErrorStageLabelKey(
+                        lastFailedCall.error_stage
+                      )
+                    )}{' '}
+                    <code>{lastFailedCall.error_stage}</code>
+                  </div>
+                )}
+                {lastFailedCall.http_status > 0 && (
+                  <div>HTTP: {lastFailedCall.http_status}</div>
+                )}
+              </div>
             )}
           </AlertDescription>
         </Alert>

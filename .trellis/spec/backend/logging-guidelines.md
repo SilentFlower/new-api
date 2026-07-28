@@ -476,8 +476,8 @@ system_tasks.active_key           message_audit_review:<audit_session_id>
 - `read_file` 和 search Tool 允许模型请求较大的连续窗口；若实际返回会超过 Tool 结果安全 Token 上限，服务端必须缩小返回范围并报告 `requested_limit`、`returned_count` 和续读游标，而不是直接失败。
 - 长消息可以拆成共享原 `sequence` 的多个虚拟分片。覆盖范围由服务端按 `file_id + start_cursor + end_cursor` 记录；引用一个原消息序号前，该消息对应的所有虚拟分片都必须实际读到。审核结果的 `overview` 由服务端根据覆盖记录生成，拆分消息只有全部分片已读才计入已覆盖消息。
 - 完整审核结果使用从 `MESSAGE_AUDIT_SECRET` 派生的独立审核密钥加密，AAD 必须绑定 `user_id + audit_session_id + reviewed_request_id`。仅允许为首次发布前的本地记录保留旧 AAD 解密回退。
-- 内部审核调用直接使用所选渠道 adaptor，不经过公开 `controller.Relay`，不执行预扣/结算、消费日志、Token/成本记录或 `CaptureMessageAudit` / `FinalizeMessageAudit`。原生 Tool 请求不得发送 API 级 `tool_choice=required`；首轮必须读资料由内置提示词、relay 降级判断和 service 覆盖校验共同保证。
-- 内部 Gin 上下文必须调用 `logger.SuppressSensitiveContentLogs`；审核提示词、Tool 参数/结果、模型输出和上游错误正文均不得进入普通应用日志。管理审计只记录会话 ID、任务 ID、操作者、状态和稳定错误类别。
+- 内部审核调用直接使用所选渠道 adaptor，不经过公开 `controller.Relay`，不执行预扣/结算、Token/成本记录或 `CaptureMessageAudit` / `FinalizeMessageAudit`。原生 Tool 请求不得发送 API 级 `tool_choice=required`，必须允许并行 Tool 调用；首轮必须读资料由内置提示词、relay 降级判断和 service 覆盖校验共同保证。
+- 内部 Gin 上下文必须调用 `logger.SuppressSensitiveContentLogs`；审核提示词、Tool 参数/结果、模型输出和上游错误正文均不得进入普通应用日志、管理审计或 API 调用日志。内部调用可以写入零额度渠道调用日志或错误日志用于排障，`other` 只允许包含渠道、模型、协议、HTTP 状态、稳定失败阶段、任务 ID、会话 ID 和安全 Tool 名称。
 - 审核任务可以在 `SystemTask.state` 保存脱敏调用诊断，包括渠道、模型、开始/结束时间、耗时、模型/Tool 调用次数、Tool Token、文本协议回退、HTTP 状态和稳定失败阶段；不得保存正文、Tool 参数、Tool 返回、模型输出或上游错误正文。
 - 列表只返回审核状态、旧风险、新鲜度和时间，不自动刷新；会话详情内联展示摘要、风险、任务概览、实际审核模型、失败类别和脱敏诊断摘要，完整依据、覆盖、未覆盖和逐次调用诊断必须通过详情弹窗查看。
 - 删除任一结果来源或活动任务固定来源时，必须在清理事务内删除 review source、review、当前 SystemTask 和 SystemTaskLock。任务完成前必须再次确认来源仍存在。
@@ -508,14 +508,14 @@ system_tasks.active_key           message_audit_review:<audit_session_id>
 - Base：AI 只读取部分资料并给出合法结论，结果可以成功，但详情必须明确列出未读或部分读取范围。
 - Bad：把全部历史快照无脑拼进一次模型请求，或让 AI 通过文件路径、SQL、网络自行找材料。
 - Bad：重审一开始就把 `review_model` 改成新模型，导致旧加密结果被错误归属给尚未成功的模型。
-- Bad：把审核模型响应写进 Debug 日志、SystemTask.result、消费日志或新的消息审计记录。
+- Bad：把审核模型响应、Tool 参数、Tool 结果或上游错误正文写进 Debug 日志、SystemTask.result、API 调用日志或新的消息审计记录。
 
 ### 6. Tests Required
 
 - router/controller：断言三条审核 API 继承 `RootAuth`，POST 路径只固定会话且不要求请求正文。
 - model：断言事务创建、同会话活动键幂等、重审保留旧结果模型、成功结果/来源/任务原子完成、清理成功结果和运行中固定来源时同步删除任务与锁。
 - service：断言每个压缩断点来源、长消息分片上限、Tool 文件越界、结构化输出枚举和覆盖校验、部分读取长消息不能作为完整证据、未覆盖原因和用户绑定 AAD。
-- logger/relay：断言敏感上下文下 Info/Warn/Error/Debug 均不写普通日志；内部调用路径不得触发计费、消费日志或递归消息审计。
+- logger/relay：断言敏感上下文下 Info/Warn/Error/Debug 均不写普通日志；内部调用路径不得触发计费、Token/成本记录或递归消息审计，零额度渠道调用日志和错误日志的 `other` 不含正文、Tool 参数、Tool 结果或模型输出。
 - frontend：断言审核 POST 不发送正文、pending/running 才轮询、旧风险与待重审并存、稳定失败码本地化、桌面和移动列表都显示 HTTP 状态与错误码。
 - 回归命令：
   - `go test ./... -count=1`

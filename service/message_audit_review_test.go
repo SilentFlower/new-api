@@ -305,7 +305,7 @@ func TestExecuteMessageAuditReviewCompletesTextToolFallbackLoop(t *testing.T) {
 	})
 
 	diagnostics := &MessageAuditReviewDiagnostics{}
-	result, err := executeMessageAuditReview(context.Background(), MessageAuditReviewPayload{
+	result, err := executeMessageAuditReview(context.Background(), "review-fallback-task", MessageAuditReviewPayload{
 		UserID: 21, AuditSessionID: "review-fallback-session", TargetRequestID: "review-fallback-request",
 		SourceRequestIDs: []string{"review-fallback-request"},
 	}, diagnostics, nil)
@@ -361,7 +361,7 @@ func TestExecuteMessageAuditReviewHonorsConfiguredToolCallLimit(t *testing.T) {
 	})
 
 	diagnostics := &MessageAuditReviewDiagnostics{}
-	_, err = executeMessageAuditReview(context.Background(), MessageAuditReviewPayload{
+	_, err = executeMessageAuditReview(context.Background(), "review-limit-task", MessageAuditReviewPayload{
 		UserID: 22, AuditSessionID: "review-limit-session", TargetRequestID: "review-limit-request",
 		SourceRequestIDs: []string{"review-limit-request"}, Config: MessageAuditReviewConfig{ToolCallLimit: 1},
 	}, diagnostics, nil)
@@ -416,7 +416,7 @@ func TestExecuteMessageAuditReviewAllowsToolTokensBeyondLegacyLimit(t *testing.T
 	})
 
 	diagnostics := &MessageAuditReviewDiagnostics{}
-	result, err := executeMessageAuditReview(context.Background(), MessageAuditReviewPayload{
+	result, err := executeMessageAuditReview(context.Background(), "review-large-tool-task", MessageAuditReviewPayload{
 		UserID: 24, AuditSessionID: "review-large-tool-session", TargetRequestID: "review-large-tool-request",
 		SourceRequestIDs: []string{"review-large-tool-request"}, Config: MessageAuditReviewConfig{ToolCallLimit: 12},
 	}, diagnostics, nil)
@@ -461,7 +461,7 @@ func TestExecuteMessageAuditReviewMapsUpstreamContextLimit(t *testing.T) {
 		messageAuditReviewCallerMu.Unlock()
 	})
 
-	_, err = executeMessageAuditReview(context.Background(), MessageAuditReviewPayload{
+	_, err = executeMessageAuditReview(context.Background(), "review-context-task", MessageAuditReviewPayload{
 		UserID: 23, AuditSessionID: "review-context-session", TargetRequestID: "review-context-request",
 		SourceRequestIDs: []string{"review-context-request"},
 	}, &MessageAuditReviewDiagnostics{}, nil)

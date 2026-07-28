@@ -25,7 +25,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func callMessageAuditReviewModel(ctx context.Context, input service.MessageAuditReviewModelRequest) (service.MessageAuditReviewModelResponse, error) {
+func callMessageAuditReviewModel(ctx context.Context, input service.MessageAuditReviewModelRequest) (result service.MessageAuditReviewModelResponse, err error) {
 	channel, err := model.GetChannelById(input.ChannelID, true)
 	if err != nil {
 		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("channel_lookup", 0)
@@ -36,20 +36,33 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+	requestID := "message-audit-review:" + common.GetRandomString(16)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(context.WithValue(ctx, common.RequestIdKey, requestID))
+	c.Set(common.RequestIdKey, requestID)
+	c.Set("id", messageAuditReviewLogUserID(input))
+	c.Set("token_name", "message-audit-review")
+	c.Set("token_id", 0)
+	c.Set("group", "audit")
+	if username, usernameErr := model.GetUsernameById(messageAuditReviewLogUserID(input), false); usernameErr == nil {
+		c.Set("username", username)
+	}
 	// 审核输入、工具结果和模型输出都属于敏感控制面数据，任何 adaptor 日志都必须被抑制。
 	logger.SuppressSensitiveContentLogs(c)
+	started := time.Now()
+	defer func() {
+		recordMessageAuditReviewModelLog(c, input, channel, started, result, err)
+	}()
 	if apiErr := middleware.SetupContextForSelectedChannel(c, channel, input.Model); apiErr != nil {
 		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("channel_setup", 0)
 	}
 	stream := false
-	parallel := false
+	parallel := true
 	request := buildMessageAuditReviewOpenAIRequest(input, &stream, &parallel)
 	info := relaycommon.GenRelayInfoOpenAI(c, request)
 	info.RelayMode = relayconstant.RelayModeChatCompletions
 	info.RequestURLPath = "/v1/chat/completions"
 	info.OriginModelName = input.Model
-	info.RequestId = "message-audit-review:" + common.GetRandomString(16)
+	info.RequestId = requestID
 	info.StartTime = time.Now()
 	info.FirstResponseTime = info.StartTime.Add(-time.Second)
 	info.InitChannelMeta(c)
@@ -107,7 +120,7 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 	if _, apiErr := adaptor.DoResponse(c, response, info); apiErr != nil {
 		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("response_conversion", response.StatusCode)
 	}
-	result, err := parseMessageAuditReviewResponse(recorder.Body.Bytes())
+	result, err = parseMessageAuditReviewResponse(recorder.Body.Bytes())
 	result.HTTPStatus = response.StatusCode
 	if err != nil {
 		err = newMessageAuditReviewModelError("response_parse", response.StatusCode)
@@ -135,14 +148,123 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 
 func buildMessageAuditReviewOpenAIRequest(input service.MessageAuditReviewModelRequest, stream *bool, parallel *bool) *dto.GeneralOpenAIRequest {
 	tools := input.Tools
+	parallelToolCalls := parallel
 	var responseFormat *dto.ResponseFormat
 	if input.TextToolFallback {
 		tools = nil
+		parallelToolCalls = nil
 		responseFormat = &dto.ResponseFormat{Type: "json_object"}
+	}
+	if len(tools) == 0 {
+		parallelToolCalls = nil
 	}
 	return &dto.GeneralOpenAIRequest{
 		Model: input.Model, Messages: input.Messages, Tools: tools,
-		ResponseFormat: responseFormat, Stream: stream, ParallelTooCalls: parallel, MaxCompletionTokens: &input.MaxTokens,
+		ResponseFormat: responseFormat, Stream: stream, ParallelTooCalls: parallelToolCalls, MaxCompletionTokens: &input.MaxTokens,
+	}
+}
+
+func messageAuditReviewLogUserID(input service.MessageAuditReviewModelRequest) int {
+	if input.OperatorID > 0 {
+		return input.OperatorID
+	}
+	return input.UserID
+}
+
+func recordMessageAuditReviewModelLog(c *gin.Context, input service.MessageAuditReviewModelRequest, channel *model.Channel, started time.Time, response service.MessageAuditReviewModelResponse, err error) {
+	if c == nil || channel == nil {
+		return
+	}
+	logUserID := messageAuditReviewLogUserID(input)
+	if logUserID <= 0 {
+		return
+	}
+	other := messageAuditReviewModelLogOther(input, response, err)
+	useTimeSeconds := int(time.Since(started).Seconds())
+	if err != nil {
+		stage := "unknown"
+		var modelErr *service.MessageAuditReviewModelError
+		if errors.As(err, &modelErr) && modelErr.Stage != "" {
+			stage = modelErr.Stage
+		}
+		model.RecordErrorLog(c, logUserID, channel.Id, input.Model, "message-audit-review", "消息审计 AI 审核渠道调用失败: "+stage, 0, useTimeSeconds, false, "audit", other)
+		return
+	}
+	model.RecordConsumeLog(c, logUserID, model.RecordConsumeLogParams{
+		ChannelId: channel.Id, ModelName: input.Model, TokenName: "message-audit-review",
+		Quota: 0, Content: "消息审计 AI 审核渠道调用", TokenId: 0,
+		UseTimeSeconds: useTimeSeconds, IsStream: false, Group: "audit", Other: other,
+	})
+}
+
+func messageAuditReviewModelLogOther(input service.MessageAuditReviewModelRequest, response service.MessageAuditReviewModelResponse, err error) map[string]interface{} {
+	protocol := "native_tools"
+	if input.TextToolFallback {
+		protocol = "text_tool_fallback"
+	}
+	other := map[string]interface{}{
+		"request_path":    "/internal/message-audit/review",
+		"review_protocol": protocol,
+		"tool_call_count": len(response.ToolCalls),
+		"status_code":     response.HTTPStatus,
+	}
+	if response.ToolFallbackRequired {
+		other["outcome"] = "fallback"
+		other["error_stage"] = response.ToolFallbackReason
+	} else if err != nil {
+		other["outcome"] = "failed"
+		var modelErr *service.MessageAuditReviewModelError
+		if errors.As(err, &modelErr) {
+			other["error_stage"] = modelErr.Stage
+			if modelErr.HTTPStatus > 0 {
+				other["status_code"] = modelErr.HTTPStatus
+			}
+			if modelErr.Code != "" {
+				other["failure_code"] = modelErr.Code
+			}
+		} else {
+			other["error_stage"] = "unknown"
+		}
+	} else if len(response.ToolCalls) > 0 {
+		other["outcome"] = "tool_calls"
+	} else {
+		other["outcome"] = "final"
+	}
+	toolNames := make([]string, 0, len(response.ToolCalls))
+	for _, call := range response.ToolCalls {
+		toolNames = append(toolNames, safeMessageAuditReviewRelayToolName(call.Name))
+	}
+	if len(toolNames) > 0 {
+		other["tool_names"] = toolNames
+	}
+	adminInfo := map[string]interface{}{
+		"message_audit_review": true,
+	}
+	if input.OperatorID > 0 {
+		adminInfo["operator_id"] = input.OperatorID
+	}
+	if input.UserID > 0 {
+		adminInfo["reviewed_user_id"] = input.UserID
+	}
+	if input.AuditSessionID != "" {
+		adminInfo["audit_session_id"] = input.AuditSessionID
+	}
+	if input.TargetRequestID != "" {
+		adminInfo["target_request_id"] = input.TargetRequestID
+	}
+	if input.TaskID != "" {
+		adminInfo["task_id"] = input.TaskID
+	}
+	other["admin_info"] = adminInfo
+	return other
+}
+
+func safeMessageAuditReviewRelayToolName(name string) string {
+	switch name {
+	case "list_files", "read_file", "search_files", "search_files_regex":
+		return name
+	default:
+		return "unknown_tool"
 	}
 }
 
@@ -192,28 +314,38 @@ func parseMessageAuditReviewTextToolResponse(content string) (service.MessageAud
 		}
 	}
 	result := service.MessageAuditReviewModelResponse{Content: content}
+	type textToolCallEnvelope struct {
+		Name      string `json:"name"`
+		Arguments any    `json:"arguments"`
+	}
 	var envelope struct {
-		ToolCall *struct {
-			Name      string `json:"name"`
-			Arguments any    `json:"arguments"`
-		} `json:"tool_call"`
+		ToolCall  *textToolCallEnvelope  `json:"tool_call"`
+		ToolCalls []textToolCallEnvelope `json:"tool_calls"`
 	}
 	if err := common.UnmarshalJsonStr(result.Content, &envelope); err != nil {
 		return result, nil
 	}
-	if envelope.ToolCall == nil {
+	calls := make([]textToolCallEnvelope, 0, len(envelope.ToolCalls)+1)
+	if envelope.ToolCall != nil {
+		calls = append(calls, *envelope.ToolCall)
+	}
+	calls = append(calls, envelope.ToolCalls...)
+	if len(calls) == 0 {
 		return result, nil
 	}
-	if strings.TrimSpace(envelope.ToolCall.Name) == "" {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review text tool name missing")
+	result.ToolCalls = make([]service.MessageAuditReviewToolCall, 0, len(calls))
+	for _, call := range calls {
+		if strings.TrimSpace(call.Name) == "" {
+			return service.MessageAuditReviewModelResponse{}, errors.New("review text tool name missing")
+		}
+		arguments, err := common.Marshal(call.Arguments)
+		if err != nil {
+			return service.MessageAuditReviewModelResponse{}, err
+		}
+		result.ToolCalls = append(result.ToolCalls, service.MessageAuditReviewToolCall{
+			ID: "text_tool_" + common.GetRandomString(8), Name: call.Name, Arguments: string(arguments),
+		})
 	}
-	arguments, err := common.Marshal(envelope.ToolCall.Arguments)
-	if err != nil {
-		return service.MessageAuditReviewModelResponse{}, err
-	}
-	result.ToolCalls = []service.MessageAuditReviewToolCall{{
-		ID: "text_tool_" + common.GetRandomString(8), Name: envelope.ToolCall.Name, Arguments: string(arguments),
-	}}
 	return result, nil
 }
 
