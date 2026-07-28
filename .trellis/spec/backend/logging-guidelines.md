@@ -225,7 +225,7 @@ logger.LogDebug(ctx, fmt.Sprintf("Redis GET: key=%s, value=%s", key, value))
 
 - Trigger：修改 AI 入站消息采集、`MESSAGE_AUDIT_SECRET`、`MessageAuditEnabled`、`MessageAuditRetentionDays`、消息审计表、推断会话、AI 辅助审核、审计管理 API、异步任务或 Default 消息审计页面。
 - 本场景是“普通日志不得记录 AI 对话内容”的唯一受控例外。正文只能进入主关系数据库中的独立加密审计表，不能写入控制台/文件日志、`logs.content`、`logs.other`、ClickHouse 日志或管理操作审计。
-- 审计经过验证并完成过滤的客户端入站会话上下文，可包含客户端提交的 system、user、assistant 和 tool 角色；不额外保存当前请求新产生的响应正文、流式增量、隐藏思考、请求头、凭证或媒体二进制。
+- 审计经过验证并完成过滤的客户端入站内容，可包含客户端提交的 system、user、assistant、tool 角色，以及图片生成或编辑请求的提示词和白名单安全参数；不额外保存当前请求新产生的响应正文、流式增量、隐藏思考、请求头、凭证或媒体二进制。
 
 ### 2. Signatures
 
@@ -276,9 +276,10 @@ message_audit_review_sources
 - capture 可以先保存 `OriginModelName`；请求结束时 finalize 必须在计费收口之后调用 `ConsumeLogModelName()`，异步覆盖为消费日志同源模型名。最终模型名为空时不得覆盖采集值，历史记录不自动回填。
 - 正文使用 AES-256-GCM 加密；去重指纹使用独立密钥的 HMAC-SHA256，并包含用户 ID 和 schema version。去重只允许发生在同一用户内；每次请求仍保留独立元数据和有序引用。
 - capture 持久化必须先按 `(user_id, schema_version, content_hmac)` 对请求内 blob 去重，分批查询既有 blob、批量插入缺失 blob，并在插入后批量回查最终 ID；唯一键冲突通过 `OnConflict DoNothing` 幂等收敛，不能依赖某一数据库对批量自增 ID 的回填行为。消息引用必须保持原 sequence 并使用受 SQLite 参数上限约束的批次写入。
-- 支持 OpenAI Chat、OpenAI Responses、Claude Messages 和 Gemini GenerateContent 的入站可见内容；Responses Compact、Realtime、Alpha Search、Embedding、Rerank、图片/音频任务及异步任务正文不进入审计。
+- 支持 OpenAI Chat、OpenAI Responses、Claude Messages、Gemini GenerateContent 的入站可见内容，以及 OpenAI Image 生成或编辑请求的提示词和白名单安全参数。Responses Compact、Realtime、Alpha Search、Embedding、Rerank、音频任务及异步任务正文不进入审计；图片、蒙版、Base64、媒体 URL、额外透传字段和生成结果不得进入审计。
 - 媒体只记录类型、MIME、大小、来源类别和摘要；Authorization、API Key、Cookie、密码、OAuth/Webhook 密钥、Base64/文件二进制和隐藏 reasoning/thinking/signature 必须过滤。
 - 推断会话仅在同一用户、同一协议内工作。唯一最长完整前缀标记 `prefix`，完全一致标记 `exact`；前缀失败时只允许使用非公共会话内容 HMAC 的高覆盖严格有序子序列标记 `compressed`；无匹配、低覆盖或多候选歧义必须标记 `new`。即使最终为 `metadata_only`，也必须保留无明文滚动 HMAC 和前缀指纹以支持 exact/prefix 归并。
+- 图片协议不生成序列指纹、前缀指纹或压缩锚点，每次图片请求必须分配独立的 `audit_session_id`；相同用户的相同审计块仍可复用加密 blob，但不得因此归并图片请求会话。
 - compressed 候选查询必须先按用户、schema version 和锚点 HMAC 解析既有 blob ID，再从 `message_audit_items.blob_id` 索引反查候选请求；不得从用户历史请求及其全部 item 开始关联扫描。候选仍须加载完整历史锚点并执行有序子序列、尾部覆盖和歧义复核。
 - 默认列表先应用筛选，再按 `audit_session_id` 聚合并返回每个会话的最新请求、`session_request_count` 和 `compressed_request_count`；`audit_session_id` 查询返回该会话的单次请求且最新在前。历史空会话 ID 和 metadata-only 请求必须单独展示。
 - 列表和状态接口不得返回密文、nonce 或正文。详情接口按单个 `request_id` 解密有序消息，每次成功或失败的查看尝试都写不含正文的管理审计日志。
@@ -312,6 +313,7 @@ message_audit_review_sources
 | 历史记录没有会话 ID | 按单次请求独立显示，不与其他空值记录合并 |
 | 前端从会话 A 切换到会话 B | B 加载期间不得把 A 的请求作为 placeholder 展示 |
 | 详情选择器翻到不含当前请求的页 | 显式补入当前请求选项，不得让 Select 失去受控值 |
+| 图片生成或编辑请求 | 保存提示词和白名单安全参数，媒体字段不落库，并为每次请求创建独立会话 |
 
 ### 5. Good / Base / Bad Cases
 
@@ -320,6 +322,7 @@ message_audit_review_sources
 - Good：压缩匹配先通过少量锚点 blob ID 命中 `message_audit_items.blob_id` 索引，再对有限候选执行完整 LCS 复核。
 - Good：客户端压缩上下文后保留足够多且顺序一致的旧消息 HMAC，系统标记 `compressed`，不解密正文做匹配。
 - Good：模型映射后消费日志显示冻结计费模型，消息审计 finalize 使用同一归一化函数更新为相同名称。
+- Good：图片生成或编辑请求只保存提示词和白名单安全参数，不保存图片、蒙版、Base64、媒体 URL 或生成结果，并且每次请求独立成会话。
 - Base：功能关闭或请求协议不支持正文审计，普通消费日志、计费和转发行为保持不变。
 - Base：完全摘要化且没有足够原始锚点时创建新会话，这是保守边界而不是错误。
 - Base：清空删除全部有效载荷后，数据库已分配空间仍可保持不变并供后续写入复用。
@@ -332,7 +335,7 @@ message_audit_review_sources
 
 ### 6. Tests Required
 
-- service 规范化测试必须覆盖四种支持协议、隐藏思考/签名过滤、媒体二进制剥离、超大快照降级和 Responses Compact 排除。
+- service 规范化测试必须覆盖五类支持协议、隐藏思考/签名过滤、媒体二进制剥离、超大快照降级和 Responses Compact 排除；图片协议还必须覆盖白名单参数保留、媒体与额外字段排除及独立会话语义。
 - 超限测试必须分别覆盖 `content_reduced`、真正 `metadata_only`、同内容精确归并和递增前缀归并，并断言两种降级都不保存被禁止的工具定义或媒体正文。
 - 加密与去重测试必须断言相同用户复用消息块、不同用户不共享、密文不能直接还原正文、工具定义不改变会话前缀。
 - 批量持久化测试必须跨越至少两个数据库批次，断言请求内重复 HMAC 只创建一个 blob、全部 item 顺序不变、重复 item 指向同一 blob、载荷与去重字节正确；SQLite、MySQL 和 PostgreSQL 隔离测试都必须执行同一 capture/detail/cleanup 合同。
@@ -843,11 +846,12 @@ MessageAuditRetentionDays     默认 7，范围 1..30
 
 ### 3. Contracts
 
-- 只支持 OpenAI Chat Completions、OpenAI Responses（不含 Compact）、Claude Messages 和 Gemini GenerateContent 的已验证入站 DTO。控制器只组装最小上下文并调用 service，不实现协议解析、过滤、加密、去重或数据库访问。
+- 支持 OpenAI Chat Completions、OpenAI Responses（不含 Compact）、Claude Messages、Gemini GenerateContent 和 OpenAI Image 生成或编辑的已验证入站 DTO。图片请求只提取提示词和白名单安全参数，不保存图片、蒙版、Base64、媒体 URL、额外透传字段或生成结果。控制器只组装最小上下文并调用 service，不实现协议解析、过滤、加密、去重或数据库访问。
 - 可见 system/developer/user/assistant/tool 消息、工具定义、工具调用和工具结果可以进入快照；reasoning、thinking、signature、encrypted content、认证头和渠道密钥必须排除。媒体只保存类型、MIME、大小、来源类别和 HMAC 摘要。
 - 工具调用数量只统计实际调用，不统计工具定义或工具结果。OpenAI `tool_calls` 按数组元素计数，Responses/Claude/Gemini 的调用节点各计一次。
 - 正文使用 `MESSAGE_AUDIT_SECRET` 派生的 AES-256-GCM 子密钥加密；去重使用独立 HMAC-SHA256 子密钥，并把用户 ID 与 schema version 纳入指纹。禁止跨用户复用消息块，禁止把密钥、nonce、密文或普通明文哈希返回列表 API。
 - capture 在请求验证后生成不可变安全快照并非阻塞入队；finalize 在请求结束时非阻塞入队。队列满、字节预算不足、快照超限或持久化失败均 fail-open，不得改变 Relay 响应、重试、并发控制或计费。
+- 图片协议不参与消息序列的 exact/prefix/compressed 会话推断，每次请求独立分配 `audit_session_id`；同用户加密 blob 去重不得改变该会话语义。
 - 列表只选择元数据列；详情仅在 root 打开单条记录时读取并解密。详情成功或失败尝试以及清空操作必须写 `LogTypeManage`，管理日志不得包含正文。
 - 清理任务 payload 的 `target_timestamp` 使用 Unix 纳秒并在任务创建时固定。`CapturedAtNano <= PurgeBeforeNano` 的旧 capture 必须跳过；秒级 `CapturedAt/PurgeBefore` 只作为历史数据兼容回退。
 - 清理消息块必须在事务中选择候选，并在实际删除语句中再次使用 `NOT EXISTS` 校验引用。MySQL/PostgreSQL 候选查询通过 `lockForUpdate` 锁定，SQLite 依赖写事务串行化；不得采用“先查 ID、事务外直接删除”的两阶段实现。
@@ -869,12 +873,14 @@ MessageAuditRetentionDays     默认 7，范围 1..30
 | 消息块仍被较新请求引用 | 孤立块清理不得删除该消息块 |
 | 页面恢复时存在 pending/running 清理任务 | 恢复任务并继续轮询，禁用重复清空 |
 | API HTTP 成功但 `success=false` | React Query 进入错误态并提供重试 |
+| 图片生成或编辑请求 | 保存提示词和白名单安全参数，排除所有媒体原文和结果，并按单次请求独立展示 |
 
 ### 5. Good / Base / Bad Cases
 
 - Good：同一用户连续请求携带相同历史消息，只新增有序引用；详情仍按每次请求当时的顺序完整还原。
 - Good：管理员点击清空后，同一秒稍晚到达的新请求因 `CapturedAtNano` 大于固定水位而保留。
 - Good：清理候选消息块在删除前被新请求复用，删除语句再次校验引用并保留该块。
+- Good：图片生成或编辑请求只形成一个经过过滤的 `image_request` 审计块，媒体原文不进入审计，每次请求独立成会话。
 - Base：历史记录只有秒级时间字段，查询和清理按秒级字段兼容处理；新写入始终填充纳秒字段。
 - Base：管理员刷新页面时存在活动清理任务，页面从 current 接口恢复进度，不要求重新点击清空。
 - Bad：把正文写入 `logs.content`、`logs.other`、普通运行日志或 ClickHouse 日志表。
@@ -886,7 +892,7 @@ MessageAuditRetentionDays     默认 7，范围 1..30
 ### 6. Tests Required
 
 - 密钥测试：缺失、过短、随机 nonce、密文篡改、跨用户 HMAC 隔离和密钥指纹不匹配。
-- 协议表驱动测试：四种协议的可见文本、工具定义、实际工具调用/结果、媒体过滤、隐藏思考过滤和 metadata-only 超限状态。
+- 协议表驱动测试：五类协议的可见文本或安全参数、工具定义、实际工具调用/结果、媒体过滤、隐藏思考过滤和 metadata-only 超限状态；图片协议必须额外断言白名单参数、媒体与额外字段排除及独立会话语义。
 - 异步生命周期测试：禁用跳过、队列满不阻塞、capture/finalize 顺序、有限重试、字节预算释放、优雅关闭排空和 `go test -race`。
 - 数据库测试：同用户去重、跨用户隔离、有序重复引用、列表不选择密文、详情解密、秒级历史字段兼容、同秒纳秒边界和孤立块删除前复查。
 - 三库测试：SQLite 始终执行；临时 MySQL/PostgreSQL 实例验证迁移、去重、清理水位、共享块保留和孤立块回收。

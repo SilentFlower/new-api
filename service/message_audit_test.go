@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -140,6 +141,66 @@ func TestMessageAuditNormalizeRequestFiltersHiddenContent(t *testing.T) {
 	assert.Contains(t, content, `"digest":`)
 }
 
+func TestMessageAuditNormalizeImageRequestKeepsOnlySafeFields(t *testing.T) {
+	manager := newMessageAuditTestManager(t)
+	n := uint(2)
+	stream := false
+	watermark := true
+	request := &dto.ImageRequest{
+		Model:             "gpt-image-1",
+		Prompt:            "生成一张安全测试图片",
+		N:                 &n,
+		Size:              "1024x1024",
+		Quality:           "high",
+		ResponseFormat:    "b64_json",
+		Style:             json.RawMessage(`"vivid"`),
+		Background:        json.RawMessage(`"transparent"`),
+		Moderation:        json.RawMessage(`"auto"`),
+		OutputFormat:      json.RawMessage(`"png"`),
+		OutputCompression: json.RawMessage(`80`),
+		PartialImages:     json.RawMessage(`1`),
+		Stream:            &stream,
+		InputFidelity:     json.RawMessage(`"https://example.com/input.png"`),
+		Watermark:         &watermark,
+		WatermarkEnabled:  json.RawMessage(`true`),
+		Image:             json.RawMessage(`"data:image/png;base64,aW1hZ2U="`),
+		Images:            json.RawMessage(`["data:image/png;base64,aW1hZ2Vz"]`),
+		Mask:              json.RawMessage(`"data:image/png;base64,bWFzaw=="`),
+		ExtraFields:       json.RawMessage(`{"source":"https://example.com/source.png"}`),
+		User:              json.RawMessage(`"external-user"`),
+		UserId:            json.RawMessage(`"external-user-id"`),
+		Extra: map[string]json.RawMessage{
+			"custom_image": json.RawMessage(`"data:image/png;base64,Y3VzdG9t"`),
+		},
+	}
+
+	entries, fingerprintEntries, messageCount, toolCount, plaintextBytes, metadataOnly, err := manager.normalizeRequest(request)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Len(t, fingerprintEntries, 1)
+	assert.Equal(t, 1, messageCount)
+	assert.Zero(t, toolCount)
+	assert.Positive(t, plaintextBytes)
+	assert.False(t, metadataOnly)
+	assert.Equal(t, "user", entries[0].Role)
+	assert.Equal(t, "image_request", entries[0].ContentType)
+
+	serialized, err := common.Marshal(entries[0].Content)
+	require.NoError(t, err)
+	content := string(serialized)
+	assert.Contains(t, content, "生成一张安全测试图片")
+	assert.Contains(t, content, `"model":"gpt-image-1"`)
+	assert.Contains(t, content, `"n":2`)
+	assert.Contains(t, content, `"size":"1024x1024"`)
+	assert.Contains(t, content, `"output_format":"png"`)
+	assert.NotContains(t, content, "input_fidelity")
+	assert.NotContains(t, content, "aW1hZ2U=")
+	assert.NotContains(t, content, "bWFzaw==")
+	assert.NotContains(t, content, "example.com")
+	assert.NotContains(t, content, "external-user")
+	assert.NotContains(t, content, "custom_image")
+}
+
 func TestMessageAuditEncryptionAndDedupAreUserScoped(t *testing.T) {
 	manager := newMessageAuditTestManager(t)
 	plaintext := []byte(`{"role":"user","content_type":"message","content":"same"}`)
@@ -193,7 +254,25 @@ func TestMessageAuditProtocolExcludesResponsesCompaction(t *testing.T) {
 	assert.True(t, isMessageAuditProtocolSupported(types.RelayFormatOpenAIResponses))
 	assert.True(t, isMessageAuditProtocolSupported(types.RelayFormatClaude))
 	assert.True(t, isMessageAuditProtocolSupported(types.RelayFormatGemini))
+	assert.True(t, isMessageAuditProtocolSupported(types.RelayFormatOpenAIImage))
 	assert.False(t, isMessageAuditProtocolSupported(types.RelayFormatOpenAIResponsesCompaction))
+}
+
+func TestMessageAuditImageRequestSkipsSessionFingerprints(t *testing.T) {
+	manager := newMessageAuditTestManager(t)
+	record, err := manager.encryptCapture(&messageAuditCaptureEvent{
+		request: model.MessageAuditRequest{UserID: 72, Protocol: string(types.RelayFormatOpenAIImage)},
+		entries: []messageAuditPlaintext{
+			{Role: "user", ContentType: "image_request", Content: map[string]any{"prompt": "重复提示词"}},
+		},
+	})
+	require.NoError(t, err)
+	require.Len(t, record.Blobs, 1)
+	assert.Empty(t, record.Request.SequenceFingerprint)
+	assert.Zero(t, record.Request.ConversationItemCount)
+	assert.Zero(t, record.Request.SessionAnchorCount)
+	assert.Empty(t, record.ConversationPrefixFingerprints)
+	assert.Empty(t, record.SessionAnchorHMACs)
 }
 
 func TestStartMessageAuditCleanupTaskPreservesNanosecondCutoff(t *testing.T) {

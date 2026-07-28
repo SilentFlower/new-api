@@ -33,6 +33,7 @@ const (
 	messageAuditSnapshotMaxSize           = int64(1024 * 1024)
 	messageAuditReviewTextDefaultMaxSize  = int64(4 * 1024 * 1024)
 	messageAuditReviewTextAbsoluteMaxSize = int64(16 * 1024 * 1024)
+	messageAuditImageOptionMaxSize        = 256
 	messageAuditBatchSize                 = 32
 	messageAuditRetryCount                = 3
 	messageAuditSecretMinLength           = 32
@@ -322,7 +323,12 @@ func CaptureMessageAudit(input MessageAuditCaptureInput) bool {
 		capturedAt = time.Now()
 	}
 	now := time.Now().Unix()
-	conversationPrefixFingerprints, sessionAnchorHMACs, sequenceFingerprint := manager.buildMessageAuditSessionFingerprints(input.UserID, string(input.Protocol), fingerprintEntries)
+	var conversationPrefixFingerprints []string
+	var sessionAnchorHMACs []string
+	sequenceFingerprint := ""
+	if !isMessageAuditStandaloneProtocol(input.Protocol) {
+		conversationPrefixFingerprints, sessionAnchorHMACs, sequenceFingerprint = manager.buildMessageAuditSessionFingerprints(input.UserID, string(input.Protocol), fingerprintEntries)
+	}
 	capturedPlaintextBytes := messageAuditPlaintextSize(entries)
 	capture := &messageAuditCaptureEvent{
 		request: model.MessageAuditRequest{
@@ -448,11 +454,15 @@ func messageAuditEnabled() bool {
 
 func isMessageAuditProtocolSupported(protocol types.RelayFormat) bool {
 	switch protocol {
-	case types.RelayFormatOpenAI, types.RelayFormatOpenAIResponses, types.RelayFormatClaude, types.RelayFormatGemini:
+	case types.RelayFormatOpenAI, types.RelayFormatOpenAIResponses, types.RelayFormatClaude, types.RelayFormatGemini, types.RelayFormatOpenAIImage:
 		return true
 	default:
 		return false
 	}
+}
+
+func isMessageAuditStandaloneProtocol(protocol types.RelayFormat) bool {
+	return protocol == types.RelayFormatOpenAIImage
 }
 
 func deriveMessageAuditKeys(secret string) ([]byte, []byte, string, error) {
@@ -661,6 +671,48 @@ func (manager *messageAuditManager) normalizeRequest(request dto.Request) ([]mes
 		if err := appendRaw("system", "tools", typed.Tools, false); err != nil {
 			return nil, nil, 0, 0, 0, false, err
 		}
+	case *dto.ImageRequest:
+		imageRequest := map[string]any{
+			"prompt": typed.Prompt,
+		}
+		if typed.Model != "" {
+			imageRequest["model"] = typed.Model
+		}
+		if typed.N != nil {
+			imageRequest["n"] = *typed.N
+		}
+		if typed.Size != "" {
+			imageRequest["size"] = typed.Size
+		}
+		if typed.Quality != "" {
+			imageRequest["quality"] = typed.Quality
+		}
+		if typed.ResponseFormat != "" {
+			imageRequest["response_format"] = typed.ResponseFormat
+		}
+		if typed.Stream != nil {
+			imageRequest["stream"] = *typed.Stream
+		}
+		if typed.Watermark != nil {
+			imageRequest["watermark"] = *typed.Watermark
+		}
+		for key, raw := range map[string]json.RawMessage{
+			"style":              typed.Style,
+			"background":         typed.Background,
+			"moderation":         typed.Moderation,
+			"output_format":      typed.OutputFormat,
+			"output_compression": typed.OutputCompression,
+			"partial_images":     typed.PartialImages,
+			"input_fidelity":     typed.InputFidelity,
+			"watermark_enabled":  typed.WatermarkEnabled,
+		} {
+			if value, ok := normalizeMessageAuditImageOption(raw); ok {
+				imageRequest[key] = value
+			}
+		}
+		if err := appendValue("user", "image_request", imageRequest, true); err != nil {
+			return nil, nil, 0, 0, 0, false, err
+		}
 	case *dto.ClaudeRequest:
 		if typed.System != nil {
 			if err := appendValue("system", "system", typed.System, true); err != nil {
@@ -714,6 +766,32 @@ func (manager *messageAuditManager) normalizeRequest(request dto.Request) ([]mes
 	return reducedEntries, reducedEntries, messageCount, toolCount, totalBytes, false, nil
 }
 
+func normalizeMessageAuditImageOption(raw json.RawMessage) (any, bool) {
+	if len(raw) == 0 || len(raw) > messageAuditImageOptionMaxSize {
+		return nil, false
+	}
+	var value any
+	if err := common.Unmarshal(raw, &value); err != nil {
+		return nil, false
+	}
+	switch typed := value.(type) {
+	case string:
+		trimmed := strings.TrimSpace(typed)
+		if trimmed == "" || len(trimmed) > messageAuditImageOptionMaxSize {
+			return nil, false
+		}
+		// 图片选项只应是枚举标量，拒绝伪装在参数中的媒体地址原文。
+		if parsed, err := url.Parse(trimmed); err == nil && parsed.Scheme != "" {
+			return nil, false
+		}
+		return typed, true
+	case float64, bool:
+		return typed, true
+	default:
+		return nil, false
+	}
+}
+
 func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureEvent) (*model.MessageAuditCaptureRecord, error) {
 	if capture == nil {
 		return nil, errors.New("message audit capture event is nil")
@@ -722,7 +800,8 @@ func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureE
 		Request: capture.request,
 		Blobs:   make([]model.MessageAuditStoredBlob, 0, len(capture.entries)),
 	}
-	hasPrecomputedFingerprints := capture.sequenceFingerprint != "" || len(capture.conversationPrefixFingerprints) > 0
+	standaloneProtocol := isMessageAuditStandaloneProtocol(types.RelayFormat(capture.request.Protocol))
+	hasPrecomputedFingerprints := !standaloneProtocol && (capture.sequenceFingerprint != "" || len(capture.conversationPrefixFingerprints) > 0)
 	if hasPrecomputedFingerprints {
 		record.ConversationPrefixFingerprints = capture.conversationPrefixFingerprints
 		record.SessionAnchorHMACs = capture.sessionAnchorHMACs
@@ -751,7 +830,7 @@ func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureE
 			Role:           entry.Role,
 		}
 		record.Blobs = append(record.Blobs, stored)
-		if hasPrecomputedFingerprints || !isMessageAuditConversationBlob(stored) {
+		if standaloneProtocol || hasPrecomputedFingerprints || !isMessageAuditConversationBlob(stored) {
 			continue
 		}
 		previousFingerprint = manager.nextMessageAuditSessionFingerprint(capture.request.UserID, capture.request.Protocol, previousFingerprint, stored)
@@ -760,7 +839,7 @@ func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureE
 			record.SessionAnchorHMACs = append(record.SessionAnchorHMACs, stored.ContentHMAC)
 		}
 	}
-	if record.Request.SequenceFingerprint == "" {
+	if !standaloneProtocol && record.Request.SequenceFingerprint == "" {
 		record.Request.SequenceFingerprint = previousFingerprint
 		record.Request.ConversationItemCount = len(record.ConversationPrefixFingerprints)
 		record.Request.SessionAnchorCount = len(record.SessionAnchorHMACs)

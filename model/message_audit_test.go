@@ -286,6 +286,28 @@ func TestMessageAuditGroupedListKeepsHistoricalRowsStandalone(t *testing.T) {
 	assert.Equal(t, "legacy-session-1", requests[1].RequestID)
 }
 
+func TestMessageAuditImageRequestsRemainStandalone(t *testing.T) {
+	truncateTables(t)
+
+	first := messageAuditCaptureRecord("image-request-1", 39, 551, "shared-image-prompt")
+	first.Request.Protocol = "openai_image"
+	first.Blobs[0].ContentType = "image_request"
+	second := messageAuditCaptureRecord("image-request-2", 39, 552, "shared-image-prompt")
+	second.Request.Protocol = "openai_image"
+	second.Blobs[0].ContentType = "image_request"
+
+	_, err := CreateMessageAuditCapture(first)
+	require.NoError(t, err)
+	_, err = CreateMessageAuditCapture(second)
+	require.NoError(t, err)
+
+	assert.NotEmpty(t, first.Request.AuditSessionID)
+	assert.NotEmpty(t, second.Request.AuditSessionID)
+	assert.NotEqual(t, first.Request.AuditSessionID, second.Request.AuditSessionID)
+	assert.Equal(t, "new", first.Request.SessionMatch)
+	assert.Equal(t, "new", second.Request.SessionMatch)
+}
+
 func TestMessageAuditSessionInferenceRecognizesCompressedSubsequence(t *testing.T) {
 	truncateTables(t)
 
