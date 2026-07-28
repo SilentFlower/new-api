@@ -143,16 +143,24 @@ available
 
 - `list_files()`：返回固定资料集清单和可用性。
 - `read_file(file_id, cursor, limit)`：按消息边界读取指定虚拟文件的一段内容。
-- `search_files(query, file_ids, cursor, limit)`：对固定资料集做大小写不敏感的字面量搜索，返回有界命中和上下文；不接受正则表达式。
+- `search_files(query, file_ids, cursor, limit)`：对固定资料集做大小写不敏感的字面量搜索，返回有界命中和分页游标。
+- `search_files_regex(pattern, case_sensitive, file_ids, cursor, limit)`：使用 Go RE2 对固定资料集做有界正则搜索。模式长度不超过 256 字符，默认忽略大小写；非法模式返回 `invalid_tool_arguments`，不调用系统 `rg`、Shell 或真实文件系统。
 
 服务端强制：
 
 - `file_id` 必须属于本次任务；不存在或跨会话立即拒绝。
-- 游标、查询长度、单次返回量、总 Tool 调用次数、总 Tool 返回 Token 和任务时长均有常量上限。
+- 游标、查询长度、单次返回量、总 Tool 调用次数、总 Tool 返回 Token 和任务时长均有上限。`message_audit_review.config.tool_call_limit` 允许 Root 配置 1-64 次，默认 24；触发任务时将归一化后的值固化进 payload。放宽次数不改变输入上下文、总返回 Token 和 5 分钟任务超时保护。
+- 每个 Tool 结果附带已用/剩余调用次数和已用/剩余返回 Token，引导模型在预算接近耗尽时基于已有证据输出最终结果。
 - 每次模型调用前对完整消息和 Tool schema 计数；超过内置输入预算时不再返回正文，并要求模型基于已读证据完成结果。
 - 不把明文写入临时文件；每次 Tool 调用按需解密，返回后只在任务内存中存在。
 - 覆盖记录由服务端根据实际 Tool 调用的虚拟分片游标生成，同时保留原消息序号用于证据展示；不能信任模型自报，也不能因长消息分片复用原序号而伪装成整条消息已读。
 - 第一版不生成分块局部摘要，也不提供管理员自定义审核提示词；达到上下文或 Tool 上限时任务明确失败，由覆盖记录如实反映本次已读范围。
+
+## 调用诊断
+
+审核任务复用 `system_tasks.state` 保存一份脱敏运行快照，不新增消息审计正文表或调用日志表。快照包含审核渠道/模型、开始与结束时间、总耗时、模型调用次数、Tool 调用次数、Tool 返回 Token、文本 Tool 回退状态、当前阶段和失败码；每次模型调用记录阶段、协议、耗时、返回 Tool 数、HTTP 状态和稳定错误阶段。
+
+relay 内部 caller 使用结构化安全错误把 `config`、`setup`、`model_mapping`、`request_conversion`、`request_serialization`、`request_filtering`、`upstream_request`、`upstream_http`、`response_conversion`、`response_parse` 等阶段传给 service。只允许 HTTP 状态和稳定枚举跨层返回；上游响应正文、错误原文、请求正文、Tool 参数与模型输出不得进入任务 state、普通日志或管理审计。会话详情在 AI 审核区展示该快照，运行中轮询时可看到最新调用数，失败后可直接定位安全失败阶段。
 
 ## 默认提示词与输出
 
@@ -212,7 +220,8 @@ Relay 实现直接使用配置渠道的 adaptor：
 ```json
 {
   "channel_id": 12,
-  "model": "example-model"
+  "model": "example-model",
+  "tool_call_limit": 24
 }
 ```
 
@@ -221,9 +230,10 @@ Relay 实现直接使用配置渠道的 adaptor：
 - `channel_id=0` 且模型为空表示清空配置；
 - 渠道必须存在且启用；
 - 模型必须出现在该渠道 `GetModels()` 返回值中；
+- `tool_call_limit` 必须为 1-64 的整数，缺失或为 0 时按默认 24 归一化；
 - 保存值只记录到 Option 表和内存配置，不记录配置值到管理日志。
 
-系统设置“日志维护 / 消息审计”区域增加渠道、模型联动 Select。渠道选项通过 Root-only 精简接口返回启用渠道的 ID、名称和模型，避免把渠道密钥或完整设置带入页面。
+系统设置“日志维护 / 消息审计”区域增加渠道、模型联动 Select 和 Tool 调用上限数字输入。渠道选项通过 Root-only 精简接口返回启用渠道的 ID、名称和模型，避免把渠道密钥或完整设置带入页面。
 
 ## API 合同
 
