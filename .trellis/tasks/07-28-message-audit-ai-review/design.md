@@ -129,6 +129,7 @@ request_id
 captured_at
 stage: before_compression | latest
 message_count
+virtual_chunk_count
 estimated_tokens
 available
 ```
@@ -141,9 +142,9 @@ available
 
 内置 Tool：
 
-- `list_files()`：返回固定资料集清单和可用性。
-- `read_file(file_id, cursor, limit)`：按消息边界读取指定虚拟文件的一段内容。
-- `search_files(query, file_ids, cursor, limit)`：对固定资料集做大小写不敏感的字面量搜索，返回有界命中和分页游标。
+- `list_files()`：返回固定资料集清单、可用性、原消息数、虚拟分片数和 Token 估算。
+- `read_file(file_id, cursor, limit)`：按消息边界读取指定虚拟文件的一段内容。模型可以请求较大的连续读取范围，服务端按 Tool 结果安全 Token 上限自动缩小实际返回并返回 `requested_limit`、`returned_count` 和 `next_cursor`。
+- `search_files(query, file_ids, cursor, limit)`：对固定资料集做大小写不敏感的字面量搜索，返回有界命中和分页游标；命中过多时同样由服务端缩小实际返回，而不是直接失败。
 - `search_files_regex(pattern, case_sensitive, file_ids, cursor, limit)`：使用 Go RE2 对固定资料集做有界正则搜索。模式长度不超过 256 字符，默认忽略大小写；非法模式返回 `invalid_tool_arguments`，不调用系统 `rg`、Shell 或真实文件系统。
 
 服务端强制：
@@ -198,6 +199,8 @@ relay 内部 caller 使用结构化安全错误把 `config`、`setup`、`model_m
 
 后端严格校验枚举、长度、数量、文件 ID 和消息范围。首次无法解析时只允许一次格式修复调用；仍无效则任务失败，原始模型输出不落库、不写日志。
 
+服务端在模型输出校验通过后追加 `overview`，概览字段包括来源数、可用来源、原消息数、虚拟分片数、已覆盖来源/消息/分片、未覆盖来源和估算 Token。`overview` 只从服务端实际 Tool 覆盖记录计算，不接受模型自报；同一原消息被拆为多个虚拟分片时，必须全部分片被读取才计入已覆盖消息数。
+
 ## 内部模型调用
 
 在 `service` 定义审核调用接口并由 `relay` 注册实现，避免 `service -> relay` 循环依赖，模式与视觉辅助的 caller 注入一致。
@@ -210,8 +213,9 @@ Relay 实现直接使用配置渠道的 adaptor：
 4. 兼容 OpenAI Chat、OpenAI Responses、Claude 和 Gemini 非流式响应格式。
 5. 不调用 `controller.Relay`、`TextHelper` 的计费收口、`PreConsumeBilling`、`PostTextConsumeQuota`、消费日志或消息审计入口。
 6. 不应用渠道 System Prompt 和可能改写消息/Tool 的 Param Override；仅保留模型映射、必要请求头和渠道适配。
+7. 原生 Tool 请求不发送 API 级 `tool_choice=required`，避免 OpenAI-compatible 渠道拒绝或忽略该字段；首轮必须读资料由内置提示词、`RequireToolCall` 降级判断和后端覆盖校验共同保证。
 
-配置渠道必须启用且模型仍存在于渠道模型列表。渠道/模型不支持 Tool 时任务以稳定类别 `tool_unsupported` 失败，不自动切换其他渠道。
+配置渠道必须启用且模型仍存在于渠道模型列表。渠道/模型原生 Tool 被忽略或不可解析时，service 可对同一渠道和模型切换为文本 Tool 协议；文本协议仍不能完成受控 Tool 流程时任务以稳定类别 `tool_unsupported` 失败，不自动切换其他渠道。
 
 ## 设置合同
 
@@ -292,7 +296,7 @@ POST /api/message-audit/session/:audit_session_id/review
 ## 前端结构
 
 - `message-audits/index.tsx`：新增风险/审核状态列和移动端徽标；失败状态下显示安全原因；保持列表无审核触发按钮。
-- `message-audit-detail.tsx`：在元数据和消息时间线之间增加未嵌套卡片的审核区，提供手动审核/重审按钮、任务轮询、旧结果提示和完整结构化结果。
+- `message-audit-detail.tsx`：在元数据和消息时间线之间增加未嵌套卡片的审核区，提供手动审核/重审按钮、任务轮询、旧结果提示、摘要、服务端任务概览和诊断摘要；完整风险依据、覆盖、未覆盖与逐次调用诊断放入独立详情弹窗。长消息正文默认折叠，Sheet/Drawer、弹窗和正文 `<pre>` 使用常驻可见滚动条。
 - `log-settings-section.tsx`：在现有消息审计设置组内增加固定渠道和模型 Select。
 - 所有 SelectItem 均置于 `SelectGroup`，受控模型值必须存在于当前渠道选项中；配置失效时显示明确错误态而不是自动选择。
 - 新增文案通过 `t('English key')`，同步全部前端语言文件。

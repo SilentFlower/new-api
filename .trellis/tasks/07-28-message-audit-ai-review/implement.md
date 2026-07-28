@@ -94,6 +94,7 @@
     - 在审核固定配置中增加正整数 Tool 调用次数，默认 24、不设固定最大值并兼容旧配置；删除独立累计 Tool Token 和本地估算输入 Token 停止条件，Tool 结果只返回剩余调用与累计 Token，模型真实上下文溢出由上游稳定归类。
     - 使用 `system_tasks.state` 持久化脱敏审核调用诊断；relay 只上报稳定失败阶段和 HTTP 状态，不上报上游正文或原始错误。
     - Default 会话详情 AI 审核区展示渠道、模型、总调用/Tool/Token/耗时和逐次调用阶段；补齐全部语言 i18n 与后端、前端回归测试。
+    - 调整原生 Tool 请求构造，不发送 `tool_choice=required`；扩大 `read_file` / search 单次请求范围并由服务端按安全 Token 上限缩小返回；结果增加服务端任务概览，前端将完整明细迁入弹窗并增强长滚动区可见性。
 
 ## 主要文件
 
@@ -119,6 +120,8 @@
 - `web/default/src/features/message-audits/lib/message-audit-ui.ts`
 - `web/default/src/features/message-audits/components/message-audit-detail.tsx`
 - `web/default/src/features/message-audits/index.tsx`
+- `web/default/src/components/dialog.tsx`
+- `web/default/src/styles/index.css`
 - `web/default/src/features/system-settings/maintenance/log-settings-section.tsx`
 - `web/default/src/features/system-settings/operations/index.tsx`
 - `web/default/src/features/system-settings/operations/section-registry.tsx`
@@ -179,6 +182,9 @@ git diff --check
 - 存储统计缓存命中时不重复执行全表统计，过期刷新失败不会写入错误值。
 - 列表和状态统计不会自动刷新；管理员点击刷新后能收敛 finalize 和审核结果。
 - 原生 Tool 被忽略时，文本工具协议仍能完成受限工具循环并生成通过结构校验的结果。
+- 原生 Tool 请求不依赖 `tool_choice=required`；兼容渠道不应因该字段进入文本 Tool 回退。
+- 审核概览由服务端覆盖记录计算，拆分消息只读部分分片时不得计入已覆盖消息。
+- AI 审核区不直接铺开完整 findings/coverage/diagnostics；详情弹窗和长消息正文滚动条在桌面 Sheet、移动 Drawer 中清晰可见。
 - 文本 Tool 协议附加的系统指令和工具定义属于实际上游请求；本地不使用统一固定 Token 阈值提前终止，上游明确返回真实上下文溢出时必须稳定归类为 `context_limit`，且不得继续触发文本 Tool 回退。
 - MySQL 人工清空通过单条原子换表切换全部审计表，其他实例的写入不能落入逐表清空间隙；外部 DSN 测试同时覆盖快速清空。
 - 清空任务不再以小批次反复扫描整张 blob 表作为主要回收方式。
