@@ -255,6 +255,8 @@ POST /api/message-audit/session/:audit_session_id/review
 ## 清理与并发
 
 - `DeleteMessageAuditsBeforeBatch` 在删除请求前查询来源引用，删除对应 review source 和 review 行，再删除消息引用与请求。
+- 人工清空先推进清理水位，再与本节点消息审计写协程互斥；MySQL 预建同结构空表并用单条 `RENAME TABLE` 原子切换全部审计表，PostgreSQL 在事务内整组截断，SQLite 使用事务内无条件整表删除，并同步移除消息审计审核任务。点击附近的新写入允许被一并清除。
+- 定时保留期清理保持按固定水位分批删除，避免每天清理阻塞在线写入。
 - 任务提交成功结果的事务再次确认所有来源请求仍存在且未越过清理水位；失败时返回 `source_expired`。
 - 同会话活动任务通过 scoped `active_key` 幂等；不同会话按创建顺序排队并由任务类型锁全局串行。
 - 结果替换、来源替换和系统任务成功收口在同一主库事务内完成，避免任务成功但结果缺失或结果更新后任务失败。
@@ -274,7 +276,7 @@ POST /api/message-audit/session/:audit_session_id/review
 ### 模型一致性
 
 - 后端测试断言 finalize 后同一 `request_id` 的列表和详情返回相同 `model_name`。
-- Default 列表在页面打开期间每 5 秒刷新，使异步 finalize 后的模型、状态和审核任务状态稳定收敛。
+- Default 列表和状态统计不自动轮询；页面刷新按钮同时刷新列表、状态和当前清理任务，避免后台请求触发表格加载态。
 - 详情切换请求仍保持当前 Sheet/Drawer 打开。
 
 ## 前端结构
@@ -344,9 +346,17 @@ POST /api/message-audit/session/:audit_session_id/review
 
 缓存刷新失败时返回错误，不写入错误值；已有缓存超过有效期后不继续伪装为新数据。缓存实现不要求 capture 主链路主动失效，避免每次高频写入反而争抢统计锁。
 
-### 自适应轮询
+### 手动刷新
 
-列表查询根据当前页是否包含未完成请求状态、审核 `pending/running` 或其他需要自动收敛的状态选择刷新间隔：活动时 5 秒，稳定时 30 秒。状态统计查询统一降到 30 秒；详情内已有审核任务轮询继续按任务状态控制。
+列表查询和状态统计不配置 `refetchInterval`，只在管理员点击页面刷新按钮或明确完成清理动作后重新请求。详情内审核任务仍只在 `pending/running` 期间轮询自身任务结果，不触发表格 `isFetching` 加载态。
+
+### Tool 兼容回退
+
+审核调用优先使用渠道原生函数调用。若首轮要求 Tool 时上游返回成功但忽略函数调用或返回无法解析的空响应，relay 只返回需要降级的无正文信号，由 service 对同一渠道和模型构造严格 JSON 文本工具协议。service 必须先构造实际发送的协议系统消息和工具定义，再执行上下文预算校验。模型只能输出单个 `tool_call` JSON 或最终审核 JSON；服务端继续使用原 `executeMessageAuditReviewTool` 执行并校验范围、游标、调用次数和 Token 预算，工具结果以固定 `AUDIT_TOOL_RESULT` 消息返回。该回退不允许模型直接访问文件、数据库或网络。
+
+### 定向 blob 回收
+
+每个请求删除批次先读取该批 item 的唯一 `blob_id`，删除 item、请求及关联审核结果后，只对这些候选 ID 执行带 `NOT EXISTS` 复核的删除。候选按不超过 SQLite 参数限制的批次处理；任务末尾保留一次全局孤儿扫描作为历史数据兜底，不再以小批次重复扫描整张 blob 表作为主清理路径。
 
 ### 运行参数
 
