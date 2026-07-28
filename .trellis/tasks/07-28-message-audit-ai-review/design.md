@@ -323,3 +323,33 @@ POST /api/message-audit/session/:audit_session_id/review
 - 清空固定审核渠道/模型即可停止新审核调用，消息审计采集仍可独立使用。
 - 新表和可空列保留不影响旧版本读取；代码回滚不要求删除数据。
 - `content_reduced` 降级可回退到原 metadata-only 行为，不改变 Relay 主链路。
+
+## MySQL 与高频采集优化
+
+### 批量 blob 解析与 item 写入
+
+`CreateMessageAuditCapture` 在会话归属确定后，先按消息出现顺序构建请求内唯一 HMAC 集合。事务内按固定批次查询同用户、同 schema 的既有 blob，批量插入缺失项并使用唯一键冲突忽略保证并发幂等，再批量回查最终 ID。随后按原消息顺序构造全部 item，并使用受 SQLite 参数上限约束的批次写入。
+
+载荷统计继续以本次事务实际新增的唯一 blob 为准；同一请求内重复消息和跨请求重复消息都不重复计入新增载荷。任一 HMAC 无法解析到 blob ID 时整体事务失败，避免生成缺少正文引用的请求。
+
+### compressed 候选查询
+
+当前请求的锚点 HMAC 先在 `message_audit_blobs` 唯一索引中解析为 blob ID，只保留数据库真实存在的锚点。候选聚合从 `message_audit_items.blob_id IN (...)` 开始，关联请求表后按用户、协议、时间和当前请求排除条件筛选，保持原有 top-N、唯一候选和有序子序列复核逻辑。
+
+该设计不新增索引：现有 blob 唯一索引负责 HMAC 定位，现有 item `blob_id` 索引负责反查请求。只有实际执行计划证明索引不足时才考虑迁移。
+
+### 存储统计缓存
+
+`GetMessageAuditStatus` 使用线程安全的短时缓存保存请求数、item 数、blob 数、payload 和物理大小。缓存周期默认 60 秒，只覆盖数据库统计；writer 运行状态、队列数量、队列字节、启停配置和保留期仍在每次请求实时组装。
+
+缓存刷新失败时返回错误，不写入错误值；已有缓存超过有效期后不继续伪装为新数据。缓存实现不要求 capture 主链路主动失效，避免每次高频写入反而争抢统计锁。
+
+### 自适应轮询
+
+列表查询根据当前页是否包含未完成请求状态、审核 `pending/running` 或其他需要自动收敛的状态选择刷新间隔：活动时 5 秒，稳定时 30 秒。状态统计查询统一降到 30 秒；详情内已有审核任务轮询继续按任务状态控制。
+
+### 运行参数
+
+生产环境将应用连接池收敛为 `SQL_MAX_OPEN_CONNS=80`、`SQL_MAX_IDLE_CONNS=20`、`SQL_MAX_LIFETIME=300`，避免应用上限超过 MySQL 连接容量。MySQL InnoDB buffer pool 调整为 2 GiB，并开启 1 秒慢查询日志用于验证；保持 `innodb_flush_log_at_trx_commit=1` 和 `sync_binlog=1` 不变。
+
+生产配置变更在代码验证和部署窗口执行。回滚时先恢复连接池和 buffer pool 配置，再重建容器；代码优化本身不依赖这些参数才能正确运行。
