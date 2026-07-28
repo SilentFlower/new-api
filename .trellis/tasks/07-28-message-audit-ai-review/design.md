@@ -326,6 +326,16 @@ POST /api/message-audit/session/:audit_session_id/review
 - 新表和可空列保留不影响旧版本读取；代码回滚不要求删除数据。
 - `content_reduced` 降级可回退到原 metadata-only 行为，不改变 Relay 主链路。
 
+## 图片请求审计
+
+- `controller.Relay` 继续复用现有统一 capture/finalize 入口；`service` 将 `RelayFormatOpenAIImage` 加入审计协议允许列表。
+- `normalizeRequest` 对 `dto.ImageRequest` 构造白名单对象，只包含 `prompt`、`model`、`n`、`size`、`quality`、`response_format`、`style`、`background`、`moderation`、`output_format`、`output_compression`、`partial_images`、`stream`、`input_fidelity`、`watermark` 和 `watermark_enabled`。
+- 明确排除 `image`、`images`、`mask`、`extra_fields`、`Extra`、用户标识以及任何媒体原文。multipart 文件仍停留在请求解析和上游转发链路，不进入审计 DTO 白名单。
+- 图片请求生成一个 `role=user`、`content_type=image_request` 的加密审计块。该块可供既有 AI Tool 按需读取，但审核提示和界面语义不得暗示模型看过图片。
+- 图片协议跳过序列指纹、前缀指纹和压缩锚点生成，使每次请求由 model 现有的新会话路径分配独立 `audit_session_id`；blob 仍可按用户 HMAC 去重，不影响独立会话语义。
+
+测试必须覆盖图片协议允许列表、白名单参数保留、所有媒体字段和额外字段排除，以及相同图片请求不生成会话指纹。
+
 ## MySQL 与高频采集优化
 
 ### 批量 blob 解析与 item 写入
