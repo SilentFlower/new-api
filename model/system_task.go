@@ -22,6 +22,7 @@ const (
 	SystemTaskTypeMidjourneyPoll      = "midjourney_poll"
 	SystemTaskTypeAsyncTaskPoll       = "async_task_poll"
 	SystemTaskTypeMessageAuditCleanup = "message_audit_cleanup"
+	SystemTaskTypeMessageAuditReview  = "message_audit_review"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")
@@ -91,6 +92,17 @@ func GenerateSystemTaskID() (string, error) {
 }
 
 func CreateSystemTask(taskType string, payload any, state any) (*SystemTask, error) {
+	return CreateSystemTaskWithActiveKey(taskType, taskType, payload, state)
+}
+
+// CreateSystemTaskWithActiveKey 使用指定活动键创建待执行系统任务。
+//
+// @param taskType 任务类型。
+// @param activeKey 活动任务幂等键。
+// @param payload 固定任务输入。
+// @param state 初始进度状态。
+// @return 新建任务或序列化、数据库错误。
+func CreateSystemTaskWithActiveKey(taskType string, activeKey string, payload any, state any) (*SystemTask, error) {
 	taskID, err := GenerateSystemTaskID()
 	if err != nil {
 		return nil, err
@@ -108,7 +120,7 @@ func CreateSystemTask(taskType string, payload any, state any) (*SystemTask, err
 		TaskID:    taskID,
 		Type:      taskType,
 		Status:    SystemTaskStatusPending,
-		ActiveKey: &taskType,
+		ActiveKey: &activeKey,
 		Payload:   payloadText,
 		State:     stateText,
 	}
@@ -117,6 +129,21 @@ func CreateSystemTask(taskType string, payload any, state any) (*SystemTask, err
 		return nil, err
 	}
 	return task, nil
+}
+
+// GetActiveSystemTaskByKey 返回指定幂等键的活动系统任务。
+//
+// @param taskType 任务类型。
+// @param activeKey 活动任务幂等键。
+// @return 活动任务；不存在时返回 nil、nil。
+func GetActiveSystemTaskByKey(taskType string, activeKey string) (*SystemTask, error) {
+	var task SystemTask
+	err := DB.Where("type = ? AND active_key = ? AND status IN ?", taskType, activeKey, activeSystemTaskStatuses()).
+		Order("id desc").First(&task).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	return &task, err
 }
 
 func GetSystemTaskByTaskID(taskID string) (*SystemTask, error) {

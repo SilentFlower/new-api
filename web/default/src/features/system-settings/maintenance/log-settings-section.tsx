@@ -17,6 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { zodResolver } from '@hookform/resolvers/zod'
+import { useQuery } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
@@ -58,6 +59,7 @@ import {
 } from '@/components/ui/select'
 import { Separator } from '@/components/ui/separator'
 import { Switch } from '@/components/ui/switch'
+import { getMessageAuditReviewOptions } from '@/features/message-audits/api'
 import { api } from '@/lib/api'
 import dayjs from '@/lib/dayjs'
 import { formatTimestampToDate } from '@/lib/format'
@@ -82,6 +84,8 @@ const logSettingsSchema = z.object({
   LogConsumeEnabled: z.boolean(),
   MessageAuditEnabled: z.boolean(),
   MessageAuditRetentionDays: z.number().int().min(1).max(30),
+  MessageAuditReviewChannelID: z.number().int().min(0),
+  MessageAuditReviewModel: z.string(),
 })
 
 type LogSettingsFormValues = z.infer<typeof logSettingsSchema>
@@ -90,6 +94,7 @@ type LogSettingsSectionProps = {
   defaultEnabled: boolean
   defaultMessageAuditEnabled: boolean
   defaultMessageAuditRetentionDays: number
+  defaultMessageAuditReviewConfig: string
 }
 
 type ServerLogInfo = {
@@ -102,6 +107,24 @@ type ServerLogInfo = {
 }
 
 const HOURS_IN_DAY = 24
+
+function parseMessageAuditReviewConfig(raw: string): {
+  channelID: number
+  model: string
+} {
+  try {
+    const value = JSON.parse(raw) as { channel_id?: unknown; model?: unknown }
+    return {
+      channelID:
+        typeof value.channel_id === 'number' && value.channel_id > 0
+          ? value.channel_id
+          : 0,
+      model: typeof value.model === 'string' ? value.model : '',
+    }
+  } catch {
+    return { channelID: 0, model: '' }
+  }
+}
 
 function formatBytes(bytes: number, decimals = 2): string {
   if (!bytes || Number.isNaN(bytes)) return '0 Bytes'
@@ -147,15 +170,22 @@ export function LogSettingsSection({
   defaultEnabled,
   defaultMessageAuditEnabled,
   defaultMessageAuditRetentionDays,
+  defaultMessageAuditReviewConfig,
 }: LogSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const defaultReviewConfig = useMemo(
+    () => parseMessageAuditReviewConfig(defaultMessageAuditReviewConfig),
+    [defaultMessageAuditReviewConfig]
+  )
   const form = useForm<LogSettingsFormValues>({
     resolver: zodResolver(logSettingsSchema),
     defaultValues: {
       LogConsumeEnabled: defaultEnabled,
       MessageAuditEnabled: defaultMessageAuditEnabled,
       MessageAuditRetentionDays: defaultMessageAuditRetentionDays,
+      MessageAuditReviewChannelID: defaultReviewConfig.channelID,
+      MessageAuditReviewModel: defaultReviewConfig.model,
     },
   })
 
@@ -173,6 +203,34 @@ export function LogSettingsSection({
   const [serverLogCleanupLoading, setServerLogCleanupLoading] = useState(false)
   const [messageAuditKeyConfigured, setMessageAuditKeyConfigured] =
     useState(false)
+  const reviewOptionsQuery = useQuery({
+    queryKey: ['message-audit-review-options'],
+    queryFn: getMessageAuditReviewOptions,
+  })
+  const selectedReviewChannelID = form.watch('MessageAuditReviewChannelID')
+  const selectedReviewModel = form.watch('MessageAuditReviewModel')
+  const selectedReviewChannel = reviewOptionsQuery.data?.channels.find(
+    (channel) => channel.id === selectedReviewChannelID
+  )
+  const reviewChannelItems = useMemo(
+    () =>
+      (reviewOptionsQuery.data?.channels ?? []).map((channel) => ({
+        value: String(channel.id),
+        label: channel.name,
+      })),
+    [reviewOptionsQuery.data?.channels]
+  )
+  const reviewModelItems = useMemo(
+    () =>
+      (selectedReviewChannel?.models ?? []).map((model) => ({
+        value: model,
+        label: model,
+      })),
+    [selectedReviewChannel?.models]
+  )
+  const reviewConfigAvailable =
+    selectedReviewChannel !== undefined &&
+    selectedReviewChannel.models.includes(selectedReviewModel)
 
   const fetchServerLogInfo = useCallback(async () => {
     try {
@@ -188,11 +246,14 @@ export function LogSettingsSection({
       LogConsumeEnabled: defaultEnabled,
       MessageAuditEnabled: defaultMessageAuditEnabled,
       MessageAuditRetentionDays: defaultMessageAuditRetentionDays,
+      MessageAuditReviewChannelID: defaultReviewConfig.channelID,
+      MessageAuditReviewModel: defaultReviewConfig.model,
     })
   }, [
     defaultEnabled,
     defaultMessageAuditEnabled,
     defaultMessageAuditRetentionDays,
+    defaultReviewConfig,
     form,
   ])
 
@@ -294,6 +355,13 @@ export function LogSettingsSection({
   }, [logCleanupActive, logCleanupTaskId, t])
 
   const onSubmit = async (values: LogSettingsFormValues) => {
+    if (
+      values.MessageAuditReviewChannelID > 0 !==
+      Boolean(values.MessageAuditReviewModel)
+    ) {
+      toast.error(t('Select both a review channel and model.'))
+      return
+    }
     if (values.LogConsumeEnabled !== defaultEnabled) {
       await updateOption.mutateAsync({
         key: 'LogConsumeEnabled',
@@ -310,6 +378,26 @@ export function LogSettingsSection({
       await updateOption.mutateAsync({
         key: 'MessageAuditRetentionDays',
         value: values.MessageAuditRetentionDays,
+      })
+    }
+    const nextReviewConfig =
+      values.MessageAuditReviewChannelID > 0 && values.MessageAuditReviewModel
+        ? JSON.stringify({
+            channel_id: values.MessageAuditReviewChannelID,
+            model: values.MessageAuditReviewModel,
+          })
+        : ''
+    const currentReviewConfig =
+      defaultReviewConfig.channelID > 0 && defaultReviewConfig.model
+        ? JSON.stringify({
+            channel_id: defaultReviewConfig.channelID,
+            model: defaultReviewConfig.model,
+          })
+        : ''
+    if (nextReviewConfig !== currentReviewConfig) {
+      await updateOption.mutateAsync({
+        key: 'message_audit_review.config',
+        value: nextReviewConfig,
       })
     }
   }
@@ -478,6 +566,119 @@ export function LogSettingsSection({
                 </div>
               )}
             />
+            <Separator />
+            <div className='space-y-1'>
+              <h5 className='text-sm font-medium'>{t('AI review model')}</h5>
+              <p className='text-muted-foreground text-sm'>
+                {t(
+                  'Used for administrator-triggered session reviews. Review calls are not billed and are not added to message audits.'
+                )}
+              </p>
+            </div>
+            {reviewOptionsQuery.isError && (
+              <Alert variant='destructive'>
+                <AlertDescription>
+                  {t('Failed to load review channels and models.')}
+                </AlertDescription>
+              </Alert>
+            )}
+            {!reviewOptionsQuery.isLoading &&
+              selectedReviewChannelID > 0 &&
+              !reviewConfigAvailable && (
+                <Alert variant='destructive'>
+                  <AlertDescription>
+                    {t(
+                      'The saved review channel or model is unavailable. Select a new pair before starting a review.'
+                    )}
+                  </AlertDescription>
+                </Alert>
+              )}
+            <div className='grid max-w-2xl gap-4 sm:grid-cols-2'>
+              <FormField
+                control={form.control}
+                name='MessageAuditReviewChannelID'
+                render={({ field }) => (
+                  <div className='grid gap-2'>
+                    <FormLabel>{t('Review channel')}</FormLabel>
+                    <Select
+                      items={reviewChannelItems}
+                      value={
+                        reviewChannelItems.some(
+                          (item) => item.value === String(field.value)
+                        )
+                          ? String(field.value)
+                          : null
+                      }
+                      onValueChange={(value) => {
+                        field.onChange(value ? Number(value) : 0)
+                        form.setValue('MessageAuditReviewModel', '', {
+                          shouldDirty: true,
+                        })
+                      }}
+                      disabled={
+                        reviewOptionsQuery.isLoading ||
+                        reviewChannelItems.length === 0
+                      }
+                    >
+                      <FormControl>
+                        <SelectTrigger className='w-full'>
+                          <SelectValue placeholder={t('Select a channel')} />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectGroup>
+                          {reviewChannelItems.map((item) => (
+                            <SelectItem key={item.value} value={item.value}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </div>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name='MessageAuditReviewModel'
+                render={({ field }) => (
+                  <div className='grid gap-2'>
+                    <FormLabel>{t('Review model')}</FormLabel>
+                    <Select
+                      items={reviewModelItems}
+                      value={
+                        reviewModelItems.some(
+                          (item) => item.value === field.value
+                        )
+                          ? field.value
+                          : null
+                      }
+                      onValueChange={(value) => field.onChange(value ?? '')}
+                      disabled={
+                        !selectedReviewChannel || reviewModelItems.length === 0
+                      }
+                    >
+                      <FormControl>
+                        <SelectTrigger className='w-full'>
+                          <SelectValue placeholder={t('Select a model')} />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectGroup>
+                          {reviewModelItems.map((item) => (
+                            <SelectItem key={item.value} value={item.value}>
+                              {item.label}
+                            </SelectItem>
+                          ))}
+                        </SelectGroup>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </div>
+                )}
+              />
+            </div>
           </SettingsControlGroup>
 
           <SettingsControlGroup className='space-y-3'>

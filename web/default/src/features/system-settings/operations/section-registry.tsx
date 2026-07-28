@@ -102,6 +102,9 @@ const OPERATIONS_SECTIONS = [
         defaultMessageAuditRetentionDays={
           settings.MessageAuditRetentionDays ?? 7
         }
+        defaultMessageAuditReviewConfig={
+          settings['message_audit_review.config'] ?? ''
+        }
       />
     ),
   },

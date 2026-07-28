@@ -18,14 +18,17 @@ func newMessageAuditTestManager(t *testing.T) *messageAuditManager {
 	t.Helper()
 	encryptionKey, dedupKey, fingerprint, err := deriveMessageAuditKeys(strings.Repeat("a", messageAuditSecretMinLength))
 	require.NoError(t, err)
+	reviewKey, reviewFingerprint := deriveMessageAuditReviewKey(strings.Repeat("a", messageAuditSecretMinLength))
 	return &messageAuditManager{
-		queue:          make(chan messageAuditEvent, messageAuditQueueCapacity),
-		stop:           make(chan struct{}),
-		done:           make(chan struct{}),
-		encryptionKey:  encryptionKey,
-		dedupKey:       dedupKey,
-		keyFingerprint: fingerprint,
-		keyConfigured:  true,
+		queue:                make(chan messageAuditEvent, messageAuditQueueCapacity),
+		stop:                 make(chan struct{}),
+		done:                 make(chan struct{}),
+		encryptionKey:        encryptionKey,
+		dedupKey:             dedupKey,
+		reviewKey:            reviewKey,
+		reviewKeyFingerprint: reviewFingerprint,
+		keyFingerprint:       fingerprint,
+		keyConfigured:        true,
 	}
 }
 
@@ -76,7 +79,7 @@ func TestMessageAuditNormalizeRequestFiltersHiddenContent(t *testing.T) {
 		},
 	}
 
-	entries, messageCount, toolCount, plaintextBytes, metadataOnly, err := manager.normalizeRequest(request)
+	entries, _, messageCount, toolCount, plaintextBytes, metadataOnly, err := manager.normalizeRequest(request)
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 	assert.Equal(t, 1, messageCount)
@@ -183,13 +186,16 @@ func TestMessageAuditOversizedSnapshotKeepsSafeMetadata(t *testing.T) {
 		Messages: []dto.Message{{Role: "user", Content: strings.Repeat("x", int(messageAuditSnapshotMaxSize)+1)}},
 	}
 
-	entries, messageCount, toolCount, plaintextBytes, metadataOnly, err := manager.normalizeRequest(request)
+	entries, fingerprintEntries, messageCount, toolCount, plaintextBytes, metadataOnly, err := manager.normalizeRequest(request)
 	require.NoError(t, err)
-	assert.Nil(t, entries)
+	require.Len(t, entries, 1)
+	require.Len(t, fingerprintEntries, 1)
 	assert.Equal(t, 1, messageCount)
 	assert.Zero(t, toolCount)
 	assert.Greater(t, plaintextBytes, messageAuditSnapshotMaxSize)
-	assert.True(t, metadataOnly)
+	assert.False(t, metadataOnly)
+	assert.Equal(t, "user", entries[0].Role)
+	assert.Equal(t, "text", entries[0].ContentType)
 }
 
 func TestMessageAuditToolCallCountAcrossProtocols(t *testing.T) {
@@ -207,7 +213,7 @@ func TestMessageAuditToolCallCountAcrossProtocols(t *testing.T) {
 			{"type":"function","function":{"name":"second","parameters":{"type":"object"}}}
 		]
 	}`), openAIRequest))
-	_, _, toolCount, _, _, err := manager.normalizeRequest(openAIRequest)
+	_, _, _, toolCount, _, _, err := manager.normalizeRequest(openAIRequest)
 	require.NoError(t, err)
 	assert.Equal(t, 2, toolCount)
 
@@ -220,7 +226,7 @@ func TestMessageAuditToolCallCountAcrossProtocols(t *testing.T) {
 		],
 		"tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]
 	}`), responsesRequest))
-	_, _, toolCount, _, _, err = manager.normalizeRequest(responsesRequest)
+	_, _, _, toolCount, _, _, err = manager.normalizeRequest(responsesRequest)
 	require.NoError(t, err)
 	assert.Equal(t, 1, toolCount)
 
@@ -234,7 +240,7 @@ func TestMessageAuditToolCallCountAcrossProtocols(t *testing.T) {
 		]}],
 		"tools":[{"name":"lookup","input_schema":{"type":"object"}}]
 	}`), claudeRequest))
-	_, _, toolCount, _, _, err = manager.normalizeRequest(claudeRequest)
+	_, _, _, toolCount, _, _, err = manager.normalizeRequest(claudeRequest)
 	require.NoError(t, err)
 	assert.Equal(t, 1, toolCount)
 
@@ -246,7 +252,7 @@ func TestMessageAuditToolCallCountAcrossProtocols(t *testing.T) {
 		]}],
 		"tools":[{"functionDeclarations":[{"name":"lookup","parameters":{"type":"object"}}]}]
 	}`), geminiRequest))
-	_, _, toolCount, _, _, err = manager.normalizeRequest(geminiRequest)
+	_, _, _, toolCount, _, _, err = manager.normalizeRequest(geminiRequest)
 	require.NoError(t, err)
 	assert.Equal(t, 1, toolCount)
 }

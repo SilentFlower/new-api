@@ -152,6 +152,9 @@ func TestMessageAuditSessionInferenceAndGroupedList(t *testing.T) {
 	first := messageAuditSessionCaptureRecord("session-request-1", 31, 501, []string{"p1", "p2"}, []string{"a1", "a2"})
 	second := messageAuditSessionCaptureRecord("session-request-2", 31, 502, []string{"p1", "p2", "p3"}, []string{"a1", "a2", "a3"})
 	duplicate := messageAuditSessionCaptureRecord("session-request-3", 31, 503, []string{"p1", "p2", "p3"}, []string{"a1", "a2", "a3"})
+	first.Request.ModelName = "first-model"
+	second.Request.ModelName = "second-model"
+	duplicate.Request.ModelName = "latest-model"
 
 	_, err := CreateMessageAuditCapture(first)
 	require.NoError(t, err)
@@ -173,6 +176,7 @@ func TestMessageAuditSessionInferenceAndGroupedList(t *testing.T) {
 	assert.Equal(t, int64(1), total)
 	require.Len(t, requests, 1)
 	assert.Equal(t, duplicate.Request.RequestID, requests[0].RequestID)
+	assert.Equal(t, "latest-model", requests[0].ModelName)
 	assert.Equal(t, int64(3), requests[0].SessionRequestCount)
 	assert.Zero(t, requests[0].CompressedCount)
 

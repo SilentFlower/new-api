@@ -21,39 +21,45 @@ const (
 
 // MessageAuditRequest 保存一次已接收 AI 请求的审计元数据。
 type MessageAuditRequest struct {
-	ID                    int64  `json:"id" gorm:"primaryKey"`
-	RequestID             string `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`
-	AuditSessionID        string `json:"audit_session_id" gorm:"type:varchar(64);index"`
-	ParentRequestID       string `json:"parent_request_id" gorm:"type:varchar(64);index"`
-	SessionMatch          string `json:"session_match" gorm:"type:varchar(16);index"`
-	SequenceFingerprint   string `json:"-" gorm:"type:varchar(64);index:idx_message_audit_session_candidate,priority:3"`
-	ConversationItemCount int    `json:"-"`
-	SessionAnchorCount    int    `json:"-"`
-	SessionRequestCount   int64  `json:"session_request_count" gorm:"-:all"`
-	CompressedCount       int64  `json:"compressed_request_count" gorm:"-:all"`
-	UserID                int    `json:"user_id" gorm:"index;index:idx_message_audit_session_candidate,priority:1"`
-	Username              string `json:"username" gorm:"type:varchar(128);index"`
-	TokenID               int    `json:"token_id" gorm:"index"`
-	TokenName             string `json:"token_name" gorm:"type:varchar(128);index"`
-	ModelName             string `json:"model_name" gorm:"type:varchar(256);index"`
-	RequestPath           string `json:"request_path" gorm:"type:varchar(512);index"`
-	Protocol              string `json:"protocol" gorm:"type:varchar(64);index;index:idx_message_audit_session_candidate,priority:2"`
-	Status                string `json:"status" gorm:"type:varchar(32);index"`
-	AuditStatus           string `json:"audit_status" gorm:"type:varchar(32);index"`
-	ErrorCode             string `json:"error_code" gorm:"type:varchar(128)"`
-	FinishReason          string `json:"finish_reason" gorm:"type:varchar(128)"`
-	HTTPStatus            int    `json:"http_status"`
-	IsStream              bool   `json:"is_stream"`
-	MessageCount          int    `json:"message_count"`
-	ToolCount             int    `json:"tool_count"`
-	PlaintextBytes        int64  `json:"plaintext_bytes"`
-	DedupSavedBytes       int64  `json:"dedup_saved_bytes"`
-	DurationMS            int64  `json:"duration_ms"`
-	CapturedAt            int64  `json:"captured_at" gorm:"index"`
-	CapturedAtNano        int64  `json:"-" gorm:"index"`
-	FinalizedAt           int64  `json:"finalized_at"`
-	CreatedAt             int64  `json:"created_at"`
-	UpdatedAt             int64  `json:"updated_at"`
+	ID                     int64  `json:"id" gorm:"primaryKey"`
+	RequestID              string `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`
+	AuditSessionID         string `json:"audit_session_id" gorm:"type:varchar(64);index"`
+	ParentRequestID        string `json:"parent_request_id" gorm:"type:varchar(64);index"`
+	SessionMatch           string `json:"session_match" gorm:"type:varchar(16);index"`
+	SequenceFingerprint    string `json:"-" gorm:"type:varchar(64);index:idx_message_audit_session_candidate,priority:3"`
+	ConversationItemCount  int    `json:"-"`
+	SessionAnchorCount     int    `json:"-"`
+	SessionRequestCount    int64  `json:"session_request_count" gorm:"-:all"`
+	CompressedCount        int64  `json:"compressed_request_count" gorm:"-:all"`
+	ReviewStatus           string `json:"review_status" gorm:"-:all"`
+	ReviewRiskLevel        string `json:"review_risk_level" gorm:"-:all"`
+	ReviewStale            bool   `json:"review_stale" gorm:"-:all"`
+	ReviewedAt             int64  `json:"reviewed_at" gorm:"-:all"`
+	UserID                 int    `json:"user_id" gorm:"index;index:idx_message_audit_session_candidate,priority:1"`
+	Username               string `json:"username" gorm:"type:varchar(128);index"`
+	TokenID                int    `json:"token_id" gorm:"index"`
+	TokenName              string `json:"token_name" gorm:"type:varchar(128);index"`
+	ModelName              string `json:"model_name" gorm:"type:varchar(256);index"`
+	RequestPath            string `json:"request_path" gorm:"type:varchar(512);index"`
+	Protocol               string `json:"protocol" gorm:"type:varchar(64);index;index:idx_message_audit_session_candidate,priority:2"`
+	Status                 string `json:"status" gorm:"type:varchar(32);index"`
+	AuditStatus            string `json:"audit_status" gorm:"type:varchar(32);index"`
+	ErrorCode              string `json:"error_code" gorm:"type:varchar(128)"`
+	FinishReason           string `json:"finish_reason" gorm:"type:varchar(128)"`
+	HTTPStatus             int    `json:"http_status"`
+	IsStream               bool   `json:"is_stream"`
+	MessageCount           int    `json:"message_count"`
+	ToolCount              int    `json:"tool_count"`
+	PlaintextBytes         int64  `json:"plaintext_bytes"`
+	CapturedPlaintextBytes *int64 `json:"captured_plaintext_bytes"`
+	StoredPayloadBytes     *int64 `json:"stored_payload_bytes"`
+	DedupSavedBytes        int64  `json:"dedup_saved_bytes"`
+	DurationMS             int64  `json:"duration_ms"`
+	CapturedAt             int64  `json:"captured_at" gorm:"index"`
+	CapturedAtNano         int64  `json:"-" gorm:"index"`
+	FinalizedAt            int64  `json:"finalized_at"`
+	CreatedAt              int64  `json:"created_at"`
+	UpdatedAt              int64  `json:"updated_at"`
 }
 
 // MessageAuditBlob 保存按用户隔离去重后的加密消息块。
@@ -198,6 +204,7 @@ func CreateMessageAuditCapture(record *MessageAuditCaptureRecord) (bool, error) 
 		}
 
 		var dedupSavedBytes int64
+		var storedPayloadBytes int64
 		for sequence, stored := range record.Blobs {
 			blob := MessageAuditBlob{
 				UserID:         record.Request.UserID,
@@ -219,6 +226,8 @@ func CreateMessageAuditCapture(record *MessageAuditCaptureRecord) (bool, error) 
 				if err := tx.Where("user_id = ? AND schema_version = ? AND content_hmac = ?", record.Request.UserID, stored.SchemaVersion, stored.ContentHMAC).First(&blob).Error; err != nil {
 					return err
 				}
+			} else {
+				storedPayloadBytes += int64(len(stored.Nonce) + len(stored.Ciphertext))
 			}
 			item := MessageAuditItem{
 				AuditRequestID: record.Request.ID,
@@ -231,10 +240,11 @@ func CreateMessageAuditCapture(record *MessageAuditCaptureRecord) (bool, error) 
 				return err
 			}
 		}
-		if dedupSavedBytes > 0 {
-			return tx.Model(&MessageAuditRequest{}).Where("id = ?", record.Request.ID).Update("dedup_saved_bytes", dedupSavedBytes).Error
+		updates := map[string]any{
+			"dedup_saved_bytes":    dedupSavedBytes,
+			"stored_payload_bytes": storedPayloadBytes,
 		}
-		return nil
+		return tx.Model(&MessageAuditRequest{}).Where("id = ?", record.Request.ID).Updates(updates).Error
 	})
 	return skipped, err
 }
@@ -468,7 +478,7 @@ func FinalizeMessageAuditRequest(record MessageAuditFinalizeRecord) error {
 // 返回值不包含消息密文或正文。
 func ListMessageAudits(filter MessageAuditListFilter) ([]MessageAuditRequest, int64, error) {
 	query := messageAuditFilteredQuery(DB.Model(&MessageAuditRequest{}), filter)
-	selectColumns := "id, request_id, audit_session_id, parent_request_id, session_match, user_id, username, token_id, token_name, model_name, request_path, protocol, status, audit_status, error_code, finish_reason, http_status, is_stream, message_count, tool_count, plaintext_bytes, dedup_saved_bytes, duration_ms, captured_at, finalized_at, created_at, updated_at"
+	selectColumns := "id, request_id, audit_session_id, parent_request_id, session_match, user_id, username, token_id, token_name, model_name, request_path, protocol, status, audit_status, error_code, finish_reason, http_status, is_stream, message_count, tool_count, plaintext_bytes, captured_plaintext_bytes, stored_payload_bytes, dedup_saved_bytes, duration_ms, captured_at, finalized_at, created_at, updated_at"
 	if filter.AuditSessionID != "" {
 		var total int64
 		if err := query.Where("audit_session_id = ?", filter.AuditSessionID).Count(&total).Error; err != nil {
@@ -591,16 +601,25 @@ func GetMessageAuditStorageStats() (MessageAuditStorageStats, error) {
 		Scan(&stats.PayloadBytes).Error; err != nil {
 		return stats, err
 	}
+	if DB.Migrator().HasTable(&MessageAuditReview{}) {
+		var reviewPayloadBytes int64
+		if err := DB.Model(&MessageAuditReview{}).
+			Select("COALESCE(SUM(LENGTH(result_ciphertext) + LENGTH(result_nonce)), 0)").
+			Scan(&reviewPayloadBytes).Error; err != nil {
+			return stats, err
+		}
+		stats.PayloadBytes += reviewPayloadBytes
+	}
 
 	var storageBytes int64
 	var err error
 	switch common.MainDatabaseType() {
 	case common.DatabaseTypeMySQL:
-		err = DB.Raw("SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states')").Scan(&storageBytes).Error
+		err = DB.Raw("SELECT COALESCE(SUM(data_length + index_length), 0) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states', 'message_audit_reviews', 'message_audit_review_sources')").Scan(&storageBytes).Error
 	case common.DatabaseTypePostgreSQL:
-		err = DB.Raw("SELECT COALESCE(SUM(pg_total_relation_size((quote_ident(schemaname) || '.' || quote_ident(tablename))::regclass)), 0) FROM pg_tables WHERE schemaname = current_schema() AND tablename IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states')").Scan(&storageBytes).Error
+		err = DB.Raw("SELECT COALESCE(SUM(pg_total_relation_size((quote_ident(schemaname) || '.' || quote_ident(tablename))::regclass)), 0) FROM pg_tables WHERE schemaname = current_schema() AND tablename IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states', 'message_audit_reviews', 'message_audit_review_sources')").Scan(&storageBytes).Error
 	case common.DatabaseTypeSQLite:
-		err = DB.Raw("SELECT COALESCE(SUM(pgsize), 0) FROM dbstat WHERE name IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states') OR name IN (SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states'))").Scan(&storageBytes).Error
+		err = DB.Raw("SELECT COALESCE(SUM(pgsize), 0) FROM dbstat WHERE name IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states', 'message_audit_reviews', 'message_audit_review_sources') OR name IN (SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN ('message_audit_requests', 'message_audit_blobs', 'message_audit_items', 'message_audit_states', 'message_audit_reviews', 'message_audit_review_sources'))").Scan(&storageBytes).Error
 	default:
 		err = errors.New("unsupported message audit storage database")
 	}
@@ -690,10 +709,17 @@ func DeleteMessageAuditsBeforeBatch(ctx context.Context, cutoff int64, batchSize
 		return 0, nil
 	}
 	err := DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var requestIDs []string
+		if err := tx.Model(&MessageAuditRequest{}).Where("id IN ?", ids).Pluck("request_id", &requestIDs).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("audit_request_id IN ?", ids).Delete(&MessageAuditItem{}).Error; err != nil {
 			return err
 		}
-		return tx.Where("id IN ?", ids).Delete(&MessageAuditRequest{}).Error
+		if err := tx.Where("id IN ?", ids).Delete(&MessageAuditRequest{}).Error; err != nil {
+			return err
+		}
+		return DeleteMessageAuditReviewsForRequestIDs(tx, requestIDs)
 	})
 	return int64(len(ids)), err
 }

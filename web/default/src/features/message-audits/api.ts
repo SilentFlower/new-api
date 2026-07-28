@@ -26,6 +26,9 @@ import type {
   MessageAuditCleanupTask,
   MessageAuditDetail,
   MessageAuditListData,
+  MessageAuditReview,
+  MessageAuditReviewOptions,
+  MessageAuditReviewTask,
   MessageAuditSearch,
   MessageAuditStatus,
 } from './types'
@@ -97,6 +100,45 @@ export async function getMessageAuditStatus() {
   const res = await api.get<MessageAuditApiResponse<MessageAuditStatus>>(
     '/api/message-audit/status'
   )
+  return unwrapMessageAuditResponse(res.data)
+}
+
+/**
+ * 返回固定审核渠道、模型配置和可选项。
+ *
+ * @returns 不包含渠道密钥的审核配置。
+ */
+export async function getMessageAuditReviewOptions() {
+  const res = await api.get<MessageAuditApiResponse<MessageAuditReviewOptions>>(
+    '/api/message-audit/review-options'
+  )
+  return unwrapMessageAuditResponse(res.data)
+}
+
+/**
+ * 返回推断会话当前审核状态和结果。
+ *
+ * @param auditSessionId 推断会话 ID。
+ * @returns 当前结果、任务状态和新鲜度。
+ */
+export async function getMessageAuditReview(auditSessionId: string) {
+  const res = await api.get<MessageAuditApiResponse<MessageAuditReview>>(
+    `/api/message-audit/session/${encodeURIComponent(auditSessionId)}/review`,
+    { disableDuplicate: true }
+  )
+  return unwrapMessageAuditResponse(res.data)
+}
+
+/**
+ * 创建或复用推断会话的手动审核任务。
+ *
+ * @param auditSessionId 推断会话 ID。
+ * @returns 系统任务和是否新建。
+ */
+export async function startMessageAuditReview(auditSessionId: string) {
+  const res = await api.post<
+    MessageAuditApiResponse<{ task: MessageAuditReviewTask; created: boolean }>
+  >(`/api/message-audit/session/${encodeURIComponent(auditSessionId)}/review`)
   return unwrapMessageAuditResponse(res.data)
 }
 

@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Check,
   ChevronLeft,
@@ -26,10 +26,12 @@ import {
   Loader2,
   Minimize2,
   RotateCcw,
+  ShieldCheck,
 } from 'lucide-react'
 import { type ReactNode, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -66,12 +68,30 @@ import {
 import { useMediaQuery } from '@/hooks'
 import dayjs from '@/lib/dayjs'
 
-import { getMessageAuditDetail, getMessageAuditSessionRequests } from '../api'
+import {
+  getMessageAuditDetail,
+  getMessageAuditReview,
+  getMessageAuditSessionRequests,
+  startMessageAuditReview,
+} from '../api'
 import {
   filterMessageAuditMessages,
+  getMessageAuditErrorMessage,
+  getMessageAuditRequestFailureLabelKey,
+  getMessageAuditReviewCategoryLabelKey,
+  getMessageAuditReviewFailureLabelKey,
+  getMessageAuditReviewPollInterval,
+  getMessageAuditReviewStatusLabelKey,
+  getMessageAuditReviewUncoveredLabelKey,
+  getMessageAuditRiskLabelKey,
   getMessageAuditSessionMatchLabelKey,
+  getMessageAuditStorageModeLabelKey,
 } from '../lib/message-audit-ui'
-import type { MessageAuditMessage } from '../types'
+import type {
+  MessageAuditMessage,
+  MessageAuditReview,
+  MessageAuditRiskLevel,
+} from '../types'
 
 type MessageAuditDetailPanelProps = {
   requestId: string | null
@@ -83,6 +103,248 @@ type AuditMessageListProps = {
   messages: MessageAuditMessage[]
   copiedSequence: number | null
   onCopy: (sequence: number, content: unknown) => void
+}
+
+function formatAuditBytes(bytes: number | null): string {
+  if (bytes === null || !Number.isFinite(bytes) || bytes <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB']
+  const index = Math.min(
+    units.length - 1,
+    Math.floor(Math.log(bytes) / Math.log(1024))
+  )
+  return `${(bytes / Math.pow(1024, index)).toFixed(index === 0 ? 0 : 1)} ${units[index]}`
+}
+
+function getRiskBadgeClass(riskLevel: MessageAuditRiskLevel | ''): string {
+  switch (riskLevel) {
+    case 'high':
+      return 'border-red-500/50 bg-red-500/10 text-red-700 dark:text-red-300'
+    case 'medium':
+      return 'border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+    case 'low':
+      return 'border-sky-500/50 bg-sky-500/10 text-sky-700 dark:text-sky-300'
+    case 'none':
+      return 'border-emerald-500/50 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+    default:
+      return ''
+  }
+}
+
+function MessageAuditReviewSection(props: { auditSessionId: string }) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const reviewQuery = useQuery({
+    queryKey: ['message-audit-review', props.auditSessionId],
+    queryFn: () => getMessageAuditReview(props.auditSessionId),
+    refetchInterval: (query) =>
+      getMessageAuditReviewPollInterval(
+        query.state.data as MessageAuditReview | undefined
+      ),
+  })
+  const startReview = useMutation({
+    mutationFn: () => startMessageAuditReview(props.auditSessionId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ['message-audit-review', props.auditSessionId],
+        }),
+        queryClient.invalidateQueries({ queryKey: ['message-audits'] }),
+      ])
+    },
+  })
+  const review = reviewQuery.data
+  const active =
+    startReview.isPending ||
+    review?.status === 'pending' ||
+    review?.status === 'running'
+
+  return (
+    <section className='space-y-3 border-b pb-5'>
+      <div className='flex flex-wrap items-start justify-between gap-3'>
+        <div>
+          <div className='flex flex-wrap items-center gap-2'>
+            <h3 className='text-sm font-medium'>{t('AI review')}</h3>
+            {review && (
+              <Badge variant='outline'>
+                {t(getMessageAuditReviewStatusLabelKey(review.status))}
+              </Badge>
+            )}
+            {review?.risk_level && (
+              <Badge
+                variant='outline'
+                className={getRiskBadgeClass(review.risk_level)}
+              >
+                {t(getMessageAuditRiskLabelKey(review.risk_level))}
+              </Badge>
+            )}
+            {review?.stale && (
+              <Badge variant='outline'>{t('Content changed')}</Badge>
+            )}
+          </div>
+          <p className='text-muted-foreground mt-1 text-xs'>
+            {t(
+              'The AI reviews the stored inbound conversation context. Model responses are included only when the client submits them again as conversation history. The result is for administrator review and does not trigger automatic enforcement.'
+            )}
+          </p>
+        </div>
+        <Button
+          type='button'
+          size='sm'
+          disabled={active || reviewQuery.isLoading}
+          onClick={() => startReview.mutate()}
+        >
+          {active ? (
+            <Loader2 className='animate-spin' aria-hidden='true' />
+          ) : (
+            <ShieldCheck aria-hidden='true' />
+          )}
+          {review?.result || review?.stale
+            ? t('Review again')
+            : t('Start AI review')}
+        </Button>
+      </div>
+
+      {(reviewQuery.isError || startReview.isError) && (
+        <Alert variant='destructive'>
+          <AlertTitle>{t('AI review unavailable')}</AlertTitle>
+          <AlertDescription>
+            {getMessageAuditErrorMessage(
+              startReview.error ?? reviewQuery.error,
+              t('The AI review could not be started.')
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {review?.status === 'failed' && (
+        <Alert variant='destructive'>
+          <AlertTitle>{t('AI review failed')}</AlertTitle>
+          <AlertDescription>
+            {t(getMessageAuditReviewFailureLabelKey(review.failure_code))}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {review?.result && (
+        <div className='space-y-3 text-sm'>
+          <p className='leading-6'>{review.result.summary}</p>
+          <div className='text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs'>
+            <span>
+              {t('Review model')}: {review.review_model}
+            </span>
+            {review.reviewed_at > 0 && (
+              <span>
+                {t('Reviewed at')}:{' '}
+                {dayjs.unix(review.reviewed_at).format('YYYY-MM-DD HH:mm:ss')}
+              </span>
+            )}
+            <span>
+              {t('{{count}} source ranges reviewed', {
+                count: review.result.coverage.length,
+              })}
+            </span>
+          </div>
+          {review.result.categories.length > 0 && (
+            <div className='flex flex-wrap gap-2'>
+              {review.result.categories.map((category) => (
+                <Badge key={category} variant='outline'>
+                  {t(getMessageAuditReviewCategoryLabelKey(category))}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {review.result.coverage.length > 0 && (
+            <section className='space-y-2'>
+              <h4 className='text-xs font-medium'>{t('Read coverage')}</h4>
+              <ol className='divide-y border-y'>
+                {review.result.coverage.map((coverage) => (
+                  <li
+                    key={`${coverage.file_id}-${coverage.start_cursor ?? coverage.start_sequence}-${coverage.end_cursor ?? coverage.end_sequence}`}
+                    className='space-y-2 py-3'
+                  >
+                    <div className='font-mono text-xs break-all'>
+                      {coverage.file_id}
+                    </div>
+                    <dl className='grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[auto_1fr]'>
+                      <dt className='text-muted-foreground'>
+                        {t('Message range')}
+                      </dt>
+                      <dd>
+                        #{coverage.start_sequence}-#{coverage.end_sequence}
+                      </dd>
+                      {coverage.start_cursor !== undefined &&
+                        coverage.end_cursor !== undefined && (
+                          <>
+                            <dt className='text-muted-foreground'>
+                              {t('Virtual chunk range')}
+                            </dt>
+                            <dd>
+                              {coverage.start_cursor}-{coverage.end_cursor}
+                            </dd>
+                          </>
+                        )}
+                      <dt className='text-muted-foreground'>
+                        {t('Estimated tokens')}
+                      </dt>
+                      <dd>{coverage.estimated_tokens}</dd>
+                    </dl>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+          {review.result.findings.length > 0 && (
+            <ol className='divide-y border-y'>
+              {review.result.findings.map((finding) => (
+                <li
+                  key={`${finding.file_id}-${finding.start_sequence}-${finding.end_sequence}-${finding.category}-${finding.reason}`}
+                  className='space-y-1 py-3'
+                >
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <Badge
+                      variant='outline'
+                      className={getRiskBadgeClass(finding.severity)}
+                    >
+                      {t(getMessageAuditRiskLabelKey(finding.severity))}
+                    </Badge>
+                    <span className='text-xs font-medium'>
+                      {t(
+                        getMessageAuditReviewCategoryLabelKey(finding.category)
+                      )}
+                    </span>
+                    <span className='text-muted-foreground font-mono text-xs'>
+                      {finding.file_id} #{finding.start_sequence}-
+                      {finding.end_sequence}
+                    </span>
+                  </div>
+                  <p className='text-muted-foreground text-xs leading-5'>
+                    {finding.reason}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          )}
+          {review.result.uncovered.length > 0 && (
+            <section className='space-y-2'>
+              <h4 className='text-xs font-medium'>{t('Unreviewed sources')}</h4>
+              <ul className='space-y-2'>
+                {review.result.uncovered.map((source) => (
+                  <li key={`${source.file_id}-${source.reason}`}>
+                    <div className='font-mono text-xs break-all'>
+                      {source.file_id}
+                    </div>
+                    <p className='text-muted-foreground text-xs'>
+                      {t(getMessageAuditReviewUncoveredLabelKey(source.reason))}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
+      )}
+    </section>
+  )
 }
 
 function AuditMessageList(props: AuditMessageListProps) {
@@ -481,7 +743,62 @@ function DetailBody(props: {
             <span className='text-muted-foreground'>{t('None')}</span>
           )}
         </dd>
+        <dt className='text-muted-foreground'>{t('Audit storage')}</dt>
+        <dd>
+          <Badge variant='outline'>
+            {t(getMessageAuditStorageModeLabelKey(detail.request.audit_status))}
+          </Badge>
+        </dd>
+        <dt className='text-muted-foreground'>{t('Body size')}</dt>
+        <dd className='flex flex-wrap gap-x-4 gap-y-1'>
+          <span>
+            {t('Original body')}:{' '}
+            {formatAuditBytes(detail.request.plaintext_bytes)}
+          </span>
+          <span>
+            {t('Captured body')}:{' '}
+            {formatAuditBytes(detail.request.captured_plaintext_bytes)}
+          </span>
+          <span>
+            {t('Stored')}:{' '}
+            {formatAuditBytes(detail.request.stored_payload_bytes)}
+          </span>
+        </dd>
+        {detail.request.status === 'failed' && (
+          <>
+            <dt className='text-muted-foreground'>{t('Failure reason')}</dt>
+            <dd className='space-y-1'>
+              <div>
+                {t('HTTP status')}: {detail.request.http_status || t('Unknown')}
+              </div>
+              {detail.request.error_code && (
+                <>
+                  <div>
+                    {t('Explanation')}:{' '}
+                    {t(
+                      getMessageAuditRequestFailureLabelKey(
+                        detail.request.error_code
+                      )
+                    )}
+                  </div>
+                  <div className='font-mono text-xs break-all'>
+                    {t('Error code')}: {detail.request.error_code}
+                  </div>
+                </>
+              )}
+              {detail.request.finish_reason && (
+                <div>
+                  {t('Finish reason')}: {detail.request.finish_reason}
+                </div>
+              )}
+            </dd>
+          </>
+        )}
       </dl>
+
+      <MessageAuditReviewSection
+        auditSessionId={detail.request.audit_session_id}
+      />
 
       <section className='space-y-3'>
         <div className='flex flex-wrap items-center justify-between gap-2'>

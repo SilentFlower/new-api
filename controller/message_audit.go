@@ -73,6 +73,53 @@ func GetMessageAuditDetail(c *gin.Context) {
 	common.ApiSuccess(c, detail)
 }
 
+// GetMessageAuditReviewOptions 返回固定审核配置和不含密钥的启用渠道模型列表。
+//
+// @param c Root 管理请求上下文。
+// @return 使用统一管理 API 契约写入响应。
+func GetMessageAuditReviewOptions(c *gin.Context) {
+	channels, err := model.ListMessageAuditReviewChannelOptions()
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"config": service.GetMessageAuditReviewConfig(), "channels": channels})
+}
+
+// GetMessageAuditSessionReview 返回推断会话当前审核状态和可选加密结果。
+//
+// @param c Root 管理请求上下文。
+// @return 每次成功或失败尝试都写不含正文的管理审计。
+func GetMessageAuditSessionReview(c *gin.Context) {
+	auditSessionID := c.Param("audit_session_id")
+	review, err := service.GetMessageAuditReviewResponse(auditSessionID)
+	recordManageAudit(c, "message_audit.review_view", map[string]interface{}{"audit_session_id": auditSessionID, "success": err == nil})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, review)
+}
+
+// CreateMessageAuditSessionReview 创建或复用推断会话的手动审核任务。
+//
+// @param c Root 管理请求上下文。
+// @return 任务元数据和是否新建，不记录任何消息正文。
+func CreateMessageAuditSessionReview(c *gin.Context) {
+	auditSessionID := c.Param("audit_session_id")
+	task, created, err := service.StartMessageAuditReview(auditSessionID, c.GetInt("id"))
+	record := map[string]interface{}{"audit_session_id": auditSessionID, "created": created, "success": err == nil}
+	if task != nil {
+		record["task_id"] = task.TaskID
+	}
+	recordManageAudit(c, "message_audit.review_start", record)
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	common.ApiSuccess(c, gin.H{"task": task.ToResponse(), "created": created})
+}
+
 // CreateMessageAuditCleanupSystemTask 创建或复用当前的一键清空异步任务。
 func CreateMessageAuditCleanupSystemTask(c *gin.Context) {
 	task, created, err := service.StartMessageAuditCleanupTask(time.Now().UnixNano())

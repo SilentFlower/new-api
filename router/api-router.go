@@ -285,6 +285,9 @@ func SetApiRouter(router *gin.Engine) {
 		{
 			messageAuditRoute.GET("/", controller.GetMessageAudits)
 			messageAuditRoute.GET("/status", controller.GetMessageAuditStatus)
+			messageAuditRoute.GET("/review-options", controller.GetMessageAuditReviewOptions)
+			messageAuditRoute.GET("/session/:audit_session_id/review", controller.GetMessageAuditSessionReview)
+			messageAuditRoute.POST("/session/:audit_session_id/review", controller.CreateMessageAuditSessionReview)
 			messageAuditRoute.GET("/:request_id", controller.GetMessageAuditDetail)
 		}
 

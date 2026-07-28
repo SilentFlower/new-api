@@ -237,6 +237,22 @@ func UpdateOption(c *gin.Context) {
 			common.ApiErrorMsg(c, "消息审计保留天数必须在 1 到 30 之间")
 			return
 		}
+	case "message_audit_review.config":
+		config, parseErr := service.ParseMessageAuditReviewConfig(option.Value.(string))
+		if parseErr != nil {
+			common.ApiErrorMsg(c, parseErr.Error())
+			return
+		}
+		if config.ChannelID == 0 && config.Model == "" {
+			option.Value = ""
+		} else {
+			data, marshalErr := common.Marshal(config)
+			if marshalErr != nil {
+				common.ApiErrorMsg(c, "消息审计 AI 配置序列化失败")
+				return
+			}
+			option.Value = string(data)
+		}
 	case "GroupRatio":
 		err = ratio_setting.CheckGroupRatio(option.Value.(string))
 		if err != nil {

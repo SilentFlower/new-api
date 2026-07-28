@@ -1,17 +1,36 @@
 import assert from 'node:assert/strict'
 import { describe, test } from 'node:test'
 
-import type { MessageAuditCleanupTask } from '../types'
+import type { MessageAuditCleanupTask, MessageAuditReview } from '../types'
 import {
   filterMessageAuditMessages,
   getMessageAuditCleanupProgress,
   getMessageAuditCleanupTitleKey,
   getMessageAuditErrorMessage,
+  getMessageAuditRequestFailureLabelKey,
+  getMessageAuditReviewPollInterval,
+  getMessageAuditReviewUncoveredLabelKey,
   getMessageAuditSessionMatchLabelKey,
   isMessageAuditCleanupActive,
   isMessageAuditClearConfirmed,
   keepMessageAuditSessionPlaceholder,
 } from './message-audit-ui'
+
+function review(status: MessageAuditReview['status']): MessageAuditReview {
+  return {
+    audit_session_id: 'session-1',
+    status,
+    risk_level: '',
+    stale: false,
+    reviewed_request_id: '',
+    current_request_id: 'request-1',
+    task_id: '',
+    review_channel_id: 0,
+    review_model: '',
+    failure_code: '',
+    reviewed_at: 0,
+  }
+}
 
 function cleanupTask(
   status: MessageAuditCleanupTask['status'],
@@ -130,6 +149,48 @@ describe('消息审计会话续接标识', () => {
     assert.equal(
       getMessageAuditSessionMatchLabelKey('unknown'),
       'New inferred session'
+    )
+  })
+})
+
+describe('消息审计 AI 审核状态', () => {
+  test('仅排队和运行状态开启轮询', () => {
+    assert.equal(getMessageAuditReviewPollInterval(review('pending')), 1000)
+    assert.equal(getMessageAuditReviewPollInterval(review('running')), 1000)
+    assert.equal(getMessageAuditReviewPollInterval(review('failed')), false)
+    assert.equal(getMessageAuditReviewPollInterval(review('succeeded')), false)
+    assert.equal(getMessageAuditReviewPollInterval(undefined), false)
+  })
+
+  test('未覆盖原因区分未读取、部分读取和正文不可用', () => {
+    assert.equal(
+      getMessageAuditReviewUncoveredLabelKey('not_read'),
+      'This source was not read.'
+    )
+    assert.equal(
+      getMessageAuditReviewUncoveredLabelKey('partially_read'),
+      'This source was only partially read.'
+    )
+    assert.equal(
+      getMessageAuditReviewUncoveredLabelKey('content_unavailable'),
+      'The source content was unavailable.'
+    )
+  })
+})
+
+describe('消息审计失败原因', () => {
+  test('稳定错误码映射为安全说明并对未知码降级', () => {
+    assert.equal(
+      getMessageAuditRequestFailureLabelKey('insufficient_user_quota'),
+      'The account had insufficient quota for this request.'
+    )
+    assert.equal(
+      getMessageAuditRequestFailureLabelKey('do_request_failed'),
+      'The upstream request failed or returned an invalid response.'
+    )
+    assert.equal(
+      getMessageAuditRequestFailureLabelKey('future_error_code'),
+      'An unknown failure occurred. Review the error code for details.'
     )
   })
 })

@@ -26,6 +26,8 @@ const (
 
 const maxLogCount = 1000000
 
+const sensitiveContentLogSuppressedKey = "sensitive_content_log_suppressed"
+
 var logCount int
 var setupLogLock sync.Mutex
 var setupLogWorking bool
@@ -74,24 +76,55 @@ func SetupLogger() {
 }
 
 func LogInfo(ctx context.Context, msg string) {
+	if SensitiveContentLogsSuppressed(ctx) {
+		return
+	}
 	logHelper(ctx, loggerINFO, msg)
 }
 
 func LogWarn(ctx context.Context, msg string) {
+	if SensitiveContentLogsSuppressed(ctx) {
+		return
+	}
 	logHelper(ctx, loggerWarn, msg)
 }
 
 func LogError(ctx context.Context, msg string) {
+	if SensitiveContentLogsSuppressed(ctx) {
+		return
+	}
 	logHelper(ctx, loggerError, msg)
 }
 
 func LogDebug(ctx context.Context, msg string, args ...any) {
+	if SensitiveContentLogsSuppressed(ctx) {
+		return
+	}
 	if common.DebugEnabled {
 		if len(args) > 0 {
 			msg = fmt.Sprintf(msg, args...)
 		}
 		logHelper(ctx, loggerDebug, msg)
 	}
+}
+
+// SuppressSensitiveContentLogs 禁止指定 Gin 上下文向普通应用日志写入任何内容。
+//
+// @param ctx 承载敏感控制面调用的 Gin 上下文。
+func SuppressSensitiveContentLogs(ctx *gin.Context) {
+	if ctx == nil {
+		return
+	}
+	ctx.Set(sensitiveContentLogSuppressedKey, true)
+}
+
+// SensitiveContentLogsSuppressed 判断当前日志上下文是否启用了敏感内容日志抑制。
+//
+// @param ctx 待检查的日志上下文。
+// @return 启用日志抑制时返回 true。
+func SensitiveContentLogsSuppressed(ctx context.Context) bool {
+	ginContext, ok := ctx.(*gin.Context)
+	return ok && ginContext.GetBool(sensitiveContentLogSuppressedKey)
 }
 
 func logHelper(ctx context.Context, level string, msg string) {

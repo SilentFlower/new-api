@@ -27,13 +27,15 @@ import (
 )
 
 const (
-	messageAuditSchemaVersion   = 1
-	messageAuditQueueCapacity   = 1024
-	messageAuditQueueByteLimit  = int64(64 * 1024 * 1024)
-	messageAuditSnapshotMaxSize = int64(1024 * 1024)
-	messageAuditBatchSize       = 32
-	messageAuditRetryCount      = 3
-	messageAuditSecretMinLength = 32
+	messageAuditSchemaVersion             = 1
+	messageAuditQueueCapacity             = 1024
+	messageAuditQueueByteLimit            = int64(64 * 1024 * 1024)
+	messageAuditSnapshotMaxSize           = int64(1024 * 1024)
+	messageAuditReviewTextDefaultMaxSize  = int64(4 * 1024 * 1024)
+	messageAuditReviewTextAbsoluteMaxSize = int64(16 * 1024 * 1024)
+	messageAuditBatchSize                 = 32
+	messageAuditRetryCount                = 3
+	messageAuditSecretMinLength           = 32
 )
 
 var (
@@ -110,8 +112,13 @@ type messageAuditPlaintext struct {
 }
 
 type messageAuditCaptureEvent struct {
-	request model.MessageAuditRequest
-	entries []messageAuditPlaintext
+	request                        model.MessageAuditRequest
+	entries                        []messageAuditPlaintext
+	conversationPrefixFingerprints []string
+	sessionAnchorHMACs             []string
+	sequenceFingerprint            string
+	conversationItemCount          int
+	sessionAnchorCount             int
 }
 
 type messageAuditEvent struct {
@@ -122,20 +129,22 @@ type messageAuditEvent struct {
 }
 
 type messageAuditManager struct {
-	queue          chan messageAuditEvent
-	stop           chan struct{}
-	done           chan struct{}
-	stopOnce       sync.Once
-	stopping       atomic.Bool
-	queuedBytes    atomic.Int64
-	succeeded      atomic.Uint64
-	retries        atomic.Uint64
-	failed         atomic.Uint64
-	dropped        atomic.Uint64
-	encryptionKey  []byte
-	dedupKey       []byte
-	keyFingerprint string
-	keyConfigured  bool
+	queue                chan messageAuditEvent
+	stop                 chan struct{}
+	done                 chan struct{}
+	stopOnce             sync.Once
+	stopping             atomic.Bool
+	queuedBytes          atomic.Int64
+	succeeded            atomic.Uint64
+	retries              atomic.Uint64
+	failed               atomic.Uint64
+	dropped              atomic.Uint64
+	encryptionKey        []byte
+	dedupKey             []byte
+	reviewKey            []byte
+	reviewKeyFingerprint string
+	keyFingerprint       string
+	keyConfigured        bool
 }
 
 // StartMessageAuditManager 启动消息审计单写协程。
@@ -143,15 +152,19 @@ type messageAuditManager struct {
 // 该函数可重复调用，只有首次调用会创建后台协程。
 func StartMessageAuditManager() {
 	messageAuditManagerOnce.Do(func() {
-		encryptionKey, dedupKey, fingerprint, err := deriveMessageAuditKeys(common.GetEnvOrDefaultString("MESSAGE_AUDIT_SECRET", ""))
+		secret := common.GetEnvOrDefaultString("MESSAGE_AUDIT_SECRET", "")
+		encryptionKey, dedupKey, fingerprint, err := deriveMessageAuditKeys(secret)
+		reviewKey, reviewFingerprint := deriveMessageAuditReviewKey(secret)
 		manager := &messageAuditManager{
-			queue:          make(chan messageAuditEvent, messageAuditQueueCapacity),
-			stop:           make(chan struct{}),
-			done:           make(chan struct{}),
-			encryptionKey:  encryptionKey,
-			dedupKey:       dedupKey,
-			keyFingerprint: fingerprint,
-			keyConfigured:  err == nil,
+			queue:                make(chan messageAuditEvent, messageAuditQueueCapacity),
+			stop:                 make(chan struct{}),
+			done:                 make(chan struct{}),
+			encryptionKey:        encryptionKey,
+			dedupKey:             dedupKey,
+			reviewKey:            reviewKey,
+			reviewKeyFingerprint: reviewFingerprint,
+			keyFingerprint:       fingerprint,
+			keyConfigured:        err == nil,
 		}
 		messageAuditManagerInst = manager
 		if err != nil {
@@ -249,7 +262,7 @@ func CaptureMessageAudit(input MessageAuditCaptureInput) bool {
 		return false
 	}
 
-	entries, messageCount, toolCount, plaintextBytes, metadataOnly, err := manager.normalizeRequest(input.Request)
+	entries, fingerprintEntries, messageCount, toolCount, plaintextBytes, metadataOnly, err := manager.normalizeRequest(input.Request)
 	if err != nil {
 		manager.dropped.Add(1)
 		logger.LogWarn(context.Background(), fmt.Sprintf("消息审计快照生成失败: request_id=%s error=%v", input.RequestID, err))
@@ -260,32 +273,42 @@ func CaptureMessageAudit(input MessageAuditCaptureInput) bool {
 		capturedAt = time.Now()
 	}
 	now := time.Now().Unix()
+	conversationPrefixFingerprints, sessionAnchorHMACs, sequenceFingerprint := manager.buildMessageAuditSessionFingerprints(input.UserID, string(input.Protocol), fingerprintEntries)
+	capturedPlaintextBytes := messageAuditPlaintextSize(entries)
 	capture := &messageAuditCaptureEvent{
 		request: model.MessageAuditRequest{
-			RequestID:      input.RequestID,
-			UserID:         input.UserID,
-			Username:       input.Username,
-			TokenID:        input.TokenID,
-			TokenName:      input.TokenName,
-			ModelName:      input.ModelName,
-			RequestPath:    input.RequestPath,
-			Protocol:       string(input.Protocol),
-			Status:         "pending",
-			AuditStatus:    "captured",
-			IsStream:       input.IsStream,
-			MessageCount:   messageCount,
-			ToolCount:      toolCount,
-			PlaintextBytes: plaintextBytes,
-			CapturedAt:     capturedAt.Unix(),
-			CapturedAtNano: capturedAt.UnixNano(),
-			CreatedAt:      now,
-			UpdatedAt:      now,
+			RequestID:              input.RequestID,
+			UserID:                 input.UserID,
+			Username:               input.Username,
+			TokenID:                input.TokenID,
+			TokenName:              input.TokenName,
+			ModelName:              input.ModelName,
+			RequestPath:            input.RequestPath,
+			Protocol:               string(input.Protocol),
+			Status:                 "pending",
+			AuditStatus:            "captured",
+			IsStream:               input.IsStream,
+			MessageCount:           messageCount,
+			ToolCount:              toolCount,
+			PlaintextBytes:         plaintextBytes,
+			CapturedPlaintextBytes: &capturedPlaintextBytes,
+			CapturedAt:             capturedAt.Unix(),
+			CapturedAtNano:         capturedAt.UnixNano(),
+			CreatedAt:              now,
+			UpdatedAt:              now,
 		},
-		entries: entries,
+		entries:                        entries,
+		conversationPrefixFingerprints: conversationPrefixFingerprints,
+		sessionAnchorHMACs:             sessionAnchorHMACs,
+		sequenceFingerprint:            sequenceFingerprint,
+		conversationItemCount:          len(conversationPrefixFingerprints),
+		sessionAnchorCount:             len(sessionAnchorHMACs),
 	}
 	if metadataOnly {
 		capture.request.AuditStatus = "metadata_only"
 		capture.entries = nil
+	} else if plaintextBytes > messageAuditSnapshotMaxSize {
+		capture.request.AuditStatus = "content_reduced"
 	}
 	eventSize := plaintextBytes + 512
 	if metadataOnly {
@@ -321,7 +344,14 @@ func FinalizeMessageAudit(input MessageAuditFinalizeInput) {
 
 // ListMessageAudits 返回不含正文的分页审计列表。
 func ListMessageAudits(filter model.MessageAuditListFilter) ([]model.MessageAuditRequest, int64, error) {
-	return model.ListMessageAudits(filter)
+	requests, total, err := model.ListMessageAudits(filter)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := model.AttachMessageAuditReviewMetadata(requests); err != nil {
+		return nil, 0, err
+	}
+	return requests, total, nil
 }
 
 // GetMessageAuditDetail 校验密钥指纹并解密单个请求的有序消息。
@@ -389,6 +419,17 @@ func deriveMessageAuditKeys(secret string) ([]byte, []byte, string, error) {
 	dedupKey := derive("new-api/message-audit/dedup/v1")
 	fingerprintHash := sha256.Sum256(encryptionKey)
 	return encryptionKey, dedupKey, hex.EncodeToString(fingerprintHash[:8]), nil
+}
+
+func deriveMessageAuditReviewKey(secret string) ([]byte, string) {
+	if len(secret) < messageAuditSecretMinLength {
+		return nil, ""
+	}
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte("new-api/message-audit/review-encryption/v1"))
+	key := mac.Sum(nil)
+	fingerprintHash := sha256.Sum256(key)
+	return key, hex.EncodeToString(fingerprintHash[:8])
 }
 
 func (manager *messageAuditManager) enqueue(event messageAuditEvent) bool {
@@ -494,7 +535,7 @@ func (manager *messageAuditManager) processWithRetry(event messageAuditEvent) {
 	logger.LogWarn(context.Background(), fmt.Sprintf("消息审计异步写入失败: request_id=%s event=%s error=%v", requestID, event.kind, err))
 }
 
-func (manager *messageAuditManager) normalizeRequest(request dto.Request) ([]messageAuditPlaintext, int, int, int64, bool, error) {
+func (manager *messageAuditManager) normalizeRequest(request dto.Request) ([]messageAuditPlaintext, []messageAuditPlaintext, int, int, int64, bool, error) {
 	plainEntries := make([]messageAuditPlaintext, 0)
 	messageCount := 0
 	toolCount := 0
@@ -535,86 +576,91 @@ func (manager *messageAuditManager) normalizeRequest(request dto.Request) ([]mes
 	case *dto.GeneralOpenAIRequest:
 		for _, message := range typed.Messages {
 			if err := appendValue(message.Role, "message", message, true); err != nil {
-				return nil, 0, 0, 0, false, err
+				return nil, nil, 0, 0, 0, false, err
 			}
 		}
 		if len(typed.Tools) > 0 {
 			if err := appendValue("system", "tools", typed.Tools, false); err != nil {
-				return nil, 0, 0, 0, false, err
+				return nil, nil, 0, 0, 0, false, err
 			}
 		}
 		if err := appendRaw("system", "functions", typed.Functions, false); err != nil {
-			return nil, 0, 0, 0, false, err
+			return nil, nil, 0, 0, 0, false, err
 		}
 	case *dto.OpenAIResponsesRequest:
 		if err := appendRaw("system", "instructions", typed.Instructions, true); err != nil {
-			return nil, 0, 0, 0, false, err
+			return nil, nil, 0, 0, 0, false, err
 		}
 		if len(typed.Input) > 0 {
 			var input any
 			if err := common.Unmarshal(typed.Input, &input); err != nil {
-				return nil, 0, 0, 0, false, err
+				return nil, nil, 0, 0, 0, false, err
 			}
 			if list, ok := input.([]any); ok {
 				for _, item := range list {
 					role := auditRoleFromValue(item, "user")
 					if err := appendValue(role, "input", item, true); err != nil {
-						return nil, 0, 0, 0, false, err
+						return nil, nil, 0, 0, 0, false, err
 					}
 				}
 			} else if err := appendValue("user", "input", input, true); err != nil {
-				return nil, 0, 0, 0, false, err
+				return nil, nil, 0, 0, 0, false, err
 			}
 		}
 		if err := appendRaw("system", "tools", typed.Tools, false); err != nil {
-			return nil, 0, 0, 0, false, err
+			return nil, nil, 0, 0, 0, false, err
 		}
 	case *dto.ClaudeRequest:
 		if typed.System != nil {
 			if err := appendValue("system", "system", typed.System, true); err != nil {
-				return nil, 0, 0, 0, false, err
+				return nil, nil, 0, 0, 0, false, err
 			}
 		}
 		for _, message := range typed.Messages {
 			if err := appendValue(message.Role, "message", message, true); err != nil {
-				return nil, 0, 0, 0, false, err
+				return nil, nil, 0, 0, 0, false, err
 			}
 		}
 		if typed.Tools != nil {
 			if err := appendValue("system", "tools", typed.Tools, false); err != nil {
-				return nil, 0, 0, 0, false, err
+				return nil, nil, 0, 0, 0, false, err
 			}
 		}
 	case *dto.GeminiChatRequest:
 		if typed.SystemInstructions != nil {
 			if err := appendValue("system", "system", typed.SystemInstructions, true); err != nil {
-				return nil, 0, 0, 0, false, err
+				return nil, nil, 0, 0, 0, false, err
 			}
 		}
 		for _, content := range typed.Contents {
 			if err := appendValue(content.Role, "content", content, true); err != nil {
-				return nil, 0, 0, 0, false, err
+				return nil, nil, 0, 0, 0, false, err
 			}
 		}
 		if err := appendRaw("system", "tools", typed.Tools, false); err != nil {
-			return nil, 0, 0, 0, false, err
+			return nil, nil, 0, 0, 0, false, err
 		}
 	default:
-		return nil, 0, 0, 0, false, nil
+		return nil, nil, 0, 0, 0, false, nil
 	}
 
 	var totalBytes int64
 	for _, entry := range plainEntries {
 		plaintext, err := common.Marshal(entry)
 		if err != nil {
-			return nil, 0, 0, 0, false, err
+			return nil, nil, 0, 0, 0, false, err
 		}
 		totalBytes += int64(len(plaintext))
-		if totalBytes > messageAuditSnapshotMaxSize {
-			return nil, messageCount, toolCount, totalBytes, true, nil
-		}
 	}
-	return plainEntries, messageCount, toolCount, totalBytes, false, nil
+	if totalBytes <= messageAuditSnapshotMaxSize {
+		return plainEntries, plainEntries, messageCount, toolCount, totalBytes, false, nil
+	}
+
+	reducedEntries := reduceMessageAuditEntries(plainEntries)
+	if len(reducedEntries) == 0 || messageAuditPlaintextSize(reducedEntries) > messageAuditReviewTextMaxSize() {
+		return nil, reducedEntries, messageCount, toolCount, totalBytes, true, nil
+	}
+	return reducedEntries, reducedEntries, messageCount, toolCount, totalBytes, false, nil
 }
 
 func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureEvent) (*model.MessageAuditCaptureRecord, error) {
@@ -624,6 +670,14 @@ func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureE
 	record := &model.MessageAuditCaptureRecord{
 		Request: capture.request,
 		Blobs:   make([]model.MessageAuditStoredBlob, 0, len(capture.entries)),
+	}
+	hasPrecomputedFingerprints := capture.sequenceFingerprint != "" || len(capture.conversationPrefixFingerprints) > 0
+	if hasPrecomputedFingerprints {
+		record.ConversationPrefixFingerprints = capture.conversationPrefixFingerprints
+		record.SessionAnchorHMACs = capture.sessionAnchorHMACs
+		record.Request.SequenceFingerprint = capture.sequenceFingerprint
+		record.Request.ConversationItemCount = capture.conversationItemCount
+		record.Request.SessionAnchorCount = capture.sessionAnchorCount
 	}
 	previousFingerprint := ""
 	for _, entry := range capture.entries {
@@ -646,7 +700,7 @@ func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureE
 			Role:           entry.Role,
 		}
 		record.Blobs = append(record.Blobs, stored)
-		if !isMessageAuditConversationBlob(stored) {
+		if hasPrecomputedFingerprints || !isMessageAuditConversationBlob(stored) {
 			continue
 		}
 		previousFingerprint = manager.nextMessageAuditSessionFingerprint(capture.request.UserID, capture.request.Protocol, previousFingerprint, stored)
@@ -655,10 +709,109 @@ func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureE
 			record.SessionAnchorHMACs = append(record.SessionAnchorHMACs, stored.ContentHMAC)
 		}
 	}
-	record.Request.SequenceFingerprint = previousFingerprint
-	record.Request.ConversationItemCount = len(record.ConversationPrefixFingerprints)
-	record.Request.SessionAnchorCount = len(record.SessionAnchorHMACs)
+	if record.Request.SequenceFingerprint == "" {
+		record.Request.SequenceFingerprint = previousFingerprint
+		record.Request.ConversationItemCount = len(record.ConversationPrefixFingerprints)
+		record.Request.SessionAnchorCount = len(record.SessionAnchorHMACs)
+	}
 	return record, nil
+}
+
+func (manager *messageAuditManager) buildMessageAuditSessionFingerprints(userID int, protocol string, entries []messageAuditPlaintext) ([]string, []string, string) {
+	prefixes := make([]string, 0, len(entries))
+	anchors := make([]string, 0, len(entries))
+	previous := ""
+	for _, entry := range entries {
+		plaintext, err := common.Marshal(entry)
+		if err != nil {
+			continue
+		}
+		stored := model.MessageAuditStoredBlob{
+			SchemaVersion: messageAuditSchemaVersion,
+			ContentHMAC:   manager.contentHMAC(userID, messageAuditSchemaVersion, plaintext),
+			ContentType:   entry.ContentType,
+			Role:          entry.Role,
+		}
+		if !isMessageAuditConversationBlob(stored) {
+			continue
+		}
+		previous = manager.nextMessageAuditSessionFingerprint(userID, protocol, previous, stored)
+		prefixes = append(prefixes, previous)
+		if isMessageAuditSessionAnchor(stored) {
+			anchors = append(anchors, stored.ContentHMAC)
+		}
+	}
+	return prefixes, anchors, previous
+}
+
+func messageAuditReviewTextMaxSize() int64 {
+	raw := common.GetEnvOrDefaultString("MESSAGE_AUDIT_REVIEW_TEXT_MAX_BYTES", "")
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= messageAuditSnapshotMaxSize || value > messageAuditReviewTextAbsoluteMaxSize {
+		return messageAuditReviewTextDefaultMaxSize
+	}
+	return value
+}
+
+func messageAuditPlaintextSize(entries []messageAuditPlaintext) int64 {
+	var total int64
+	for _, entry := range entries {
+		data, err := common.Marshal(entry)
+		if err == nil {
+			total += int64(len(data))
+		}
+	}
+	return total
+}
+
+func reduceMessageAuditEntries(entries []messageAuditPlaintext) []messageAuditPlaintext {
+	reduced := make([]messageAuditPlaintext, 0, len(entries))
+	for _, entry := range entries {
+		if strings.ToLower(entry.Role) != "user" {
+			continue
+		}
+		text := extractMessageAuditVisibleText(entry.Content)
+		if text == "" {
+			continue
+		}
+		reduced = append(reduced, messageAuditPlaintext{Role: "user", ContentType: "text", Content: text})
+	}
+	return reduced
+}
+
+func extractMessageAuditVisibleText(value any) string {
+	parts := make([]string, 0)
+	var visit func(any, string)
+	visit = func(current any, key string) {
+		switch typed := current.(type) {
+		case string:
+			lowerKey := strings.ToLower(key)
+			if key == "" || lowerKey == "text" || lowerKey == "content" || lowerKey == "input_text" {
+				trimmed := strings.TrimSpace(typed)
+				if trimmed != "" {
+					parts = append(parts, trimmed)
+				}
+			}
+		case []any:
+			for _, item := range typed {
+				visit(item, key)
+			}
+		case map[string]any:
+			itemType := strings.ToLower(common.Interface2String(typed["type"]))
+			if isMessageAuditToolCallType(strings.ReplaceAll(itemType, "-", "_")) {
+				return
+			}
+			for childKey, child := range typed {
+				lowerKey := strings.ToLower(childKey)
+				if lowerKey == "tool_calls" || lowerKey == "function_call" || lowerKey == "arguments" || lowerKey == "args" {
+					continue
+				}
+				visit(child, childKey)
+			}
+		}
+	}
+	visit(value, "")
+	return strings.Join(parts, "\n")
 }
 
 func isMessageAuditConversationBlob(stored model.MessageAuditStoredBlob) bool {

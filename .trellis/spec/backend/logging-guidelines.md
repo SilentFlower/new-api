@@ -223,9 +223,9 @@ logger.LogDebug(ctx, fmt.Sprintf("Redis GET: key=%s, value=%s", key, value))
 
 ### 1. Scope / Trigger
 
-- Trigger：修改 AI 入站消息采集、`MESSAGE_AUDIT_SECRET`、`MessageAuditEnabled`、`MessageAuditRetentionDays`、消息审计表、推断会话、审计管理 API、异步清理任务或 Default 消息审计页面。
+- Trigger：修改 AI 入站消息采集、`MESSAGE_AUDIT_SECRET`、`MessageAuditEnabled`、`MessageAuditRetentionDays`、消息审计表、推断会话、AI 辅助审核、审计管理 API、异步任务或 Default 消息审计页面。
 - 本场景是“普通日志不得记录 AI 对话内容”的唯一受控例外。正文只能进入主关系数据库中的独立加密审计表，不能写入控制台/文件日志、`logs.content`、`logs.other`、ClickHouse 日志或管理操作审计。
-- 第一阶段只审计经过验证的客户端入站可见内容，不保存当前请求产生的响应正文、流式增量、隐藏思考、请求头、凭证或媒体二进制。
+- 审计经过验证并完成过滤的客户端入站会话上下文，可包含客户端提交的 system、user、assistant 和 tool 角色；不额外保存当前请求新产生的响应正文、流式增量、隐藏思考、请求头、凭证或媒体二进制。
 
 ### 2. Signatures
 
@@ -240,6 +240,8 @@ func ListMessageAudits(filter model.MessageAuditListFilter) ([]model.MessageAudi
 func GetMessageAuditDetail(requestID string) (*MessageAuditDetail, error)
 func GetMessageAuditStatus() MessageAuditStatus
 func StartMessageAuditCleanupTask(targetTimestamp int64) (*model.SystemTask, bool, error)
+func StartMessageAuditReview(auditSessionID string, operatorID int) (*model.SystemTask, bool, error)
+func GetMessageAuditReviewResponse(auditSessionID string) (*MessageAuditReviewResponse, error)
 ```
 
 root-only 管理 API：
@@ -247,17 +249,22 @@ root-only 管理 API：
 ```text
 GET  /api/message-audit/
 GET  /api/message-audit/status
+GET  /api/message-audit/review-options
+GET  /api/message-audit/session/:audit_session_id/review
+POST /api/message-audit/session/:audit_session_id/review
 GET  /api/message-audit/:request_id
 POST /api/system-task/message-audit-cleanup
 ```
 
-主数据库固定包含四张表：
+主数据库固定包含六张表：
 
 ```text
 message_audit_requests
 message_audit_blobs
 message_audit_items
 message_audit_states
+message_audit_reviews
+message_audit_review_sources
 ```
 
 ### 3. Contracts
@@ -265,12 +272,12 @@ message_audit_states
 - `MESSAGE_AUDIT_SECRET` 必须至少 32 字节；所有节点必须使用完全相同的值。数据库只保存不可逆密钥指纹，不保存原始密钥。
 - `MessageAuditEnabled` 默认 `false`；开启时必须先通过密钥校验。`MessageAuditRetentionDays` 默认 `7`，合法范围为 `1-30`。
 - controller/relay 只传递验证后的 DTO、请求 ID、用户、令牌、模型、路径、协议、流式标志和时间；协议规范化、过滤、HMAC、加密、去重、会话推断和数据库操作分别归 service/model。
-- capture/finalize 均非阻塞入队。队列容量为 1024 条、总字节上限为 64 MiB，单请求快照上限为 1 MiB；队列满、快照超限或持久化失败不得使 relay 或计费失败。
+- capture/finalize 均非阻塞入队。队列容量为 1024 条、总字节上限为 64 MiB；完整快照不超过 1 MiB 时保存全部过滤后角色内容，超过后先剥离工具定义、系统/开发者指令和媒体信息并保留有界文本，精简文本仍超过硬上限时才降级为 `metadata_only`。任何降级或持久化失败不得使 relay 或计费失败。
 - capture 可以先保存 `OriginModelName`；请求结束时 finalize 必须在计费收口之后调用 `ConsumeLogModelName()`，异步覆盖为消费日志同源模型名。最终模型名为空时不得覆盖采集值，历史记录不自动回填。
 - 正文使用 AES-256-GCM 加密；去重指纹使用独立密钥的 HMAC-SHA256，并包含用户 ID 和 schema version。去重只允许发生在同一用户内；每次请求仍保留独立元数据和有序引用。
 - 支持 OpenAI Chat、OpenAI Responses、Claude Messages 和 Gemini GenerateContent 的入站可见内容；Responses Compact、Realtime、Alpha Search、Embedding、Rerank、图片/音频任务及异步任务正文不进入审计。
 - 媒体只记录类型、MIME、大小、来源类别和摘要；Authorization、API Key、Cookie、密码、OAuth/Webhook 密钥、Base64/文件二进制和隐藏 reasoning/thinking/signature 必须过滤。
-- 推断会话仅在同一用户、同一协议内工作。唯一最长完整前缀标记 `prefix`，完全一致标记 `exact`；前缀失败时只允许使用非公共会话内容 HMAC 的高覆盖严格有序子序列标记 `compressed`；无匹配、低覆盖或多候选歧义必须标记 `new`。
+- 推断会话仅在同一用户、同一协议内工作。唯一最长完整前缀标记 `prefix`，完全一致标记 `exact`；前缀失败时只允许使用非公共会话内容 HMAC 的高覆盖严格有序子序列标记 `compressed`；无匹配、低覆盖或多候选歧义必须标记 `new`。即使最终为 `metadata_only`，也必须保留无明文滚动 HMAC 和前缀指纹以支持 exact/prefix 归并。
 - 默认列表先应用筛选，再按 `audit_session_id` 聚合并返回每个会话的最新请求、`session_request_count` 和 `compressed_request_count`；`audit_session_id` 查询返回该会话的单次请求且最新在前。历史空会话 ID 和 metadata-only 请求必须单独展示。
 - 列表和状态接口不得返回密文、nonce 或正文。详情接口按单个 `request_id` 解密有序消息，每次成功或失败的查看尝试都写不含正文的管理审计日志。
 - 状态接口返回 `payload_bytes`、`storage_bytes`、`storage_estimated`、`request_count`、`blob_count` 和 `item_count`。`payload_bytes` 始终表示仍被引用的密文与 nonce 逻辑字节；`storage_bytes` 优先表示四张审计表及其索引的实际分配空间，数据库能力不足时回退为 `payload_bytes` 并标记估算。
@@ -285,7 +292,8 @@ message_audit_states
 | 密钥缺失或不足 32 字节 | 拒绝把 `MessageAuditEnabled` 设置为 `true`，不影响普通 relay |
 | 多节点密钥不一致或旧正文指纹不匹配 | 详情返回明确错误并记录查看失败，不尝试错误密钥、不输出密文 |
 | 队列条目或字节预算耗尽 | 非阻塞丢弃本次审计并增加 `dropped`，relay 继续 |
-| 快照超过 1 MiB | 只保留安全元数据并标记正文不可用，不把超大正文放入队列 |
+| 完整快照超过 1 MiB，但精简文本未超过硬上限 | 保存有界精简文本并标记 `content_reduced`，不保存被剥离内容 |
+| 精简文本仍超过硬上限 | 只保留安全元数据、计数和 HMAC 指纹并标记 `metadata_only` |
 | 后台写入失败 | 最多重试 3 次，最终增加 `failed` 并记录不含正文的请求关联告警 |
 | 完整前缀落入多个会话 | 创建新的 `audit_session_id`，`session_match=new` |
 | 压缩子序列候选相同或差距不足 | 不强行归并，创建新会话 |
@@ -313,6 +321,7 @@ message_audit_states
 ### 6. Tests Required
 
 - service 规范化测试必须覆盖四种支持协议、隐藏思考/签名过滤、媒体二进制剥离、超大快照降级和 Responses Compact 排除。
+- 超限测试必须分别覆盖 `content_reduced`、真正 `metadata_only`、同内容精确归并和递增前缀归并，并断言两种降级都不保存被禁止的工具定义或媒体正文。
 - 加密与去重测试必须断言相同用户复用消息块、不同用户不共享、密文不能直接还原正文、工具定义不改变会话前缀。
 - model 测试必须覆盖 SQLite 写入/查询/清理、共享块回收、纳秒水位、历史秒级水位、精确/前缀/压缩/新建归属，以及前缀和压缩多候选歧义拒绝。
 - model/service 测试必须断言 finalize 非空模型名会覆盖、空模型名保留旧值，异步 capture 先于 finalize 持久化，并覆盖消费日志模型归一化。
@@ -363,6 +372,147 @@ placeholderData: (previousData, previousQuery) =>
     previousQuery?.queryKey[1],
     sessionId
   )
+```
+
+## 场景：消息审计 AI 辅助审核
+
+### 1. Scope / Trigger
+
+- Trigger：修改 `message_audit_review.config`、审核渠道/模型设置、会话审核 Root API、`message_audit_reviews`、`message_audit_review_sources`、`message_audit_review` 系统任务、内部无计费模型调用、虚拟文件 Tool、覆盖范围、结果加密或前端审核状态展示。
+- 审核对象固定为一个 `audit_session_id` 推断会话；管理员只能手动触发，不得在消息到达或会话变化时自动调用模型。
+- 所有已保存的入站角色内容都属于不可信审计材料，材料中的 system、assistant 或 tool 指令不能改变内置系统提示词、Tool 范围、风险枚举或输出合同。
+
+### 2. Signatures
+
+```go
+type MessageAuditReviewPayload struct {
+	AuditSessionID   string
+	TargetRequestID  string
+	SourceRequestIDs []string
+	UserID           int
+	OperatorID       int
+	Config           MessageAuditReviewConfig
+}
+
+func RegisterMessageAuditReviewCaller(caller MessageAuditReviewCaller)
+func StartMessageAuditReview(auditSessionID string, operatorID int) (*model.SystemTask, bool, error)
+func GetMessageAuditReviewResponse(auditSessionID string) (*MessageAuditReviewResponse, error)
+func CreateMessageAuditReviewTask(activeKey string, payload any, review MessageAuditReview) (*SystemTask, error)
+func CompleteMessageAuditReview(taskID string, runnerID string, review MessageAuditReview, sourceRequestIDs []string) error
+func DeleteMessageAuditReviewsForRequestIDs(tx *gorm.DB, requestIDs []string) error
+```
+
+Root-only API：
+
+```text
+GET  /api/message-audit/review-options
+GET  /api/message-audit/session/:audit_session_id/review
+POST /api/message-audit/session/:audit_session_id/review
+```
+
+数据库与任务：
+
+```text
+message_audit_reviews             一会话一行当前状态和最后一次成功结果
+message_audit_review_sources      成功结果引用的固定请求集合
+system_tasks.type                 message_audit_review
+system_tasks.active_key           message_audit_review:<audit_session_id>
+```
+
+### 3. Contracts
+
+- `message_audit_review.config` 是系统设置中的单个 JSON 固定值：`{"channel_id":<int>,"model":"<string>"}`。渠道必须启用，模型必须属于该渠道；第一版不提供自定义审核提示词或业务规则输入。
+- `review-options` 只返回启用渠道的 `id/name/models` 和当前配置，不得返回渠道密钥、Base URL 或完整渠道设置。
+- 触发时固定最新请求和全部来源请求 ID。每个 `session_match=compressed` 断点选择其 `parent_request_id`，最后加入目标最新请求；任务执行期间的新请求不得进入本次资料集。
+- 同会话活动任务使用唯一 `active_key` 幂等。`SystemTask` 和 `MessageAuditReview` 的 pending 状态必须在同一事务中创建，提交后才能唤醒执行器。
+- 重审期间保留最后一次成功结果、风险、模型、时间和加密正文；pending/running/failed 只替换当前任务状态。只有新任务成功后才能原子替换结果归属。
+- 虚拟文件只存在于任务内存中，文件 ID 固定为 `request:<request_id>`。初始模型输入只包含内置规则和文件清单；正文只能通过 `list_files`、`read_file`、`search_files` 读取，不能访问真实路径、网络、任意数据库查询或其他会话。
+- 单次上下文、输出预留、虚拟分片、Tool 调用次数、单次 Tool 返回和 Tool 总返回 Token 使用代码内固定上限。达到上限必须以稳定错误码失败，不能静默截断后声称完整审核。
+- 长消息可以拆成共享原 `sequence` 的多个虚拟分片。覆盖范围由服务端按 `file_id + start_cursor + end_cursor` 记录；引用一个原消息序号前，该消息对应的所有虚拟分片都必须实际读到。
+- 完整审核结果使用从 `MESSAGE_AUDIT_SECRET` 派生的独立审核密钥加密，AAD 必须绑定 `user_id + audit_session_id + reviewed_request_id`。仅允许为首次发布前的本地记录保留旧 AAD 解密回退。
+- 内部审核调用直接使用所选渠道 adaptor，不经过公开 `controller.Relay`，不执行预扣/结算、消费日志、Token/成本记录或 `CaptureMessageAudit` / `FinalizeMessageAudit`。
+- 内部 Gin 上下文必须调用 `logger.SuppressSensitiveContentLogs`；审核提示词、Tool 参数/结果、模型输出和上游错误正文均不得进入普通应用日志。管理审计只记录会话 ID、任务 ID、操作者、状态和稳定错误类别。
+- 列表只返回审核状态、旧风险、新鲜度和时间，并每 5 秒刷新以收敛 finalize 后模型名；完整摘要、依据、覆盖、未覆盖、实际审核模型和失败类别只在会话详情展示。
+- 删除任一结果来源或活动任务固定来源时，必须在清理事务内删除 review source、review、当前 SystemTask 和 SystemTaskLock。任务完成前必须再次确认来源仍存在。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+|------|------|
+| 非 Root 访问任一审核 API | 返回未授权，不读取配置、正文或结果 |
+| 渠道/模型未配置、停用或模型移除 | 拒绝启动并提示在系统设置修正，不自动选择其他渠道 |
+| 最新请求为 `metadata_only` | 拒绝启动，返回正文不可用 |
+| 同一会话已有 pending/running 任务 | 返回现有任务，`created=false`，不创建第二个结果写入者 |
+| 模型未调用必需 Tool | 失败码 `tool_unsupported` |
+| Tool 文件越界、参数非法或真实路径请求 | 拒绝调用，使用稳定 Tool 错误类别，不返回其他资料 |
+| 上下文、调用次数或 Tool Token 达到上限 | 失败码 `context_limit`、`tool_call_limit` 或 `tool_token_limit` |
+| 输出不是合法结构、枚举越界或依据超出实际覆盖 | 最多一次格式修复；仍失败则 `invalid_output`，原文不落库 |
+| 重审失败且已有成功结果 | 保留旧风险、摘要、覆盖、审核时间和旧结果实际模型，同时展示本次失败状态 |
+| 来源在执行期间被清理 | 成功提交失败为 `source_expired`，不得重新写回摘要 |
+| 审核密钥指纹不匹配或 AAD 用户不匹配 | 解密失败，不尝试其他用户、会话或请求的 AAD |
+
+### 5. Good / Base / Bad Cases
+
+- Good：多次压缩会话生成多个压缩前虚拟文件和一个最新文件，AI 自主搜索并读取必要分片；详情如实显示已读游标和未覆盖文件。
+- Good：高风险旧结果进入重审后，列表同时显示“高风险”和 pending/running/failed 或待重审；新结果成功后才切换风险和审核模型。
+- Good：两个管理员同时触发同一会话时，唯一活动键只允许一个任务，另一请求复用该任务。
+- Base：未配置审核渠道时消息审计详情仍可正常查看，只禁用或拒绝 AI 审核入口。
+- Base：AI 只读取部分资料并给出合法结论，结果可以成功，但详情必须明确列出未读或部分读取范围。
+- Bad：把全部历史快照无脑拼进一次模型请求，或让 AI 通过文件路径、SQL、网络自行找材料。
+- Bad：重审一开始就把 `review_model` 改成新模型，导致旧加密结果被错误归属给尚未成功的模型。
+- Bad：把审核模型响应写进 Debug 日志、SystemTask.result、消费日志或新的消息审计记录。
+
+### 6. Tests Required
+
+- router/controller：断言三条审核 API 继承 `RootAuth`，POST 路径只固定会话且不要求请求正文。
+- model：断言事务创建、同会话活动键幂等、重审保留旧结果模型、成功结果/来源/任务原子完成、清理成功结果和运行中固定来源时同步删除任务与锁。
+- service：断言每个压缩断点来源、长消息分片上限、Tool 文件越界、结构化输出枚举和覆盖校验、部分读取长消息不能作为完整证据、未覆盖原因和用户绑定 AAD。
+- logger/relay：断言敏感上下文下 Info/Warn/Error/Debug 均不写普通日志；内部调用路径不得触发计费、消费日志或递归消息审计。
+- frontend：断言审核 POST 不发送正文、pending/running 才轮询、旧风险与待重审并存、稳定失败码本地化、桌面和移动列表都显示 HTTP 状态与错误码。
+- 回归命令：
+  - `go test ./... -count=1`
+  - `go test -race ./logger ./model ./service -run 'MessageAudit|SensitiveContent' -count=1`
+  - `go vet ./logger ./model ./service ./relay ./controller ./router`
+  - `cd web/default && bun test src/features/message-audits && bun run typecheck && bun run build && bun run i18n:sync`
+  - 对本次前端文件执行定向 oxlint/oxfmt；全仓 lint 有既有失败时必须单独说明基线，不得归为本次通过。
+  - `git diff --check`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+// 错误：任务先暴露给执行器，再单独写审核状态；并且重审立即覆盖旧结果模型。
+task, _, _ := EnqueueScopedSystemTask(SystemTaskTypeMessageAuditReview, activeKey, payload)
+DB.Model(&MessageAuditReview{}).Where("audit_session_id = ?", sessionID).Updates(map[string]any{
+	"current_task_id": task.TaskID,
+	"review_model":    payload.Config.Model,
+})
+```
+
+```go
+// 错误：只按原消息序号判断覆盖，长消息只读第一片也会被当作整条已读。
+if coverage.StartSequence <= finding.StartSequence && coverage.EndSequence >= finding.EndSequence {
+	acceptFinding()
+}
+```
+
+#### Correct
+
+```go
+// 正确：任务和审核行同事务提交；已有成功密文时保留旧结果归属，提交后再唤醒执行器。
+task, err := model.CreateMessageAuditReviewTask(activeKey, payload, review)
+if err != nil {
+	return nil, false, err
+}
+notifySystemTaskRunner()
+```
+
+```go
+// 正确：证据覆盖以虚拟游标为准，同一 sequence 的所有分片都已读才能引用整条消息。
+if !messageAuditReviewRangeCovered(fileID, startSequence, endSequence, files, coverage) {
+	return errors.New("review finding is outside actual coverage")
+}
 ```
 
 ## 场景：API 请求原始 User-Agent 审计

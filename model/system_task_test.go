@@ -89,6 +89,22 @@ func TestSystemTaskActiveKeyPreventsDuplicateActiveRun(t *testing.T) {
 	assert.Equal(t, task.TaskID, activeTask.TaskID)
 }
 
+func TestCreateSystemTaskWithActiveKeyScopesDeduplication(t *testing.T) {
+	truncateTables(t)
+
+	first, err := CreateSystemTaskWithActiveKey(SystemTaskTypeMessageAuditReview, "message_audit_review:session-a", nil, nil)
+	require.NoError(t, err)
+	_, err = CreateSystemTaskWithActiveKey(SystemTaskTypeMessageAuditReview, "message_audit_review:session-a", nil, nil)
+	require.Error(t, err)
+	same, err := GetActiveSystemTaskByKey(SystemTaskTypeMessageAuditReview, "message_audit_review:session-a")
+	require.NoError(t, err)
+	require.NotNil(t, same)
+	assert.Equal(t, first.TaskID, same.TaskID)
+	different, err := CreateSystemTaskWithActiveKey(SystemTaskTypeMessageAuditReview, "message_audit_review:session-b", nil, nil)
+	require.NoError(t, err)
+	assert.NotEqual(t, first.TaskID, different.TaskID)
+}
+
 func TestSystemTaskLockPreventsConcurrentClaim(t *testing.T) {
 	truncateTables(t)
 

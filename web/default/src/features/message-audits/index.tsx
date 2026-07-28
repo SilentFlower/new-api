@@ -61,6 +61,7 @@ import { Progress } from '@/components/ui/progress'
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectTrigger,
   SelectValue,
@@ -83,6 +84,10 @@ import {
   getMessageAuditCleanupProgress,
   getMessageAuditCleanupTitleKey,
   getMessageAuditErrorMessage,
+  getMessageAuditRequestFailureLabelKey,
+  getMessageAuditReviewStatusLabelKey,
+  getMessageAuditRiskLabelKey,
+  getMessageAuditStorageModeLabelKey,
   isMessageAuditCleanupActive,
   isMessageAuditClearConfirmed,
   MESSAGE_AUDIT_CLEAR_CONFIRMATION,
@@ -182,6 +187,7 @@ export function MessageAudits() {
         pageSize: pagination.pageSize,
       }),
     placeholderData: (previousData) => previousData,
+    refetchInterval: 5000,
   })
   const statusQuery = useQuery({
     queryKey: ['message-audit-status'],
@@ -286,7 +292,23 @@ export function MessageAudits() {
       {
         accessorKey: 'plaintext_bytes',
         header: t('Body size'),
-        cell: ({ row }) => formatBytes(row.original.plaintext_bytes),
+        cell: ({ row }) => (
+          <div className='space-y-0.5'>
+            <div>{formatBytes(row.original.plaintext_bytes)}</div>
+            {row.original.stored_payload_bytes !== null && (
+              <div className='text-muted-foreground text-xs'>
+                {t('Stored')}: {formatBytes(row.original.stored_payload_bytes)}
+              </div>
+            )}
+            <Badge variant='outline' className='max-w-32'>
+              <span className='truncate'>
+                {t(
+                  getMessageAuditStorageModeLabelKey(row.original.audit_status)
+                )}
+              </span>
+            </Badge>
+          </div>
+        ),
       },
       {
         accessorKey: 'compressed_request_count',
@@ -308,14 +330,66 @@ export function MessageAudits() {
       {
         accessorKey: 'status',
         header: t('Status'),
+        cell: ({ row }) => {
+          const request = row.original
+          return (
+            <div className='space-y-1'>
+              <Badge
+                variant={
+                  request.status === 'failed' ? 'destructive' : 'outline'
+                }
+              >
+                {t(request.status || 'pending')}
+              </Badge>
+              {request.status === 'failed' && (
+                <div className='max-w-56 space-y-0.5 text-xs'>
+                  <div
+                    className='text-destructive truncate'
+                    title={t(
+                      getMessageAuditRequestFailureLabelKey(request.error_code)
+                    )}
+                  >
+                    {request.error_code
+                      ? t(
+                          getMessageAuditRequestFailureLabelKey(
+                            request.error_code
+                          )
+                        )
+                      : request.finish_reason || t('Unknown')}
+                  </div>
+                  <div className='text-muted-foreground truncate font-mono'>
+                    HTTP {request.http_status || '?'}
+                    {(request.error_code || request.finish_reason) &&
+                      ` · ${request.error_code || request.finish_reason}`}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        },
+      },
+      {
+        id: 'review',
+        header: t('AI review'),
+        size: 150,
         cell: ({ row }) => (
-          <Badge
-            variant={
-              row.original.status === 'failed' ? 'destructive' : 'outline'
-            }
-          >
-            {t(row.original.status || 'pending')}
-          </Badge>
+          <div className='flex flex-wrap gap-1'>
+            <Badge variant='outline'>
+              {t(
+                getMessageAuditReviewStatusLabelKey(
+                  row.original.review_status || 'unreviewed'
+                )
+              )}
+            </Badge>
+            {row.original.review_risk_level && (
+              <Badge variant='outline'>
+                {t(getMessageAuditRiskLabelKey(row.original.review_risk_level))}
+              </Badge>
+            )}
+            {row.original.review_stale && (
+              <Badge variant='outline'>{t('Content changed')}</Badge>
+            )}
+          </div>
         ),
       },
       { accessorKey: 'request_id', header: t('Request ID'), size: 210 },
@@ -670,10 +744,12 @@ export function MessageAudits() {
                   <SelectValue placeholder={t('Status')} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value='all'>{t('All statuses')}</SelectItem>
-                  <SelectItem value='pending'>{t('pending')}</SelectItem>
-                  <SelectItem value='succeeded'>{t('succeeded')}</SelectItem>
-                  <SelectItem value='failed'>{t('failed')}</SelectItem>
+                  <SelectGroup>
+                    <SelectItem value='all'>{t('All statuses')}</SelectItem>
+                    <SelectItem value='pending'>{t('pending')}</SelectItem>
+                    <SelectItem value='succeeded'>{t('succeeded')}</SelectItem>
+                    <SelectItem value='failed'>{t('failed')}</SelectItem>
+                  </SelectGroup>
                 </SelectContent>
               </Select>
               <div className='flex gap-2 sm:col-span-2 lg:col-span-4 xl:col-span-8'>
@@ -758,6 +834,49 @@ export function MessageAudits() {
                                 {t('Compressed continuation')} ·{' '}
                                 {row.original.compressed_request_count}
                               </Badge>
+                            )}
+                            <div className='mt-2 flex flex-wrap gap-1'>
+                              <Badge variant='outline'>
+                                {t(
+                                  getMessageAuditReviewStatusLabelKey(
+                                    row.original.review_status || 'unreviewed'
+                                  )
+                                )}
+                              </Badge>
+                              {row.original.review_risk_level && (
+                                <Badge variant='outline'>
+                                  {t(
+                                    getMessageAuditRiskLabelKey(
+                                      row.original.review_risk_level
+                                    )
+                                  )}
+                                </Badge>
+                              )}
+                              {row.original.review_stale && (
+                                <Badge variant='outline'>
+                                  {t('Content changed')}
+                                </Badge>
+                              )}
+                            </div>
+                            {row.original.status === 'failed' && (
+                              <div className='mt-1 space-y-0.5 text-xs'>
+                                <div className='text-destructive truncate'>
+                                  {row.original.error_code
+                                    ? t(
+                                        getMessageAuditRequestFailureLabelKey(
+                                          row.original.error_code
+                                        )
+                                      )
+                                    : row.original.finish_reason ||
+                                      t('Unknown')}
+                                </div>
+                                <div className='text-muted-foreground truncate font-mono'>
+                                  HTTP {row.original.http_status || '?'}
+                                  {(row.original.error_code ||
+                                    row.original.finish_reason) &&
+                                    ` · ${row.original.error_code || row.original.finish_reason}`}
+                                </div>
+                              </div>
                             )}
                             <div className='text-muted-foreground mt-1 truncate font-mono text-xs'>
                               {row.original.request_id}

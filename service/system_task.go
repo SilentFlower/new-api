@@ -219,6 +219,33 @@ func EnqueueSystemTask(taskType string, payload any) (*model.SystemTask, bool, e
 	return task, true, nil
 }
 
+// EnqueueScopedSystemTask 按自定义活动键创建或复用系统任务。
+//
+// @param taskType 任务类型。
+// @param activeKey 活动任务幂等键。
+// @param payload 固定任务输入。
+// @return 任务、是否新建以及查询或创建错误。
+func EnqueueScopedSystemTask(taskType string, activeKey string, payload any) (*model.SystemTask, bool, error) {
+	activeTask, err := model.GetActiveSystemTaskByKey(taskType, activeKey)
+	if err != nil {
+		return nil, false, err
+	}
+	if activeTask != nil {
+		return activeTask, false, nil
+	}
+
+	task, err := model.CreateSystemTaskWithActiveKey(taskType, activeKey, payload, nil)
+	if err != nil {
+		activeTask, activeErr := model.GetActiveSystemTaskByKey(taskType, activeKey)
+		if activeErr == nil && activeTask != nil {
+			return activeTask, false, nil
+		}
+		return nil, false, err
+	}
+	notifySystemTaskRunner()
+	return task, true, nil
+}
+
 // runSystemTaskClaimPass tries to claim one pending task per registered type
 // and dispatches each claimed task in its own goroutine so a long-running
 // handler (e.g. channel test) never blocks another type (e.g. log cleanup).

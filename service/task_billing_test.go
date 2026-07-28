@@ -57,6 +57,8 @@ func TestMain(m *testing.M) {
 		&model.MessageAuditBlob{},
 		&model.MessageAuditItem{},
 		&model.MessageAuditState{},
+		&model.MessageAuditReview{},
+		&model.MessageAuditReviewSource{},
 	); err != nil {
 		panic("failed to migrate: " + err.Error())
 	}
@@ -84,6 +86,8 @@ func truncate(t *testing.T) {
 		model.DB.Exec("DELETE FROM message_audit_requests")
 		model.DB.Exec("DELETE FROM message_audit_blobs")
 		model.DB.Exec("DELETE FROM message_audit_states")
+		model.DB.Exec("DELETE FROM message_audit_review_sources")
+		model.DB.Exec("DELETE FROM message_audit_reviews")
 	})
 }
 
