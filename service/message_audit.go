@@ -435,10 +435,11 @@ func GetMessageAuditDetail(requestID string) (*MessageAuditDetail, error) {
 		if err := common.Unmarshal(plaintext, &content); err != nil {
 			return nil, errors.New("消息审计正文格式无效")
 		}
+		role, contentType := messageAuditDetailSemantics(types.RelayFormat(request.Protocol), content.Role, content.ContentType, content.Content)
 		messages = append(messages, MessageAuditMessage{
 			Sequence:    item.Sequence,
-			Role:        content.Role,
-			ContentType: content.ContentType,
+			Role:        role,
+			ContentType: contentType,
 			Content:     content.Content,
 		})
 	}
@@ -1125,6 +1126,95 @@ func auditRoleFromValue(value any, fallback string) string {
 	return fallback
 }
 
+func messageAuditDetailSemantics(protocol types.RelayFormat, role string, contentType string, content any) (string, string) {
+	item, ok := content.(map[string]any)
+	if !ok {
+		return role, contentType
+	}
+	switch protocol {
+	case types.RelayFormatOpenAIResponses:
+		itemType := strings.ToLower(strings.ReplaceAll(common.Interface2String(item["type"]), "-", "_"))
+		if isMessageAuditToolCallType(itemType) {
+			return "assistant", "tool_call"
+		}
+		if isMessageAuditToolResultType(itemType) {
+			return "tool", "tool_result"
+		}
+	case types.RelayFormatClaude:
+		if semanticRole := messageAuditClaudeToolRole(item["content"]); semanticRole != "" {
+			if semanticRole == "assistant" {
+				return semanticRole, "tool_call"
+			}
+			return semanticRole, "tool_result"
+		}
+	case types.RelayFormatGemini:
+		if semanticRole := messageAuditGeminiToolRole(item["parts"]); semanticRole != "" {
+			if semanticRole == "assistant" {
+				return semanticRole, "tool_call"
+			}
+			return semanticRole, "tool_result"
+		}
+	}
+	return role, contentType
+}
+
+func messageAuditClaudeToolRole(value any) string {
+	blocks, ok := value.([]any)
+	if !ok || len(blocks) == 0 {
+		return ""
+	}
+	semanticRole := ""
+	for _, block := range blocks {
+		item, ok := block.(map[string]any)
+		if !ok {
+			return ""
+		}
+		itemType := strings.ToLower(strings.ReplaceAll(common.Interface2String(item["type"]), "-", "_"))
+		currentRole := ""
+		switch {
+		case itemType == "tool_use" || itemType == "server_tool_use":
+			currentRole = "assistant"
+		case itemType == "tool_result" || strings.HasSuffix(itemType, "_tool_result"):
+			currentRole = "tool"
+		default:
+			return ""
+		}
+		if semanticRole != "" && semanticRole != currentRole {
+			return ""
+		}
+		semanticRole = currentRole
+	}
+	return semanticRole
+}
+
+func messageAuditGeminiToolRole(value any) string {
+	parts, ok := value.([]any)
+	if !ok || len(parts) == 0 {
+		return ""
+	}
+	semanticRole := ""
+	for _, part := range parts {
+		item, ok := part.(map[string]any)
+		if !ok {
+			return ""
+		}
+		currentRole := ""
+		switch {
+		case item["functionCall"] != nil || item["function_call"] != nil || item["executableCode"] != nil || item["executable_code"] != nil:
+			currentRole = "assistant"
+		case item["functionResponse"] != nil || item["function_response"] != nil || item["codeExecutionResult"] != nil || item["code_execution_result"] != nil:
+			currentRole = "tool"
+		default:
+			return ""
+		}
+		if semanticRole != "" && semanticRole != currentRole {
+			return ""
+		}
+		semanticRole = currentRole
+	}
+	return semanticRole
+}
+
 func countMessageAuditToolCalls(value any) int {
 	count := 0
 	switch typed := value.(type) {
@@ -1166,6 +1256,10 @@ func isMessageAuditToolCallType(itemType string) bool {
 	default:
 		return false
 	}
+}
+
+func isMessageAuditToolResultType(itemType string) bool {
+	return itemType == "tool_result" || strings.HasSuffix(itemType, "_call_output")
 }
 
 func (manager *messageAuditManager) contentHMAC(userID int, schemaVersion int, plaintext []byte) string {

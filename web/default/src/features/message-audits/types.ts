@@ -131,8 +131,6 @@ export type MessageAuditReviewDiagnostics = {
   tool_calls: number
   tool_tokens: number
   tool_call_limit: number
-  tool_token_limit: number
-  input_token_limit: number
   text_tool_fallback: boolean
   stage: string
   failure_code: string

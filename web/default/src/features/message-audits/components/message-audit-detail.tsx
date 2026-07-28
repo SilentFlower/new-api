@@ -248,10 +248,7 @@ function MessageAuditReviewSection(props: { auditSessionId: string }) {
               {review.diagnostics.tool_call_limit}
             </dd>
             <dt className='text-muted-foreground'>{t('Tool tokens')}</dt>
-            <dd>
-              {review.diagnostics.tool_tokens} /{' '}
-              {review.diagnostics.tool_token_limit}
-            </dd>
+            <dd>{review.diagnostics.tool_tokens}</dd>
             <dt className='text-muted-foreground'>{t('Duration')}</dt>
             <dd>{review.diagnostics.duration_ms} ms</dd>
             <dt className='text-muted-foreground'>{t('Text Tool fallback')}</dt>

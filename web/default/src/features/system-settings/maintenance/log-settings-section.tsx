@@ -86,7 +86,7 @@ const logSettingsSchema = z.object({
   MessageAuditRetentionDays: z.number().int().min(1).max(30),
   MessageAuditReviewChannelID: z.number().int().min(0),
   MessageAuditReviewModel: z.string(),
-  MessageAuditReviewToolCallLimit: z.number().int().min(1).max(64),
+  MessageAuditReviewToolCallLimit: z.number().int().positive(),
 })
 
 type LogSettingsFormValues = z.infer<typeof logSettingsSchema>
@@ -130,8 +130,7 @@ function parseMessageAuditReviewConfig(raw: string): {
       toolCallLimit:
         typeof value.tool_call_limit === 'number' &&
         Number.isInteger(value.tool_call_limit) &&
-        value.tool_call_limit >= 1 &&
-        value.tool_call_limit <= 64
+        value.tool_call_limit >= 1
           ? value.tool_call_limit
           : DEFAULT_MESSAGE_AUDIT_REVIEW_TOOL_CALL_LIMIT,
     }
@@ -711,7 +710,6 @@ export function LogSettingsSection({
                     <Input
                       type='number'
                       min={1}
-                      max={64}
                       value={field.value}
                       onChange={(event) =>
                         field.onChange(Number(event.target.value))
@@ -720,7 +718,7 @@ export function LogSettingsSection({
                   </FormControl>
                   <FormDescription>
                     {t(
-                      'Allows 1 to 64 Tool calls per review. Context, Tool token, and timeout limits still apply.'
+                      'Sets the maximum Tool calls per review. Enter any positive integer; the task timeout still prevents stuck runs.'
                     )}
                   </FormDescription>
                   <FormMessage />

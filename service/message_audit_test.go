@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -419,6 +420,111 @@ func TestMessageAuditToolCallCountAcrossProtocols(t *testing.T) {
 	_, _, _, toolCount, _, _, err = manager.normalizeRequest(geminiRequest)
 	require.NoError(t, err)
 	assert.Equal(t, 1, toolCount)
+}
+
+func TestGetMessageAuditDetailUsesSemanticToolRolesAcrossProtocols(t *testing.T) {
+	truncate(t)
+	manager := newMessageAuditTestManager(t)
+	previousManager := messageAuditManagerInst
+	messageAuditManagerInst = manager
+	t.Cleanup(func() {
+		messageAuditManagerInst = previousManager
+	})
+	now := time.Now().Unix()
+	tests := []struct {
+		name        string
+		protocol    types.RelayFormat
+		entries     []messageAuditPlaintext
+		expectRoles []string
+		expectTypes []string
+	}{
+		{
+			name: "Responses 调用和结果", protocol: types.RelayFormatOpenAIResponses,
+			entries: []messageAuditPlaintext{
+				{Role: "user", ContentType: "input", Content: map[string]any{"type": "function_call", "call_id": "call-1", "name": "lookup"}},
+				{Role: "user", ContentType: "input", Content: map[string]any{"type": "function_call_output", "call_id": "call-1", "output": "ok"}},
+			},
+			expectRoles: []string{"assistant", "tool"}, expectTypes: []string{"tool_call", "tool_result"},
+		},
+		{
+			name: "Claude 纯工具结果", protocol: types.RelayFormatClaude,
+			entries: []messageAuditPlaintext{{
+				Role: "user", ContentType: "message", Content: map[string]any{
+					"role": "user", "content": []any{map[string]any{"type": "tool_result", "tool_use_id": "tool-1", "content": "ok"}},
+				},
+			}},
+			expectRoles: []string{"tool"}, expectTypes: []string{"tool_result"},
+		},
+		{
+			name: "Claude 纯工具调用", protocol: types.RelayFormatClaude,
+			entries: []messageAuditPlaintext{{
+				Role: "assistant", ContentType: "message", Content: map[string]any{
+					"role": "assistant", "content": []any{map[string]any{"type": "tool_use", "id": "tool-1", "name": "lookup", "input": map[string]any{}}},
+				},
+			}},
+			expectRoles: []string{"assistant"}, expectTypes: []string{"tool_call"},
+		},
+		{
+			name: "Claude 混合用户文本不强制改写", protocol: types.RelayFormatClaude,
+			entries: []messageAuditPlaintext{{
+				Role: "user", ContentType: "message", Content: map[string]any{
+					"role": "user", "content": []any{
+						map[string]any{"type": "text", "text": "继续处理"},
+						map[string]any{"type": "tool_result", "tool_use_id": "tool-1", "content": "ok"},
+					},
+				},
+			}},
+			expectRoles: []string{"user"}, expectTypes: []string{"message"},
+		},
+		{
+			name: "Gemini 纯函数结果", protocol: types.RelayFormatGemini,
+			entries: []messageAuditPlaintext{{
+				Role: "user", ContentType: "content", Content: map[string]any{
+					"role": "user", "parts": []any{map[string]any{"functionResponse": map[string]any{"name": "lookup", "response": map[string]any{"status": "ok"}}}},
+				},
+			}},
+			expectRoles: []string{"tool"}, expectTypes: []string{"tool_result"},
+		},
+		{
+			name: "Gemini 纯函数调用", protocol: types.RelayFormatGemini,
+			entries: []messageAuditPlaintext{{
+				Role: "model", ContentType: "content", Content: map[string]any{
+					"role": "model", "parts": []any{map[string]any{"functionCall": map[string]any{"name": "lookup", "args": map[string]any{}}}},
+				},
+			}},
+			expectRoles: []string{"assistant"}, expectTypes: []string{"tool_call"},
+		},
+		{
+			name: "OpenAI 普通用户对象不改写", protocol: types.RelayFormatOpenAI,
+			entries: []messageAuditPlaintext{{
+				Role: "user", ContentType: "message", Content: map[string]any{"role": "user", "content": map[string]any{"type": "tool_result"}},
+			}},
+			expectRoles: []string{"user"}, expectTypes: []string{"message"},
+		},
+	}
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			requestID := fmt.Sprintf("semantic-role-%d", index)
+			record, err := manager.encryptCapture(&messageAuditCaptureEvent{
+				request: model.MessageAuditRequest{
+					RequestID: requestID, UserID: 80 + index, Protocol: string(test.protocol), Status: "succeeded", AuditStatus: "captured",
+					MessageCount: len(test.entries), CapturedAt: now, CreatedAt: now, UpdatedAt: now,
+				},
+				entries: test.entries,
+			})
+			require.NoError(t, err)
+			_, err = model.CreateMessageAuditCapture(record)
+			require.NoError(t, err)
+
+			detail, err := GetMessageAuditDetail(requestID)
+			require.NoError(t, err)
+			require.Len(t, detail.Messages, len(test.entries))
+			for messageIndex := range detail.Messages {
+				assert.Equal(t, test.expectRoles[messageIndex], detail.Messages[messageIndex].Role)
+				assert.Equal(t, test.expectTypes[messageIndex], detail.Messages[messageIndex].ContentType)
+			}
+		})
+	}
 }
 
 func TestMessageAuditManagerDrainsCaptureBeforeFinalize(t *testing.T) {

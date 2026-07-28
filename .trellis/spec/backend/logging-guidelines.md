@@ -284,7 +284,7 @@ message_audit_review_sources
 - 默认列表先应用筛选，再按 `audit_session_id` 聚合并返回每个会话的最新请求、`session_request_count` 和 `compressed_request_count`；`audit_session_id` 查询返回该会话的单次请求且最新在前。历史空会话 ID 和 metadata-only 请求必须单独展示。
 - 列表和状态接口不得返回密文、nonce 或正文。详情接口按单个 `request_id` 解密有序消息，每次成功或失败的查看尝试都写不含正文的管理审计日志。
 - 状态接口返回 `payload_bytes`、`storage_bytes`、`storage_estimated`、`request_count`、`blob_count` 和 `item_count`。`payload_bytes` 始终表示仍被引用的密文与 nonce 逻辑字节；`storage_bytes` 优先表示四张审计表及其索引的实际分配空间，数据库能力不足时回退为 `payload_bytes` 并标记估算。
-- 状态接口中的表行数、payload 和物理空间统计使用 60 秒进程内缓存，刷新失败不得覆盖最后一次正确缓存；启停配置、保留期、队列深度、队列字节和 writer 计数仍须实时组装。Default 列表存在请求 `pending` 或审核 `pending/running` 时每 5 秒刷新，稳定状态降为 30 秒；状态统计固定每 30 秒刷新。
+- 状态接口中的表行数、payload 和物理空间统计使用 60 秒进程内缓存，刷新失败不得覆盖最后一次正确缓存；启停配置、保留期、队列深度、队列字节和 writer 计数仍须实时组装。Default 列表和状态统计不自动轮询，只在管理员点击刷新、清理任务完成或审核任务状态变化后按需重新请求；清理任务和详情内 AI 审核任务仅在自身 `pending/running` 期间轮询自身状态，不触发表格固定刷新。
 - 一键清空使用异步系统任务和持久化纳秒清理水位；清理截止时间之后的新请求继续保留，截止时间之前尚在队列中的旧 capture 不能在任务结束后重新出现。
 - Default 会话历史查询只能在同一 `audit_session_id` 翻页时复用上一页占位数据；切换 session 时必须立即清空旧数据，避免在新会话标识下展示上一会话记录。
 - Default 详情在当前 Sheet/Drawer 内提供推断会话历史选择器；切换请求只更新详情请求 ID，不关闭容器。分页列表不含当前请求时必须把当前请求补入选项，确保受控 Select 的 value 始终有效。
@@ -454,13 +454,13 @@ system_tasks.active_key           message_audit_review:<audit_session_id>
 
 ### 3. Contracts
 
-- `message_audit_review.config` 是系统设置中的单个 JSON 固定值：`{"channel_id":<int>,"model":"<string>","tool_call_limit":<int>}`。渠道必须启用，模型必须属于该渠道；Tool 调用上限范围为 `1-64`、默认 `24`，旧配置缺失时按默认值归一化；第一版不提供自定义审核提示词或业务规则输入。
+- `message_audit_review.config` 是系统设置中的单个 JSON 固定值：`{"channel_id":<int>,"model":"<string>","tool_call_limit":<int>}`。渠道必须启用，模型必须属于该渠道；Tool 调用次数必须为正整数、默认 `24`，不设人为固定最大值，旧配置缺失时按默认值归一化；第一版不提供自定义审核提示词或业务规则输入。
 - `review-options` 只返回启用渠道的 `id/name/models` 和当前配置，不得返回渠道密钥、Base URL 或完整渠道设置。
 - 触发时固定最新请求和全部来源请求 ID。每个 `session_match=compressed` 断点选择其 `parent_request_id`，最后加入目标最新请求；任务执行期间的新请求不得进入本次资料集。
 - 同会话活动任务使用唯一 `active_key` 幂等。`SystemTask` 和 `MessageAuditReview` 的 pending 状态必须在同一事务中创建，提交后才能唤醒执行器。
 - 重审期间保留最后一次成功结果、风险、模型、时间和加密正文；pending/running/failed 只替换当前任务状态。只有新任务成功后才能原子替换结果归属。
 - 虚拟文件只存在于任务内存中，文件 ID 固定为 `request:<request_id>`。初始模型输入只包含内置规则和文件清单；正文只能通过 `list_files`、`read_file`、`search_files`、`search_files_regex` 读取，不能访问真实路径、网络、任意数据库查询或其他会话。正则检索只能使用 Go RE2 在固定虚拟文件内执行。
-- 单次上下文、输出预留、虚拟分片、单次 Tool 返回和 Tool 总返回 Token 使用代码内固定上限；Tool 调用次数使用任务创建时冻结的配置上限。达到上限必须以稳定错误码失败，不能静默截断后声称完整审核。
+- 虚拟文件、Tool 参数、Tool 调用次数和任务超时保持受控；累计 Tool Token 只记录诊断，不设置独立停止阈值。本地不得使用与所选模型无关的固定输入 Token 阈值；上游真实上下文溢出必须映射为稳定 `context_limit`，不能静默截断后声称完整审核。
 - 长消息可以拆成共享原 `sequence` 的多个虚拟分片。覆盖范围由服务端按 `file_id + start_cursor + end_cursor` 记录；引用一个原消息序号前，该消息对应的所有虚拟分片都必须实际读到。
 - 完整审核结果使用从 `MESSAGE_AUDIT_SECRET` 派生的独立审核密钥加密，AAD 必须绑定 `user_id + audit_session_id + reviewed_request_id`。仅允许为首次发布前的本地记录保留旧 AAD 解密回退。
 - 内部审核调用直接使用所选渠道 adaptor，不经过公开 `controller.Relay`，不执行预扣/结算、消费日志、Token/成本记录或 `CaptureMessageAudit` / `FinalizeMessageAudit`。
@@ -479,7 +479,7 @@ system_tasks.active_key           message_audit_review:<audit_session_id>
 | 同一会话已有 pending/running 任务 | 返回现有任务，`created=false`，不创建第二个结果写入者 |
 | 模型未调用必需 Tool | 失败码 `tool_unsupported` |
 | Tool 文件越界、参数非法或真实路径请求 | 拒绝调用，使用稳定 Tool 错误类别，不返回其他资料 |
-| 上下文、调用次数或 Tool Token 达到上限 | 失败码 `context_limit`、`tool_call_limit` 或 `tool_token_limit` |
+| 上游真实上下文或配置的调用次数达到上限 | 失败码 `context_limit` 或 `tool_call_limit`；历史 `tool_token_limit` 仅保留兼容展示，新任务不再产生 |
 | 输出不是合法结构、枚举越界或依据超出实际覆盖 | 最多一次格式修复；仍失败则 `invalid_output`，原文不落库 |
 | 重审失败且已有成功结果 | 保留旧风险、摘要、覆盖、审核时间和旧结果实际模型，同时展示本次失败状态 |
 | 来源在执行期间被清理 | 成功提交失败为 `source_expired`，不得重新写回摘要 |

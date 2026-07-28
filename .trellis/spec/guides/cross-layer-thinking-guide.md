@@ -68,6 +68,12 @@ For each boundary:
 
 **Good**: Each layer only knows its neighbors
 
+### Mistake 4: Partial Configuration Propagation
+
+**Bad**: Expose one runtime budget in settings while related hard-coded budgets, diagnostics, failure codes, and UI copy remain elsewhere in the call chain
+
+**Good**: Before adding or changing a configuration field, search the full data flow for sibling constants and limits, then decide explicitly which values are configurable, diagnostic-only, provider-owned, or true operational safeguards
+
 ---
 
 ## Checklist for Cross-Layer Features
@@ -77,6 +83,7 @@ Before implementation:
 - [ ] Identified all layer boundaries
 - [ ] Defined format at each boundary
 - [ ] Decided where validation happens
+- [ ] Searched for sibling constants, limits, diagnostics, errors, and UI copy that must change with the configuration contract
 
 After implementation:
 - [ ] Tested with edge cases (null, empty, invalid)

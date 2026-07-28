@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -86,34 +87,46 @@ func TestMessageAuditReviewRegexToolSearchesOnlyFixedFiles(t *testing.T) {
 	assert.Equal(t, "invalid_tool_arguments", taskErr.code)
 }
 
-func TestMessageAuditReviewToolResultReportsConfiguredBudget(t *testing.T) {
+func TestMessageAuditReviewToolResultReportsUsageAndConfiguredCallBudget(t *testing.T) {
 	data, tokens, err := marshalMessageAuditReviewToolResult(map[string]any{"matches": []string{"one"}}, 5, 100, 12, "gpt-4o")
 	require.NoError(t, err)
 	assert.Positive(t, tokens)
 	var payload struct {
 		ToolBudget struct {
-			UsedCalls      int `json:"used_calls"`
-			RemainingCalls int `json:"remaining_calls"`
-			UsedTokens     int `json:"used_tokens"`
+			UsedCalls       int  `json:"used_calls"`
+			RemainingCalls  int  `json:"remaining_calls"`
+			UsedTokens      int  `json:"used_tokens"`
+			RemainingTokens *int `json:"remaining_tokens"`
 		} `json:"tool_budget"`
 	}
 	require.NoError(t, common.Unmarshal(data, &payload))
 	assert.Equal(t, 5, payload.ToolBudget.UsedCalls)
 	assert.Equal(t, 7, payload.ToolBudget.RemainingCalls)
 	assert.Equal(t, 100+tokens, payload.ToolBudget.UsedTokens)
+	assert.Nil(t, payload.ToolBudget.RemainingTokens)
 }
 
-func TestMessageAuditReviewConfigDefaultsAndBoundsToolCallLimit(t *testing.T) {
+func TestMessageAuditReviewConfigDefaultsAndAcceptsPositiveToolCallLimit(t *testing.T) {
 	config, err := ParseMessageAuditReviewConfig("")
 	require.NoError(t, err)
 	assert.Equal(t, messageAuditReviewDefaultToolCallLimit, config.ToolCallLimit)
 
-	config, err = ParseMessageAuditReviewConfig(`{"tool_call_limit":64}`)
+	config, err = ParseMessageAuditReviewConfig(`{"tool_call_limit":1000}`)
 	require.NoError(t, err)
-	assert.Equal(t, 64, config.ToolCallLimit)
+	assert.Equal(t, 1000, config.ToolCallLimit)
 
-	_, err = ParseMessageAuditReviewConfig(`{"tool_call_limit":65}`)
+	_, err = ParseMessageAuditReviewConfig(`{"tool_call_limit":-1}`)
 	require.Error(t, err)
+}
+
+func TestMessageAuditReviewDiagnosticsDecodeLegacyTokenLimitFields(t *testing.T) {
+	task := model.SystemTask{State: `{"model":"legacy-model","tool_tokens":9100,"tool_call_limit":48,"tool_token_limit":9000,"input_token_limit":16000}`}
+	diagnostics := MessageAuditReviewDiagnostics{}
+
+	require.NoError(t, task.DecodeState(&diagnostics))
+	assert.Equal(t, "legacy-model", diagnostics.Model)
+	assert.Equal(t, 9100, diagnostics.ToolTokens)
+	assert.Equal(t, 48, diagnostics.ToolCallLimit)
 }
 
 func TestParseMessageAuditReviewOutputRequiresActuallyReadEvidence(t *testing.T) {
@@ -177,7 +190,7 @@ func TestMessageAuditReviewUncoveredUsesVirtualChunkCursors(t *testing.T) {
 	assert.Equal(t, "partially_read", uncovered[0].Reason)
 }
 
-func TestPrepareMessageAuditReviewTextToolRequestIncludesProtocolInBudget(t *testing.T) {
+func TestPrepareMessageAuditReviewTextToolRequestIncludesProtocol(t *testing.T) {
 	input := MessageAuditReviewModelRequest{
 		Model: "gpt-4o", Messages: []dto.Message{{Role: "user", Content: "manifest"}},
 		Tools: messageAuditReviewTools(), RequireToolCall: true, TextToolFallback: true,
@@ -188,24 +201,12 @@ func TestPrepareMessageAuditReviewTextToolRequestIncludesProtocolInBudget(t *tes
 	assert.Empty(t, prepared.Tools)
 	assert.Contains(t, prepared.Messages[1].StringContent(), "本轮必须先调用工具")
 	assert.Contains(t, prepared.Messages[1].StringContent(), "read_file")
-	require.NoError(t, ensureMessageAuditReviewContextBudget(prepared.Messages, prepared.Tools, input.Model))
 
 	nativePayload, err := common.Marshal(map[string]any{"messages": input.Messages, "tools": input.Tools})
 	require.NoError(t, err)
 	fallbackPayload, err := common.Marshal(map[string]any{"messages": prepared.Messages, "tools": prepared.Tools})
 	require.NoError(t, err)
 	assert.Greater(t, CountTextToken(string(fallbackPayload), input.Model), CountTextToken(string(nativePayload), input.Model))
-
-	boundaryInput := input
-	boundaryInput.TextToolFallback = false
-	boundaryInput.Messages = []dto.Message{{Role: "user", Content: strings.Repeat("token ", 13000)}}
-	require.NoError(t, ensureMessageAuditReviewContextBudget(boundaryInput.Messages, boundaryInput.Tools, boundaryInput.Model))
-	boundaryInput.TextToolFallback = true
-	preparedBoundary, err := prepareMessageAuditReviewModelRequest(boundaryInput)
-	require.NoError(t, err)
-	var taskErr *messageAuditReviewTaskError
-	require.ErrorAs(t, ensureMessageAuditReviewContextBudget(preparedBoundary.Messages, preparedBoundary.Tools, boundaryInput.Model), &taskErr)
-	assert.Equal(t, "context_limit", taskErr.code)
 }
 
 func TestExecuteMessageAuditReviewCompletesTextToolFallbackLoop(t *testing.T) {
@@ -327,6 +328,105 @@ func TestExecuteMessageAuditReviewHonorsConfiguredToolCallLimit(t *testing.T) {
 	require.ErrorAs(t, err, &taskErr)
 	assert.Equal(t, "tool_call_limit", taskErr.code)
 	assert.Equal(t, 2, diagnostics.ToolCalls)
+}
+
+func TestExecuteMessageAuditReviewAllowsToolTokensBeyondLegacyLimit(t *testing.T) {
+	truncate(t)
+	manager := newMessageAuditTestManager(t)
+	previousManager := messageAuditManagerInst
+	messageAuditManagerInst = manager
+	t.Cleanup(func() {
+		messageAuditManagerInst = previousManager
+	})
+
+	now := time.Now().Unix()
+	record, err := manager.encryptCapture(&messageAuditCaptureEvent{
+		request: model.MessageAuditRequest{
+			RequestID: "review-large-tool-request", AuditSessionID: "review-large-tool-session", UserID: 24,
+			Status: "succeeded", AuditStatus: "captured", CapturedAt: now, CreatedAt: now, UpdatedAt: now,
+		},
+		entries: []messageAuditPlaintext{{
+			Role: "user", ContentType: "message", Content: strings.Repeat("需要审核的长文本内容。", 12000),
+		}},
+	})
+	require.NoError(t, err)
+	_, err = model.CreateMessageAuditCapture(record)
+	require.NoError(t, err)
+
+	callCount := 0
+	messageAuditReviewCallerMu.Lock()
+	previousCaller := messageAuditReviewCaller
+	messageAuditReviewCaller = func(_ context.Context, input MessageAuditReviewModelRequest) (MessageAuditReviewModelResponse, error) {
+		callCount++
+		if callCount <= 8 {
+			return MessageAuditReviewModelResponse{ToolCalls: []MessageAuditReviewToolCall{{
+				ID: fmt.Sprintf("call-%d", callCount), Name: "read_file",
+				Arguments: fmt.Sprintf(`{"file_id":"request:review-large-tool-request","cursor":%d,"limit":1}`, callCount-1),
+			}}}, nil
+		}
+		return MessageAuditReviewModelResponse{Content: `{"summary":"已完成大范围读取","risk_level":"none","categories":[],"findings":[]}`}, nil
+	}
+	messageAuditReviewCallerMu.Unlock()
+	t.Cleanup(func() {
+		messageAuditReviewCallerMu.Lock()
+		messageAuditReviewCaller = previousCaller
+		messageAuditReviewCallerMu.Unlock()
+	})
+
+	diagnostics := &MessageAuditReviewDiagnostics{}
+	result, err := executeMessageAuditReview(context.Background(), MessageAuditReviewPayload{
+		UserID: 24, AuditSessionID: "review-large-tool-session", TargetRequestID: "review-large-tool-request",
+		SourceRequestIDs: []string{"review-large-tool-request"}, Config: MessageAuditReviewConfig{ToolCallLimit: 12},
+	}, diagnostics, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "已完成大范围读取", result.Summary)
+	assert.Greater(t, diagnostics.ToolTokens, 9000)
+	assert.Equal(t, 8, diagnostics.ToolCalls)
+}
+
+func TestExecuteMessageAuditReviewMapsUpstreamContextLimit(t *testing.T) {
+	truncate(t)
+	manager := newMessageAuditTestManager(t)
+	previousManager := messageAuditManagerInst
+	messageAuditManagerInst = manager
+	t.Cleanup(func() {
+		messageAuditManagerInst = previousManager
+	})
+
+	now := time.Now().Unix()
+	record, err := manager.encryptCapture(&messageAuditCaptureEvent{
+		request: model.MessageAuditRequest{
+			RequestID: "review-context-request", AuditSessionID: "review-context-session", UserID: 23,
+			Status: "succeeded", AuditStatus: "captured", CapturedAt: now, CreatedAt: now, UpdatedAt: now,
+		},
+		entries: []messageAuditPlaintext{{Role: "user", ContentType: "message", Content: "需要审核的文本"}},
+	})
+	require.NoError(t, err)
+	_, err = model.CreateMessageAuditCapture(record)
+	require.NoError(t, err)
+
+	messageAuditReviewCallerMu.Lock()
+	previousCaller := messageAuditReviewCaller
+	messageAuditReviewCaller = func(context.Context, MessageAuditReviewModelRequest) (MessageAuditReviewModelResponse, error) {
+		return MessageAuditReviewModelResponse{}, &MessageAuditReviewModelError{
+			Stage: "upstream_http", HTTPStatus: 400, Code: "context_limit",
+		}
+	}
+	messageAuditReviewCallerMu.Unlock()
+	t.Cleanup(func() {
+		messageAuditReviewCallerMu.Lock()
+		messageAuditReviewCaller = previousCaller
+		messageAuditReviewCallerMu.Unlock()
+	})
+
+	_, err = executeMessageAuditReview(context.Background(), MessageAuditReviewPayload{
+		UserID: 23, AuditSessionID: "review-context-session", TargetRequestID: "review-context-request",
+		SourceRequestIDs: []string{"review-context-request"},
+	}, &MessageAuditReviewDiagnostics{}, nil)
+	require.Error(t, err)
+	var taskErr *messageAuditReviewTaskError
+	require.ErrorAs(t, err, &taskErr)
+	assert.Equal(t, "context_limit", taskErr.code)
 }
 
 func TestMessageAuditReviewResultAADIsBoundToUser(t *testing.T) {

@@ -22,6 +22,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
+	"github.com/tidwall/gjson"
 )
 
 func callMessageAuditReviewModel(ctx context.Context, input service.MessageAuditReviewModelRequest) (service.MessageAuditReviewModelResponse, error) {
@@ -101,6 +102,12 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 	}
 	defer service.CloseResponseBodyGracefully(response)
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(response.Body, 256*1024))
+		if isMessageAuditReviewContextLimitError(body) {
+			return service.MessageAuditReviewModelResponse{}, &service.MessageAuditReviewModelError{
+				Stage: "upstream_http", HTTPStatus: response.StatusCode, Code: "context_limit",
+			}
+		}
 		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("upstream_http", response.StatusCode)
 	}
 	response.Body = struct {
@@ -144,7 +151,37 @@ func newMessageAuditReviewModelError(stage string, httpStatus int) error {
 }
 
 func messageAuditReviewNeedsTextToolFallback(input service.MessageAuditReviewModelRequest, response service.MessageAuditReviewModelResponse, responseErr error) bool {
+	var modelErr *service.MessageAuditReviewModelError
+	if errors.As(responseErr, &modelErr) && modelErr.Code == "context_limit" {
+		return false
+	}
 	return !input.TextToolFallback && input.RequireToolCall && (responseErr != nil || len(response.ToolCalls) == 0)
+}
+
+func isMessageAuditReviewContextLimitError(body []byte) bool {
+	values := []string{
+		gjson.GetBytes(body, "error.code").String(),
+		gjson.GetBytes(body, "error.type").String(),
+		gjson.GetBytes(body, "error.message").String(),
+		gjson.GetBytes(body, "code").String(),
+		gjson.GetBytes(body, "type").String(),
+		gjson.GetBytes(body, "message").String(),
+	}
+	combined := strings.ToLower(strings.Join(values, " "))
+	for _, marker := range []string{
+		"context_length_exceeded",
+		"context window",
+		"maximum context length",
+		"context length",
+		"too many tokens",
+		"prompt is too long",
+		"input is too long",
+	} {
+		if strings.Contains(combined, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseMessageAuditReviewTextToolResponse(content string) (service.MessageAuditReviewModelResponse, error) {

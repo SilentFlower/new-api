@@ -13,9 +13,16 @@ func TestMessageAuditReviewNeedsTextToolFallbackWhenNativeToolIsIgnored(t *testi
 	input := service.MessageAuditReviewModelRequest{RequireToolCall: true}
 	assert.True(t, messageAuditReviewNeedsTextToolFallback(input, service.MessageAuditReviewModelResponse{Content: `{"summary":"premature"}`}, nil))
 	assert.True(t, messageAuditReviewNeedsTextToolFallback(input, service.MessageAuditReviewModelResponse{}, errors.New("unsupported response")))
+	assert.False(t, messageAuditReviewNeedsTextToolFallback(input, service.MessageAuditReviewModelResponse{}, &service.MessageAuditReviewModelError{Code: "context_limit"}))
 	assert.False(t, messageAuditReviewNeedsTextToolFallback(input, service.MessageAuditReviewModelResponse{ToolCalls: []service.MessageAuditReviewToolCall{{Name: "read_file"}}}, nil))
 	input.TextToolFallback = true
 	assert.False(t, messageAuditReviewNeedsTextToolFallback(input, service.MessageAuditReviewModelResponse{}, nil))
+}
+
+func TestMessageAuditReviewRecognizesUpstreamContextLimit(t *testing.T) {
+	assert.True(t, isMessageAuditReviewContextLimitError([]byte(`{"error":{"code":"context_length_exceeded","message":"context too large"}}`)))
+	assert.True(t, isMessageAuditReviewContextLimitError([]byte(`{"error":{"message":"Maximum context length was exceeded"}}`)))
+	assert.False(t, isMessageAuditReviewContextLimitError([]byte(`{"error":{"message":"rate limit exceeded"}}`)))
 }
 
 func TestParseMessageAuditReviewTextToolResponse(t *testing.T) {
