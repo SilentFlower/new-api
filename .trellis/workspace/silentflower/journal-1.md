@@ -874,3 +874,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 26: 完成 AI 消息持久化审计
+
+**Date**: 2026-07-28
+**Task**: 完成 AI 消息持久化审计
+**Branch**: `build-bak`
+
+### Summary
+
+完成入站消息加密审计、服务端推断会话与压缩续接、详情过滤和时间线、存储统计、一键清空语义，以及消费日志模型名对齐；Full Check-All 通过并已推送 build-bak。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b74db1362 10127a30e 2c76f9235` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
