@@ -100,6 +100,18 @@ export type MessageAuditReviewCoverage = {
   estimated_tokens: number
 }
 
+export type MessageAuditReviewOverview = {
+  source_count: number
+  available_source_count: number
+  message_count: number
+  virtual_chunk_count: number
+  covered_source_count: number
+  covered_message_count: number
+  covered_chunk_count: number
+  uncovered_source_count: number
+  estimated_tokens: number
+}
+
 export type MessageAuditReviewResult = {
   summary: string
   risk_level: MessageAuditRiskLevel
@@ -107,6 +119,7 @@ export type MessageAuditReviewResult = {
   findings: MessageAuditReviewFinding[]
   coverage: MessageAuditReviewCoverage[]
   uncovered: { file_id: string; reason: string }[]
+  overview: MessageAuditReviewOverview
 }
 
 export type MessageAuditReviewCallDiagnostic = {

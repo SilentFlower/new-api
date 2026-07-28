@@ -44,20 +44,7 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 	}
 	stream := false
 	parallel := false
-	messages := input.Messages
-	tools := input.Tools
-	var toolChoice any
-	var responseFormat *dto.ResponseFormat
-	if input.TextToolFallback {
-		tools = nil
-		responseFormat = &dto.ResponseFormat{Type: "json_object"}
-	} else if input.RequireToolCall {
-		toolChoice = "required"
-	}
-	request := &dto.GeneralOpenAIRequest{
-		Model: input.Model, Messages: messages, Tools: tools, ToolChoice: toolChoice,
-		ResponseFormat: responseFormat, Stream: &stream, ParallelTooCalls: &parallel, MaxCompletionTokens: &input.MaxTokens,
-	}
+	request := buildMessageAuditReviewOpenAIRequest(input, &stream, &parallel)
 	info := relaycommon.GenRelayInfoOpenAI(c, request)
 	info.RelayMode = relayconstant.RelayModeChatCompletions
 	info.RequestURLPath = "/v1/chat/completions"
@@ -144,6 +131,19 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 		result.HTTPStatus = response.StatusCode
 	}
 	return result, nil
+}
+
+func buildMessageAuditReviewOpenAIRequest(input service.MessageAuditReviewModelRequest, stream *bool, parallel *bool) *dto.GeneralOpenAIRequest {
+	tools := input.Tools
+	var responseFormat *dto.ResponseFormat
+	if input.TextToolFallback {
+		tools = nil
+		responseFormat = &dto.ResponseFormat{Type: "json_object"}
+	}
+	return &dto.GeneralOpenAIRequest{
+		Model: input.Model, Messages: input.Messages, Tools: tools,
+		ResponseFormat: responseFormat, Stream: stream, ParallelTooCalls: parallel, MaxCompletionTokens: &input.MaxTokens,
+	}
 }
 
 func newMessageAuditReviewModelError(stage string, httpStatus int) error {

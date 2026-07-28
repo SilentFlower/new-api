@@ -50,6 +50,35 @@ func TestMessageAuditReviewToolRejectsFilesOutsideFixedScope(t *testing.T) {
 	assert.Equal(t, "invalid_tool_arguments", taskErr.code)
 }
 
+func TestMessageAuditReviewReadFileAllowsLargeLimitAndBoundsResult(t *testing.T) {
+	messages := make([]messageAuditReviewMessage, 0, 12)
+	for index := range 12 {
+		messages = append(messages, messageAuditReviewMessage{
+			Sequence: index, PartCount: 1, Role: "user", ContentType: "text",
+			Content: strings.Repeat("需要审核的长内容。", 120),
+		})
+	}
+	files := []messageAuditReviewVirtualFile{{
+		FileID: "request:large", Available: true, Messages: messages,
+	}}
+
+	result, coverage, err := executeMessageAuditReviewTool(MessageAuditReviewToolCall{
+		Name: "read_file", Arguments: `{"file_id":"request:large","cursor":0,"limit":100}`,
+	}, files, "gpt-4o")
+	require.NoError(t, err)
+	payload, ok := result.(map[string]any)
+	require.True(t, ok)
+	returnedMessages, ok := payload["messages"].([]messageAuditReviewMessage)
+	require.True(t, ok)
+	require.NotEmpty(t, returnedMessages)
+	assert.Less(t, len(returnedMessages), len(messages))
+	assert.Equal(t, 100, payload["requested_limit"])
+	assert.Equal(t, len(returnedMessages), payload["returned_count"])
+	assert.NotNil(t, payload["next_cursor"])
+	require.Len(t, coverage, 1)
+	assert.Equal(t, len(returnedMessages)-1, coverage[0].EndCursor)
+}
+
 func TestMessageAuditReviewDiagnosticsSanitizesUnknownToolNames(t *testing.T) {
 	assert.Equal(t, "read_file", safeMessageAuditReviewToolName("read_file"))
 	assert.Equal(t, "unknown_tool", safeMessageAuditReviewToolName("secret-from-model"))
@@ -188,6 +217,15 @@ func TestMessageAuditReviewUncoveredUsesVirtualChunkCursors(t *testing.T) {
 	uncovered := buildMessageAuditReviewUncovered(files, coverage)
 	require.Len(t, uncovered, 1)
 	assert.Equal(t, "partially_read", uncovered[0].Reason)
+
+	overview := buildMessageAuditReviewOverview(files, coverage, uncovered)
+	assert.Equal(t, 1, overview.SourceCount)
+	assert.Equal(t, 1, overview.AvailableSourceCount)
+	assert.Equal(t, 1, overview.MessageCount)
+	assert.Equal(t, 2, overview.VirtualChunkCount)
+	assert.Equal(t, 1, overview.CoveredChunkCount)
+	assert.Equal(t, 0, overview.CoveredMessageCount)
+	assert.Equal(t, 1, overview.UncoveredSourceCount)
 }
 
 func TestPrepareMessageAuditReviewTextToolRequestIncludesProtocol(t *testing.T) {
@@ -275,6 +313,10 @@ func TestExecuteMessageAuditReviewCompletesTextToolFallbackLoop(t *testing.T) {
 	assert.Equal(t, "已完成受限审核", result.Summary)
 	assert.Equal(t, "none", result.RiskLevel)
 	require.Len(t, result.Coverage, 1)
+	assert.Equal(t, 1, result.Overview.SourceCount)
+	assert.Equal(t, 1, result.Overview.AvailableSourceCount)
+	assert.Equal(t, 1, result.Overview.MessageCount)
+	assert.Equal(t, 1, result.Overview.CoveredMessageCount)
 	assert.Equal(t, 3, callCount)
 	assert.Equal(t, 3, diagnostics.ModelCalls)
 	assert.Equal(t, 1, diagnostics.ToolCalls)

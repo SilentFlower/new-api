@@ -72,11 +72,13 @@ func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest)
 
 - AI 重审消息和工具定义由 service 统一拥有；relay 只负责一次模型调用、响应解析和返回是否需要文本 Tool 降级的信号。
 - 原生 Tool 被渠道忽略、无法解析或未产生所需 Tool Call 时，service 可以切换到文本 Tool 协议；只允许执行定义好的 `list_files`、`search_files`、`search_files_regex` 和 `read_file`。
+- 原生 Tool 请求不得发送 API 级 `tool_choice=required`；该字段在 OpenAI-compatible 渠道中兼容性不稳定，必须由系统提示词、relay 首轮 Tool 判断和 service 覆盖校验保证模型先读取资料。
 - 文本 Tool 协议必须继续使用任务创建时冻结的文件清单、游标和读取上限。模型输出或审计材料中的指令不能改变系统提示词、可调用工具或文件范围。
 - 详情接口必须根据请求协议和已解密载荷派生 Tool 语义角色：Responses 顶层调用/结果、Claude 纯 `tool_use`/`tool_result` 内容、Gemini 纯 `functionCall`/`functionResponse` parts 分别返回 `assistant/tool_call` 或 `tool/tool_result`。派生只修改详情响应，不重写存储内容、HMAC、去重或会话指纹，因此必须对历史记录生效。
 - `search_files_regex` 只能使用 Go RE2 在任务内存中的固定虚拟文件执行，并限制表达式长度、文件 ID、游标和返回条数；禁止启动系统命令或访问真实文件系统。
 - Tool 调用次数由 `message_audit_review.config.tool_call_limit` 配置，必须为正整数、默认 `24`，不设人为固定最大值；旧配置缺少该字段时必须归一化为默认值，并在任务创建时冻结。
 - 累计 Tool Token 只作为脱敏诊断计数，不得设置独立停止阈值；本地也不得使用与所选模型无关的固定输入 Token 阈值提前终止。模型真实上下文溢出由上游识别并归类为 `context_limit`。
+- `read_file` / search 可接受较大的请求窗口；当候选返回超过 Tool 结果安全 Token 上限时，service 缩小实际返回并报告请求量、返回量和续读游标，不能因为模型请求较大窗口直接失败。
 - AI 重审请求本身不得进入消息审计，AI 模型原始响应不得持久化；只保存结构化审核结果、状态、稳定失败码和脱敏调用诊断。
 - 脱敏诊断可以记录渠道、模型、耗时、模型/Tool 调用次数、Tool Token、协议、HTTP 状态和稳定失败阶段；不得记录正文、Tool 参数、Tool 返回、模型输出或上游错误正文。
 
@@ -84,7 +86,7 @@ func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest)
 
 - service 必须先通过 `prepareMessageAuditReviewModelRequest` 构造实际发送的完整请求；relay 不得在该请求之外追加审计正文或扩大 Tool 范围。
 - 本地没有可靠的跨渠道模型上下文元数据时，不得用统一固定 Token 数伪装成模型真实窗口。上游明确返回上下文溢出时，relay 只在内存中识别稳定类别，service 返回 `context_limit`。
-- 渠道不能支持受控 Tool 流程时返回 `tool_unsupported`，不能把失败退化为无工具的整包内容输入。
+- 渠道不能通过原生或文本协议完成受控 Tool 流程时返回 `tool_unsupported`，不能把失败退化为无工具的整包内容输入。
 
 ### 4. Validation & Error Matrix
 
@@ -99,12 +101,14 @@ func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest)
 | 原生 Tool 被忽略或响应无法作为 Tool Call 解析 | relay 返回 `ToolFallbackRequired`，service 构造并校验文本 Tool 请求 |
 | 上游明确拒绝请求上下文过长 | 不重试文本 Tool 协议，以 `context_limit` 失败 |
 | 渠道无法完成任何受控 Tool 流程 | 以 `tool_unsupported` 失败 |
+| 模型请求大范围连续读取 | 服务端在安全 Token 上限内缩小实际返回，并提供续读游标 |
 | 模型请求读取冻结范围外文件 | 拒绝 Tool 调用，不扩大审计材料范围 |
 
 ### 5. Good / Base / Bad Cases
 
 - Good：MySQL 上百万条审计数据通过表交换在数秒内恢复空主表，新请求无需等待逐行删除完成。
 - Good：渠道忽略原生 Tool，service 将同一任务切换为文本 `read_file` 协议，模型按冻结游标读取必要片段后返回结构化结论。
+- Good：兼容渠道不支持 `tool_choice=required`，原生请求仍可正常返回 Tool Call，不会因强制字段直接进入文本 Tool 回退。
 - Good：上游明确返回上下文过长；任务直接记录 `context_limit`，不把该错误误判为 Tool 不支持或继续文本协议重试。
 - Base：原生 Tool 正常工作；请求准备逻辑不改变消息和工具定义。
 - Base：管理员清空时没有并发写入；三种数据库最终都得到空审计业务表，并保留其他系统任务。

@@ -1,10 +1,10 @@
 # Base UI 组件组合规范
 
-> 适用于 `web/default/` 中基于 Base UI 封装的菜单、选择器、Sheet、Drawer 等交互组件。
+> 适用于 `web/default/` 中基于 Base UI 封装的菜单、选择器、Dialog、Sheet、Drawer 等交互组件。
 
 ## 1. Scope / Trigger
 
-- Trigger：新增或修改 Base UI 复合组件的分组部件、受控值、Portal、Sheet/Drawer 内菜单或选择器。
+- Trigger：新增或修改 Base UI 复合组件的分组部件、受控值、Portal、Dialog/Sheet/Drawer 内菜单、选择器或长内容滚动区。
 - 风险：TypeScript 和生产构建可以通过，但缺少 React Context 会在用户打开组件时触发数字运行时错误。
 
 ## 2. Signatures
@@ -13,6 +13,7 @@
 <DropdownMenuGroup>{/* Label / CheckboxItem */}</DropdownMenuGroup>
 <SelectGroup>{/* SelectItem */}</SelectGroup>
 <DropdownMenuTrigger render={<Button />} />
+<Dialog bodyContainerClassName='visible-scrollbar' />
 ```
 
 ## 3. Contracts
@@ -22,6 +23,7 @@
 - 触发器替换底层元素时使用项目封装组件的 `render` 属性，保留事件、焦点和可访问性语义。
 - 受控 Select 的当前 `value` 必须始终存在于渲染选项中；分页数据不含当前项时显式补入当前项。
 - Sheet/Drawer 内切换数据时，是否重置子组件状态必须由 `key` 或外部状态明确表达，不能依赖偶然的容器重挂载。
+- Dialog/Sheet/Drawer 内展示审计明细、JSON、日志或模型输出等长内容时，主要滚动容器必须可见且位置明确；优先使用项目级 `visible-scrollbar`，不要只依赖浏览器默认淡色滚动条或 hover 才出现的滚动条。
 
 ## 4. Validation & Error Matrix
 
@@ -31,14 +33,17 @@
 | Network 为 200、错误边界显示“500” | 先检查浏览器控制台，不得误判为后端 500 |
 | Select 当前值不在分页选项中 | 补入当前选项后再渲染受控 Select |
 | Sheet/Drawer 内切换请求 | 容器保持打开，按需求重置或保留子状态 |
+| 长详情内容导致用户看不清当前位置 | 使用独立滚动容器和常驻可见滚动条，必要时将明细迁入 Dialog |
 
 ## 5. Good / Base / Bad Cases
 
 - Good：复选菜单完整包在 `DropdownMenuGroup` 中，打开菜单不会触发缺失上下文错误。
 - Good：详情选择另一请求时 Sheet 保持打开，带 `key={requestId}` 的内容区重新加载并重置局部过滤状态。
+- Good：消息审计详情只内联展示审核摘要和概览，完整依据/覆盖/诊断放入 Dialog，Sheet、Dialog 和长 `<pre>` 都使用清晰滚动条。
 - Base：会话只有一页，当前请求自然存在于选项中，不显示分页按钮。
 - Bad：把 Base UI 数字错误码当作接口 500，只排查后端日志。
 - Bad：受控 Select 的 value 不在 items 中，导致显示、键盘或焦点行为异常。
+- Bad：把完整 AI 审核明细和超长 JSON 全部铺在 Sheet 中，右侧只有浏览器默认浅色滚动条，用户无法判断当前位置。
 
 ## 6. Tests Required
 

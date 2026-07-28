@@ -4,6 +4,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/service"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -17,6 +18,31 @@ func TestMessageAuditReviewNeedsTextToolFallbackWhenNativeToolIsIgnored(t *testi
 	assert.False(t, messageAuditReviewNeedsTextToolFallback(input, service.MessageAuditReviewModelResponse{ToolCalls: []service.MessageAuditReviewToolCall{{Name: "read_file"}}}, nil))
 	input.TextToolFallback = true
 	assert.False(t, messageAuditReviewNeedsTextToolFallback(input, service.MessageAuditReviewModelResponse{}, nil))
+}
+
+func TestMessageAuditReviewOpenAIRequestDoesNotForceRequiredToolChoice(t *testing.T) {
+	stream := false
+	parallel := false
+	maxTokens := uint(256)
+	request := buildMessageAuditReviewOpenAIRequest(service.MessageAuditReviewModelRequest{
+		Model: "review-model", RequireToolCall: true, MaxTokens: maxTokens,
+		Tools: []dto.ToolCallRequest{{Type: "function", Function: dto.FunctionRequest{Name: "read_file"}}},
+	}, &stream, &parallel)
+
+	require.Len(t, request.Tools, 1)
+	assert.Nil(t, request.ToolChoice)
+	require.NotNil(t, request.MaxCompletionTokens)
+	assert.Equal(t, maxTokens, *request.MaxCompletionTokens)
+	assert.False(t, *request.Stream)
+	assert.False(t, *request.ParallelTooCalls)
+
+	fallbackRequest := buildMessageAuditReviewOpenAIRequest(service.MessageAuditReviewModelRequest{
+		Model: "review-model", TextToolFallback: true, MaxTokens: maxTokens,
+		Tools: []dto.ToolCallRequest{{Type: "function", Function: dto.FunctionRequest{Name: "read_file"}}},
+	}, &stream, &parallel)
+	assert.Empty(t, fallbackRequest.Tools)
+	require.NotNil(t, fallbackRequest.ResponseFormat)
+	assert.Equal(t, "json_object", fallbackRequest.ResponseFormat.Type)
 }
 
 func TestMessageAuditReviewRecognizesUpstreamContextLimit(t *testing.T) {

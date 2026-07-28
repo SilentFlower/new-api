@@ -31,6 +31,7 @@ import {
 import { type ReactNode, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { Dialog } from '@/components/dialog'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -109,6 +110,8 @@ type AuditMessageListProps = {
   onCopy: (sequence: number, content: unknown) => void
 }
 
+const messageAuditDetailScrollClassName = 'visible-scrollbar'
+
 function formatAuditBytes(bytes: number | null): string {
   if (bytes === null || !Number.isFinite(bytes) || bytes <= 0) return '0 B'
   const units = ['B', 'KB', 'MB', 'GB']
@@ -134,106 +137,175 @@ function getRiskBadgeClass(riskLevel: MessageAuditRiskLevel | ''): string {
   }
 }
 
-function MessageAuditReviewSection(props: { auditSessionId: string }) {
+function MessageAuditReviewOverviewGrid(props: { review: MessageAuditReview }) {
   const { t } = useTranslation()
-  const queryClient = useQueryClient()
-  const reviewQuery = useQuery({
-    queryKey: ['message-audit-review', props.auditSessionId],
-    queryFn: () => getMessageAuditReview(props.auditSessionId),
-    refetchInterval: (query) =>
-      getMessageAuditReviewPollInterval(
-        query.state.data as MessageAuditReview | undefined
-      ),
-  })
-  const startReview = useMutation({
-    mutationFn: () => startMessageAuditReview(props.auditSessionId),
-    onSuccess: async () => {
-      await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: ['message-audit-review', props.auditSessionId],
-        }),
-        queryClient.invalidateQueries({ queryKey: ['message-audits'] }),
-      ])
+  const overview = props.review.result?.overview
+  if (!overview || overview.source_count <= 0) return null
+
+  const items = [
+    {
+      label: t('Sources'),
+      value: `${overview.covered_source_count}/${overview.source_count}`,
     },
-  })
-  const review = reviewQuery.data
-  const active =
-    startReview.isPending ||
-    review?.status === 'pending' ||
-    review?.status === 'running'
+    {
+      label: t('Messages covered'),
+      value: `${overview.covered_message_count}/${overview.message_count}`,
+    },
+    {
+      label: t('Chunks covered'),
+      value: `${overview.covered_chunk_count}/${overview.virtual_chunk_count}`,
+    },
+    {
+      label: t('Unreviewed sources'),
+      value: overview.uncovered_source_count,
+    },
+    {
+      label: t('Estimated tokens'),
+      value: overview.estimated_tokens,
+    },
+  ]
 
   return (
-    <section className='space-y-3 border-b pb-5'>
-      <div className='flex flex-wrap items-start justify-between gap-3'>
-        <div>
-          <div className='flex flex-wrap items-center gap-2'>
-            <h3 className='text-sm font-medium'>{t('AI review')}</h3>
-            {review && (
-              <Badge variant='outline'>
-                {t(getMessageAuditReviewStatusLabelKey(review.status))}
-              </Badge>
-            )}
-            {review?.risk_level && (
-              <Badge
-                variant='outline'
-                className={getRiskBadgeClass(review.risk_level)}
-              >
-                {t(getMessageAuditRiskLabelKey(review.risk_level))}
-              </Badge>
-            )}
-            {review?.stale && (
-              <Badge variant='outline'>{t('Content changed')}</Badge>
-            )}
-          </div>
-          <p className='text-muted-foreground mt-1 text-xs'>
-            {t(
-              'The AI reviews the stored inbound conversation context. Model responses are included only when the client submits them again as conversation history. The result is for administrator review and does not trigger automatic enforcement.'
-            )}
-          </p>
+    <div className='grid gap-2 sm:grid-cols-5'>
+      {items.map((item) => (
+        <div key={item.label} className='rounded-md border px-3 py-2'>
+          <div className='text-muted-foreground text-[11px]'>{item.label}</div>
+          <div className='mt-1 text-sm font-medium'>{item.value}</div>
         </div>
-        <Button
-          type='button'
-          size='sm'
-          disabled={active || reviewQuery.isLoading}
-          onClick={() => startReview.mutate()}
-        >
-          {active ? (
-            <Loader2 className='animate-spin' aria-hidden='true' />
-          ) : (
-            <ShieldCheck aria-hidden='true' />
+      ))}
+    </div>
+  )
+}
+
+function MessageAuditReviewDetailsDialog(props: {
+  review: MessageAuditReview
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { t } = useTranslation()
+  const review = props.review
+
+  return (
+    <Dialog
+      open={props.open}
+      onOpenChange={props.onOpenChange}
+      title={t('AI review details')}
+      description={t(
+        'Detailed findings, read coverage, uncovered sources, and safe call diagnostics for this review.'
+      )}
+      contentClassName='sm:max-w-4xl'
+      contentHeight='min(72vh, 42rem)'
+      bodyContainerClassName={messageAuditDetailScrollClassName}
+      bodyClassName='space-y-5'
+      showCloseButton
+    >
+      {review.result && (
+        <section className='space-y-3'>
+          <div>
+            <h4 className='text-sm font-medium'>{t('Review overview')}</h4>
+            <p className='text-muted-foreground mt-1 text-xs leading-5'>
+              {review.result.summary}
+            </p>
+          </div>
+          <MessageAuditReviewOverviewGrid review={review} />
+          {review.result.findings.length > 0 && (
+            <section className='space-y-2'>
+              <h4 className='text-xs font-medium'>{t('Findings')}</h4>
+              <ol className='divide-y border-y'>
+                {review.result.findings.map((finding) => (
+                  <li
+                    key={`${finding.file_id}-${finding.start_sequence}-${finding.end_sequence}-${finding.category}-${finding.reason}`}
+                    className='space-y-1 py-3'
+                  >
+                    <div className='flex flex-wrap items-center gap-2'>
+                      <Badge
+                        variant='outline'
+                        className={getRiskBadgeClass(finding.severity)}
+                      >
+                        {t(getMessageAuditRiskLabelKey(finding.severity))}
+                      </Badge>
+                      <span className='text-xs font-medium'>
+                        {t(
+                          getMessageAuditReviewCategoryLabelKey(
+                            finding.category
+                          )
+                        )}
+                      </span>
+                      <span className='text-muted-foreground font-mono text-xs'>
+                        {finding.file_id} #{finding.start_sequence}-
+                        {finding.end_sequence}
+                      </span>
+                    </div>
+                    <p className='text-muted-foreground text-xs leading-5'>
+                      {finding.reason}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            </section>
           )}
-          {review?.result || review?.stale
-            ? t('Review again')
-            : t('Start AI review')}
-        </Button>
-      </div>
-
-      {(reviewQuery.isError || startReview.isError) && (
-        <Alert variant='destructive'>
-          <AlertTitle>{t('AI review unavailable')}</AlertTitle>
-          <AlertDescription>
-            {getMessageAuditErrorMessage(
-              startReview.error ?? reviewQuery.error,
-              t('The AI review could not be started.')
-            )}
-          </AlertDescription>
-        </Alert>
+          {review.result.coverage.length > 0 && (
+            <section className='space-y-2'>
+              <h4 className='text-xs font-medium'>{t('Read coverage')}</h4>
+              <ol className='divide-y border-y'>
+                {review.result.coverage.map((coverage) => (
+                  <li
+                    key={`${coverage.file_id}-${coverage.start_cursor ?? coverage.start_sequence}-${coverage.end_cursor ?? coverage.end_sequence}`}
+                    className='space-y-2 py-3'
+                  >
+                    <div className='font-mono text-xs break-all'>
+                      {coverage.file_id}
+                    </div>
+                    <dl className='grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[auto_1fr]'>
+                      <dt className='text-muted-foreground'>
+                        {t('Message range')}
+                      </dt>
+                      <dd>
+                        #{coverage.start_sequence}-#{coverage.end_sequence}
+                      </dd>
+                      {coverage.start_cursor !== undefined &&
+                        coverage.end_cursor !== undefined && (
+                          <>
+                            <dt className='text-muted-foreground'>
+                              {t('Virtual chunk range')}
+                            </dt>
+                            <dd>
+                              {coverage.start_cursor}-{coverage.end_cursor}
+                            </dd>
+                          </>
+                        )}
+                      <dt className='text-muted-foreground'>
+                        {t('Estimated tokens')}
+                      </dt>
+                      <dd>{coverage.estimated_tokens}</dd>
+                    </dl>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+          {review.result.uncovered.length > 0 && (
+            <section className='space-y-2'>
+              <h4 className='text-xs font-medium'>{t('Unreviewed sources')}</h4>
+              <ul className='space-y-2'>
+                {review.result.uncovered.map((source) => (
+                  <li key={`${source.file_id}-${source.reason}`}>
+                    <div className='font-mono text-xs break-all'>
+                      {source.file_id}
+                    </div>
+                    <p className='text-muted-foreground text-xs'>
+                      {t(getMessageAuditReviewUncoveredLabelKey(source.reason))}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </section>
       )}
 
-      {review?.status === 'failed' && (
-        <Alert variant='destructive'>
-          <AlertTitle>{t('AI review failed')}</AlertTitle>
-          <AlertDescription>
-            {t(getMessageAuditReviewFailureLabelKey(review.failure_code))}
-            {review.failure_code && (
-              <code className='mt-1 block text-xs'>{review.failure_code}</code>
-            )}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      {review?.diagnostics && (
-        <section className='space-y-3 border-y py-3 text-sm'>
+      {review.diagnostics && (
+        <section className='space-y-3 border-t pt-4 text-sm'>
           <h4 className='text-xs font-medium'>{t('Review diagnostics')}</h4>
           <dl className='grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[auto_1fr_auto_1fr]'>
             <dt className='text-muted-foreground'>{t('Review channel')}</dt>
@@ -317,6 +389,129 @@ function MessageAuditReviewSection(props: { auditSessionId: string }) {
           )}
         </section>
       )}
+    </Dialog>
+  )
+}
+
+function MessageAuditReviewSection(props: { auditSessionId: string }) {
+  const { t } = useTranslation()
+  const queryClient = useQueryClient()
+  const [detailsOpen, setDetailsOpen] = useState(false)
+  const reviewQuery = useQuery({
+    queryKey: ['message-audit-review', props.auditSessionId],
+    queryFn: () => getMessageAuditReview(props.auditSessionId),
+    refetchInterval: (query) =>
+      getMessageAuditReviewPollInterval(
+        query.state.data as MessageAuditReview | undefined
+      ),
+  })
+  const startReview = useMutation({
+    mutationFn: () => startMessageAuditReview(props.auditSessionId),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ['message-audit-review', props.auditSessionId],
+        }),
+        queryClient.invalidateQueries({ queryKey: ['message-audits'] }),
+      ])
+    },
+  })
+  const review = reviewQuery.data
+  const active =
+    startReview.isPending ||
+    review?.status === 'pending' ||
+    review?.status === 'running'
+  const hasDetails = Boolean(review?.result || review?.diagnostics)
+
+  return (
+    <section className='space-y-3 border-b pb-5'>
+      <div className='flex flex-wrap items-start justify-between gap-3'>
+        <div>
+          <div className='flex flex-wrap items-center gap-2'>
+            <h3 className='text-sm font-medium'>{t('AI review')}</h3>
+            {review && (
+              <Badge variant='outline'>
+                {t(getMessageAuditReviewStatusLabelKey(review.status))}
+              </Badge>
+            )}
+            {review?.risk_level && (
+              <Badge
+                variant='outline'
+                className={getRiskBadgeClass(review.risk_level)}
+              >
+                {t(getMessageAuditRiskLabelKey(review.risk_level))}
+              </Badge>
+            )}
+            {review?.stale && (
+              <Badge variant='outline'>{t('Content changed')}</Badge>
+            )}
+          </div>
+          <p className='text-muted-foreground mt-1 text-xs'>
+            {t(
+              'The AI reviews the stored inbound conversation context. Model responses are included only when the client submits them again as conversation history. The result is for administrator review and does not trigger automatic enforcement.'
+            )}
+          </p>
+        </div>
+        <Button
+          type='button'
+          size='sm'
+          disabled={active || reviewQuery.isLoading}
+          onClick={() => startReview.mutate()}
+        >
+          {active ? (
+            <Loader2 className='animate-spin' aria-hidden='true' />
+          ) : (
+            <ShieldCheck aria-hidden='true' />
+          )}
+          {review?.result || review?.stale
+            ? t('Review again')
+            : t('Start AI review')}
+        </Button>
+      </div>
+
+      {(reviewQuery.isError || startReview.isError) && (
+        <Alert variant='destructive'>
+          <AlertTitle>{t('AI review unavailable')}</AlertTitle>
+          <AlertDescription>
+            {getMessageAuditErrorMessage(
+              startReview.error ?? reviewQuery.error,
+              t('The AI review could not be started.')
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {review?.status === 'failed' && (
+        <Alert variant='destructive'>
+          <AlertTitle>{t('AI review failed')}</AlertTitle>
+          <AlertDescription>
+            {t(getMessageAuditReviewFailureLabelKey(review.failure_code))}
+            {review.failure_code && (
+              <code className='mt-1 block text-xs'>{review.failure_code}</code>
+            )}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {review?.diagnostics && (
+        <dl className='bg-muted/30 grid gap-x-4 gap-y-1 rounded-md border px-3 py-2 text-xs sm:grid-cols-[auto_1fr_auto_1fr]'>
+          <dt className='text-muted-foreground'>{t('Model calls')}</dt>
+          <dd>{review.diagnostics.model_calls}</dd>
+          <dt className='text-muted-foreground'>{t('Tool calls')}</dt>
+          <dd>
+            {review.diagnostics.tool_calls} /{' '}
+            {review.diagnostics.tool_call_limit}
+          </dd>
+          <dt className='text-muted-foreground'>{t('Text Tool fallback')}</dt>
+          <dd>
+            {review.diagnostics.text_tool_fallback
+              ? t('Enabled')
+              : t('Disabled')}
+          </dd>
+          <dt className='text-muted-foreground'>{t('Duration')}</dt>
+          <dd>{review.diagnostics.duration_ms} ms</dd>
+        </dl>
+      )}
 
       {review?.result && (
         <div className='space-y-3 text-sm'>
@@ -337,6 +532,7 @@ function MessageAuditReviewSection(props: { auditSessionId: string }) {
               })}
             </span>
           </div>
+          <MessageAuditReviewOverviewGrid review={review} />
           {review.result.categories.length > 0 && (
             <div className='flex flex-wrap gap-2'>
               {review.result.categories.map((category) => (
@@ -346,94 +542,24 @@ function MessageAuditReviewSection(props: { auditSessionId: string }) {
               ))}
             </div>
           )}
-          {review.result.coverage.length > 0 && (
-            <section className='space-y-2'>
-              <h4 className='text-xs font-medium'>{t('Read coverage')}</h4>
-              <ol className='divide-y border-y'>
-                {review.result.coverage.map((coverage) => (
-                  <li
-                    key={`${coverage.file_id}-${coverage.start_cursor ?? coverage.start_sequence}-${coverage.end_cursor ?? coverage.end_sequence}`}
-                    className='space-y-2 py-3'
-                  >
-                    <div className='font-mono text-xs break-all'>
-                      {coverage.file_id}
-                    </div>
-                    <dl className='grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[auto_1fr]'>
-                      <dt className='text-muted-foreground'>
-                        {t('Message range')}
-                      </dt>
-                      <dd>
-                        #{coverage.start_sequence}-#{coverage.end_sequence}
-                      </dd>
-                      {coverage.start_cursor !== undefined &&
-                        coverage.end_cursor !== undefined && (
-                          <>
-                            <dt className='text-muted-foreground'>
-                              {t('Virtual chunk range')}
-                            </dt>
-                            <dd>
-                              {coverage.start_cursor}-{coverage.end_cursor}
-                            </dd>
-                          </>
-                        )}
-                      <dt className='text-muted-foreground'>
-                        {t('Estimated tokens')}
-                      </dt>
-                      <dd>{coverage.estimated_tokens}</dd>
-                    </dl>
-                  </li>
-                ))}
-              </ol>
-            </section>
-          )}
-          {review.result.findings.length > 0 && (
-            <ol className='divide-y border-y'>
-              {review.result.findings.map((finding) => (
-                <li
-                  key={`${finding.file_id}-${finding.start_sequence}-${finding.end_sequence}-${finding.category}-${finding.reason}`}
-                  className='space-y-1 py-3'
-                >
-                  <div className='flex flex-wrap items-center gap-2'>
-                    <Badge
-                      variant='outline'
-                      className={getRiskBadgeClass(finding.severity)}
-                    >
-                      {t(getMessageAuditRiskLabelKey(finding.severity))}
-                    </Badge>
-                    <span className='text-xs font-medium'>
-                      {t(
-                        getMessageAuditReviewCategoryLabelKey(finding.category)
-                      )}
-                    </span>
-                    <span className='text-muted-foreground font-mono text-xs'>
-                      {finding.file_id} #{finding.start_sequence}-
-                      {finding.end_sequence}
-                    </span>
-                  </div>
-                  <p className='text-muted-foreground text-xs leading-5'>
-                    {finding.reason}
-                  </p>
-                </li>
-              ))}
-            </ol>
-          )}
-          {review.result.uncovered.length > 0 && (
-            <section className='space-y-2'>
-              <h4 className='text-xs font-medium'>{t('Unreviewed sources')}</h4>
-              <ul className='space-y-2'>
-                {review.result.uncovered.map((source) => (
-                  <li key={`${source.file_id}-${source.reason}`}>
-                    <div className='font-mono text-xs break-all'>
-                      {source.file_id}
-                    </div>
-                    <p className='text-muted-foreground text-xs'>
-                      {t(getMessageAuditReviewUncoveredLabelKey(source.reason))}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+        </div>
+      )}
+
+      {hasDetails && review && (
+        <div className='flex justify-end'>
+          <Button
+            type='button'
+            variant='outline'
+            size='sm'
+            onClick={() => setDetailsOpen(true)}
+          >
+            {t('View review details')}
+          </Button>
+          <MessageAuditReviewDetailsDialog
+            review={review}
+            open={detailsOpen}
+            onOpenChange={setDetailsOpen}
+          />
         </div>
       )}
     </section>
@@ -450,9 +576,13 @@ function AuditMessageList(props: AuditMessageListProps) {
         aria-hidden='true'
       />
       {props.messages.map((message) => {
-        const collapseContent = ['tools', 'functions'].includes(
-          message.content_type
-        )
+        const renderedContent =
+          typeof message.content === 'string'
+            ? message.content
+            : JSON.stringify(message.content, null, 2)
+        const collapseContent =
+          ['tools', 'functions'].includes(message.content_type) ||
+          renderedContent.length > 1600
         return (
           <li key={message.sequence} className='relative pb-6 pl-9 last:pb-0'>
             <span
@@ -493,17 +623,17 @@ function AuditMessageList(props: AuditMessageListProps) {
                   <summary className='text-muted-foreground cursor-pointer text-xs'>
                     {t('Details')}
                   </summary>
-                  <pre className='bg-muted/50 mt-2 max-h-96 overflow-auto rounded-md border p-3 text-xs leading-5 break-words whitespace-pre-wrap'>
-                    {typeof message.content === 'string'
-                      ? message.content
-                      : JSON.stringify(message.content, null, 2)}
+                  <pre
+                    className={`bg-muted/50 mt-2 max-h-96 overflow-auto rounded-md border p-3 text-xs leading-5 break-words whitespace-pre-wrap ${messageAuditDetailScrollClassName}`}
+                  >
+                    {renderedContent}
                   </pre>
                 </details>
               ) : (
-                <pre className='bg-muted/50 max-h-96 overflow-auto rounded-md border p-3 text-xs leading-5 break-words whitespace-pre-wrap'>
-                  {typeof message.content === 'string'
-                    ? message.content
-                    : JSON.stringify(message.content, null, 2)}
+                <pre
+                  className={`bg-muted/50 max-h-96 overflow-auto rounded-md border p-3 text-xs leading-5 break-words whitespace-pre-wrap ${messageAuditDetailScrollClassName}`}
+                >
+                  {renderedContent}
                 </pre>
               )}
             </article>
@@ -960,7 +1090,9 @@ export function MessageAuditDetailPanel(props: MessageAuditDetailPanelProps) {
               {props.requestId}
             </DrawerDescription>
           </DrawerHeader>
-          <div className='min-h-0 flex-1 overflow-y-auto px-4'>
+          <div
+            className={`min-h-0 flex-1 overflow-y-auto px-4 pr-3 ${messageAuditDetailScrollClassName}`}
+          >
             {props.requestId && (
               <DetailBody
                 key={props.requestId}
@@ -978,7 +1110,7 @@ export function MessageAuditDetailPanel(props: MessageAuditDetailPanelProps) {
     <Sheet open={open} onOpenChange={props.onOpenChange}>
       <SheetContent
         side='right'
-        className='w-full overflow-y-auto sm:max-w-2xl'
+        className='w-full overflow-hidden sm:max-w-2xl'
       >
         <SheetHeader>
           <SheetTitle>{t('Message audit detail')}</SheetTitle>
@@ -986,7 +1118,9 @@ export function MessageAuditDetailPanel(props: MessageAuditDetailPanelProps) {
             {props.requestId}
           </SheetDescription>
         </SheetHeader>
-        <div className='px-4'>
+        <div
+          className={`min-h-0 flex-1 overflow-y-auto px-4 pr-3 ${messageAuditDetailScrollClassName}`}
+        >
           {props.requestId && (
             <DetailBody
               key={props.requestId}
