@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"消息审计正文、审核结果、管理审计与普通日志隔离合同"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"新增审核表、来源引用、事务与 SQLite/MySQL/PostgreSQL 兼容"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"Root 管理 API 的统一响应、查询和跨层数据合同"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"稳定错误类别、脱敏和管理 API 错误响应"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"后端分层、JSON 包装、测试和代码质量要求"}
+{"file":".trellis/spec/frontend/base-ui-composition.md","reason":"详情 Sheet/Drawer 与渠道模型 Select 的 Base UI 组合约束"}

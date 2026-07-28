@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"检查任何正文、模型输出或错误原文是否越过独立加密审计边界"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"检查迁移、锁、事务和三库兼容性"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"检查 Root API、列表元数据与详情结果契约"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查失败原因只暴露稳定安全信息"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"执行后端测试、JSON 使用和分层质量检查"}
+{"file":".trellis/spec/frontend/base-ui-composition.md","reason":"检查 SelectGroup、受控值和详情容器运行时行为"}

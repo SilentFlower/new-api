@@ -1,0 +1,49 @@
+{
+  "id": "message-audit-ai-review",
+  "name": "message-audit-ai-review",
+  "title": "消息审计 AI 自动审核与总结",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-07-28",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-07-28T00:36:10Z",
+      "contextKey": "codex_019fa622-bb62-7d82-977c-5da7a071e0f8",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "bc81eb72f6c3dec94e853d844f6ad8c01b91fade",
+        "status": []
+      }
+    }
+  },
+  "progress": {
+    "updatedAt": "2026-07-28T11:40:06+08:00",
+    "completedSteps": [
+      "完成消息审计 AI 辅助审核实现",
+      "修复 Check-All 全部问题",
+      "更新消息审计跨层代码规范",
+      "完成后端、前端、竞态和构建验证"
+    ],
+    "partialStep": null,
+    "nextStep": "提交推送后按需执行任务收尾",
+    "notes": "全仓前端 lint 存在与本次无关的既有基线错误；本次修改文件定向 lint 通过。"
+  }
+}
