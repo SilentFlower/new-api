@@ -27,10 +27,10 @@ import (
 func callMessageAuditReviewModel(ctx context.Context, input service.MessageAuditReviewModelRequest) (service.MessageAuditReviewModelResponse, error) {
 	channel, err := model.GetChannelById(input.ChannelID, true)
 	if err != nil {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review channel unavailable")
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("channel_lookup", 0)
 	}
 	if channel.Status != common.ChannelStatusEnabled || !containsMessageAuditReviewModel(channel.GetModels(), input.Model) {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review channel configuration invalid")
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("channel_config", 0)
 	}
 
 	recorder := httptest.NewRecorder()
@@ -39,7 +39,7 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 	// 审核输入、工具结果和模型输出都属于敏感控制面数据，任何 adaptor 日志都必须被抑制。
 	logger.SuppressSensitiveContentLogs(c)
 	if apiErr := middleware.SetupContextForSelectedChannel(c, channel, input.Model); apiErr != nil {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review channel setup failed")
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("channel_setup", 0)
 	}
 	stream := false
 	parallel := false
@@ -66,42 +66,42 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 	info.FirstResponseTime = info.StartTime.Add(-time.Second)
 	info.InitChannelMeta(c)
 	if err := helper.ModelMappedHelper(c, info, request); err != nil {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review model mapping failed")
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("model_mapping", 0)
 	}
 	// 审核控制面不得应用可能改写系统指令、工具或正文的渠道参数覆盖。
 	info.ParamOverride = nil
 
 	adaptor := GetAdaptor(info.ApiType)
 	if adaptor == nil {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review adaptor unavailable")
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("adaptor_unavailable", 0)
 	}
 	adaptor.Init(info)
 	converted, err := adaptor.ConvertOpenAIRequest(c, info, request)
 	if err != nil {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review request conversion failed")
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("request_conversion", 0)
 	}
 	info.InitRequestConversionChain()
 	relaycommon.AppendRequestConversionFromRequest(info, converted)
 	body, err := common.Marshal(converted)
 	if err != nil {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review request serialization failed")
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("request_serialization", 0)
 	}
 	body, err = relaycommon.RemoveDisabledFields(body, info.ChannelOtherSettings, info.ChannelSetting.PassThroughBodyEnabled)
 	if err != nil {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review request filtering failed")
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("request_filtering", 0)
 	}
 	info.UpstreamRequestBodySize = int64(len(body))
 	responseAny, err := adaptor.DoRequest(c, info, bytes.NewReader(body))
 	if err != nil {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review upstream request failed")
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("upstream_request", 0)
 	}
 	response, ok := responseAny.(*http.Response)
 	if !ok || response == nil {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review upstream response unavailable")
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("upstream_response", 0)
 	}
 	defer service.CloseResponseBodyGracefully(response)
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-		return service.MessageAuditReviewModelResponse{}, fmt.Errorf("review upstream status: %d", response.StatusCode)
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("upstream_http", response.StatusCode)
 	}
 	response.Body = struct {
 		io.Reader
@@ -111,11 +111,20 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 		Closer: response.Body,
 	}
 	if _, apiErr := adaptor.DoResponse(c, response, info); apiErr != nil {
-		return service.MessageAuditReviewModelResponse{}, errors.New("review upstream response conversion failed")
+		return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("response_conversion", response.StatusCode)
 	}
 	result, err := parseMessageAuditReviewResponse(recorder.Body.Bytes())
+	result.HTTPStatus = response.StatusCode
+	if err != nil {
+		err = newMessageAuditReviewModelError("response_parse", response.StatusCode)
+	}
 	if messageAuditReviewNeedsTextToolFallback(input, result, err) {
-		return service.MessageAuditReviewModelResponse{ToolFallbackRequired: true}, nil
+		reason := "tool_ignored"
+		var modelErr *service.MessageAuditReviewModelError
+		if errors.As(err, &modelErr) {
+			reason = modelErr.Stage
+		}
+		return service.MessageAuditReviewModelResponse{ToolFallbackRequired: true, ToolFallbackReason: reason, HTTPStatus: response.StatusCode}, nil
 	}
 	if err != nil {
 		return service.MessageAuditReviewModelResponse{}, err
@@ -123,10 +132,15 @@ func callMessageAuditReviewModel(ctx context.Context, input service.MessageAudit
 	if input.TextToolFallback {
 		result, err = parseMessageAuditReviewTextToolResponse(result.Content)
 		if err != nil {
-			return service.MessageAuditReviewModelResponse{}, err
+			return service.MessageAuditReviewModelResponse{}, newMessageAuditReviewModelError("response_parse", response.StatusCode)
 		}
+		result.HTTPStatus = response.StatusCode
 	}
 	return result, nil
+}
+
+func newMessageAuditReviewModelError(stage string, httpStatus int) error {
+	return &service.MessageAuditReviewModelError{Stage: stage, HTTPStatus: httpStatus}
 }
 
 func messageAuditReviewNeedsTextToolFallback(input service.MessageAuditReviewModelRequest, response service.MessageAuditReviewModelResponse, responseErr error) bool {

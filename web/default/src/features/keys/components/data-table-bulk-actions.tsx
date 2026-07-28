@@ -16,9 +16,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type Table } from '@tanstack/react-table'
 import { UserArrowLeftRightIcon } from '@hugeicons/core-free-icons'
 import { HugeiconsIcon } from '@hugeicons/react'
+import type { Table } from '@tanstack/react-table'
 import { Copy, Trash2, Loader2 } from 'lucide-react'
 import { useState, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -35,9 +35,9 @@ import { copyToClipboard } from '@/lib/copy-to-clipboard'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 
-import { type ApiKey } from '../types'
-import { ApiKeysMultiDeleteDialog } from './api-keys-multi-delete-dialog'
+import type { ApiKey } from '../types'
 import { ApiKeysMigrateToAccountsDialog } from './api-keys-migrate-to-accounts-dialog'
+import { ApiKeysMultiDeleteDialog } from './api-keys-multi-delete-dialog'
 import { useApiKeys } from './api-keys-provider'
 
 type DataTableBulkActionsProps<TData> = {
@@ -128,10 +128,7 @@ export function DataTableBulkActions<TData>({
                 />
               }
             >
-              <HugeiconsIcon
-                icon={UserArrowLeftRightIcon}
-                strokeWidth={2}
-              />
+              <HugeiconsIcon icon={UserArrowLeftRightIcon} strokeWidth={2} />
             </TooltipTrigger>
             <TooltipContent>
               <p>{t('Migrate selected API keys to accounts')}</p>

@@ -18,11 +18,11 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { useQuery } from '@tanstack/react-query'
 
+import type { Option } from '@/components/multi-select'
 import {
   getDashboardGroups,
   getDashboardTokenOptions,
 } from '@/features/dashboard/api'
-import type { Option } from '@/components/multi-select'
 import { ROLE } from '@/lib/roles'
 import { useAuthStore } from '@/stores/auth-store'
 

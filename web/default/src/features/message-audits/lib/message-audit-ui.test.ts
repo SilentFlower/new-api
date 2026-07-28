@@ -9,6 +9,9 @@ import {
   getMessageAuditErrorMessage,
   getMessageAuditRequestFailureLabelKey,
   getMessageAuditReviewPollInterval,
+  getMessageAuditReviewCallOutcomeLabelKey,
+  getMessageAuditReviewErrorStageLabelKey,
+  getMessageAuditReviewFailureLabelKey,
   getMessageAuditReviewUncoveredLabelKey,
   getMessageAuditSessionMatchLabelKey,
   isMessageAuditCleanupActive,
@@ -174,6 +177,28 @@ describe('消息审计 AI 审核状态', () => {
     assert.equal(
       getMessageAuditReviewUncoveredLabelKey('content_unavailable'),
       'The source content was unavailable.'
+    )
+  })
+
+  test('调用诊断使用稳定阶段和结果标签', () => {
+    assert.equal(
+      getMessageAuditReviewErrorStageLabelKey('upstream_http'),
+      'Upstream response'
+    )
+    assert.equal(
+      getMessageAuditReviewErrorStageLabelKey('response_parse'),
+      'Response parsing'
+    )
+    assert.equal(
+      getMessageAuditReviewCallOutcomeLabelKey('fallback'),
+      'Switched to text Tool fallback'
+    )
+  })
+
+  test('Tool 调用上限使用独立失败说明', () => {
+    assert.equal(
+      getMessageAuditReviewFailureLabelKey('tool_call_limit'),
+      'The review stopped after reaching the configured Tool call limit.'
     )
   })
 })

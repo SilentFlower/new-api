@@ -41,6 +41,79 @@ func TestMessageAuditReviewToolRejectsFilesOutsideFixedScope(t *testing.T) {
 	var taskErr *messageAuditReviewTaskError
 	require.ErrorAs(t, err, &taskErr)
 	assert.Equal(t, "tool_scope_denied", taskErr.code)
+
+	_, _, err = executeMessageAuditReviewTool(MessageAuditReviewToolCall{
+		Name: "read_file", Arguments: `{"file_id":"request:allowed","cursor":1000001,"limit":1}`,
+	}, files, "gpt-4o")
+	require.ErrorAs(t, err, &taskErr)
+	assert.Equal(t, "invalid_tool_arguments", taskErr.code)
+}
+
+func TestMessageAuditReviewDiagnosticsSanitizesUnknownToolNames(t *testing.T) {
+	assert.Equal(t, "read_file", safeMessageAuditReviewToolName("read_file"))
+	assert.Equal(t, "unknown_tool", safeMessageAuditReviewToolName("secret-from-model"))
+}
+
+func TestMessageAuditReviewRegexToolSearchesOnlyFixedFiles(t *testing.T) {
+	files := []messageAuditReviewVirtualFile{
+		{
+			FileID: "request:allowed", Available: true,
+			Messages: []messageAuditReviewMessage{{Sequence: 3, PartCount: 1, Role: "user", ContentType: "text", Content: "Authorization: Bearer secret-value"}},
+		},
+		{
+			FileID: "request:other", Available: true,
+			Messages: []messageAuditReviewMessage{{Sequence: 5, PartCount: 1, Role: "user", ContentType: "text", Content: "Bearer should-not-match"}},
+		},
+	}
+
+	result, coverage, err := executeMessageAuditReviewTool(MessageAuditReviewToolCall{
+		Name: "search_files_regex", Arguments: `{"pattern":"authorization:\\s+bearer","file_ids":["request:allowed"],"cursor":0,"limit":10}`,
+	}, files, "gpt-4o")
+	require.NoError(t, err)
+	data, err := common.Marshal(result)
+	require.NoError(t, err)
+	assert.Contains(t, string(data), "secret-value")
+	assert.NotContains(t, string(data), "should-not-match")
+	require.Len(t, coverage, 1)
+	assert.Equal(t, "request:allowed", coverage[0].FileID)
+
+	_, _, err = executeMessageAuditReviewTool(MessageAuditReviewToolCall{
+		Name: "search_files_regex", Arguments: `{"pattern":"[","cursor":0,"limit":10}`,
+	}, files, "gpt-4o")
+	require.Error(t, err)
+	var taskErr *messageAuditReviewTaskError
+	require.ErrorAs(t, err, &taskErr)
+	assert.Equal(t, "invalid_tool_arguments", taskErr.code)
+}
+
+func TestMessageAuditReviewToolResultReportsConfiguredBudget(t *testing.T) {
+	data, tokens, err := marshalMessageAuditReviewToolResult(map[string]any{"matches": []string{"one"}}, 5, 100, 12, "gpt-4o")
+	require.NoError(t, err)
+	assert.Positive(t, tokens)
+	var payload struct {
+		ToolBudget struct {
+			UsedCalls      int `json:"used_calls"`
+			RemainingCalls int `json:"remaining_calls"`
+			UsedTokens     int `json:"used_tokens"`
+		} `json:"tool_budget"`
+	}
+	require.NoError(t, common.Unmarshal(data, &payload))
+	assert.Equal(t, 5, payload.ToolBudget.UsedCalls)
+	assert.Equal(t, 7, payload.ToolBudget.RemainingCalls)
+	assert.Equal(t, 100+tokens, payload.ToolBudget.UsedTokens)
+}
+
+func TestMessageAuditReviewConfigDefaultsAndBoundsToolCallLimit(t *testing.T) {
+	config, err := ParseMessageAuditReviewConfig("")
+	require.NoError(t, err)
+	assert.Equal(t, messageAuditReviewDefaultToolCallLimit, config.ToolCallLimit)
+
+	config, err = ParseMessageAuditReviewConfig(`{"tool_call_limit":64}`)
+	require.NoError(t, err)
+	assert.Equal(t, 64, config.ToolCallLimit)
+
+	_, err = ParseMessageAuditReviewConfig(`{"tool_call_limit":65}`)
+	require.Error(t, err)
 }
 
 func TestParseMessageAuditReviewOutputRequiresActuallyReadEvidence(t *testing.T) {
@@ -125,7 +198,7 @@ func TestPrepareMessageAuditReviewTextToolRequestIncludesProtocolInBudget(t *tes
 
 	boundaryInput := input
 	boundaryInput.TextToolFallback = false
-	boundaryInput.Messages = []dto.Message{{Role: "user", Content: strings.Repeat("token ", 13200)}}
+	boundaryInput.Messages = []dto.Message{{Role: "user", Content: strings.Repeat("token ", 13000)}}
 	require.NoError(t, ensureMessageAuditReviewContextBudget(boundaryInput.Messages, boundaryInput.Tools, boundaryInput.Model))
 	boundaryInput.TextToolFallback = true
 	preparedBoundary, err := prepareMessageAuditReviewModelRequest(boundaryInput)
@@ -192,15 +265,68 @@ func TestExecuteMessageAuditReviewCompletesTextToolFallbackLoop(t *testing.T) {
 		messageAuditReviewCallerMu.Unlock()
 	})
 
+	diagnostics := &MessageAuditReviewDiagnostics{}
 	result, err := executeMessageAuditReview(context.Background(), MessageAuditReviewPayload{
 		UserID: 21, AuditSessionID: "review-fallback-session", TargetRequestID: "review-fallback-request",
 		SourceRequestIDs: []string{"review-fallback-request"},
-	})
+	}, diagnostics, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "已完成受限审核", result.Summary)
 	assert.Equal(t, "none", result.RiskLevel)
 	require.Len(t, result.Coverage, 1)
 	assert.Equal(t, 3, callCount)
+	assert.Equal(t, 3, diagnostics.ModelCalls)
+	assert.Equal(t, 1, diagnostics.ToolCalls)
+	assert.True(t, diagnostics.TextToolFallback)
+}
+
+func TestExecuteMessageAuditReviewHonorsConfiguredToolCallLimit(t *testing.T) {
+	truncate(t)
+	manager := newMessageAuditTestManager(t)
+	previousManager := messageAuditManagerInst
+	messageAuditManagerInst = manager
+	t.Cleanup(func() {
+		messageAuditManagerInst = previousManager
+	})
+
+	now := time.Now().Unix()
+	record, err := manager.encryptCapture(&messageAuditCaptureEvent{
+		request: model.MessageAuditRequest{
+			RequestID: "review-limit-request", AuditSessionID: "review-limit-session", UserID: 22,
+			Status: "succeeded", AuditStatus: "captured", CapturedAt: now, CreatedAt: now, UpdatedAt: now,
+		},
+		entries: []messageAuditPlaintext{{Role: "user", ContentType: "message", Content: "需要审核的文本"}},
+	})
+	require.NoError(t, err)
+	_, err = model.CreateMessageAuditCapture(record)
+	require.NoError(t, err)
+
+	messageAuditReviewCallerMu.Lock()
+	previousCaller := messageAuditReviewCaller
+	messageAuditReviewCaller = func(_ context.Context, input MessageAuditReviewModelRequest) (MessageAuditReviewModelResponse, error) {
+		assert.Contains(t, input.Messages[1].StringContent(), "最多调用 1 次 Tool")
+		return MessageAuditReviewModelResponse{ToolCalls: []MessageAuditReviewToolCall{
+			{ID: "call-1", Name: "list_files", Arguments: `{}`},
+			{ID: "call-2", Name: "list_files", Arguments: `{}`},
+		}}, nil
+	}
+	messageAuditReviewCallerMu.Unlock()
+	t.Cleanup(func() {
+		messageAuditReviewCallerMu.Lock()
+		messageAuditReviewCaller = previousCaller
+		messageAuditReviewCallerMu.Unlock()
+	})
+
+	diagnostics := &MessageAuditReviewDiagnostics{}
+	_, err = executeMessageAuditReview(context.Background(), MessageAuditReviewPayload{
+		UserID: 22, AuditSessionID: "review-limit-session", TargetRequestID: "review-limit-request",
+		SourceRequestIDs: []string{"review-limit-request"}, Config: MessageAuditReviewConfig{ToolCallLimit: 1},
+	}, diagnostics, nil)
+	require.Error(t, err)
+	var taskErr *messageAuditReviewTaskError
+	require.ErrorAs(t, err, &taskErr)
+	assert.Equal(t, "tool_call_limit", taskErr.code)
+	assert.Equal(t, 2, diagnostics.ToolCalls)
 }
 
 func TestMessageAuditReviewResultAADIsBoundToUser(t *testing.T) {
@@ -239,6 +365,10 @@ func TestGetMessageAuditReviewResponseExposesStableFailureCode(t *testing.T) {
 	claimed, ok, err := model.ClaimSystemTask(task.ID, task.Type, "runner-review", now+60)
 	require.NoError(t, err)
 	require.True(t, ok)
+	require.NoError(t, model.UpdateSystemTaskState(claimed.TaskID, "runner-review", MessageAuditReviewDiagnostics{
+		ChannelID: 8, Model: "deepseek-chat", StartedAt: now, ModelCalls: 1,
+		Calls: []MessageAuditReviewCallDiagnostic{{Attempt: 1, Phase: "review", Protocol: "native_tools", Outcome: "failed", HTTPStatus: 400, ErrorStage: "upstream_http"}},
+	}))
 	require.NoError(t, model.FinishSystemTask(claimed.TaskID, "runner-review", model.SystemTaskStatusFailed, nil, "tool_unsupported"))
 	require.NoError(t, model.DB.Create(&model.MessageAuditReview{
 		AuditSessionID: "session-failed-review", CurrentTaskID: task.TaskID,
@@ -249,4 +379,9 @@ func TestGetMessageAuditReviewResponseExposesStableFailureCode(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "tool_unsupported", response.FailureCode)
 	assert.Equal(t, "high", response.RiskLevel)
+	require.NotNil(t, response.Diagnostics)
+	assert.Equal(t, "deepseek-chat", response.Diagnostics.Model)
+	require.Len(t, response.Diagnostics.Calls, 1)
+	assert.Equal(t, 400, response.Diagnostics.Calls[0].HTTPStatus)
+	assert.Equal(t, "upstream_http", response.Diagnostics.Calls[0].ErrorStage)
 }

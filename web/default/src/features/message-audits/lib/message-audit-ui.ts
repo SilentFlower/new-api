@@ -152,6 +152,7 @@ export function getMessageAuditReviewFailureLabelKey(code: string): string {
     case 'tool_unsupported':
       return 'The selected model did not use the required audit tools.'
     case 'tool_call_limit':
+      return 'The review stopped after reaching the configured Tool call limit.'
     case 'tool_token_limit':
     case 'context_limit':
       return 'The review stopped after reaching its protected context limit.'
@@ -164,6 +165,87 @@ export function getMessageAuditReviewFailureLabelKey(code: string): string {
       return 'The selected review channel request failed.'
     default:
       return 'The AI review could not be completed.'
+  }
+}
+
+/**
+ * 返回审核模型调用阶段对应的 i18n 文案键。
+ *
+ * @param phase 服务端记录的调用阶段。
+ * @returns 常规审核或格式修复对应的英文源键。
+ */
+export function getMessageAuditReviewCallPhaseLabelKey(phase: string): string {
+  return phase === 'format_repair' ? 'Format repair' : 'Review pass'
+}
+
+/**
+ * 返回审核模型调用协议对应的 i18n 文案键。
+ *
+ * @param protocol 服务端记录的工具协议。
+ * @returns 原生 Tool 或文本回退对应的英文源键。
+ */
+export function getMessageAuditReviewProtocolLabelKey(
+  protocol: string
+): string {
+  return protocol === 'text_tool_fallback'
+    ? 'Text Tool fallback'
+    : 'Native Tool calls'
+}
+
+/**
+ * 返回审核模型调用结果对应的 i18n 文案键。
+ *
+ * @param outcome 服务端记录的调用结果。
+ * @returns 调用结果对应的英文源键。
+ */
+export function getMessageAuditReviewCallOutcomeLabelKey(
+  outcome: string
+): string {
+  switch (outcome) {
+    case 'tool_calls':
+      return 'Tools requested'
+    case 'final':
+      return 'Final result returned'
+    case 'fallback':
+      return 'Switched to text Tool fallback'
+    case 'failed':
+      return 'Model call failed'
+    default:
+      return 'Model call completed'
+  }
+}
+
+/**
+ * 返回脱敏失败阶段对应的 i18n 文案键。
+ *
+ * @param stage relay 返回的稳定失败阶段。
+ * @returns 可供管理员理解的阶段英文源键。
+ */
+export function getMessageAuditReviewErrorStageLabelKey(stage: string): string {
+  switch (stage) {
+    case 'channel_lookup':
+    case 'channel_config':
+      return 'Review channel configuration'
+    case 'channel_setup':
+    case 'model_mapping':
+    case 'adaptor_unavailable':
+      return 'Review channel setup'
+    case 'request_conversion':
+    case 'request_serialization':
+    case 'request_filtering':
+      return 'Review request preparation'
+    case 'upstream_request':
+      return 'Upstream connection'
+    case 'upstream_response':
+    case 'upstream_http':
+      return 'Upstream response'
+    case 'response_conversion':
+    case 'response_parse':
+      return 'Response parsing'
+    case 'tool_ignored':
+      return 'Native Tool support'
+    default:
+      return 'Unknown stage'
   }
 }
 

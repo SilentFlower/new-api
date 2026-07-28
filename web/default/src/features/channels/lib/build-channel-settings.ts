@@ -144,10 +144,7 @@ export const BUILD_CHANNEL_OTHER_SETTING_FORM_FIELDS = [
 ] satisfies (keyof ChannelFormValues)[]
 
 type BuildChannelSettingValues = Required<
-  Pick<
-    ChannelFormValues,
-    (typeof BUILD_CHANNEL_SETTING_FORM_FIELDS)[number]
-  >
+  Pick<ChannelFormValues, (typeof BUILD_CHANNEL_SETTING_FORM_FIELDS)[number]>
 >
 
 type BuildChannelOtherSettingValues = Required<
@@ -280,9 +277,7 @@ export function parseBuildChannelSettingDefaults(
     web_search_api_key_configured: webSearch.api_key_configured === true,
     web_search_clear_api_key: false,
     web_search_max_results: minNumberOrDefault(webSearch.max_results, 1, 5),
-    web_search_search_depth: normalizeTavilySearchDepth(
-      webSearch.search_depth
-    ),
+    web_search_search_depth: normalizeTavilySearchDepth(webSearch.search_depth),
     web_search_freshness: normalizeAnySearchFreshness(webSearch.freshness),
     web_search_content_types: Array.isArray(webSearch.content_types)
       ? webSearch.content_types.join(',')

@@ -82,7 +82,9 @@ export async function getFlowQuotaDates(
 }
 
 export async function getDashboardGroups(): Promise<string[]> {
-  const res = await api.get<{ success: boolean; data?: string[] }>('/api/group/')
+  const res = await api.get<{ success: boolean; data?: string[] }>(
+    '/api/group/'
+  )
   return res.data.success ? (res.data.data ?? []) : []
 }
 

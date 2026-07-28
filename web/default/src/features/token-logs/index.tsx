@@ -17,9 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { PublicLayout } from '@/components/layout'
-import {
-  UsageLogsProvider,
-} from '@/features/usage-logs/components/usage-logs-provider'
+import { UsageLogsProvider } from '@/features/usage-logs/components/usage-logs-provider'
 
 import { AuthPanel } from './components/auth-panel'
 import { TokenLogsWorkspace } from './components/token-logs-workspace'

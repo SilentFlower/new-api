@@ -36,6 +36,13 @@ type MessageAuditReviewModelResponse struct {
 	Content              string
 	ToolCalls            []MessageAuditReviewToolCall
 	ToolFallbackRequired bool
+	ToolFallbackReason   string
+	HTTPStatus           int
+}
+
+type MessageAuditReviewModelError struct {
+	Stage      string
+	HTTPStatus int
 }
 ```
 
@@ -64,9 +71,12 @@ func ensureMessageAuditReviewContextBudget(messages []dto.Message, tools []dto.T
 #### AI 重审 Tool 降级
 
 - AI 重审消息和工具定义由 service 统一拥有；relay 只负责一次模型调用、响应解析和返回是否需要文本 Tool 降级的信号。
-- 原生 Tool 被渠道忽略、无法解析或未产生所需 Tool Call 时，service 可以切换到文本 Tool 协议；只允许执行定义好的 `list_files`、`search_files` 和 `read_file`。
+- 原生 Tool 被渠道忽略、无法解析或未产生所需 Tool Call 时，service 可以切换到文本 Tool 协议；只允许执行定义好的 `list_files`、`search_files`、`search_files_regex` 和 `read_file`。
 - 文本 Tool 协议必须继续使用任务创建时冻结的文件清单、游标和读取上限。模型输出或审计材料中的指令不能改变系统提示词、可调用工具或文件范围。
-- AI 重审请求本身不得进入消息审计，AI 模型原始响应不得持久化；只保存结构化审核结果、状态和稳定失败码。
+- `search_files_regex` 只能使用 Go RE2 在任务内存中的固定虚拟文件执行，并限制表达式长度、文件 ID、游标和返回条数；禁止启动系统命令或访问真实文件系统。
+- Tool 调用上限由 `message_audit_review.config.tool_call_limit` 配置，范围 `1-64`、默认 `24`；旧配置缺少该字段时必须归一化为默认值，并在任务创建时冻结。
+- AI 重审请求本身不得进入消息审计，AI 模型原始响应不得持久化；只保存结构化审核结果、状态、稳定失败码和脱敏调用诊断。
+- 脱敏诊断可以记录渠道、模型、耗时、模型/Tool 调用次数、Tool Token、协议、HTTP 状态和稳定失败阶段；不得记录正文、Tool 参数、Tool 返回、模型输出或上游错误正文。
 
 #### 上下文预算
 

@@ -35,3 +35,12 @@ func TestParseMessageAuditReviewTextToolResponse(t *testing.T) {
 	assert.Empty(t, final.ToolCalls)
 	assert.Contains(t, final.Content, `"summary":"done"`)
 }
+
+func TestMessageAuditReviewModelErrorKeepsOnlySafeStageAndStatus(t *testing.T) {
+	err := newMessageAuditReviewModelError("upstream_http", 429)
+	var modelErr *service.MessageAuditReviewModelError
+	require.ErrorAs(t, err, &modelErr)
+	assert.Equal(t, "upstream_http", modelErr.Stage)
+	assert.Equal(t, 429, modelErr.HTTPStatus)
+	assert.NotContains(t, err.Error(), "response body")
+}

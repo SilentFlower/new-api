@@ -79,8 +79,12 @@ import {
   getMessageAuditErrorMessage,
   getMessageAuditRequestFailureLabelKey,
   getMessageAuditReviewCategoryLabelKey,
+  getMessageAuditReviewCallOutcomeLabelKey,
+  getMessageAuditReviewCallPhaseLabelKey,
+  getMessageAuditReviewErrorStageLabelKey,
   getMessageAuditReviewFailureLabelKey,
   getMessageAuditReviewPollInterval,
+  getMessageAuditReviewProtocolLabelKey,
   getMessageAuditReviewStatusLabelKey,
   getMessageAuditReviewUncoveredLabelKey,
   getMessageAuditRiskLabelKey,
@@ -226,6 +230,95 @@ function MessageAuditReviewSection(props: { auditSessionId: string }) {
             )}
           </AlertDescription>
         </Alert>
+      )}
+
+      {review?.diagnostics && (
+        <section className='space-y-3 border-y py-3 text-sm'>
+          <h4 className='text-xs font-medium'>{t('Review diagnostics')}</h4>
+          <dl className='grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[auto_1fr_auto_1fr]'>
+            <dt className='text-muted-foreground'>{t('Review channel')}</dt>
+            <dd>#{review.diagnostics.channel_id}</dd>
+            <dt className='text-muted-foreground'>{t('Review model')}</dt>
+            <dd className='break-all'>{review.diagnostics.model}</dd>
+            <dt className='text-muted-foreground'>{t('Model calls')}</dt>
+            <dd>{review.diagnostics.model_calls}</dd>
+            <dt className='text-muted-foreground'>{t('Tool calls')}</dt>
+            <dd>
+              {review.diagnostics.tool_calls} /{' '}
+              {review.diagnostics.tool_call_limit}
+            </dd>
+            <dt className='text-muted-foreground'>{t('Tool tokens')}</dt>
+            <dd>
+              {review.diagnostics.tool_tokens} /{' '}
+              {review.diagnostics.tool_token_limit}
+            </dd>
+            <dt className='text-muted-foreground'>{t('Duration')}</dt>
+            <dd>{review.diagnostics.duration_ms} ms</dd>
+            <dt className='text-muted-foreground'>{t('Text Tool fallback')}</dt>
+            <dd>
+              {review.diagnostics.text_tool_fallback
+                ? t('Enabled')
+                : t('Disabled')}
+            </dd>
+          </dl>
+          {review.diagnostics.calls.length > 0 && (
+            <ol className='divide-y border-t'>
+              {review.diagnostics.calls.map((call) => (
+                <li key={call.attempt} className='space-y-2 py-3'>
+                  <div className='flex flex-wrap items-center gap-2'>
+                    <span className='font-mono text-xs'>#{call.attempt}</span>
+                    <Badge variant='outline'>
+                      {t(
+                        getMessageAuditReviewCallOutcomeLabelKey(call.outcome)
+                      )}
+                    </Badge>
+                    <span className='text-muted-foreground text-xs'>
+                      {t(getMessageAuditReviewCallPhaseLabelKey(call.phase))} ·{' '}
+                      {t(getMessageAuditReviewProtocolLabelKey(call.protocol))}
+                    </span>
+                  </div>
+                  <dl className='grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[auto_1fr]'>
+                    <dt className='text-muted-foreground'>{t('Duration')}</dt>
+                    <dd>{call.duration_ms} ms</dd>
+                    {call.http_status > 0 && (
+                      <>
+                        <dt className='text-muted-foreground'>HTTP</dt>
+                        <dd>{call.http_status}</dd>
+                      </>
+                    )}
+                    {call.error_stage && (
+                      <>
+                        <dt className='text-muted-foreground'>
+                          {t('Failure stage')}
+                        </dt>
+                        <dd>
+                          {t(
+                            getMessageAuditReviewErrorStageLabelKey(
+                              call.error_stage
+                            )
+                          )}{' '}
+                          <code className='text-muted-foreground'>
+                            {call.error_stage}
+                          </code>
+                        </dd>
+                      </>
+                    )}
+                    {call.tool_names.length > 0 && (
+                      <>
+                        <dt className='text-muted-foreground'>
+                          {t('Tools used')}
+                        </dt>
+                        <dd className='font-mono break-all'>
+                          {call.tool_names.join(', ')}
+                        </dd>
+                      </>
+                    )}
+                  </dl>
+                </li>
+              ))}
+            </ol>
+          )}
+        </section>
       )}
 
       {review?.result && (

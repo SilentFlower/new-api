@@ -109,6 +109,36 @@ export type MessageAuditReviewResult = {
   uncovered: { file_id: string; reason: string }[]
 }
 
+export type MessageAuditReviewCallDiagnostic = {
+  attempt: number
+  phase: string
+  protocol: string
+  outcome: string
+  duration_ms: number
+  tool_call_count: number
+  tool_names: string[]
+  http_status: number
+  error_stage: string
+}
+
+export type MessageAuditReviewDiagnostics = {
+  channel_id: number
+  model: string
+  started_at: number
+  finished_at: number
+  duration_ms: number
+  model_calls: number
+  tool_calls: number
+  tool_tokens: number
+  tool_call_limit: number
+  tool_token_limit: number
+  input_token_limit: number
+  text_tool_fallback: boolean
+  stage: string
+  failure_code: string
+  calls: MessageAuditReviewCallDiagnostic[]
+}
+
 export type MessageAuditReview = {
   audit_session_id: string
   status: MessageAuditReviewStatus
@@ -121,11 +151,12 @@ export type MessageAuditReview = {
   review_model: string
   failure_code: string
   reviewed_at: number
+  diagnostics?: MessageAuditReviewDiagnostics
   result?: MessageAuditReviewResult
 }
 
 export type MessageAuditReviewOptions = {
-  config: { channel_id: number; model: string }
+  config: { channel_id: number; model: string; tool_call_limit: number }
   channels: { id: number; name: string; models: string[] }[]
 }
 
@@ -136,7 +167,7 @@ export type MessageAuditReviewTask = SystemTask<
     source_request_ids: string[]
     user_id: number
     operator_id: number
-    config: { channel_id: number; model: string }
+    config: { channel_id: number; model: string; tool_call_limit: number }
   },
   null,
   null

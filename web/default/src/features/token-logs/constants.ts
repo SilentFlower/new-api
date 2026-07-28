@@ -18,11 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { LOG_TYPE_ENUM } from '@/features/usage-logs/constants'
 
-import type {
-  TokenLogChartData,
-  TokenLogPageData,
-  TokenLogStat,
-} from './types'
+import type { TokenLogChartData, TokenLogPageData, TokenLogStat } from './types'
 
 export const DEFAULT_PAGE_DATA: TokenLogPageData = {
   items: [],

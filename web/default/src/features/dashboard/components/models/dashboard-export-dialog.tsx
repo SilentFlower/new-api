@@ -185,7 +185,9 @@ export function DashboardExportDialog(props: DashboardExportDialogProps) {
           </div>
 
           <div className='grid gap-2'>
-            <Label htmlFor='dashboard-export-token-names'>{t('API Keys')}</Label>
+            <Label htmlFor='dashboard-export-token-names'>
+              {t('API Keys')}
+            </Label>
             <MultiSelect
               id='dashboard-export-token-names'
               options={filterDashboardTokenOptionsByGroups(

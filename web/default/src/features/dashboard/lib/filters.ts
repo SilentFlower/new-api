@@ -75,13 +75,13 @@ export function cleanFilters<T extends Record<string, unknown>>(
       continue
     }
     if (Array.isArray(value)) {
-      const normalized = Array.from(
-        new Set(
+      const normalized = [
+        ...new Set(
           value
             .map((item) => String(item).trim())
             .filter((item) => item.length > 0)
-        )
-      )
+        ),
+      ]
       if (normalized.length > 0) {
         cleaned[key as keyof T] = normalized as T[keyof T]
       }
@@ -210,7 +210,9 @@ export function buildDashboardTokenOptionValue(
 }
 
 export function extractDashboardTokenName(value: string): string {
-  return String(value || '').split(DASHBOARD_TOKEN_VALUE_SEPARATOR)[0].trim()
+  return String(value || '')
+    .split(DASHBOARD_TOKEN_VALUE_SEPARATOR)[0]
+    .trim()
 }
 
 function getDashboardTokenOptionGroup(option: DashboardTokenOption): string {

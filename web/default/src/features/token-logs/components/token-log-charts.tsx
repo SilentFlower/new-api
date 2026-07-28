@@ -126,7 +126,7 @@ export function TokenLogCharts(props: {
                 <button
                   key={modelName}
                   type='button'
-                  className='w-full rounded-md px-1 py-0.5 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40'
+                  className='hover:bg-muted/60 focus-visible:ring-ring/40 w-full rounded-md px-1 py-0.5 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none'
                   onClick={() => props.onSelectModel(modelName)}
                 >
                   <div className='flex flex-col gap-1'>{rowContent}</div>
@@ -151,19 +151,19 @@ export function TokenLogCharts(props: {
             </p>
           ) : (
             <div className='grid h-52 grid-cols-[4.5rem_minmax(0,1fr)] grid-rows-[minmax(0,1fr)_2rem] gap-x-2 overflow-hidden'>
-              <div className='col-start-1 row-start-1 flex h-full flex-col justify-between py-1 text-right text-[10px] leading-none text-muted-foreground'>
+              <div className='text-muted-foreground col-start-1 row-start-1 flex h-full flex-col justify-between py-1 text-right text-[10px] leading-none'>
                 {yTicks.map((tick) => (
                   <span key={tick} className='truncate'>
                     {formatLogQuota(tick)}
                   </span>
                 ))}
               </div>
-              <div className='relative col-start-2 row-start-1 min-w-0 overflow-hidden rounded-sm border-b border-l border-border/70 pl-2 pr-1 pt-1'>
+              <div className='border-border/70 relative col-start-2 row-start-1 min-w-0 overflow-hidden rounded-sm border-b border-l pt-1 pr-1 pl-2'>
                 <div className='pointer-events-none absolute inset-x-2 inset-y-1 flex flex-col justify-between'>
                   {[0, 1, 2, 3, 4].map((line) => (
                     <span
                       key={line}
-                      className='border-t border-dashed border-border/70'
+                      className='border-border/70 border-t border-dashed'
                     />
                   ))}
                 </div>
@@ -204,7 +204,7 @@ export function TokenLogCharts(props: {
                   })}
                 </div>
               </div>
-              <div className='col-start-2 row-start-2 flex min-w-0 gap-1 pl-2 pr-1 pt-1'>
+              <div className='col-start-2 row-start-2 flex min-w-0 gap-1 pt-1 pr-1 pl-2'>
                 {trendItems.map((item, index) => {
                   const showLabel =
                     index === 0 ||
@@ -213,7 +213,7 @@ export function TokenLogCharts(props: {
                   return (
                     <span
                       key={`${item.created_at}-${item.end_at}`}
-                      className='min-w-0 flex-1 truncate text-center text-[10px] leading-tight text-muted-foreground'
+                      className='text-muted-foreground min-w-0 flex-1 truncate text-center text-[10px] leading-tight'
                     >
                       {showLabel
                         ? formatTimestampToDate(item.created_at).slice(5, 16)

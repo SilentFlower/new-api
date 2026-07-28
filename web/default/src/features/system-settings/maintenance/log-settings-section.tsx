@@ -86,6 +86,7 @@ const logSettingsSchema = z.object({
   MessageAuditRetentionDays: z.number().int().min(1).max(30),
   MessageAuditReviewChannelID: z.number().int().min(0),
   MessageAuditReviewModel: z.string(),
+  MessageAuditReviewToolCallLimit: z.number().int().min(1).max(64),
 })
 
 type LogSettingsFormValues = z.infer<typeof logSettingsSchema>
@@ -107,22 +108,39 @@ type ServerLogInfo = {
 }
 
 const HOURS_IN_DAY = 24
+const DEFAULT_MESSAGE_AUDIT_REVIEW_TOOL_CALL_LIMIT = 24
 
 function parseMessageAuditReviewConfig(raw: string): {
   channelID: number
   model: string
+  toolCallLimit: number
 } {
   try {
-    const value = JSON.parse(raw) as { channel_id?: unknown; model?: unknown }
+    const value = JSON.parse(raw) as {
+      channel_id?: unknown
+      model?: unknown
+      tool_call_limit?: unknown
+    }
     return {
       channelID:
         typeof value.channel_id === 'number' && value.channel_id > 0
           ? value.channel_id
           : 0,
       model: typeof value.model === 'string' ? value.model : '',
+      toolCallLimit:
+        typeof value.tool_call_limit === 'number' &&
+        Number.isInteger(value.tool_call_limit) &&
+        value.tool_call_limit >= 1 &&
+        value.tool_call_limit <= 64
+          ? value.tool_call_limit
+          : DEFAULT_MESSAGE_AUDIT_REVIEW_TOOL_CALL_LIMIT,
     }
   } catch {
-    return { channelID: 0, model: '' }
+    return {
+      channelID: 0,
+      model: '',
+      toolCallLimit: DEFAULT_MESSAGE_AUDIT_REVIEW_TOOL_CALL_LIMIT,
+    }
   }
 }
 
@@ -186,6 +204,7 @@ export function LogSettingsSection({
       MessageAuditRetentionDays: defaultMessageAuditRetentionDays,
       MessageAuditReviewChannelID: defaultReviewConfig.channelID,
       MessageAuditReviewModel: defaultReviewConfig.model,
+      MessageAuditReviewToolCallLimit: defaultReviewConfig.toolCallLimit,
     },
   })
 
@@ -248,6 +267,7 @@ export function LogSettingsSection({
       MessageAuditRetentionDays: defaultMessageAuditRetentionDays,
       MessageAuditReviewChannelID: defaultReviewConfig.channelID,
       MessageAuditReviewModel: defaultReviewConfig.model,
+      MessageAuditReviewToolCallLimit: defaultReviewConfig.toolCallLimit,
     })
   }, [
     defaultEnabled,
@@ -385,6 +405,7 @@ export function LogSettingsSection({
         ? JSON.stringify({
             channel_id: values.MessageAuditReviewChannelID,
             model: values.MessageAuditReviewModel,
+            tool_call_limit: values.MessageAuditReviewToolCallLimit,
           })
         : ''
     const currentReviewConfig =
@@ -392,6 +413,7 @@ export function LogSettingsSection({
         ? JSON.stringify({
             channel_id: defaultReviewConfig.channelID,
             model: defaultReviewConfig.model,
+            tool_call_limit: defaultReviewConfig.toolCallLimit,
           })
         : ''
     if (nextReviewConfig !== currentReviewConfig) {
@@ -679,6 +701,32 @@ export function LogSettingsSection({
                 )}
               />
             </div>
+            <FormField
+              control={form.control}
+              name='MessageAuditReviewToolCallLimit'
+              render={({ field }) => (
+                <div className='grid max-w-xs gap-2'>
+                  <FormLabel>{t('AI review Tool call limit')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      min={1}
+                      max={64}
+                      value={field.value}
+                      onChange={(event) =>
+                        field.onChange(Number(event.target.value))
+                      }
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Allows 1 to 64 Tool calls per review. Context, Tool token, and timeout limits still apply.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </div>
+              )}
+            />
           </SettingsControlGroup>
 
           <SettingsControlGroup className='space-y-3'>

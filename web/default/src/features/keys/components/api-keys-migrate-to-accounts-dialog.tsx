@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { type Table } from '@tanstack/react-table'
+import type { Table } from '@tanstack/react-table'
 import { Loader2 } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -37,7 +37,7 @@ import {
 
 import { migrateApiKeysToAccounts } from '../api'
 import { ERROR_MESSAGES } from '../constants'
-import { type ApiKey, type ApiKeyMigrationResult } from '../types'
+import type { ApiKey, ApiKeyMigrationResult } from '../types'
 import { useApiKeys } from './api-keys-provider'
 
 interface ApiKeysMigrateToAccountsDialogProps<TData> {
@@ -183,9 +183,7 @@ export function ApiKeysMigrateToAccountsDialog<TData>({
                   <TableCell>
                     <StatusBadge
                       label={
-                        result.status === 'success'
-                          ? t('Success')
-                          : t('Failed')
+                        result.status === 'success' ? t('Success') : t('Failed')
                       }
                       variant={
                         result.status === 'success' ? 'success' : 'danger'

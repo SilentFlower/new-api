@@ -454,18 +454,19 @@ system_tasks.active_key           message_audit_review:<audit_session_id>
 
 ### 3. Contracts
 
-- `message_audit_review.config` 是系统设置中的单个 JSON 固定值：`{"channel_id":<int>,"model":"<string>"}`。渠道必须启用，模型必须属于该渠道；第一版不提供自定义审核提示词或业务规则输入。
+- `message_audit_review.config` 是系统设置中的单个 JSON 固定值：`{"channel_id":<int>,"model":"<string>","tool_call_limit":<int>}`。渠道必须启用，模型必须属于该渠道；Tool 调用上限范围为 `1-64`、默认 `24`，旧配置缺失时按默认值归一化；第一版不提供自定义审核提示词或业务规则输入。
 - `review-options` 只返回启用渠道的 `id/name/models` 和当前配置，不得返回渠道密钥、Base URL 或完整渠道设置。
 - 触发时固定最新请求和全部来源请求 ID。每个 `session_match=compressed` 断点选择其 `parent_request_id`，最后加入目标最新请求；任务执行期间的新请求不得进入本次资料集。
 - 同会话活动任务使用唯一 `active_key` 幂等。`SystemTask` 和 `MessageAuditReview` 的 pending 状态必须在同一事务中创建，提交后才能唤醒执行器。
 - 重审期间保留最后一次成功结果、风险、模型、时间和加密正文；pending/running/failed 只替换当前任务状态。只有新任务成功后才能原子替换结果归属。
-- 虚拟文件只存在于任务内存中，文件 ID 固定为 `request:<request_id>`。初始模型输入只包含内置规则和文件清单；正文只能通过 `list_files`、`read_file`、`search_files` 读取，不能访问真实路径、网络、任意数据库查询或其他会话。
-- 单次上下文、输出预留、虚拟分片、Tool 调用次数、单次 Tool 返回和 Tool 总返回 Token 使用代码内固定上限。达到上限必须以稳定错误码失败，不能静默截断后声称完整审核。
+- 虚拟文件只存在于任务内存中，文件 ID 固定为 `request:<request_id>`。初始模型输入只包含内置规则和文件清单；正文只能通过 `list_files`、`read_file`、`search_files`、`search_files_regex` 读取，不能访问真实路径、网络、任意数据库查询或其他会话。正则检索只能使用 Go RE2 在固定虚拟文件内执行。
+- 单次上下文、输出预留、虚拟分片、单次 Tool 返回和 Tool 总返回 Token 使用代码内固定上限；Tool 调用次数使用任务创建时冻结的配置上限。达到上限必须以稳定错误码失败，不能静默截断后声称完整审核。
 - 长消息可以拆成共享原 `sequence` 的多个虚拟分片。覆盖范围由服务端按 `file_id + start_cursor + end_cursor` 记录；引用一个原消息序号前，该消息对应的所有虚拟分片都必须实际读到。
 - 完整审核结果使用从 `MESSAGE_AUDIT_SECRET` 派生的独立审核密钥加密，AAD 必须绑定 `user_id + audit_session_id + reviewed_request_id`。仅允许为首次发布前的本地记录保留旧 AAD 解密回退。
 - 内部审核调用直接使用所选渠道 adaptor，不经过公开 `controller.Relay`，不执行预扣/结算、消费日志、Token/成本记录或 `CaptureMessageAudit` / `FinalizeMessageAudit`。
 - 内部 Gin 上下文必须调用 `logger.SuppressSensitiveContentLogs`；审核提示词、Tool 参数/结果、模型输出和上游错误正文均不得进入普通应用日志。管理审计只记录会话 ID、任务 ID、操作者、状态和稳定错误类别。
-- 列表只返回审核状态、旧风险、新鲜度和时间，并每 5 秒刷新以收敛 finalize 后模型名；完整摘要、依据、覆盖、未覆盖、实际审核模型和失败类别只在会话详情展示。
+- 审核任务可以在 `SystemTask.state` 保存脱敏调用诊断，包括渠道、模型、开始/结束时间、耗时、模型/Tool 调用次数、Tool Token、文本协议回退、HTTP 状态和稳定失败阶段；不得保存正文、Tool 参数、Tool 返回、模型输出或上游错误正文。
+- 列表只返回审核状态、旧风险、新鲜度和时间，不自动刷新；完整摘要、依据、覆盖、未覆盖、实际审核模型、失败类别和脱敏调用诊断只在会话详情展示。
 - 删除任一结果来源或活动任务固定来源时，必须在清理事务内删除 review source、review、当前 SystemTask 和 SystemTaskLock。任务完成前必须再次确认来源仍存在。
 
 ### 4. Validation & Error Matrix
