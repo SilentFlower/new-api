@@ -95,7 +95,11 @@
 
 ### Main Changes
 
-(Add details)
+- 增加入站消息审计持久化、会话追溯、失败原因安全展示、图片生成/编辑请求审计。
+- 增加 Root-only AI 辅助审核：固定渠道/模型配置、默认合并上下文、可选 Tool 模式、受限虚拟文件读取、结构化 JSON 输出校验、加密保存结果。
+- 优化高频消息审计写入、会话匹配、状态统计缓存、手动刷新和快速清空路径，降低 MySQL 压力。
+- 完善 AI 审核调用诊断、上游失败阶段定位、前端详情弹窗展示、滚动可见性和多语言文案。
+- 补充 backend/frontend/spec 文档，完成 release 审计并归档 Trellis 任务。
 
 ### Git Commits
 
@@ -106,7 +110,7 @@
 
 ### Testing
 
-- [OK] (Add test results)
+- [OK] 本轮最终 Check-All 已通过；相关 backend/frontend 定向测试、i18n 同步、typecheck/lint/build 在业务提交前完成。
 
 ### Status
 
@@ -895,6 +899,50 @@
 | Hash | Message |
 |------|---------|
 | `b74db1362 10127a30e 2c76f9235` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
+
+
+## Session 27: 完成消息审计 AI 审核收尾
+
+**Date**: 2026-07-29
+**Task**: 完成消息审计 AI 审核收尾
+**Branch**: `build-bak`
+
+### Summary
+
+完成消息审计入站内容持久化、会话追溯、AI 辅助审核、MySQL 压力优化、失败原因展示、图片请求审计、AI 审核 Tool/合并上下文模式、调用诊断、结构化 JSON 输出稳定化和前端详情展示优化；业务提交已推送，收尾阶段补充 release 审计并归档任务。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b74db1362` | (see git log) |
+| `10127a30e` | (see git log) |
+| `2c76f9235` | (see git log) |
+| `50cc07632` | (see git log) |
+| `638bb20af` | (see git log) |
+| `fb672fdac` | (see git log) |
+| `2cc1e2d2a` | (see git log) |
+| `df3028009` | (see git log) |
+| `8e394df5c` | (see git log) |
+| `bc287db4d` | (see git log) |
+| `caf44f862` | (see git log) |
+| `b9da2d366` | (see git log) |
 
 ### Testing
 
