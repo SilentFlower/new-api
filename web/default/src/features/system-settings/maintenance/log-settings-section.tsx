@@ -87,6 +87,7 @@ const logSettingsSchema = z.object({
   MessageAuditReviewChannelID: z.number().int().min(0),
   MessageAuditReviewModel: z.string(),
   MessageAuditReviewToolCallLimit: z.number().int().positive(),
+  MessageAuditReviewContextMode: z.enum(['merged', 'tool']),
 })
 
 type LogSettingsFormValues = z.infer<typeof logSettingsSchema>
@@ -109,17 +110,20 @@ type ServerLogInfo = {
 
 const HOURS_IN_DAY = 24
 const DEFAULT_MESSAGE_AUDIT_REVIEW_TOOL_CALL_LIMIT = 24
+const DEFAULT_MESSAGE_AUDIT_REVIEW_CONTEXT_MODE = 'merged'
 
 function parseMessageAuditReviewConfig(raw: string): {
   channelID: number
   model: string
   toolCallLimit: number
+  contextMode: 'merged' | 'tool'
 } {
   try {
     const value = JSON.parse(raw) as {
       channel_id?: unknown
       model?: unknown
       tool_call_limit?: unknown
+      context_mode?: unknown
     }
     return {
       channelID:
@@ -133,12 +137,17 @@ function parseMessageAuditReviewConfig(raw: string): {
         value.tool_call_limit >= 1
           ? value.tool_call_limit
           : DEFAULT_MESSAGE_AUDIT_REVIEW_TOOL_CALL_LIMIT,
+      contextMode:
+        value.context_mode === 'tool'
+          ? 'tool'
+          : DEFAULT_MESSAGE_AUDIT_REVIEW_CONTEXT_MODE,
     }
   } catch {
     return {
       channelID: 0,
       model: '',
       toolCallLimit: DEFAULT_MESSAGE_AUDIT_REVIEW_TOOL_CALL_LIMIT,
+      contextMode: DEFAULT_MESSAGE_AUDIT_REVIEW_CONTEXT_MODE,
     }
   }
 }
@@ -204,6 +213,7 @@ export function LogSettingsSection({
       MessageAuditReviewChannelID: defaultReviewConfig.channelID,
       MessageAuditReviewModel: defaultReviewConfig.model,
       MessageAuditReviewToolCallLimit: defaultReviewConfig.toolCallLimit,
+      MessageAuditReviewContextMode: defaultReviewConfig.contextMode,
     },
   })
 
@@ -227,8 +237,16 @@ export function LogSettingsSection({
   })
   const selectedReviewChannelID = form.watch('MessageAuditReviewChannelID')
   const selectedReviewModel = form.watch('MessageAuditReviewModel')
+  const selectedReviewContextMode = form.watch('MessageAuditReviewContextMode')
   const selectedReviewChannel = reviewOptionsQuery.data?.channels.find(
     (channel) => channel.id === selectedReviewChannelID
+  )
+  const reviewContextModeItems = useMemo(
+    () => [
+      { value: 'merged', label: t('Merged context') },
+      { value: 'tool', label: t('Model Tool reading') },
+    ],
+    [t]
   )
   const reviewChannelItems = useMemo(
     () =>
@@ -267,6 +285,7 @@ export function LogSettingsSection({
       MessageAuditReviewChannelID: defaultReviewConfig.channelID,
       MessageAuditReviewModel: defaultReviewConfig.model,
       MessageAuditReviewToolCallLimit: defaultReviewConfig.toolCallLimit,
+      MessageAuditReviewContextMode: defaultReviewConfig.contextMode,
     })
   }, [
     defaultEnabled,
@@ -405,6 +424,7 @@ export function LogSettingsSection({
             channel_id: values.MessageAuditReviewChannelID,
             model: values.MessageAuditReviewModel,
             tool_call_limit: values.MessageAuditReviewToolCallLimit,
+            context_mode: values.MessageAuditReviewContextMode,
           })
         : ''
     const currentReviewConfig =
@@ -413,6 +433,7 @@ export function LogSettingsSection({
             channel_id: defaultReviewConfig.channelID,
             model: defaultReviewConfig.model,
             tool_call_limit: defaultReviewConfig.toolCallLimit,
+            context_mode: defaultReviewConfig.contextMode,
           })
         : ''
     if (nextReviewConfig !== currentReviewConfig) {
@@ -702,6 +723,43 @@ export function LogSettingsSection({
             </div>
             <FormField
               control={form.control}
+              name='MessageAuditReviewContextMode'
+              render={({ field }) => (
+                <div className='grid max-w-xs gap-2'>
+                  <FormLabel>{t('AI review context mode')}</FormLabel>
+                  <Select
+                    items={reviewContextModeItems}
+                    value={field.value}
+                    onValueChange={(value) =>
+                      field.onChange(value === 'tool' ? 'tool' : 'merged')
+                    }
+                  >
+                    <FormControl>
+                      <SelectTrigger className='w-full'>
+                        <SelectValue placeholder={t('Select a context mode')} />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectGroup>
+                        {reviewContextModeItems.map((item) => (
+                          <SelectItem key={item.value} value={item.value}>
+                            {item.label}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <FormDescription>
+                    {t(
+                      'Merged context sends saved audit material once. Model Tool reading lets the model read virtual files itself.'
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </div>
+              )}
+            />
+            <FormField
+              control={form.control}
               name='MessageAuditReviewToolCallLimit'
               render={({ field }) => (
                 <div className='grid max-w-xs gap-2'>
@@ -711,6 +769,7 @@ export function LogSettingsSection({
                       type='number'
                       min={1}
                       value={field.value}
+                      disabled={selectedReviewContextMode !== 'tool'}
                       onChange={(event) =>
                         field.onChange(Number(event.target.value))
                       }
@@ -718,7 +777,7 @@ export function LogSettingsSection({
                   </FormControl>
                   <FormDescription>
                     {t(
-                      'Sets the maximum Tool calls per review. Enter any positive integer; the task timeout still prevents stuck runs.'
+                      'Only applies when context mode is Model Tool reading. Enter any positive integer; the task timeout still prevents stuck runs.'
                     )}
                   </FormDescription>
                   <FormMessage />

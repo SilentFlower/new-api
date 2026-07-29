@@ -466,19 +466,19 @@ system_tasks.active_key           message_audit_review:<audit_session_id>
 
 ### 3. Contracts
 
-- `message_audit_review.config` 是系统设置中的单个 JSON 固定值：`{"channel_id":<int>,"model":"<string>","tool_call_limit":<int>}`。渠道必须启用，模型必须属于该渠道；Tool 调用次数必须为正整数、默认 `24`，不设人为固定最大值，旧配置缺失时按默认值归一化；第一版不提供自定义审核提示词或业务规则输入。
+- `message_audit_review.config` 是系统设置中的单个 JSON 固定值：`{"channel_id":<int>,"model":"<string>","context_mode":"merged|tool","tool_call_limit":<int>}`。渠道必须启用，模型必须属于该渠道；`context_mode` 缺失时默认 `merged`，`tool` 保留原虚拟文件读取模式；Tool 调用次数必须为正整数、默认 `24`，不设人为固定最大值，旧配置缺失时按默认值归一化；第一版不提供自定义审核提示词或业务规则输入。
 - `review-options` 只返回启用渠道的 `id/name/models` 和当前配置，不得返回渠道密钥、Base URL 或完整渠道设置。
 - 触发时固定最新请求和全部来源请求 ID。每个 `session_match=compressed` 断点选择其 `parent_request_id`，最后加入目标最新请求；任务执行期间的新请求不得进入本次资料集。
 - 同会话活动任务使用唯一 `active_key` 幂等。`SystemTask` 和 `MessageAuditReview` 的 pending 状态必须在同一事务中创建，提交后才能唤醒执行器。
 - 重审期间保留最后一次成功结果、风险、模型、时间和加密正文；pending/running/failed 只替换当前任务状态。只有新任务成功后才能原子替换结果归属。
-- 虚拟文件只存在于任务内存中，文件 ID 固定为 `request:<request_id>`。初始模型输入只包含内置规则和文件清单；正文只能通过 `list_files`、`read_file`、`search_files`、`search_files_regex` 读取，不能访问真实路径、网络、任意数据库查询或其他会话。正则检索只能使用 Go RE2 在固定虚拟文件内执行。
-- 虚拟文件、Tool 参数、Tool 调用次数和任务超时保持受控；累计 Tool Token 只记录诊断，不设置独立停止阈值。本地不得使用与所选模型无关的固定输入 Token 阈值；上游真实上下文溢出必须映射为稳定 `context_limit`，不能静默截断后声称完整审核。
+- 虚拟文件只存在于任务内存中，文件 ID 固定为 `request:<request_id>`。`merged` 模式初始模型输入包含内置规则和本次固定资料集，不注册 Tool，并要求直接输出最终 JSON；`tool` 模式初始模型输入只包含内置规则和文件清单，正文只能通过 `list_files`、`read_file`、`search_files`、`search_files_regex` 读取，不能访问真实路径、网络、任意数据库查询或其他会话。正则检索只能使用 Go RE2 在固定虚拟文件内执行。
+- 虚拟文件、Tool 参数、Tool 调用次数和任务超时保持受控；累计 Tool Token 只记录诊断，不设置独立停止阈值。本地不得使用与所选模型无关的固定输入 Token 阈值；`merged` 模式超过模型真实上下文时由上游返回并映射为稳定 `context_limit`，不能静默截断后声称完整审核。
 - `read_file` 和 search Tool 允许模型请求较大的连续窗口；若实际返回会超过 Tool 结果安全 Token 上限，服务端必须缩小返回范围并报告 `requested_limit`、`returned_count` 和续读游标，而不是直接失败。
-- 长消息可以拆成共享原 `sequence` 的多个虚拟分片。覆盖范围由服务端按 `file_id + start_cursor + end_cursor` 记录；引用一个原消息序号前，该消息对应的所有虚拟分片都必须实际读到。审核结果的 `overview` 由服务端根据覆盖记录生成，拆分消息只有全部分片已读才计入已覆盖消息。
+- 长消息可以拆成共享原 `sequence` 的多个虚拟分片。覆盖范围由服务端按 `file_id + start_cursor + end_cursor` 记录；引用一个原消息序号前，该消息对应的所有虚拟分片都必须被本次覆盖。审核结果的 `overview` 由服务端根据覆盖记录生成，合并模式按已发送可用分片计算，Tool 模式按实际 Tool 覆盖计算；拆分消息只有全部分片被覆盖才计入已覆盖消息。
 - 完整审核结果使用从 `MESSAGE_AUDIT_SECRET` 派生的独立审核密钥加密，AAD 必须绑定 `user_id + audit_session_id + reviewed_request_id`。仅允许为首次发布前的本地记录保留旧 AAD 解密回退。
-- 内部审核调用直接使用所选渠道 adaptor，不经过公开 `controller.Relay`，不执行预扣/结算、Token/成本记录或 `CaptureMessageAudit` / `FinalizeMessageAudit`。原生 Tool 请求不得发送 API 级 `tool_choice=required`，必须允许并行 Tool 调用；首轮必须读资料由内置提示词、relay 降级判断和 service 覆盖校验共同保证。
+- 内部审核调用直接使用所选渠道 adaptor，不经过公开 `controller.Relay`，不执行预扣/结算、Token/成本记录或 `CaptureMessageAudit` / `FinalizeMessageAudit`。`merged` 模式和格式修复请求必须设置 JSON 输出约束；`tool` 模式原生 Tool 请求不得发送 API 级 `tool_choice=required`，必须允许并行 Tool 调用，首轮必须读资料由内置提示词、relay 降级判断和 service 覆盖校验共同保证，已有覆盖后的结论阶段也必须设置 JSON 输出约束。
 - 内部 Gin 上下文必须调用 `logger.SuppressSensitiveContentLogs`；审核提示词、Tool 参数/结果、模型输出和上游错误正文均不得进入普通应用日志、管理审计或 API 调用日志。内部调用可以写入零额度渠道调用日志或错误日志用于排障，`other` 只允许包含渠道、模型、协议、HTTP 状态、稳定失败阶段、任务 ID、会话 ID 和安全 Tool 名称。
-- 审核任务可以在 `SystemTask.state` 保存脱敏调用诊断，包括渠道、模型、开始/结束时间、耗时、模型/Tool 调用次数、Tool Token、文本协议回退、HTTP 状态和稳定失败阶段；不得保存正文、Tool 参数、Tool 返回、模型输出或上游错误正文。
+- 审核任务可以在 `SystemTask.state` 保存脱敏调用诊断，包括渠道、模型、上下文模式、开始/结束时间、耗时、模型/Tool 调用次数、Tool Token、文本协议回退、HTTP 状态和稳定失败阶段；不得保存正文、Tool 参数、Tool 返回、模型输出或上游错误正文。旧诊断缺少上下文模式时按历史 Tool 模式展示。
 - 列表只返回审核状态、旧风险、新鲜度和时间，不自动刷新；会话详情内联展示摘要、风险、任务概览、实际审核模型、失败类别和脱敏诊断摘要，完整依据、覆盖、未覆盖和逐次调用诊断必须通过详情弹窗查看。
 - 删除任一结果来源或活动任务固定来源时，必须在清理事务内删除 review source、review、当前 SystemTask 和 SystemTaskLock。任务完成前必须再次确认来源仍存在。
 
@@ -490,6 +490,7 @@ system_tasks.active_key           message_audit_review:<audit_session_id>
 | 渠道/模型未配置、停用或模型移除 | 拒绝启动并提示在系统设置修正，不自动选择其他渠道 |
 | 最新请求为 `metadata_only` | 拒绝启动，返回正文不可用 |
 | 同一会话已有 pending/running 任务 | 返回现有任务，`created=false`，不创建第二个结果写入者 |
+| `merged` 模式上游返回上下文过长 | 失败码 `context_limit`，不得本地截断后重试并声称完整审核 |
 | 原生模型未调用必需 Tool | relay 返回文本 Tool 降级信号；文本协议仍不能完成受控 Tool 流程时失败码 `tool_unsupported` |
 | Tool 文件越界、参数非法或真实路径请求 | 拒绝调用，使用稳定 Tool 错误类别，不返回其他资料 |
 | 上游真实上下文或配置的调用次数达到上限 | 失败码 `context_limit` 或 `tool_call_limit`；历史 `tool_token_limit` 仅保留兼容展示，新任务不再产生 |

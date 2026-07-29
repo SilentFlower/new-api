@@ -37,6 +37,23 @@ func TestMessageAuditReviewOpenAIRequestDoesNotForceRequiredToolChoice(t *testin
 	assert.False(t, *request.Stream)
 	assert.True(t, *request.ParallelTooCalls)
 
+	jsonToolRequest := buildMessageAuditReviewOpenAIRequest(service.MessageAuditReviewModelRequest{
+		Model: "review-model", RequireJSON: true, MaxTokens: maxTokens,
+		Tools: []dto.ToolCallRequest{{Type: "function", Function: dto.FunctionRequest{Name: "read_file"}}},
+	}, &stream, &parallel)
+	require.Len(t, jsonToolRequest.Tools, 1)
+	require.NotNil(t, jsonToolRequest.ResponseFormat)
+	assert.Equal(t, "json_object", jsonToolRequest.ResponseFormat.Type)
+	require.NotNil(t, jsonToolRequest.ParallelTooCalls)
+	assert.True(t, *jsonToolRequest.ParallelTooCalls)
+
+	jsonRequest := buildMessageAuditReviewOpenAIRequest(service.MessageAuditReviewModelRequest{
+		Model: "review-model", RequireJSON: true, MaxTokens: maxTokens,
+	}, &stream, &parallel)
+	require.NotNil(t, jsonRequest.ResponseFormat)
+	assert.Equal(t, "json_object", jsonRequest.ResponseFormat.Type)
+	assert.Nil(t, jsonRequest.ParallelTooCalls)
+
 	fallbackRequest := buildMessageAuditReviewOpenAIRequest(service.MessageAuditReviewModelRequest{
 		Model: "review-model", TextToolFallback: true, MaxTokens: maxTokens,
 		Tools: []dto.ToolCallRequest{{Type: "function", Function: dto.FunctionRequest{Name: "read_file"}}},
@@ -80,7 +97,7 @@ func TestParseMessageAuditReviewTextToolResponse(t *testing.T) {
 
 func TestMessageAuditReviewModelLogOtherKeepsDiagnosticsSafe(t *testing.T) {
 	other := messageAuditReviewModelLogOther(service.MessageAuditReviewModelRequest{
-		TextToolFallback: true, UserID: 12, OperatorID: 1,
+		TextToolFallback: true, UserID: 12, OperatorID: 1, Protocol: "text_tool_fallback",
 		AuditSessionID: "audsess_safe", TargetRequestID: "req_safe", TaskID: "task_safe",
 	}, service.MessageAuditReviewModelResponse{
 		HTTPStatus: 415,
@@ -100,6 +117,9 @@ func TestMessageAuditReviewModelLogOtherKeepsDiagnosticsSafe(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, true, adminInfo["message_audit_review"])
 	assert.Equal(t, "audsess_safe", adminInfo["audit_session_id"])
+
+	mergedOther := messageAuditReviewModelLogOther(service.MessageAuditReviewModelRequest{Protocol: "merged_context"}, service.MessageAuditReviewModelResponse{}, nil)
+	assert.Equal(t, "merged_context", mergedOther["review_protocol"])
 }
 
 func TestMessageAuditReviewModelErrorKeepsOnlySafeStageAndStatus(t *testing.T) {

@@ -139,12 +139,17 @@ func TestMessageAuditReviewConfigDefaultsAndAcceptsPositiveToolCallLimit(t *test
 	config, err := ParseMessageAuditReviewConfig("")
 	require.NoError(t, err)
 	assert.Equal(t, messageAuditReviewDefaultToolCallLimit, config.ToolCallLimit)
+	assert.Equal(t, messageAuditReviewContextModeMerged, config.ContextMode)
 
-	config, err = ParseMessageAuditReviewConfig(`{"tool_call_limit":1000}`)
+	config, err = ParseMessageAuditReviewConfig(`{"tool_call_limit":1000,"context_mode":"tool"}`)
 	require.NoError(t, err)
 	assert.Equal(t, 1000, config.ToolCallLimit)
+	assert.Equal(t, messageAuditReviewContextModeTool, config.ContextMode)
 
 	_, err = ParseMessageAuditReviewConfig(`{"tool_call_limit":-1}`)
+	require.Error(t, err)
+
+	_, err = ParseMessageAuditReviewConfig(`{"context_mode":"invalid"}`)
 	require.Error(t, err)
 }
 
@@ -247,6 +252,60 @@ func TestPrepareMessageAuditReviewTextToolRequestIncludesProtocol(t *testing.T) 
 	assert.Greater(t, CountTextToken(string(fallbackPayload), input.Model), CountTextToken(string(nativePayload), input.Model))
 }
 
+func TestExecuteMessageAuditReviewDefaultsToMergedContext(t *testing.T) {
+	truncate(t)
+	manager := newMessageAuditTestManager(t)
+	previousManager := messageAuditManagerInst
+	messageAuditManagerInst = manager
+	t.Cleanup(func() {
+		messageAuditManagerInst = previousManager
+	})
+
+	now := time.Now().Unix()
+	record, err := manager.encryptCapture(&messageAuditCaptureEvent{
+		request: model.MessageAuditRequest{
+			RequestID: "review-merged-request", AuditSessionID: "review-merged-session", UserID: 25,
+			Status: "succeeded", AuditStatus: "captured", CapturedAt: now, CreatedAt: now, UpdatedAt: now,
+		},
+		entries: []messageAuditPlaintext{{Role: "user", ContentType: "message", Content: "需要一次性合并审核的文本"}},
+	})
+	require.NoError(t, err)
+	_, err = model.CreateMessageAuditCapture(record)
+	require.NoError(t, err)
+
+	messageAuditReviewCallerMu.Lock()
+	previousCaller := messageAuditReviewCaller
+	messageAuditReviewCaller = func(_ context.Context, input MessageAuditReviewModelRequest) (MessageAuditReviewModelResponse, error) {
+		assert.Empty(t, input.Tools)
+		assert.True(t, input.RequireJSON)
+		assert.Equal(t, messageAuditReviewProtocolMerged, input.Protocol)
+		require.Len(t, input.Messages, 2)
+		assert.Contains(t, input.Messages[1].StringContent(), "request:review-merged-request")
+		assert.Contains(t, input.Messages[1].StringContent(), "需要一次性合并审核的文本")
+		return MessageAuditReviewModelResponse{Content: `{"summary":"已完成合并审核","risk_level":"none","categories":[],"findings":[]}`}, nil
+	}
+	messageAuditReviewCallerMu.Unlock()
+	t.Cleanup(func() {
+		messageAuditReviewCallerMu.Lock()
+		messageAuditReviewCaller = previousCaller
+		messageAuditReviewCallerMu.Unlock()
+	})
+
+	diagnostics := &MessageAuditReviewDiagnostics{}
+	result, err := executeMessageAuditReview(context.Background(), "review-merged-task", MessageAuditReviewPayload{
+		UserID: 25, AuditSessionID: "review-merged-session", TargetRequestID: "review-merged-request",
+		SourceRequestIDs: []string{"review-merged-request"},
+	}, diagnostics, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "已完成合并审核", result.Summary)
+	assert.Equal(t, messageAuditReviewContextModeMerged, diagnostics.ContextMode)
+	assert.Equal(t, 1, diagnostics.ModelCalls)
+	assert.Equal(t, 0, diagnostics.ToolCalls)
+	require.Len(t, diagnostics.Calls, 1)
+	assert.Equal(t, messageAuditReviewProtocolMerged, diagnostics.Calls[0].Protocol)
+	assert.Equal(t, 1, result.Overview.CoveredMessageCount)
+}
+
 func TestExecuteMessageAuditReviewCompletesTextToolFallbackLoop(t *testing.T) {
 	truncate(t)
 	manager := newMessageAuditTestManager(t)
@@ -307,7 +366,7 @@ func TestExecuteMessageAuditReviewCompletesTextToolFallbackLoop(t *testing.T) {
 	diagnostics := &MessageAuditReviewDiagnostics{}
 	result, err := executeMessageAuditReview(context.Background(), "review-fallback-task", MessageAuditReviewPayload{
 		UserID: 21, AuditSessionID: "review-fallback-session", TargetRequestID: "review-fallback-request",
-		SourceRequestIDs: []string{"review-fallback-request"},
+		SourceRequestIDs: []string{"review-fallback-request"}, Config: MessageAuditReviewConfig{ContextMode: messageAuditReviewContextModeTool},
 	}, diagnostics, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "已完成受限审核", result.Summary)
@@ -363,7 +422,7 @@ func TestExecuteMessageAuditReviewHonorsConfiguredToolCallLimit(t *testing.T) {
 	diagnostics := &MessageAuditReviewDiagnostics{}
 	_, err = executeMessageAuditReview(context.Background(), "review-limit-task", MessageAuditReviewPayload{
 		UserID: 22, AuditSessionID: "review-limit-session", TargetRequestID: "review-limit-request",
-		SourceRequestIDs: []string{"review-limit-request"}, Config: MessageAuditReviewConfig{ToolCallLimit: 1},
+		SourceRequestIDs: []string{"review-limit-request"}, Config: MessageAuditReviewConfig{ToolCallLimit: 1, ContextMode: messageAuditReviewContextModeTool},
 	}, diagnostics, nil)
 	require.Error(t, err)
 	var taskErr *messageAuditReviewTaskError
@@ -401,11 +460,13 @@ func TestExecuteMessageAuditReviewAllowsToolTokensBeyondLegacyLimit(t *testing.T
 	messageAuditReviewCaller = func(_ context.Context, input MessageAuditReviewModelRequest) (MessageAuditReviewModelResponse, error) {
 		callCount++
 		if callCount <= 8 {
+			assert.Equal(t, callCount > 1, input.RequireJSON)
 			return MessageAuditReviewModelResponse{ToolCalls: []MessageAuditReviewToolCall{{
 				ID: fmt.Sprintf("call-%d", callCount), Name: "read_file",
 				Arguments: fmt.Sprintf(`{"file_id":"request:review-large-tool-request","cursor":%d,"limit":1}`, callCount-1),
 			}}}, nil
 		}
+		assert.True(t, input.RequireJSON)
 		return MessageAuditReviewModelResponse{Content: `{"summary":"已完成大范围读取","risk_level":"none","categories":[],"findings":[]}`}, nil
 	}
 	messageAuditReviewCallerMu.Unlock()
@@ -418,7 +479,7 @@ func TestExecuteMessageAuditReviewAllowsToolTokensBeyondLegacyLimit(t *testing.T
 	diagnostics := &MessageAuditReviewDiagnostics{}
 	result, err := executeMessageAuditReview(context.Background(), "review-large-tool-task", MessageAuditReviewPayload{
 		UserID: 24, AuditSessionID: "review-large-tool-session", TargetRequestID: "review-large-tool-request",
-		SourceRequestIDs: []string{"review-large-tool-request"}, Config: MessageAuditReviewConfig{ToolCallLimit: 12},
+		SourceRequestIDs: []string{"review-large-tool-request"}, Config: MessageAuditReviewConfig{ToolCallLimit: 12, ContextMode: messageAuditReviewContextModeTool},
 	}, diagnostics, nil)
 	require.NoError(t, err)
 	assert.Equal(t, "已完成大范围读取", result.Summary)
@@ -523,6 +584,7 @@ func TestGetMessageAuditReviewResponseExposesStableFailureCode(t *testing.T) {
 	assert.Equal(t, "high", response.RiskLevel)
 	require.NotNil(t, response.Diagnostics)
 	assert.Equal(t, "deepseek-chat", response.Diagnostics.Model)
+	assert.Equal(t, messageAuditReviewContextModeTool, response.Diagnostics.ContextMode)
 	require.Len(t, response.Diagnostics.Calls, 1)
 	assert.Equal(t, 400, response.Diagnostics.Calls[0].HTTPStatus)
 	assert.Equal(t, "upstream_http", response.Diagnostics.Calls[0].ErrorStage)

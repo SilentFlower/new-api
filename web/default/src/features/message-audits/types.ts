@@ -137,6 +137,7 @@ export type MessageAuditReviewCallDiagnostic = {
 export type MessageAuditReviewDiagnostics = {
   channel_id: number
   model: string
+  context_mode: 'merged' | 'tool' | ''
   started_at: number
   finished_at: number
   duration_ms: number
@@ -167,7 +168,12 @@ export type MessageAuditReview = {
 }
 
 export type MessageAuditReviewOptions = {
-  config: { channel_id: number; model: string; tool_call_limit: number }
+  config: {
+    channel_id: number
+    model: string
+    tool_call_limit: number
+    context_mode: 'merged' | 'tool'
+  }
   channels: { id: number; name: string; models: string[] }[]
 }
 
@@ -178,7 +184,12 @@ export type MessageAuditReviewTask = SystemTask<
     source_request_ids: string[]
     user_id: number
     operator_id: number
-    config: { channel_id: number; model: string; tool_call_limit: number }
+    config: {
+      channel_id: number
+      model: string
+      tool_call_limit: number
+      context_mode: 'merged' | 'tool'
+    }
   },
   null,
   null

@@ -150,6 +150,9 @@ func buildMessageAuditReviewOpenAIRequest(input service.MessageAuditReviewModelR
 	tools := input.Tools
 	parallelToolCalls := parallel
 	var responseFormat *dto.ResponseFormat
+	if input.RequireJSON {
+		responseFormat = &dto.ResponseFormat{Type: "json_object"}
+	}
 	if input.TextToolFallback {
 		tools = nil
 		parallelToolCalls = nil
@@ -198,10 +201,7 @@ func recordMessageAuditReviewModelLog(c *gin.Context, input service.MessageAudit
 }
 
 func messageAuditReviewModelLogOther(input service.MessageAuditReviewModelRequest, response service.MessageAuditReviewModelResponse, err error) map[string]interface{} {
-	protocol := "native_tools"
-	if input.TextToolFallback {
-		protocol = "text_tool_fallback"
-	}
+	protocol := messageAuditReviewProtocol(input)
 	other := map[string]interface{}{
 		"request_path":    "/internal/message-audit/review",
 		"review_protocol": protocol,
@@ -257,6 +257,16 @@ func messageAuditReviewModelLogOther(input service.MessageAuditReviewModelReques
 	}
 	other["admin_info"] = adminInfo
 	return other
+}
+
+func messageAuditReviewProtocol(input service.MessageAuditReviewModelRequest) string {
+	if input.Protocol != "" {
+		return input.Protocol
+	}
+	if input.TextToolFallback {
+		return "text_tool_fallback"
+	}
+	return "native_tools"
 }
 
 func safeMessageAuditReviewRelayToolName(name string) string {

@@ -1,14 +1,14 @@
 # 消息审计控制面契约
 
-> 约束消息审计的整库清空、AI 重审 Tool 降级和上游上下文边界，避免高并发写入、跨数据库差异或协议降级破坏审计可用性。
+> 约束消息审计的整库清空、AI 重审上下文模式、Tool 降级和上游上下文边界，避免高并发写入、跨数据库差异或协议降级破坏审计可用性。
 
 ## 场景：消息审计清空与 AI 重审
 
 ### 1. Scope / Trigger
 
-- Trigger：修改消息审计表结构、手动清空、保留水位、系统任务、AI 重审请求构造、`read_file` Tool、原生 Tool 降级或上游上下文错误归类。
+- Trigger：修改消息审计表结构、手动清空、保留水位、系统任务、AI 重审请求构造、合并上下文模式、`read_file` Tool、原生 Tool 降级或上游上下文错误归类。
 - 适用范围：`model/message_audit*.go`、`service/message_audit*.go`、`relay/message_audit_review.go` 及对应测试。
-- 目标：管理员清空审计数据时快速释放主表，同时保证并发新写入可继续；AI 重审在原生 Tool 不可用时仍受同一上下文上限和固定文件读取范围约束。
+- 目标：管理员清空审计数据时快速释放主表，同时保证并发新写入可继续；AI 重审默认可合并资料一次发送，Tool 模式在原生 Tool 不可用时仍受同一上下文上限和固定文件读取范围约束。
 - 非目标：不保存 AI 原始返回内容，不让 AI 重审请求进入消息审计，不允许模型扩展可读取文件范围；可在既有 API 日志中保留脱敏的零额度渠道调用日志或错误日志用于排障。
 
 ### 2. Signatures
@@ -30,6 +30,8 @@ type MessageAuditReviewModelRequest struct {
 	MaxTokens        uint
 	RequireToolCall  bool
 	TextToolFallback bool
+	RequireJSON      bool
+	Protocol         string
 	UserID           int
 	OperatorID       int
 	AuditSessionID   string
@@ -73,9 +75,12 @@ func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest)
 - PostgreSQL 必须在同一事务内成组 `TRUNCATE`；SQLite 必须在同一事务内逐表 `DELETE`。
 - 返回结果必须基于清空前统计；清空后的异步 Blob 文件删除只处理已确定不再被引用的文件，不能阻塞主表切换。
 
-#### AI 重审 Tool 降级
+#### AI 重审上下文模式与 Tool 降级
 
-- AI 重审消息和工具定义由 service 统一拥有；relay 只负责一次模型调用、响应解析和返回是否需要文本 Tool 降级的信号。
+- AI 重审消息、上下文模式和工具定义由 service 统一拥有；relay 只负责一次模型调用、响应解析和返回是否需要文本 Tool 降级的信号。
+- `message_audit_review.config.context_mode` 支持 `merged` 和 `tool`，缺失时默认 `merged` 并随任务 payload 冻结；旧诊断缺失该字段时按历史 Tool 模式展示。
+- `merged` 模式不注册 Tool，service 将本次固定资料集合并到一次模型请求，设置 `RequireJSON=true` 和 `Protocol=merged_context`；覆盖范围由服务端按实际发送的可用虚拟分片生成。
+- `tool` 模式保留虚拟文件读取流程。首轮只包含规则和清单，后续工具调用与覆盖范围仍由 service 统一执行和记录。
 - 原生 Tool 被渠道忽略、无法解析或未产生所需 Tool Call 时，service 可以切换到文本 Tool 协议；只允许执行定义好的 `list_files`、`search_files`、`search_files_regex` 和 `read_file`。
 - 原生 Tool 请求不得发送 API 级 `tool_choice=required`；该字段在 OpenAI-compatible 渠道中兼容性不稳定，必须由系统提示词、relay 首轮 Tool 判断和 service 覆盖校验保证模型先读取资料。
 - 原生 Tool 请求必须允许并行 Tool 调用；文本 Tool 协议必须同时支持单个 `tool_call` 和多个 `tool_calls`，多个调用仍逐个执行并计入同一任务的 Tool 调用次数上限。
@@ -83,6 +88,7 @@ func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest)
 - 详情接口必须根据请求协议和已解密载荷派生 Tool 语义角色：Responses 顶层调用/结果、Claude 纯 `tool_use`/`tool_result` 内容、Gemini 纯 `functionCall`/`functionResponse` parts 分别返回 `assistant/tool_call` 或 `tool/tool_result`。派生只修改详情响应，不重写存储内容、HMAC、去重或会话指纹，因此必须对历史记录生效。
 - `search_files_regex` 只能使用 Go RE2 在任务内存中的固定虚拟文件执行，并限制表达式长度、文件 ID、游标和返回条数；禁止启动系统命令或访问真实文件系统。
 - Tool 调用次数由 `message_audit_review.config.tool_call_limit` 配置，必须为正整数、默认 `24`，不设人为固定最大值；旧配置缺少该字段时必须归一化为默认值，并在任务创建时冻结。
+- Tool 模式已有读取覆盖后的结论阶段和所有格式修复请求必须设置 `RequireJSON=true`；若模型仍返回非法结构、非法枚举或超出覆盖范围的依据，最多一次格式修复后以 `invalid_output` 失败。
 - 累计 Tool Token 只作为脱敏诊断计数，不得设置独立停止阈值；本地也不得使用与所选模型无关的固定输入 Token 阈值提前终止。模型真实上下文溢出由上游识别并归类为 `context_limit`。
 - `read_file` / search 可接受较大的请求窗口；当候选返回超过 Tool 结果安全 Token 上限时，service 缩小实际返回并报告请求量、返回量和续读游标，不能因为模型请求较大窗口直接失败。
 - AI 重审请求本身不得进入消息审计，AI 模型原始响应不得持久化；只保存结构化审核结果、状态、稳定失败码、脱敏调用诊断，以及既有日志体系中的零额度渠道调用日志或错误日志。
@@ -93,6 +99,7 @@ func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest)
 - service 必须先通过 `prepareMessageAuditReviewModelRequest` 构造实际发送的完整请求；relay 不得在该请求之外追加审计正文或扩大 Tool 范围。
 - 本地没有可靠的跨渠道模型上下文元数据时，不得用统一固定 Token 数伪装成模型真实窗口。上游明确返回上下文溢出时，relay 只在内存中识别稳定类别，service 返回 `context_limit`。
 - 渠道不能通过原生或文本协议完成受控 Tool 流程时返回 `tool_unsupported`，不能把失败退化为无工具的整包内容输入。
+- `merged` 模式允许整包发送已保存资料，但不得在本地截断后声称完整审核；上游上下文过长时直接 `context_limit`。
 
 ### 4. Validation & Error Matrix
 
@@ -104,6 +111,8 @@ func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest)
 | SQLite 任一表删除失败 | 事务整体回滚，不报告部分成功 |
 | 清空前请求在清空后延迟落库 | 保留水位拒绝该旧 capture |
 | 原生 Tool 正常返回 `read_file` | 继续标准 Tool 循环，不启用文本协议 |
+| `merged` 模式返回合法 JSON 结论 | 不执行任何 Tool，服务端按发送资料生成覆盖与概览 |
+| `merged` 模式上游拒绝上下文过长 | 以 `context_limit` 失败，不降级为 Tool 或静默截断 |
 | 原生 Tool 被忽略或响应无法作为 Tool Call 解析 | relay 返回 `ToolFallbackRequired`，service 构造并校验文本 Tool 请求 |
 | 模型一次返回多个合法 Tool Call | service 按返回顺序逐个执行，全部计入同一任务调用次数和覆盖记录 |
 | 上游明确拒绝请求上下文过长 | 不重试文本 Tool 协议，以 `context_limit` 失败 |
@@ -114,6 +123,7 @@ func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest)
 ### 5. Good / Base / Bad Cases
 
 - Good：MySQL 上百万条审计数据通过表交换在数秒内恢复空主表，新请求无需等待逐行删除完成。
+- Good：默认合并模式一次发送固定资料集，模型直接返回合法 JSON，诊断协议显示 `merged_context` 且 Tool 次数为 0。
 - Good：渠道忽略原生 Tool，service 将同一任务切换为文本 `read_file` 协议，模型按冻结游标读取必要片段后返回结构化结论。
 - Good：模型一轮返回多个独立 Tool Call，service 逐个校验并执行，减少模型往返次数但不扩大文件范围。
 - Good：DeepSeek Claude 格式上游返回 HTTP 415，详情和 API 错误日志只展示 `upstream_http`、HTTP 状态和任务元数据，不保存上游响应正文。
@@ -123,7 +133,7 @@ func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest)
 - Base：管理员清空时没有并发写入；三种数据库最终都得到空审计业务表，并保留其他系统任务。
 - Bad：MySQL 顺序执行五次 `TRUNCATE TABLE`，让并发请求观察到跨表不一致状态。
 - Bad：relay 在发现原生 Tool 失败后自行拼接系统消息并递归请求，绕过 service 的预算和循环次数控制。
-- Bad：把全部审计内容无条件拼进模型输入，或允许模型通过审计材料要求读取未冻结文件。
+- Bad：在 `merged` 模式外无条件拼接全部审计内容，或允许模型通过审计材料要求读取未冻结文件。
 
 ### 6. Tests Required
 
@@ -131,6 +141,8 @@ func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest)
 - MySQL 外部数据库兼容测试：执行真实 `ClearMessageAudits`，验证多表交换后表结构可继续写入、目标数据清空且无关任务保留。
 - PostgreSQL 外部数据库兼容测试：执行真实事务截断并验证同样的业务结果。
 - AI 重审完整降级循环：原生 Tool 被忽略 -> 文本 `read_file` -> Tool 结果 -> 结构化审核结果。
+- 合并模式测试：默认配置走 `merged_context`，无 Tool、要求 JSON 输出并按已发送资料生成覆盖。
+- Tool 结论 JSON 测试：Tool 模式已有覆盖后的请求和格式修复请求设置 `RequireJSON=true`。
 - 并行 Tool 回归：原生请求带 `parallel_tool_calls=true`，文本 Tool 回退解析 `tool_calls` 数组并逐个执行。
 - 上下文边界测试：上游上下文错误稳定映射为 `context_limit`，且不触发文本 Tool 回退。
 - relay 决策测试：正常 Tool Call 不触发降级，忽略或不可解析响应触发一次 `ToolFallbackRequired`。

@@ -187,9 +187,24 @@ export function getMessageAuditReviewCallPhaseLabelKey(phase: string): string {
 export function getMessageAuditReviewProtocolLabelKey(
   protocol: string
 ): string {
-  return protocol === 'text_tool_fallback'
-    ? 'Text Tool fallback'
-    : 'Native Tool calls'
+  switch (protocol) {
+    case 'merged_context':
+      return 'Merged context'
+    case 'text_tool_fallback':
+      return 'Text Tool fallback'
+    default:
+      return 'Native Tool calls'
+  }
+}
+
+/**
+ * 返回审核上下文模式对应的 i18n 文案键。
+ *
+ * @param mode 服务端记录的审核上下文模式。
+ * @returns 合并上下文或 Tool 读取对应的英文源键。
+ */
+export function getMessageAuditReviewContextModeLabelKey(mode: string): string {
+  return mode === 'tool' ? 'Model Tool reading' : 'Merged context'
 }
 
 /**

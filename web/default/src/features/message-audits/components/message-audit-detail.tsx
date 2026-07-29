@@ -82,6 +82,7 @@ import {
   getMessageAuditReviewCategoryLabelKey,
   getMessageAuditReviewCallOutcomeLabelKey,
   getMessageAuditReviewCallPhaseLabelKey,
+  getMessageAuditReviewContextModeLabelKey,
   getMessageAuditReviewErrorStageLabelKey,
   getMessageAuditReviewFailureLabelKey,
   getMessageAuditReviewPollInterval,
@@ -320,6 +321,14 @@ function MessageAuditReviewDetailsDialog(props: {
             <dd>#{review.diagnostics.channel_id}</dd>
             <dt className='text-muted-foreground'>{t('Review model')}</dt>
             <dd className='break-all'>{review.diagnostics.model}</dd>
+            <dt className='text-muted-foreground'>{t('Context mode')}</dt>
+            <dd>
+              {t(
+                getMessageAuditReviewContextModeLabelKey(
+                  review.diagnostics.context_mode
+                )
+              )}
+            </dd>
             <dt className='text-muted-foreground'>{t('Model calls')}</dt>
             <dd>{review.diagnostics.model_calls}</dd>
             <dt className='text-muted-foreground'>{t('Tool calls')}</dt>
@@ -534,6 +543,14 @@ function MessageAuditReviewSection(props: { auditSessionId: string }) {
         <dl className='bg-muted/30 grid gap-x-4 gap-y-1 rounded-md border px-3 py-2 text-xs sm:grid-cols-[auto_1fr_auto_1fr]'>
           <dt className='text-muted-foreground'>{t('Model calls')}</dt>
           <dd>{review.diagnostics.model_calls}</dd>
+          <dt className='text-muted-foreground'>{t('Context mode')}</dt>
+          <dd>
+            {t(
+              getMessageAuditReviewContextModeLabelKey(
+                review.diagnostics.context_mode
+              )
+            )}
+          </dd>
           <dt className='text-muted-foreground'>{t('Tool calls')}</dt>
           <dd>
             {review.diagnostics.tool_calls} /{' '}

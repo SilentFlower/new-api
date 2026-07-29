@@ -12,6 +12,7 @@ import {
   getMessageAuditReviewCallOutcomeLabelKey,
   getMessageAuditReviewErrorStageLabelKey,
   getMessageAuditReviewFailureLabelKey,
+  getMessageAuditReviewProtocolLabelKey,
   getMessageAuditReviewUncoveredLabelKey,
   getMessageAuditSessionMatchLabelKey,
   isMessageAuditCleanupActive,
@@ -192,6 +193,14 @@ describe('消息审计 AI 审核状态', () => {
     assert.equal(
       getMessageAuditReviewCallOutcomeLabelKey('fallback'),
       'Switched to text Tool fallback'
+    )
+    assert.equal(
+      getMessageAuditReviewProtocolLabelKey('merged_context'),
+      'Merged context'
+    )
+    assert.equal(
+      getMessageAuditReviewProtocolLabelKey('native_tools'),
+      'Native Tool calls'
     )
   })
 
