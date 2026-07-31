@@ -10,16 +10,21 @@ Therefore, when an AI uses this skill, the default customization target is local
 
 Do not default to guiding the user to fork the Trellis CLI repository. Treat upstream source code as the operating target only when the user explicitly says they want to change Trellis upstream source, publish an npm package, or contribute a PR.
 
+<!-- BEGIN skill-garden patch trellis-meta-managed-system-model v0.6 -->
 ## Local System Model
 
-Trellis provides three layers inside a user project:
+Native Trellis provides three project-local layers:
 
-1. **Workflow layer**: `.trellis/workflow.md` defines phases, routing, next actions, and prompt blocks.
-2. **Persistence layer**: `.trellis/tasks/`, `.trellis/spec/`, and `.trellis/workspace/` store tasks, specs, and session memory.
-3. **Platform integration layer**: hooks, settings, agents, skills, commands, prompts, and workflows in platform directories connect the Trellis workflow to different AI tools.
+1. **Workflow layer**: `.trellis/workflow.md` defines current phases, routing, next actions, and prompt blocks.
+2. **Persistence layer**: `.trellis/tasks/`, `.trellis/spec/`, and `.trellis/workspace/` store tasks, specs, and deliberate session records.
+3. **Platform integration layer**: hooks, settings, agents, skills, commands, prompts, workflows, channel runtime files, and memory entry points connect Trellis to AI tools.
 
-All three layers live inside the user project, so an AI can read and modify them directly.
+Flower adds a conditional management layer when a Plugin is declared and locked:
 
+4. **Plugin management layer**: `.flower/plugins.json` records intent, `.flower/plugin-lock.json` records the resolved immutable graph and granted capabilities, and `.flower/state.json` records owned paths, Patch provenance, and resulting hashes. Planning, preflight, transaction, lock, state, rollback, and uninstall are one lifecycle rather than unrelated local edits.
+
+Without matching Plugin state or managed markers, use the native three-layer model. With `flower/skill-garden` ownership, read deployed files to understand current behavior but make durable 0.6 changes through the owning Skill-Garden source and Patch catalog.
+<!-- END skill-garden patch trellis-meta-managed-system-model v0.6 -->
 ## Core Paths
 
 | Path | Purpose |
@@ -33,14 +38,17 @@ All three layers live inside the user project, so an AI can read and modify them
 | `.trellis/.runtime/` | Session-level runtime state, such as the current task pointer. |
 | `.trellis/.template-hashes.json` | Template hashes for Trellis-managed files, used by update to determine whether local files were modified by the user. |
 
+<!-- BEGIN skill-garden patch trellis-meta-managed-customization-principles v0.6 -->
 ## AI Customization Principles
 
-1. **Find the local source of truth first**: Do not edit from memory. Read `.trellis/workflow.md`, `.trellis/config.yaml`, the relevant platform directory, and related task files first.
-2. **Edit the user project, not the npm package cache**: Modify generated files inside the project, not `node_modules` or the global npm install directory.
-3. **Keep platform files aligned with `.trellis/`**: If workflow routing changes, also check whether platform skills or commands still describe the same flow.
-4. **Put project-specific rules in `.trellis/spec/` or a local skill**: Do not put team conventions into `trellis-meta`.
-5. **Preserve user changes**: If a file was already modified locally, work from the current content instead of overwriting it with a default template.
-
+1. **Inspect behavior and ownership separately**: Read the current `.trellis/` and platform files for runtime truth, then inspect `.flower/` state, template hashes, and managed markers to locate the durable authoring source.
+2. **Choose the owner before the edit**: Project-local content may be edited locally. Trellis templates follow native update rules. Flower/Skill-Garden targets follow Plugin state and Patch ownership.
+3. **Use the 0.6 Patch Engine for managed Trellis files**: Declare exact targets, selector/baseline/content, target policy, and Bundle selection. Do not add a special injector or modify only a deployed copy.
+4. **Keep the lifecycle ordered**: Change `vendor/skill-garden/.trellis/0.6/`, run `npm run sync` to refresh `enhancements/0.6/`, regenerate/check compiled targets, then update dogfood through the Flower Plugin lifecycle.
+5. **Keep shared semantics aligned**: Workflow owner changes may require matching skill, hook, helper, or platform entry updates, but each full procedure stays with its owning capability.
+6. **Keep project-specific rules project-local**: Use `.trellis/spec/` or a separately owned local skill; do not turn public `trellis-meta` into a project notebook.
+7. **Preserve evidence and user content**: Respect Plugin ownership, first-backup/provenance records, template conflicts, and current user modifications. Never use `node_modules` as an authoring target.
+<!-- END skill-garden patch trellis-meta-managed-customization-principles v0.6 -->
 ## How To Use This Directory
 
 - To understand which files exist after init, read `generated-files.md`.

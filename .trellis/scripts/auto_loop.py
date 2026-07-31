@@ -26,7 +26,10 @@ LEGACY_SCHEMA_VERSION = 1
 DEFAULT_PROFILE = "commit-only"
 MAX_FIX_RECHECK = 3
 MAX_PLANNING_REPAIR = 3
+MAX_ARTIFACT_RECONCILE = 3
 DECISION_LOG_LIMIT = 20
+MANIFEST_AUDIT_TAIL_LIMIT = 3
+TASK_PROGRESS_NOTE_LIMIT = 500
 ACTIVE_RUN_STATUSES = {"preparing", "awaiting_input", "running"}
 TERMINAL_RUN_STATUSES = {
     "completed",
@@ -38,6 +41,7 @@ ALLOWED_TASK_STATUSES = {"planning", "in_progress"}
 VALID_IMPLEMENT_ROUTES = {"inline", "subagent"}
 VALID_CHECK_ROUTES = {"check-all-inline", "check-all-subagent"}
 VALID_CHECK_DEPTHS = {"auto", "light", "full"}
+CHECK_ACTIONS = {"run_check_all", "run_recheck"}
 RECOVERABLE_BLOCK_REASONS = {
     "missing-prd",
     "open-questions",
@@ -48,6 +52,7 @@ RECOVERABLE_BLOCK_REASONS = {
     "missing-implement-context",
     "missing-check-context",
     "planning-repair-budget-exhausted",
+    "retry-budget-exhausted",
     "artifact-drift",
     "protected-path-conflict",
     "protected-baseline-drift",
@@ -147,6 +152,116 @@ def _rel_path(repo_root: Path, path: Path) -> str:
         return path.relative_to(repo_root).as_posix()
     except ValueError:
         return str(path)
+
+
+def _repo_root_from_run_path(path: Path) -> Path | None:
+    """从 auto-loop runtime 文件路径反推项目根目录。"""
+    try:
+        if path.parents[2].name == ".trellis":
+            return path.parents[3]
+    except IndexError:
+        return None
+    return None
+
+
+def _manifest_audit_path(path: Path) -> Path:
+    """返回当前 run 的 manifest audit JSONL 路径。"""
+    return path.with_suffix(".manifest.jsonl")
+
+
+def _audit_rel_path(path: Path, audit_path: Path) -> str:
+    """返回可写入 runtime 的相对 audit 路径。"""
+    repo_root = _repo_root_from_run_path(path)
+    if repo_root is not None:
+        return _rel_path(repo_root, audit_path)
+    return audit_path.name
+
+
+def _manifest_event(payload: dict[str, Any]) -> dict[str, Any]:
+    """把 manifest payload 包装为可去重的 audit 事件。"""
+    revision = int(payload.get("revision") or 0)
+    sha256 = str(payload.get("sha256") or "")
+    return {
+        "event_id": f"manifest-{revision:06d}-{sha256[:12]}",
+        "type": "manifest_revision",
+        "revision": revision,
+        "sha256": sha256,
+        "created_at": payload.get("created_at"),
+        "payload": payload,
+    }
+
+
+def _read_manifest_event_keys(path: Path) -> set[tuple[int, str]]:
+    """读取已写入 manifest audit 的 revision/sha256 键。"""
+    keys: set[tuple[int, str]] = set()
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError:
+        return keys
+    except OSError:
+        return keys
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict) or event.get("type") != "manifest_revision":
+            continue
+        try:
+            revision = int(event.get("revision") or 0)
+        except (TypeError, ValueError):
+            continue
+        sha256 = event.get("sha256")
+        if isinstance(sha256, str) and sha256:
+            keys.add((revision, sha256))
+    return keys
+
+
+def _append_manifest_events(path: Path, revisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """把完整 manifest revision 追加到 audit JSONL，并跳过已存在事件。"""
+    events = [_manifest_event(payload) for payload in revisions if isinstance(payload, dict)]
+    if not events:
+        return []
+    path.parent.mkdir(parents=True, exist_ok=True)
+    existing = _read_manifest_event_keys(path)
+    pending = [
+        event
+        for event in events
+        if (int(event.get("revision") or 0), str(event.get("sha256") or "")) not in existing
+    ]
+    if not pending:
+        return events
+    with path.open("a", encoding="utf-8") as handle:
+        for event in pending:
+            handle.write(json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    return events
+
+
+def _compact_manifest_history(path: Path, state: dict[str, Any]) -> None:
+    """把主 runtime 中的完整 manifest 历史迁移到旁路 JSONL。"""
+    revisions = state.get("manifest_revisions")
+    if not isinstance(revisions, list) or not revisions:
+        state.pop("manifest_revisions", None)
+        if state.get("manifest_revision"):
+            state.setdefault("manifest_audit_path", _audit_rel_path(path, _manifest_audit_path(path)))
+        return
+    audit_path = _manifest_audit_path(path)
+    events = _append_manifest_events(audit_path, [item for item in revisions if isinstance(item, dict)])
+    state["manifest_audit_path"] = _audit_rel_path(path, audit_path)
+    state["manifest_tail"] = [
+        {
+            "event_id": event.get("event_id"),
+            "revision": event.get("revision"),
+            "sha256": event.get("sha256"),
+            "created_at": event.get("created_at"),
+        }
+        for event in events[-MANIFEST_AUDIT_TAIL_LIMIT:]
+    ]
+    state.pop("manifest_revisions", None)
 
 
 def _auto_dir(repo_root: Path) -> Path:
@@ -364,6 +479,131 @@ def _load_task_json(repo_root: Path, task_ref: str) -> dict[str, Any]:
 def _task_status(repo_root: Path, task_ref: str) -> str:
     """读取任务状态。"""
     return str(_load_task_json(repo_root, task_ref).get("status") or "unknown")
+
+
+def _trim_text(value: Any, limit: int = TASK_PROGRESS_NOTE_LIMIT) -> str:
+    """把 progress notes 中的长文本压到固定上限。"""
+    text = str(value or "").replace("\n", " ").strip()
+    if len(text) <= limit:
+        return text
+    return text[: limit - 1].rstrip() + "…"
+
+
+def _progress_stable_fields(progress: dict[str, Any]) -> dict[str, Any]:
+    """提取 progress 中除 updatedAt 外的稳定字段。"""
+    return {
+        "completedSteps": progress.get("completedSteps", []),
+        "partialStep": progress.get("partialStep"),
+        "nextStep": progress.get("nextStep"),
+        "notes": progress.get("notes", ""),
+    }
+
+
+def _progress_for_completed(state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    """构造 auto-loop 本地提交完成后的任务进度。"""
+    commit = str(item.get("commit") or "")
+    short_commit = commit[:7] if commit else "unknown"
+    notes = "; ".join(
+        part
+        for part in (
+            f"run_id={state.get('run_id')}",
+            f"task={item.get('task')}",
+            f"commit={commit or 'unknown'}",
+            f"status={state.get('status')}",
+        )
+        if part
+    )
+    return {
+        "updatedAt": _utc_now(),
+        "completedSteps": [f"auto-loop: 本地提交完成 {short_commit}"],
+        "partialStep": None,
+        "nextStep": "auto-loop 已本地提交；需要用户显式运行 finish-work/archive 或继续后续人工流程",
+        "notes": _trim_text(notes),
+    }
+
+
+def _progress_for_blocked(state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    """构造 auto-loop blocked 后的任务进度。"""
+    blocked = item.get("blocked") if isinstance(item.get("blocked"), dict) else {}
+    reason = str(blocked.get("reason") or "unknown")
+    summary = str(blocked.get("summary") or "")
+    task = str(item.get("task") or "")
+    run_id = str(state.get("run_id") or "")
+    command = f"python3 ./.trellis/scripts/auto_loop.py retry-blocked --run-id {run_id} --task {task}"
+    notes = "; ".join(
+        part
+        for part in (
+            f"run_id={run_id}",
+            f"task={task}",
+            f"status={state.get('status')}",
+            f"reason={reason}",
+            f"summary={summary}" if summary else "",
+        )
+        if part
+    )
+    return {
+        "updatedAt": _utc_now(),
+        "completedSteps": [],
+        "partialStep": f"auto-loop blocked: {reason}",
+        "nextStep": f"auto-loop 已阻断；确认后运行 {command}",
+        "notes": _trim_text(notes),
+    }
+
+
+def _auto_progress_for_item(state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any] | None:
+    """按队列项终态生成可写入 task.json 的 progress。"""
+    if item.get("status") == "completed":
+        return _progress_for_completed(state, item)
+    if item.get("status") == "blocked":
+        return _progress_for_blocked(state, item)
+    return None
+
+
+def _write_auto_task_progress(repo_root: Path, state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any] | None:
+    """把 auto-loop 下一步写入对应 task.json.progress。"""
+    progress = _auto_progress_for_item(state, item)
+    if progress is None:
+        return None
+    task_ref = str(item.get("task") or "")
+    task_json_path = _task_dir(repo_root, task_ref) / "task.json"
+    task_data = _read_json(task_json_path)
+    if not task_data:
+        return {
+            "task": task_ref,
+            "reason": "invalid-task-json",
+            "path": _rel_path(repo_root, task_json_path),
+        }
+    existing = task_data.get("progress")
+    if isinstance(existing, dict) and _progress_stable_fields(existing) == _progress_stable_fields(progress):
+        return None
+    task_data["progress"] = progress
+    task_data.pop("last_push_snapshot", None)
+    _write_json(task_json_path, task_data)
+    return {
+        "task": task_ref,
+        "status": "written",
+        "path": _rel_path(repo_root, task_json_path),
+    }
+
+
+def _sync_auto_task_progress(repo_root: Path, state: dict[str, Any]) -> None:
+    """同步所有终态队列项的任务恢复提示。"""
+    warnings: list[dict[str, Any]] = []
+    for item in _queue_items(state):
+        try:
+            result = _write_auto_task_progress(repo_root, state, item)
+        except OSError as exc:
+            result = {
+                "task": item.get("task"),
+                "reason": "task-progress-write-failed",
+                "message": str(exc),
+            }
+        if isinstance(result, dict) and result.get("reason"):
+            warnings.append(result)
+    if warnings:
+        state["task_progress_warnings"] = warnings[-DECISION_LOG_LIMIT:]
+    else:
+        state.pop("task_progress_warnings", None)
 
 
 def _has_real_jsonl_entries(path: Path, repo_root: Path) -> bool:
@@ -698,14 +938,27 @@ def _manifest_payload(state: dict[str, Any], revision: int) -> dict[str, Any]:
     }
 
 
-def _append_manifest_revision(state: dict[str, Any], decision_id: str | None = None) -> dict[str, Any]:
+def _append_manifest_revision(
+    state: dict[str, Any],
+    decision_id: str | None = None,
+    change_source: str | None = None,
+    files: list[str] | None = None,
+) -> dict[str, Any]:
     """追加并激活一个 run manifest revision。"""
     revisions = state.get("manifest_revisions")
     if not isinstance(revisions, list):
         revisions = []
-    payload = _manifest_payload(state, len(revisions) + 1)
+    try:
+        next_revision = int(state.get("manifest_revision") or 0) + 1
+    except (TypeError, ValueError):
+        next_revision = len(revisions) + 1
+    payload = _manifest_payload(state, next_revision)
     if decision_id:
         payload["decision_id"] = decision_id
+    if change_source:
+        payload["change_source"] = change_source
+    if files:
+        payload["files"] = sorted(files)
     encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     payload["sha256"] = hashlib.sha256(encoded.encode("utf-8")).hexdigest()
     revisions.append(payload)
@@ -1064,6 +1317,10 @@ def _write_state(path: Path, state: dict[str, Any]) -> None:
     """刷新 auto run 状态和更新时间。"""
     state["updated_at"] = _utc_now()
     state.pop("resume_capsule", None)
+    _compact_manifest_history(path, state)
+    repo_root = _repo_root_from_run_path(path)
+    if repo_root is not None:
+        _sync_auto_task_progress(repo_root, state)
     _write_json(path, state)
 
 
@@ -1268,8 +1525,10 @@ def _summary(state: dict[str, Any]) -> dict[str, Any]:
             "queue_reordered_detail": state.get("queue_reordered"),
             "repositories": state.get("repositories"),
             "protected_drifts": state.get("protected_drifts", []),
-            "manifest_revisions": state.get("manifest_revisions"),
+            "manifest_audit_path": state.get("manifest_audit_path"),
+            "manifest_tail": state.get("manifest_tail", []),
             "global_block": state.get("global_block"),
+            "task_progress_warnings": state.get("task_progress_warnings", []),
         })
     return summary
 
@@ -1300,7 +1559,7 @@ def _make_item(repo_root: Path, task_ref: str) -> dict[str, Any]:
         "blocked_by": [],
         "owned_dirty": [],
         "decision_count": 0,
-        "attempts": {"fix_recheck": 0},
+        "attempts": {"fix_recheck": 0, "artifact_reconcile": 0},
         "last_failure": None,
         "last_check": None,
         "last_action": None,
@@ -1360,11 +1619,17 @@ def _action(action: str, item: dict[str, Any], extra: dict[str, Any] | None = No
     elif action == "run_implement":
         base["instruction"] = "进入 Phase 2.1 implement route，并执行实现。"
     elif action == "run_check_all":
-        base["instruction"] = "进入 Phase 2.2 check route，按 requested_check_depth 执行统一 Check-All；完成后立即 record + next。"
+        base["instruction"] = (
+            "进入 Phase 2.2 check route，按 requested_check_depth 执行统一 Check-All；DOC 修复需精确声明 "
+            "--doc-remediation-file。record 成功后立即 next；返回 retryable 时先在同一 action 自纠。"
+        )
     elif action == "run_fix":
         base["instruction"] = "根据最近失败摘要修复问题。"
     elif action == "run_recheck":
-        base["instruction"] = "修复后重新执行统一 Check-All，不得低于 minimum_check_depth；完成后立即 record + next。"
+        base["instruction"] = (
+            "修复后重新执行统一 Check-All，不得低于 minimum_check_depth；DOC 修复需精确声明 "
+            "--doc-remediation-file。record 成功后立即 next；返回 retryable 时先在同一 action 自纠。"
+        )
     elif action == "run_spec_update":
         base["instruction"] = (
             "执行 trellis-update-spec 并读取 spec_update_result：no-op/written 时 "
@@ -1378,7 +1643,11 @@ def _action(action: str, item: dict[str, Any], extra: dict[str, Any] | None = No
     return base
 
 
-def _remember_action(item: dict[str, Any], action_data: dict[str, Any]) -> dict[str, Any]:
+def _remember_action(
+    item: dict[str, Any],
+    action_data: dict[str, Any],
+    artifact_sha256: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """记录 runner 已发出的待回写 action。"""
     item["last_action"] = {
         "action": action_data.get("action"),
@@ -1388,6 +1657,8 @@ def _remember_action(item: dict[str, Any], action_data: dict[str, Any]) -> dict[
     for key in ("prd_sha256", "planning_sha256", "handoff_sha256"):
         if action_data.get(key):
             item["last_action"][key] = action_data[key]
+    if artifact_sha256 is not None:
+        item["last_action"]["artifact_sha256"] = artifact_sha256
     item["updated_at"] = _utc_now()
     return action_data
 
@@ -1475,8 +1746,8 @@ def _next_item_legacy(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str,
                 ),
             )
         if step == "fix":
-            attempts = item.setdefault("attempts", {}).get("fix_recheck", 0)
-            if attempts >= MAX_FIX_RECHECK:
+            attempts = int(item.setdefault("attempts", {}).get("fix_recheck", 0))
+            if attempts > MAX_FIX_RECHECK:
                 _block_item(item, "retry-budget-exhausted", "fix/recheck 已达到默认 3 轮预算")
                 continue
             return item, _remember_action(
@@ -1715,10 +1986,10 @@ def _next_running_v2(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, 
             return item, _remember_action(item, _action("run_check_all", item, {
                 "requested_check_depth": _requested_check_depth(state),
                 "minimum_check_depth": _minimum_check_depth(item, "run_check_all"),
-            }))
+            }), _task_artifact_hashes(repo_root, item))
         if step == "fix":
             attempts = int(item.setdefault("attempts", {}).get("fix_recheck", 0))
-            if attempts >= MAX_FIX_RECHECK:
+            if attempts > MAX_FIX_RECHECK:
                 _block_item(item, "retry-budget-exhausted", "fix/recheck 已达到默认 3 轮预算")
                 continue
             return item, _remember_action(item, _action("run_fix", item, {
@@ -1729,7 +2000,7 @@ def _next_running_v2(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, 
             return item, _remember_action(item, _action("run_recheck", item, {
                 "requested_check_depth": _requested_check_depth(state),
                 "minimum_check_depth": _minimum_check_depth(item, "run_recheck"),
-            }))
+            }), _task_artifact_hashes(repo_root, item))
         if step == "spec_update":
             return item, _remember_action(item, _action("run_spec_update", item))
         if step == "commit_only":
@@ -2046,6 +2317,15 @@ def cmd_retry_blocked(args: argparse.Namespace) -> int:
         item["status"] = "pending"
         item["blocked"] = None
         item["last_action"] = None
+        if reason in {"retry-budget-exhausted", "artifact-drift"}:
+            attempts = item.get("attempts")
+            if not isinstance(attempts, dict):
+                attempts = {}
+            if reason == "retry-budget-exhausted":
+                attempts["fix_recheck"] = 0
+            else:
+                attempts["artifact_reconcile"] = 0
+            item["attempts"] = attempts
         item["task_status"] = _task_status(repo_root, str(item.get("task")))
         item["updated_at"] = _utc_now()
         state["current_index"] = min(int(state.get("current_index") or index), index)
@@ -2777,6 +3057,175 @@ def _consume_pending_artifact_decision(
     }
 
 
+def _consume_check_doc_remediation(
+    repo_root: Path,
+    state: dict[str, Any],
+    item: dict[str, Any],
+    action: str,
+    raw_files: list[str],
+) -> dict[str, Any] | None:
+    """校验并消费 Check-All 声明的低风险任务文档修复。"""
+    if not raw_files:
+        return None
+    if action not in CHECK_ACTIONS:
+        return {
+            "status": "error",
+            "reason": "doc-remediation-action-not-allowed",
+            "message": "--doc-remediation-file 只允许用于 run_check_all 或 run_recheck。",
+        }
+    if isinstance(item.get("pending_artifact_decision"), dict):
+        return {
+            "status": "error",
+            "reason": "doc-remediation-decision-conflict",
+            "message": "当前 action 同时存在待消费的 decide artifact 授权，不能混用 DOC remediation。",
+        }
+
+    last_action = item.get("last_action")
+    previous = last_action.get("artifact_sha256") if isinstance(last_action, dict) else None
+    if not isinstance(previous, dict):
+        return {
+            "status": "error",
+            "reason": "doc-remediation-baseline-missing",
+            "message": "当前 outstanding check action 没有逐文件 artifact baseline，请重新启动安全流程。",
+        }
+
+    task_dir = _task_dir(repo_root, str(item.get("task") or ""))
+    allowed = {
+        _baseline_key(".", _rel_path(repo_root, task_dir / "implement.md")),
+        _baseline_key(".", _rel_path(repo_root, task_dir / "brief.md")),
+    }
+    declared = {_normalize_record_file(value) for value in raw_files}
+    forbidden = sorted(declared - allowed)
+    if forbidden:
+        return {
+            "status": "error",
+            "reason": "doc-remediation-file-not-allowed",
+            "files": forbidden,
+            "allowed_files": sorted(allowed),
+        }
+
+    current = _task_artifact_hashes(repo_root, item)
+    changed = {
+        key
+        for key in set(previous) | set(current)
+        if previous.get(key) != current.get(key)
+    }
+    if changed != declared:
+        return {
+            "status": "error",
+            "reason": "doc-remediation-files-mismatch",
+            "declared_files": sorted(declared),
+            "changed_files": sorted(changed),
+        }
+
+    planning_hash, handoff_hash = _current_artifact_hashes(repo_root, item)
+    item["planning_sha256"] = planning_hash
+    item["handoff_sha256"] = handoff_hash
+    manifest = _append_manifest_revision(
+        state,
+        change_source="check-doc-remediation",
+        files=sorted(changed),
+    )
+    detail = {
+        "files": sorted(changed),
+        "manifest_revision": manifest["revision"],
+        "manifest_sha256": manifest["sha256"],
+    }
+    _append_item_decision(
+        item,
+        "check_doc_artifacts_rebound",
+        "Check-All 低风险任务文档修复已重新绑定到 manifest",
+        detail,
+    )
+    return detail
+
+
+def _record_artifact_drift(
+    path: Path,
+    state: dict[str, Any],
+    item: dict[str, Any],
+    action: str,
+    args: argparse.Namespace,
+    summary: str,
+    detail: dict[str, Any],
+) -> int:
+    """按 action 风险和预算记录 artifact drift。"""
+    if action not in CHECK_ACTIONS or (
+        args.result == "blocked" and args.failure_type == "artifact-drift"
+    ):
+        item["last_action"] = None
+        _block_item(item, "artifact-drift", summary, detail)
+        _write_state(path, state)
+        return _print({
+            "status": "recorded",
+            "run_id": state.get("run_id"),
+            "task": item.get("task"),
+            "item_status": item.get("status"),
+            "current_step": item.get("current_step"),
+            "summary": _format_summary(state, args),
+        })
+
+    attempts = item.setdefault("attempts", {})
+    attempt = int(attempts.get("artifact_reconcile", 0)) + 1
+    attempts["artifact_reconcile"] = attempt
+    item["last_failure"] = {
+        "action": action,
+        "failure_type": "artifact-drift",
+        "summary": summary,
+        "detail": detail,
+        "failed_at": _utc_now(),
+    }
+    if attempt > MAX_ARTIFACT_RECONCILE:
+        item["last_action"] = None
+        _block_item(
+            item,
+            "artifact-drift",
+            "Check action artifact drift 连续自纠超过 3 次",
+            {**detail, "attempt": attempt, "max_attempts": MAX_ARTIFACT_RECONCILE},
+        )
+        _write_state(path, state)
+        return _print({
+            "status": "recorded",
+            "run_id": state.get("run_id"),
+            "task": item.get("task"),
+            "item_status": item.get("status"),
+            "current_step": item.get("current_step"),
+            "summary": _format_summary(state, args),
+        })
+
+    item["updated_at"] = _utc_now()
+    _append_item_decision(
+        item,
+        "warning",
+        summary,
+        {
+            "action": action,
+            "failure_type": "artifact-drift",
+            "attempt": attempt,
+            "max_attempts": MAX_ARTIFACT_RECONCILE,
+            "detail": detail,
+        },
+    )
+    _write_state(path, state)
+    return _print({
+        "status": "retryable",
+        "reason": "artifact-drift",
+        "run_id": state.get("run_id"),
+        "task": item.get("task"),
+        "item_status": item.get("status"),
+        "current_step": item.get("current_step"),
+        "attempt": attempt,
+        "max_attempts": MAX_ARTIFACT_RECONCILE,
+        "outstanding_action": action,
+        "detail": detail,
+        "instruction": (
+            "不要运行 next；撤回本 action 的误改后重录，或为合法 implement.md/brief.md 修复补充 "
+            "--doc-remediation-file。无法安全归因时用 blocked + artifact-drift 重录。"
+        ),
+        "summary": _format_summary(state, args),
+    })
+
+
 def cmd_record(args: argparse.Namespace) -> int:
     """记录 agent 执行结果。"""
     repo_root = _repo_root()
@@ -2890,24 +3339,47 @@ def cmd_record(args: argparse.Namespace) -> int:
                 "current_step": item.get("current_step"),
                 "summary": _format_summary(state, args),
             })
+        doc_rebind = _consume_check_doc_remediation(
+            repo_root,
+            state,
+            item,
+            action,
+            args.doc_remediation_file,
+        )
+        if isinstance(doc_rebind, dict) and doc_rebind.get("status") == "error":
+            doc_rebind.update({"task": item.get("task"), "action": action})
+            return _print(doc_rebind)
         artifact_rebind = _consume_pending_artifact_decision(repo_root, state, item)
         if isinstance(artifact_rebind, dict) and artifact_rebind.get("unauthorized"):
-            item["last_action"] = None
-            _block_item(
+            return _record_artifact_drift(
+                path,
+                state,
                 item,
-                "artifact-drift",
+                action,
+                args,
                 "planning/handoff artifacts 的变化未被当前 AI 决策文件范围授权",
                 artifact_rebind,
             )
-            _write_state(path, state)
-            return _print({
-                "status": "recorded",
-                "run_id": state.get("run_id"),
-                "task": item.get("task"),
-                "item_status": item.get("status"),
-                "current_step": item.get("current_step"),
-                "summary": _format_summary(state, args),
-            })
+        if action in CHECK_ACTIONS and doc_rebind is None and artifact_rebind is None:
+            last_action = item.get("last_action")
+            previous = last_action.get("artifact_sha256") if isinstance(last_action, dict) else None
+            if isinstance(previous, dict):
+                current = _task_artifact_hashes(repo_root, item)
+                changed = sorted(
+                    key
+                    for key in set(previous) | set(current)
+                    if previous.get(key) != current.get(key)
+                )
+                if changed:
+                    return _record_artifact_drift(
+                        path,
+                        state,
+                        item,
+                        action,
+                        args,
+                        "Check action 发出后 planning/handoff 文件发生未声明变化",
+                        {"changed_files": changed},
+                    )
         if item.get("planning_sha256"):
             try:
                 planning_hash, handoff_hash = _current_artifact_hashes(repo_root, item)
@@ -2925,22 +3397,15 @@ def cmd_record(args: argparse.Namespace) -> int:
                 planning_hash != item.get("planning_sha256")
                 or handoff_hash != item.get("handoff_sha256")
             ):
-                item["last_action"] = None
-                _block_item(
+                return _record_artifact_drift(
+                    path,
+                    state,
                     item,
-                    "artifact-drift",
+                    action,
+                    args,
                     "action 发出后 planning/handoff artifacts 发生未授权变化",
                     drift_detail,
                 )
-                _write_state(path, state)
-                return _print({
-                    "status": "recorded",
-                    "run_id": state.get("run_id"),
-                    "task": item.get("task"),
-                    "item_status": item.get("status"),
-                    "current_step": item.get("current_step"),
-                    "summary": _format_summary(state, args),
-                })
         conflicts = _protected_path_conflicts(state, args.files)
         if conflicts:
             item["last_action"] = None
@@ -2966,6 +3431,8 @@ def cmd_record(args: argparse.Namespace) -> int:
         return _print(check_error)
 
     _record_check_result(state, item, action, args)
+    if action in CHECK_ACTIONS:
+        item.setdefault("attempts", {})["artifact_reconcile"] = 0
     item["last_action"] = None
     if args.result == "ok":
         _advance_after_ok(item, action, args)
@@ -3157,6 +3624,7 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--failure-type")
     record.add_argument("--summary")
     record.add_argument("--files", nargs="*")
+    record.add_argument("--doc-remediation-file", action="append", default=[])
     record.add_argument("--retained-files", nargs="*")
     record.add_argument("--commit")
     record.add_argument("--commit-message")

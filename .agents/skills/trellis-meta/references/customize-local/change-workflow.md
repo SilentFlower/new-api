@@ -1,6 +1,8 @@
 # Change Local Workflow
 
-When the user wants to change Trellis phases, next-action hints, whether to create tasks, whether to use sub-agents, or when to check/wrap up, edit `.trellis/workflow.md` first.
+<!-- BEGIN skill-garden patch trellis-meta-managed-workflow-entry v0.6 -->
+When the user wants to change Trellis phases, next actions, task gates, routing, checking, or wrap-up, read `.trellis/workflow.md` first because it is the current runtime contract. Before editing it, determine whether the relevant section is project-local, an upstream template, or a Skill-Garden managed Patch output.
+<!-- END skill-garden patch trellis-meta-managed-workflow-entry v0.6 -->
 
 ## Read These Files First
 
@@ -19,14 +21,16 @@ When the user wants to change Trellis phases, next-action hints, whether to crea
 | Change wrap-up after completion | Phase 3 and `[workflow-state:completed]`. |
 | Change which skill a user intent triggers | `Skill Routing` table. |
 
+<!-- BEGIN skill-garden patch trellis-meta-managed-workflow-edit-route v0.6 -->
 ## Modification Steps
 
-1. Find the relevant section in `.trellis/workflow.md`.
-2. When changing rules, keep explicit trigger conditions and next actions.
-3. If adding or renaming a skill/agent, synchronize the corresponding files in platform directories.
-4. Workflow-state changes only need an edit to the `[workflow-state:STATUS]` block in `.trellis/workflow.md`. The hook is parser-only — it reads whatever you put in the block. Keep the opening and closing tags' STATUS strings identical (`[workflow-state:foo]…[/workflow-state:foo]`); mismatched STATUS pairs are silently dropped.
-5. Make the AI reread `.trellis/workflow.md`; do not keep using rules from the old conversation.
-
+1. Find the runtime section in `.trellis/workflow.md` and identify the owner named by the Workflow Owner Index or owning skill/helper.
+2. Inspect Plugin state and nearby markers. If the section is not managed, make the narrow local edit and keep trigger/next-action semantics explicit.
+3. If Skill-Garden owns the section, change the matching 0.6 Patch selector/baseline/content and Bundle policy. Do not add a parallel workflow injector or edit only the dogfood workflow.
+4. Keep workflow-state tags paired, but do not duplicate a full owner procedure into the state block. State holds a one-hop gate; the owner skill/helper holds the detailed contract.
+5. Synchronize affected skills, hooks, helpers, or platform entries through their own managed sources when the shared semantics require it.
+6. Run source-to-snapshot sync, conflict checks, compiled target generation/check, final-output review, and idempotent dogfood application before treating the change as complete.
+<!-- END skill-garden patch trellis-meta-managed-workflow-edit-route v0.6 -->
 ## Example: Relax Task Creation Requirements
 
 To change when task creation can be skipped, usually edit `[workflow-state:no_task]`:

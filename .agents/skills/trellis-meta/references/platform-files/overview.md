@@ -46,14 +46,16 @@ Some platforms do not have Trellis sub-agent or hook capabilities. They rely on 
 
 To change behavior, inspect platform workflows/skills/commands and `.trellis/workflow.md`.
 
+<!-- BEGIN skill-garden patch trellis-meta-managed-platform-edit-route v0.6 -->
 ## Local Modification Order
 
-When the user asks to customize behavior for a platform, the AI should inspect files in this order:
+When customizing a platform:
 
-1. Read `.trellis/workflow.md` to confirm the shared flow.
-2. Read the target platform's settings/config to see which hooks/agents/skills/commands are registered.
-3. Read the target platform's agents/skills/commands/hooks.
-4. Modify the local file closest to the user's need.
-5. If the change affects the shared flow, synchronize `.trellis/workflow.md` or `.trellis/spec/`.
+1. Read `.trellis/workflow.md` and the target platform's settings, hooks, agents, skills, commands, prompts, or workflows.
+2. Inspect `.flower/plugin-lock.json`, `.flower/state.json`, template hashes, and managed markers for every candidate target.
+3. For project-local files, modify the narrow local source and keep shared workflow semantics aligned.
+4. For managed files, modify the owning Plugin/Patch source and preserve explicit platform targets with `each-existing`/`missing: skip`; do not create roots for platforms that are not enabled.
+5. Apply the lifecycle and compare final bytes across all existing platform roots. Shared `.agents/skills` consumers must remain byte-consistent, while platform-specific frontmatter may retain its native differences.
 
-Do not modify only platform files and forget the shared workflow. Do not modify only `.trellis/workflow.md` and forget that platform entry points may still contain old descriptions.
+Never claim cross-platform support after changing only one deployed copy.
+<!-- END skill-garden patch trellis-meta-managed-platform-edit-route v0.6 -->

@@ -47,34 +47,31 @@ Different platforms generate different directories. Common categories:
 
 When modifying a platform directory, also confirm whether `.trellis/workflow.md` still describes the same flow.
 
+<!-- BEGIN skill-garden patch trellis-meta-managed-template-hashes v0.6 -->
 ## Meaning Of Template Hashes
 
-`.trellis/.template-hashes.json` records the content hash from the last time Trellis wrote a template file. `trellis update` uses it to distinguish three cases:
+`.trellis/.template-hashes.json` records native Trellis template hashes and still governs ordinary `trellis update` conflicts:
 
-| Case | Update behavior |
+| Case | Native update behavior |
 | --- | --- |
-| File was not modified by the user | It can be updated automatically. |
-| File was modified by the user | Prompt the user to overwrite, keep, or generate `.new`. |
-| File is no longer a current template | It may be deleted, renamed, or preserved according to migration rules. |
+| File matches the recorded template hash | Trellis may update it automatically. |
+| File differs from the recorded template hash | Trellis may prompt to overwrite, keep, or generate `.new`. |
+| File is no longer a current template | Trellis migration rules decide whether to delete, rename, or preserve it. |
 
-When an AI customizes local Trellis files, it does not need to maintain hashes manually. It is normal for Trellis update to recognize the result as "modified by the user."
-
+This file is not the complete ownership model in a Flower-managed project. When `.flower/plugin-lock.json` and `.flower/state.json` claim a target, Plugin ownership, Patch provenance, transaction checks, and managed result hashes also apply. Do not hand-edit either hash store; inspect both before deciding whether a difference is a user customization, a managed overlay, or drift.
+<!-- END skill-garden patch trellis-meta-managed-template-hashes v0.6 -->
+<!-- BEGIN skill-garden patch trellis-meta-managed-file-boundaries v0.6 -->
 ## Local Customization Boundaries
 
-Editable by default:
+Classify before editing:
 
-- `.trellis/workflow.md`
-- `.trellis/config.yaml`
-- `.trellis/spec/**`
-- `.trellis/scripts/**`
-- Platform hooks, settings, agents, skills, commands, prompts, and workflows
+| Ownership | Durable edit point |
+| --- | --- |
+| Project-local | The current project file, after reading its call chain and related workflow semantics. |
+| Upstream Trellis template | A local customization or upstream Trellis source, depending on the user's stated goal and template-hash behavior. |
+| Skill-Garden managed | `vendor/skill-garden/.trellis/0.6/` in the Flower source checkout, expressed through Patch/Bundle declarations for existing Trellis targets. |
+| Flower managed | The owning Flower source, Plugin manifest/adapter, or Patch catalog; never only the deployed result. |
+| Shared common | The shared source plus Plugin state ownership rules; preserve content shared by more than one capability. |
 
-Do not edit by default:
-
-- Global npm install directory
-- `node_modules/@mindfoldhq/trellis`
-- Trellis GitHub repository source code
-- Concrete state files under `.trellis/.runtime/**`
-- Hash contents inside `.trellis/.template-hashes.json`
-
-Switch to the Trellis CLI source-code perspective only when the user explicitly wants to contribute upstream.
+Never hand-edit concrete runtime state, `.flower/` lock/state files, template hash contents, global npm caches, or `node_modules` as an implementation shortcut. If the Flower source checkout is not present, use the installed Plugin lifecycle or create separately owned project-local content rather than pretending the managed source exists locally.
+<!-- END skill-garden patch trellis-meta-managed-file-boundaries v0.6 -->

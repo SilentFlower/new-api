@@ -28,16 +28,16 @@ description: "按确认的精确文件范围提交普通变更或完成已就绪
 
 内部 `commit-only` 不接受临时扩大文件范围、远端推送或其他附加动作。安全条件不满足时返回失败，由调用方决定后续状态。
 
-## Step 0：交互式完成链门禁
+## Step 0：记录完成链证据
 
-除 auto-loop 内部 `commit-only` 外，任何普通 push 或用户 `commit-only` 在读取 Git 提交计划前，按以下顺序验证交互式完成链：
+除 auto-loop 内部 `commit-only` 外，普通 push 或用户 `commit-only` 已经构成明确 Git 意图。本 skill 在读取 Git 提交计划前只记录当前可用的完成链证据，不补跑、不切换阶段，也不新增确认：
 
-1. 当前工作内容缺少有效 Check-All，或实际 diff、检查范围/结论已变化：返回 Phase 2.2。唯一例外是当前有效 `spec_update_result.status=written` 的 `changed_files`，且这些受控写入全部位于 `.trellis/spec/**`；该 Update-Spec 自校验结果不触发额外 Check-All。当前 direct Git 请求只作为“严格通过后继续”的条件意图；Check-All 有 findings、blocked、部分验证或实质剩余风险时停止。此分支不得运行 Update-Spec，也不得读取 Git 计划。
-2. Check-All 有效后检查当前有效的 `spec_update_result`。结果缺失，或除上述受控 spec 写入外的实际 diff、Check-All 结论、用户 spec 意图已变化时，先加载 `trellis-update-spec`；只有新的 `no-op|written` 才能回到本 skill。
-3. `status=no-op|written`：继续本 skill 的 Git 预检与计划。
-4. `status=needs-review`：停止，不生成提交计划。
+- Check-All：根据当前标准报告与实际 diff 标记为 `通过`、`未运行`、`已失效`、`存在 findings`、`blocked` 或 `部分验证`。没有可验证的当前报告时使用 `未运行`，不得从历史消息、摘要或 dirty 状态猜测通过。
+- Update-Spec：根据当前 `spec_update_result` 与实际 diff 标记为 `no-op`、`written`、`needs-review`、`未运行` 或 `已失效`。结果缺失或无法证明仍适用于当前 diff 时使用 `未运行` / `已失效`。
 
-用户直接说 push/提交不构成跳过 Phase 3.3 的授权。auto-loop 内部 `commit-only` 已由 runner 的 `run_spec_update -> commit_only` 状态机和预授权保证顺序，因此不得重复进入本门禁。
+上述状态只进入 Step 3 的完成链证据与风险展示，不会阻止读取 Git 状态或生成提交计划。本步骤不得返回 Phase 2.2，不得加载 `trellis-check-all` 或 `trellis-update-spec`，也不得要求用户改写成“跳过检查后 push”。正常 workflow 的 Check-All -> Update-Spec -> Push 顺序仍由 Phase 2.2、Phase 3.3 和各自 owner 推进；`trellis-push` 不反向补做上游阶段。
+
+auto-loop 内部 `commit-only` 已由 runner 的 `run_check_all -> run_spec_update -> commit_only` 状态机和预授权保证顺序，因此不重复记录或判断本交互证据。
 
 ## Step 1：发现仓库与任务
 
@@ -119,6 +119,10 @@ git log @{u}..HEAD --oneline 2>/dev/null || true
 [无活动任务时追加：无活动任务]
 顺序：<repo-a> [-> `<local generation command>`] -> <repo-b> [-> task progress]
 
+### 完成链证据
+- Check-All：<通过 / 未运行 / 已失效 / 存在 findings / blocked / 部分验证>
+- Update-Spec：<no-op / written / needs-review / 未运行 / 已失效>
+
 ### 1. <repository-name>
 
 `<commit message>`
@@ -139,7 +143,7 @@ Push：<执行 / 跳过（commit-only）>
 - [staged] <path>
 
 ### 风险（仅数量大于 0 时显示）
-- <unknown ahead / branch-upstream / attribution risk>
+- <Check-All / Update-Spec 风险，或 unknown ahead / branch-upstream / attribution risk>
 
 [任务记录（仅普通模式且存在活动任务时显示）：`chore(task): update <task-name> progress` · <N> 个文件]
 [仓库：<repository-name> · 分支：`<branch>` -> `<upstream>`]
@@ -156,8 +160,9 @@ Push：<执行 / 跳过（commit-only）>
 - 超过 8 个时按目录归组，最多 12 行；用户要求展开时展示同一 exact set。
 - 顶部仓库/commit/file 总数包含独立任务记录提交所在 Git root、该提交及其 exact files；任务记录文件使用相同的 8 文件展示阈值和展开规则。
 - 保留未提交的变更始终逐项标注 Git 状态；真正风险在独立“风险”区逐项展示。
+- 完成链证据始终显示当前状态，但不重复 Check-All 报告或 Spec review 正文；`未运行`、`已失效`、findings、blocked、部分验证或 `needs-review` 同时计入风险区。
 - 无活动任务或 `commit-only` 时省略进度动作。
-- 不重复展示检查结果、规范复核、归档或其他阶段信息。
+- 不重复展示检查结果、规范复核、归档或其他阶段的详细信息。
 - 生成前无法确定的内容和增删行写“生成后计算”，不得填预测值。
 
 普通多仓只确认一次。计划已展示生成命令和预计 exact files 时，命令成功且没有出现预计列表外的新 dirty path 就沿用原确认；内容、hash 或统计变化不重问。其它计划边界变化仍按 Step 4 重新规划。

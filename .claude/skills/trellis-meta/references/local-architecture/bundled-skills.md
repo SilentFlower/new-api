@@ -4,18 +4,23 @@
 
 A bundled skill is a directory under `packages/cli/src/templates/common/bundled-skills/<skill>/` that already contains its own `SKILL.md` (with YAML frontmatter) plus optional `references/`, assets, or other supporting files. Trellis copies the whole directory tree as-is into each platform's skill root, so references stay lazy-loadable instead of being flattened into one oversized `SKILL.md`.
 
+<!-- BEGIN skill-garden patch trellis-meta-managed-skill-taxonomy v0.6 -->
 ## What Counts As Bundled (vs. Adjacent Concepts)
 
-| Source path | Type | How it ships |
+Directory shape alone does not determine ownership:
+
+| Ownership class | Evidence | Durable source |
 | --- | --- | --- |
-| `templates/common/bundled-skills/<name>/` | Bundled skill (multi-file) | Whole directory copied to every platform skill root |
-| `templates/common/skills/<name>.md` | Single-file workflow skill | Wrapped with frontmatter, written as `<root>/<name>/SKILL.md` |
-| `templates/common/commands/<name>.md` | Slash command / prompt | Written to each platform's command directory (`.claude/commands/trellis/`, `.cursor/commands/trellis-*.md`, `.gemini/commands/trellis/*.toml`, etc.) |
-| `templates/<platform>/skills/` | Platform-specific skill | Written only into that platform's directory (e.g. `.codex/skills/`) |
-| User skills under `.claude/skills/<my-skill>/` etc. | Marketplace or user-authored | Not managed by Trellis at all |
+| Upstream bundled | Trellis template hashes and bundled-skill distribution | Trellis bundled template source or an explicitly local supplement |
+| Skill-Garden managed | `flower/skill-garden` lock/state entries or `skill-garden patch` markers | `vendor/skill-garden/.trellis/0.6/` in the Flower source checkout |
+| Flower managed | Flower Plugin state paths/patches and owner IDs | The owning Flower Plugin source, adapter, or `src/patches/` catalog |
+| Shared common | Plugin state entry with shared ownership | The common source retained across dependent capabilities |
+| Project-local | No upstream template or Plugin ownership claim, plus project intent | The project file itself |
 
-The Trellis CLI never touches anything that is not produced by one of its own template loaders. Anything a user drops into a platform skill root by hand is left alone.
+For managed 0.6 changes, Patch leaves own `insert`/`replace`/`remove` transformations; selectors and full baselines fail closed on upstream drift; content files own replacement bytes; explicit targets and `each-existing` prevent accidental platform creation; Bundles own full/selected aliases; required preflight prevents partial writes; markers and first backups support migration/recovery; provenance records the selected operations; compatibility and conflict policies audit the final result; canonical compiled targets prove the pinned upstream output. These responsibilities must stay in the shared Patch Engine instead of being reimplemented by a skill-specific injector.
 
+Discover what is active from the local skill roots, `.trellis/workflow.md`, available `overrides/bundles/`, and `.flower/state.json`. Do not infer ownership from a skill name or maintain a fixed Skill-Garden capability list in this document.
+<!-- END skill-garden patch trellis-meta-managed-skill-taxonomy v0.6 -->
 ## Current Bundled Skills (v0.6.0)
 
 The set is discovered at runtime by listing directories under `templates/common/bundled-skills/`:
@@ -111,23 +116,18 @@ The shape and dispatch wiring are already generic, so adding a skill requires on
 
 6. **Add a migration manifest entry** if the skill is added in a release that other projects will upgrade into. Without an explicit manifest entry the file will land via the standard "missing file" branch of `trellis update`, but a manifest makes the change visible in the changelog.
 
+<!-- BEGIN skill-garden patch trellis-meta-managed-bundled-overrides v0.6 -->
 ## Overriding a Bundled Skill Locally
 
-There is no formal "project-local skill" mechanism (e.g. `.trellis/skills/`). Bundled skills are platform-rooted, so any override is platform-rooted too.
+First determine whether the deployed bundled skill is only Trellis-managed or also owned by Flower/Skill-Garden.
 
-The supported pattern relies on the existing template-hash diff in `trellis update`:
+- In a native Trellis project, template-hash conflict handling still permits a local divergence, with the normal cross-platform and future-update caveats.
+- In a Flower-managed project, do not directly edit a target recorded in `.flower/state.json`. Change the owning Plugin/Patch source and let preflight plus the transaction writer update every existing platform target consistently.
+- In the Flower source checkout, Skill-Garden 0.6 modifications belong under `vendor/skill-garden/.trellis/0.6/overrides/`; run `npm run sync`, refresh/check compiled targets, then apply the Plugin to dogfood targets.
+- For project-private behavior, prefer `.trellis/spec/` or a differently named project-local skill that has no upstream or Plugin ownership claim.
 
-1. Edit the local file directly. Example: `.claude/skills/trellis-meta/SKILL.md`.
-2. The file's hash now diverges from the entry in `.trellis/.template-hashes.json`.
-3. The next `trellis update` detects the user modification and leaves the file untouched (Trellis never overwrites user-modified files without an explicit `--force`).
-
-Caveats:
-
-- The override only applies to the one platform whose directory you edited. To override the same skill across, for example, Claude Code and Codex, you must edit both `.claude/skills/<name>/` and `.agents/skills/<name>/`.
-- A future `trellis update --force` will overwrite local edits. Keep the override under version control so it can be reapplied if needed.
-- Marketplace skills installed under the same platform skill root with a different folder name (e.g. `.claude/skills/my-custom-meta/`) are untouched by Trellis and are the cleaner option when the goal is to add behavior, not to mutate the bundled skill.
-- Team-private conventions belong in `.trellis/spec/` or in a separate marketplace-style local skill, not in modifications to `trellis-meta` itself. See `customize-local/add-project-local-conventions.md`.
-
+If Skill-Garden is removed and its state ownership is cleanly released, the remaining bundled skill returns to native Trellis update semantics. Do not leave managed prose behind after uninstall or freeze assumptions into this reference.
+<!-- END skill-garden patch trellis-meta-managed-bundled-overrides v0.6 -->
 ## Removing a Bundled Skill From a Project
 
 There is no per-project opt-out flag for bundled skills. Two options:

@@ -1,6 +1,6 @@
 ---
 name: trellis-release
-description: "核对并汇总 Trellis 任务 release.md，生成版本或上线批次操作单。用于正式上线前整理 SQL、配置、批处理、外部系统、回滚、验证事项和文档漂移风险。"
+description: "核对 Trellis 任务 release.md，并生成任务上线操作单或批次操作单。只在用户明确要求‘生成上线单’‘汇总 release.md’或点名 trellis-release 时使用；实际软件包发版、部署和版本标签流程应先读取项目 SOP，不使用本 skill。"
 ---
 
 # Trellis Release

@@ -180,7 +180,7 @@ helper 写入规则：保留另一个 target 的 runtime 决策和偏好；覆�
 | `inline implement` | `Skill({skill: "trellis-before-dev"})` 加载 spec → 读任务文档 → 主线程实施 → 跑必要验证 → 回到 Phase 2.1 completion contract 解析 Pre-Check，不得在局部验证后直接结束 |
 | `subagent implement` | `Agent({subagent_type: "trellis-implement"})`；若 `subagent_skip_compile=true`，dispatch prompt 附加“跳过 mvn install / npm run build / tsc 等耗时编译类检查（已由主 agent 验证或最终统一执行）”；主 agent 收到结果后回到 Phase 2.1 completion contract 解析 Pre-Check |
 | `inline check-all` | `Skill({skill: "trellis-check-all"})` |
-| `subagent check-all` | 优先使用明确 audit-only 的 `trellis-check-all` agent；不存在时使用平台通用 subagent，并用下方 dispatch 契约执行本地 `trellis-check-all`。禁止 fallback 到会直接修改工作区的 `trellis-check` agent；无兼容 subagent 时停止并请用户改选 inline |
+| `subagent check-all` | 优先使用明确 audit-only 的 `trellis-check-all` agent；不存在时使用平台通用 subagent，并用下方 dispatch 契约执行本地 `trellis-check-all`。subagent 只返回 `DOC-*` 文档漂移候选，不写文件；主会话负责允许的文档自修。禁止 fallback 到会直接修改工作区的 `trellis-check` agent；无兼容 subagent 时停止并请用户改选 inline |
 
 implement 路由只决定执行位置，不拥有实现后的停止策略。无论 inline 或 subagent，focused validation 完成后都必须返回 workflow Phase 2.1 的 completion contract；由该 owner 处理 auto-loop、用户显式继续/暂缓、已有 hold 和默认立即 Check-All 的优先级。
 
@@ -191,19 +191,19 @@ implement 路由只决定执行位置，不拥有实现后的停止策略。无�
 ```text
 Active task: <task path from task.py current>
 
-执行本项目 0.6 `trellis-check-all` 的 audit-only collect-all 全流程。
+执行本项目 0.6 `trellis-check-all` 的 audit-only collect-all 全流程，并识别可由主会话处理的 `DOC-*` 文档漂移候选。
 
 必须：
 1. 读取 <task>/check.jsonl 及其列出的文件，再读取 prd.md、design.md（若存在）、implement.md（若存在）。
 2. 读取并遵循本地 trellis-check-all/SKILL.md；完成三件套实现、实现假设、完整性与规范三个维度。
-3. 收集全部可继续问题，使用稳定 CHK-* ID、P0/P1/P2 和统一报告结构。
-4. 只读审查；禁止编辑、写文件、补测试或自修复。Step 3 只复用 trellis-check 的检查清单，忽略其自动修复指令。
+3. 收集全部可继续问题，使用稳定 CHK-* ID、P0/P1/P2 和统一报告结构；低风险文档漂移使用 `DOC-*` 候选单独返回。
+4. 只读审查；禁止编辑、写文件、补测试或自修复。Step 3 只复用 trellis-check 的检查清单，忽略其自动修复指令；`DOC-*` 也只能返回候选，由主会话按 Check-All 规则决定是否写入。
 5. 真正阻塞条件返回主会话，不替用户选择业务行为或修复范围。
 
-返回：统一 Check-All 结果、已执行验证和剩余风险。不要输出 commit/push 计划。
+返回：统一 Check-All 结果、`DOC-*` 候选、已执行验证和剩余风险。不要输出 commit/push 计划。
 ```
 
-平台存在专用 `trellis-check-all` agent 时，也必须先确认其角色说明明确 audit-only；名称相同但带自修复语义的 agent 不可使用。平台没有专用或通用 subagent 时，不得静默改成 inline，也不得使用 `trellis-check` 代替；停止并让用户重新选择 check route。
+平台存在专用 `trellis-check-all` agent 时，也必须先确认其角色说明明确 audit-only：允许识别 `DOC-*` 候选，但不得写文件。名称相同但会直接自修复代码、测试、配置或普通 `CHK-*` 的 agent 不可使用。平台没有专用或通用 subagent 时，不得静默改成 inline，也不得使用 `trellis-check` 代替；停止并让用户重新选择 check route。
 
 ### 输出模板
 

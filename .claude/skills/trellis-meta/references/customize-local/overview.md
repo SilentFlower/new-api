@@ -1,6 +1,8 @@
 # Local Customization Overview
 
-This directory is for local AI working in a user project where Trellis was installed through npm and `trellis init` has already been run. The AI should modify generated `.trellis/` and platform directories inside the project, not Trellis CLI upstream source code.
+<!-- BEGIN skill-garden patch trellis-meta-managed-customization-entry v0.6 -->
+This directory covers both native local customization and managed overlays. Read generated `.trellis/` and platform files to understand current behavior, but determine ownership before editing: project-local targets may be changed in place, while Flower/Skill-Garden targets must be changed through their owning Plugin or Patch source. Never use the npm cache or `node_modules` as an authoring source.
+<!-- END skill-garden patch trellis-meta-managed-customization-entry v0.6 -->
 
 ## First Determine What The User Actually Wants To Change
 
@@ -15,14 +17,18 @@ This directory is for local AI working in a user project where Trellis was insta
 | "Adjust the project spec structure" | `change-spec-structure.md` |
 | "Add team conventions and local notes" | `add-project-local-conventions.md` |
 
+<!-- BEGIN skill-garden patch trellis-meta-managed-customization-order v0.6 -->
 ## General Operation Order
 
-1. **Confirm platform and directories**: inspect which directories exist, such as `.claude/`, `.codex/`, `.cursor/`, `.zcode/`.
-2. **Confirm the current active task**: run `python3 ./.trellis/scripts/task.py current --source`.
-3. **Read the local source of truth**: prefer `.trellis/workflow.md`, `.trellis/config.yaml`, and relevant platform files.
-4. **Modify narrowly**: edit only files related to the user's request.
-5. **Synchronize semantics**: if a shared flow changes, check whether platform entry points also need changes; if a platform entry changes, check whether `.trellis/workflow.md` still agrees.
-
+1. **Confirm scope**: inspect enabled platform roots and the current active task.
+2. **Read runtime truth**: read `.trellis/workflow.md`, `.trellis/config.yaml`, and the relevant platform files.
+3. **Resolve ownership**: inspect `.flower/plugins.json`, `.flower/plugin-lock.json`, `.flower/state.json`, `.trellis/.template-hashes.json`, and managed markers.
+4. **Choose one route**:
+   - project-local or native local customization: edit the narrowly scoped local source;
+   - Flower/Skill-Garden managed target: edit the owning Plugin/Patch source, not the deployed result.
+5. **For Skill-Garden 0.6 authoring**: change `vendor/skill-garden/.trellis/0.6/`, run `npm run sync`, regenerate/check compiled targets, then apply the Flower lifecycle to dogfood targets.
+6. **Verify final semantics**: check every existing platform target, conflict assertions, provenance, and idempotency. The final files must agree with `.trellis/workflow.md` and their workflow owner.
+<!-- END skill-garden patch trellis-meta-managed-customization-order v0.6 -->
 ## Local File Priority
 
 | Layer | Files |

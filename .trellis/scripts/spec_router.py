@@ -2,8 +2,8 @@
 # -*- coding: utf-8 -*-
 """从 `.trellis/spec/` 发现相关项目 SOP/spec 文件。
 
-这个 helper 刻意保持轻量：只返回候选路径、置信度和命中原因，让 AI 在项目
-局部知识可能影响做法的决策边界前读取匹配文件；它不把完整文档注入上下文。
+这个 helper 刻意保持轻量：只返回候选路径、置信度、命中原因和章节加载计划，
+让 AI 在项目局部知识可能影响做法的决策边界前按需读取；它不把正文注入输出。
 """
 
 from __future__ import annotations
@@ -18,10 +18,23 @@ from typing import Any
 
 
 MAX_BODY_CHARS = 8000
+MAX_SECTION_BODY_CHARS = 4000
+FULL_FILE_MAX_BYTES = 12 * 1024
+MAX_SECTION_LOAD_BYTES = 12 * 1024
+MAX_SELECTED_SECTIONS = 2
 DEFAULT_LIMIT = 3
 MIN_SCORE = 3
 MIN_BODY_ONLY_HITS = 5
 MIN_ANCHORED_BODY_HITS = 2
+MIN_SECTION_BODY_HITS = 2
+NON_ROUTING_BODY_HEADINGS = {
+    "tests required",
+    "validation & error matrix",
+    "validation and error matrix",
+    "validation matrix",
+    "good/base/bad cases",
+    "wrong vs correct",
+}
 WEAK_TOKENS = {
     "action",
     "actions",
@@ -84,14 +97,75 @@ WEAK_TOKENS = {
 }
 TOKEN_RE = re.compile(r"[A-Za-z0-9@]+|[\u4e00-\u9fff]+")
 CJK_RE = re.compile(r"^[\u4e00-\u9fff]+$")
-HEADER_RE = re.compile(r"^\s{0,3}#{1,3}\s+(.+?)\s*$", re.MULTILINE)
+HEADER_RE = re.compile(r"^\s{0,3}(#{1,3})\s+(.+?)(?:\s+#+)?\s*$")
+FENCE_RE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+NUMBERED_HEADING_RE = re.compile(r"^\d+(?:\.\d+)*\.\s*")
 FRONTMATTER_BOUNDARY_RE = re.compile(r"^---\s*$")
 MARKDOWN_LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+\.md(?:#[^)]+)?)\)")
 
 
 @dataclass
+class Section:
+    """Markdown 章节及其原文件范围。
+
+    Attributes:
+        heading: 当前标题文本。
+        heading_path: 从父标题到当前标题的展示路径。
+        routing_heading: 排除文档 H1 后用于局部路由的标题路径。
+        level: ATX 标题层级。
+        start_line: 原文件 1-based 起始行。
+        end_line: 原文件 1-based 结束行。
+        text: 完整章节范围文本。
+        sample_text: 不包含子章节的直接正文样本。
+    """
+
+    heading: str
+    heading_path: str
+    routing_heading: str
+    level: int
+    start_line: int
+    end_line: int
+    text: str
+    sample_text: str
+
+
+@dataclass
+class SectionMatch:
+    """带分数和加载预算的章节候选。
+
+    Attributes:
+        heading: 章节展示路径。
+        start_line: 原文件 1-based 起始行。
+        end_line: 原文件 1-based 结束行。
+        score: 章节相关性分数。
+        confidence: 章节相关性置信度。
+        estimated_bytes: 章节完整范围的 UTF-8 字节数。
+    """
+
+    heading: str
+    start_line: int
+    end_line: int
+    score: int
+    confidence: str
+    estimated_bytes: int
+
+
+@dataclass
 class Candidate:
-    """带分数的项目知识候选项。"""
+    """带文件分数和加载计划的项目知识候选项。
+
+    Attributes:
+        path: 相对项目根目录的 spec 路径。
+        score: 文件相关性分数。
+        kind: frontmatter 声明或推断出的知识类型。
+        load: 原有 frontmatter 加载声明。
+        priority: 原有 frontmatter 优先级。
+        confidence: 文件相关性置信度。
+        reasons: 文件命中原因。
+        load_strategy: `full`、`sections` 或 `outline`。
+        sections: 建议读取的章节范围。
+        action: 面向 AI 的读取动作。
+    """
 
     path: str
     score: int
@@ -100,6 +174,8 @@ class Candidate:
     priority: str
     confidence: str
     reasons: list[str]
+    load_strategy: str
+    sections: list[SectionMatch]
     action: str
 
 
@@ -141,6 +217,23 @@ def parse_scalar(value: str) -> str:
     return value
 
 
+def find_frontmatter_end(lines: list[str]) -> int | None:
+    """查找简单 Markdown frontmatter 的结束行索引。
+
+    Args:
+        lines: 不带或带换行符的 Markdown 行。
+
+    Returns:
+        结束分隔线的 0-based 索引；没有完整 frontmatter 时返回 None。
+    """
+    if not lines or not FRONTMATTER_BOUNDARY_RE.match(lines[0].rstrip("\r\n")):
+        return None
+    for index in range(1, len(lines)):
+        if FRONTMATTER_BOUNDARY_RE.match(lines[index].rstrip("\r\n")):
+            return index
+    return None
+
+
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
     """解析 Markdown 文件中的简单 frontmatter。
 
@@ -154,14 +247,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         `(元数据, 去除 frontmatter 后的正文)`。
     """
     lines = text.splitlines()
-    if not lines or not FRONTMATTER_BOUNDARY_RE.match(lines[0]):
-        return {}, text
-
-    end_index = None
-    for idx in range(1, len(lines)):
-        if FRONTMATTER_BOUNDARY_RE.match(lines[idx]):
-            end_index = idx
-            break
+    end_index = find_frontmatter_end(lines)
     if end_index is None:
         return {}, text
 
@@ -198,6 +284,102 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 
     body = "\n".join(lines[end_index + 1 :])
     return metadata, body
+
+
+def parse_sections(text: str) -> list[Section]:
+    """解析 H1-H3 Markdown 章节并保留原文件行号。
+
+    fenced code block 内的伪标题不会参与章节结构。章节加载范围延伸到下一个
+    同级或更高级标题前，匹配样本只延伸到下一个任意标题前，避免把子章节
+    的零散正文证据聚合到父章节。
+
+    Args:
+        text: 完整 Markdown 文本。
+
+    Returns:
+        按原文件顺序排列的章节列表。
+    """
+    lines = text.splitlines(keepends=True)
+    if not lines:
+        return []
+
+    frontmatter_end = find_frontmatter_end(lines)
+    heading_stack: dict[int, str] = {}
+    records: list[tuple[str, str, str, int, int]] = []
+    fence_char: str | None = None
+    fence_length = 0
+
+    for line_number, raw_line in enumerate(lines, start=1):
+        if frontmatter_end is not None and line_number <= frontmatter_end + 1:
+            continue
+
+        line = raw_line.rstrip("\r\n")
+        fence_match = FENCE_RE.match(line)
+        if fence_match:
+            marker = fence_match.group(1)
+            if fence_char is None:
+                fence_char = marker[0]
+                fence_length = len(marker)
+            elif marker[0] == fence_char and len(marker) >= fence_length:
+                fence_char = None
+                fence_length = 0
+            continue
+        if fence_char is not None:
+            continue
+
+        header_match = HEADER_RE.match(line)
+        if not header_match:
+            continue
+        marker, heading = header_match.groups()
+        level = len(marker)
+        heading = heading.strip()
+        for existing_level in [item for item in heading_stack if item >= level]:
+            heading_stack.pop(existing_level)
+        heading_stack[level] = heading
+        heading_path = " > ".join(
+            heading_stack[item]
+            for item in sorted(heading_stack)
+            if item <= level
+        )
+        routing_parts = [
+            heading_stack[item]
+            for item in sorted(heading_stack)
+            if 2 <= item <= level
+        ]
+        routing_heading = " > ".join(routing_parts) if routing_parts else heading
+        records.append(
+            (heading, heading_path, routing_heading, level, line_number)
+        )
+
+    sections: list[Section] = []
+    for index, (
+        heading,
+        heading_path,
+        routing_heading,
+        level,
+        start_line,
+    ) in enumerate(records):
+        end_line = len(lines)
+        sample_end_line = len(lines)
+        if index + 1 < len(records):
+            sample_end_line = records[index + 1][4] - 1
+        for _, _, _, next_level, next_start_line in records[index + 1 :]:
+            if next_level <= level:
+                end_line = next_start_line - 1
+                break
+        sections.append(
+            Section(
+                heading=heading,
+                heading_path=heading_path,
+                routing_heading=routing_heading,
+                level=level,
+                start_line=start_line,
+                end_line=end_line,
+                text="".join(lines[start_line - 1 : end_line]),
+                sample_text="".join(lines[start_line:sample_end_line]),
+            )
+        )
+    return sections
 
 
 def as_list(value: Any) -> list[str]:
@@ -292,6 +474,244 @@ def significant_hits(query_tokens: list[str], target_tokens: list[str]) -> list[
     ]
 
 
+def allows_body_routing(section: Section) -> bool:
+    """判断章节正文是否适合作为知识路由证据。
+
+    测试矩阵和 Good/Bad 示例章节经常包含故意写入的负例关键词，只允许它们
+    通过标题参与明确查询，不让示例正文反向召回整份规范。
+
+    Args:
+        section: 待判断章节。
+
+    Returns:
+        章节正文可参与路由时返回 True。
+    """
+    heading = NUMBERED_HEADING_RE.sub("", section.heading.strip().lower())
+    return heading not in NON_ROUTING_BODY_HEADINGS
+
+
+def best_body_hits(
+    query_tokens: list[str],
+    text: str,
+    sections: list[Section],
+) -> list[str]:
+    """从单个正文区域中选择最强 token 命中。
+
+    有章节时分别采样每个章节的直接正文，避免把多个章节的零散弱证据合并；
+    没有章节时保留原有的文档前缀退化行为。
+
+    Args:
+        query_tokens: 查询 token。
+        text: 完整 Markdown 文本。
+        sections: 已解析章节。
+
+    Returns:
+        单个最强正文区域的非弱词命中。
+    """
+    if sections:
+        samples = [
+            section.sample_text[:MAX_SECTION_BODY_CHARS]
+            for section in sections
+            if allows_body_routing(section)
+        ]
+    else:
+        _, body = parse_frontmatter(text)
+        samples = [body[:MAX_BODY_CHARS]]
+
+    best_hits: list[str] = []
+    for sample in samples:
+        hits = significant_hits(query_tokens, normalize_tokens(sample))
+        if len(hits) > len(best_hits):
+            best_hits = hits
+    return best_hits
+
+
+def mask_non_routing_section_bodies(
+    text: str,
+    sections: list[Section],
+) -> str:
+    """遮蔽不应参与路由的章节正文并保持原字符位置。
+
+    标题行保留给显式标题匹配；正文字符替换为空格而不是删除，确保后续仍按
+    原文件前 `MAX_BODY_CHARS` 字符取样，不会因过滤而扩大前缀窗口。
+
+    Args:
+        text: 完整 Markdown 文本。
+        sections: 已解析章节。
+
+    Returns:
+        保持行号和字符位置、但已遮蔽非路由正文的 Markdown 文本。
+    """
+    lines = text.splitlines(keepends=True)
+    for section in sections:
+        if allows_body_routing(section):
+            continue
+        for line_index in range(section.start_line, section.end_line):
+            lines[line_index] = re.sub(r"[^\r\n]", " ", lines[line_index])
+    return "".join(lines)
+
+
+def prefix_body_hits(
+    query_tokens: list[str],
+    text: str,
+    sections: list[Section],
+) -> list[str]:
+    """计算过滤测试、验证和示例章节后的文件前缀正文证据。
+
+    Args:
+        query_tokens: 查询 token。
+        text: 完整 Markdown 文本。
+        sections: 已解析章节。
+
+    Returns:
+        文件正文前缀中的非弱词命中。
+    """
+    masked_text = mask_non_routing_section_bodies(text, sections)
+    _, body = parse_frontmatter(masked_text)
+    return significant_hits(
+        query_tokens,
+        normalize_tokens(body[:MAX_BODY_CHARS]),
+    )
+
+
+def score_section(
+    section: Section,
+    query_tokens: list[str],
+) -> tuple[SectionMatch, int] | None:
+    """为单个 Markdown 章节计算局部相关性。
+
+    Args:
+        section: 待评分章节。
+        query_tokens: 查询 token。
+
+    Returns:
+        `(章节候选, 标题层级)`；证据不足时返回 None。
+    """
+    heading_hits = significant_hits(
+        query_tokens,
+        normalize_tokens(section.routing_heading),
+    )
+    body_sample = (
+        section.sample_text[:MAX_SECTION_BODY_CHARS]
+        if allows_body_routing(section)
+        else ""
+    )
+    body_hits = significant_hits(
+        query_tokens,
+        normalize_tokens(body_sample),
+    )
+    if len(heading_hits) >= 2 or (
+        heading_hits and len(body_hits) >= MIN_ANCHORED_BODY_HITS
+    ):
+        confidence = "high"
+    elif heading_hits or len(body_hits) >= MIN_SECTION_BODY_HITS:
+        confidence = "medium"
+    else:
+        return None
+
+    score = 4 * len(heading_hits) + len(body_hits)
+    return (
+        SectionMatch(
+            heading=section.heading_path,
+            start_line=section.start_line,
+            end_line=section.end_line,
+            score=score,
+            confidence=confidence,
+            estimated_bytes=len(section.text.encode("utf-8")),
+        ),
+        section.level,
+    )
+
+
+def sections_overlap(left: SectionMatch, right: SectionMatch) -> bool:
+    """判断两个章节加载范围是否重叠。
+
+    Args:
+        left: 左侧章节候选。
+        right: 右侧章节候选。
+
+    Returns:
+        两个闭区间有交集时返回 True。
+    """
+    return not (
+        left.end_line < right.start_line
+        or right.end_line < left.start_line
+    )
+
+
+def select_section_matches(
+    sections: list[Section],
+    query_tokens: list[str],
+) -> list[SectionMatch]:
+    """选择预算内、互不重叠的相关章节。
+
+    Args:
+        sections: 已解析章节。
+        query_tokens: 查询 token。
+
+    Returns:
+        至多 `MAX_SELECTED_SECTIONS` 个章节加载范围。
+    """
+    has_detailed_sections = any(section.level >= 2 for section in sections)
+    eligible_sections = [
+        section
+        for section in sections
+        if not has_detailed_sections or section.level >= 2
+    ]
+    scored = [
+        result
+        for section in eligible_sections
+        if (result := score_section(section, query_tokens)) is not None
+    ]
+    scored.sort(
+        key=lambda item: (
+            0 if item[0].confidence == "high" else 1,
+            -item[0].score,
+            -item[1],
+            item[0].estimated_bytes,
+            item[0].start_line,
+        )
+    )
+
+    selected: list[SectionMatch] = []
+    total_bytes = 0
+    for match, _ in scored:
+        if match.estimated_bytes > MAX_SECTION_LOAD_BYTES:
+            continue
+        if total_bytes + match.estimated_bytes > MAX_SECTION_LOAD_BYTES:
+            continue
+        if any(sections_overlap(match, existing) for existing in selected):
+            continue
+        selected.append(match)
+        total_bytes += match.estimated_bytes
+        if len(selected) >= MAX_SELECTED_SECTIONS:
+            break
+    return selected
+
+
+def build_load_plan(
+    text: str,
+    sections: list[Section],
+    query_tokens: list[str],
+) -> tuple[str, list[SectionMatch]]:
+    """根据文件大小和章节证据生成加载计划。
+
+    Args:
+        text: 完整 Markdown 文本。
+        sections: 已解析章节。
+        query_tokens: 查询 token。
+
+    Returns:
+        `(load_strategy, 章节候选)`。
+    """
+    if len(text.encode("utf-8")) <= FULL_FILE_MAX_BYTES:
+        return "full", []
+    selected = select_section_matches(sections, query_tokens)
+    if selected:
+        return "sections", selected
+    return "outline", []
+
+
 def collect_index_descriptions(spec_dir: Path) -> dict[str, list[str]]:
     """从 `index.md` 链接行收集目标文档的路由描述。
 
@@ -375,18 +795,27 @@ def classify_confidence(
     return None
 
 
-def action_for_confidence(confidence: str) -> str:
-    """按置信度返回读取建议。
+def action_for_load_strategy(confidence: str, load_strategy: str) -> str:
+    """按置信度和加载策略返回读取建议。
 
     Args:
-        confidence: 候选置信度。
+        confidence: 文件候选置信度。
+        load_strategy: `full` / `sections` / `outline`。
 
     Returns:
-        面向 AI 的行动建议。
+        面向 AI 的精确行动建议。
     """
     if confidence == "high":
-        return "read before acting"
-    return "read if clearly relevant"
+        return {
+            "full": "read full file before acting",
+            "sections": "read matched sections before acting; expand only if needed",
+            "outline": "inspect headings and read relevant sections before acting",
+        }[load_strategy]
+    return {
+        "full": "read full file if clearly relevant",
+        "sections": "read matched sections if clearly relevant",
+        "outline": "inspect headings if clearly relevant",
+    }[load_strategy]
 
 
 def read_markdown(path: Path) -> str | None:
@@ -448,14 +877,14 @@ def score_file(
     if text is None:
         return None
 
-    metadata, body = parse_frontmatter(text)
+    metadata, _ = parse_frontmatter(text)
+    sections = parse_sections(text)
     rel_path = path.relative_to(root).as_posix()
     spec_rel_path = path.relative_to(root / ".trellis" / "spec").as_posix()
     spec_rel_tokens = normalize_tokens(spec_rel_path)
-    body_sample = body[:MAX_BODY_CHARS]
-    body_tokens = normalize_tokens(body_sample)
-    headers = HEADER_RE.findall(body)
-    header_tokens = normalize_tokens(" ".join(headers))
+    header_tokens = normalize_tokens(
+        " ".join(section.heading for section in sections)
+    )
     index_text = " ".join(index_descriptions.get(spec_rel_path, []))
     index_tokens = normalize_tokens(index_text)
 
@@ -492,7 +921,10 @@ def score_file(
         score += 4 * len(index_hits)
         reasons.append(f"matched index descriptions: {', '.join(index_hits[:5])}")
 
-    body_hits = significant_hits(query_tokens, body_tokens)
+    section_body_hits = best_body_hits(query_tokens, text, sections)
+    existing_body_hits = prefix_body_hits(query_tokens, text, sections)
+    has_anchor = bool(matched_triggers or path_hits or header_hits or index_hits)
+    body_hits = existing_body_hits if has_anchor else section_body_hits
     if body_hits:
         score += len(body_hits)
         reasons.append(f"matched body tokens: {', '.join(body_hits[:5])}")
@@ -518,6 +950,12 @@ def score_file(
     if score < MIN_SCORE:
         return None
 
+    load_strategy, section_matches = build_load_plan(
+        text,
+        sections,
+        query_tokens,
+    )
+
     return Candidate(
         path=rel_path,
         score=score,
@@ -526,7 +964,9 @@ def score_file(
         priority=priority,
         confidence=confidence,
         reasons=reasons,
-        action=action_for_confidence(confidence),
+        load_strategy=load_strategy,
+        sections=section_matches,
+        action=action_for_load_strategy(confidence, load_strategy),
     )
 
 
@@ -582,6 +1022,15 @@ def format_markdown(candidates: list[Candidate]) -> str:
         lines.append(f"  kind: {candidate.kind}")
         lines.append(f"  score: {candidate.score}")
         lines.append(f"  confidence: {candidate.confidence}")
+        lines.append(f"  load_strategy: {candidate.load_strategy}")
+        for section in candidate.sections:
+            lines.append(
+                "  section: "
+                f"lines {section.start_line}-{section.end_line} | "
+                f"{section.heading} | score={section.score} | "
+                f"confidence={section.confidence} | "
+                f"bytes={section.estimated_bytes}"
+            )
         if candidate.load:
             lines.append(f"  load: {candidate.load}")
         if candidate.priority:
@@ -610,6 +1059,18 @@ def format_json(candidates: list[Candidate]) -> str:
             "load": candidate.load,
             "priority": candidate.priority,
             "reason": candidate.reasons,
+            "load_strategy": candidate.load_strategy,
+            "sections": [
+                {
+                    "heading": section.heading,
+                    "start_line": section.start_line,
+                    "end_line": section.end_line,
+                    "score": section.score,
+                    "confidence": section.confidence,
+                    "estimated_bytes": section.estimated_bytes,
+                }
+                for section in candidate.sections
+            ],
             "action": candidate.action,
         }
         for candidate in candidates

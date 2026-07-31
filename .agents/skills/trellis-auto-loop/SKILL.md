@@ -1,6 +1,6 @@
 ---
 name: trellis-auto-loop
-description: "启动、恢复和推进 Trellis 自动任务循环。用于用户明确要求 auto loop、自动跑任务、/goal 类似流程、一次跑多个任务、继续自动 run、查看/停止 auto-loop，或压缩恢复后需要从 .trellis/scripts/auto_loop.py 读取下一步。"
+description: "启动、恢复和推进 Trellis 自动任务循环。用于用户明确要求 auto loop、自动跑任务、/goal 类似流程、一次跑多个任务、继续自动 run、查看/停止 auto-loop，或压缩恢复后需要执行 .trellis/scripts/auto_loop.py next 获取 runner action。"
 ---
 
 # Trellis Auto Loop
@@ -13,6 +13,7 @@ description: "启动、恢复和推进 Trellis 自动任务循环。用于用户
 - 用户发出启动指令即授权本次 `commit-only` run。prepare 完成后不再确认 manifest，也不逐任务执行 `confirm_brief`。
 - 新 run 先 prepare 全部显式任务，Open Questions 全部收敛后才进入 running。running 中不再询问 route、planning 或普通 Check-All 停止边界。
 - 每个 action 完成后，必须用同名 `record --action ...` 精确回写并立即 `next`。不得根据聊天摘要手改 runtime 或跳步。
+- `record` 返回 `status=retryable` 时保留的是同一个 outstanding Check action：不得运行 `next`，必须先按返回指令消解漂移并重录。
 - 本地提交是自动终点。不得 push、merge、release、deploy、finish-work 或 archive；queue item 完成后 Trellis task 仍保持 `in_progress`。
 - 任务顺序只决定稳定调度顺序，不隐含依赖。依赖必须通过 `--depends-on dependent=dependency` 明确传入或由 planning artifacts 明确声明。
 - 任务级失败只阻塞自身及显式依赖项；独立任务继续。fix/recheck 与 planning repair 各最多 3 轮，队列结束后不自动执行第二遍恢复扫描。
@@ -82,7 +83,7 @@ python3 ./.trellis/scripts/auto_loop.py decide \
   [--verification "<验证摘要>"]
 ```
 
-决策写入 runtime 摘要和任务 `decisions.jsonl`，只保存结论与证据，不保存思维链。下一次同任务 action record 会消费该决策：列明的 planning/handoff 变化生成绑定 decision ID 的 manifest revision；其它变化按 `artifact-drift` 阻塞。
+决策写入 runtime 摘要和任务 `decisions.jsonl`，只保存结论与证据，不保存思维链。下一次同任务 action record 会消费该决策：列明的 planning/handoff 变化生成绑定 decision ID 的 manifest revision；Check record 中其它变化进入有限自纠，其它 action 仍按 `artifact-drift` 阻塞。
 
 以下事项不得用 `decide`，必须 blocked：
 
@@ -100,7 +101,7 @@ python3 ./.trellis/scripts/auto_loop.py decide \
 | --- | --- | --- |
 | `start_task` | 执行 action 返回的 `task.py start ...` | `record --action start_task --result ok` |
 | `run_implement` | 进入 Phase 2.1，复用 manifest/当前任务 implement route | `record --action run_implement --result ok --route-mode <mode> --route-source <source>` |
-| `run_check_all` | 进入 Phase 2.2，按 requested depth 执行统一 Check-All | `record --action run_check_all --result ok --route-mode <mode> --route-source <source> --effective-check-depth light|full --check-depth-reason "..."` |
+| `run_check_all` | 进入 Phase 2.2，按 requested depth 执行统一 Check-All | `record --action run_check_all --result ok --route-mode <mode> --route-source <source> --effective-check-depth light|full --check-depth-reason "..." [--doc-remediation-file <repository>::<path> ...]` |
 | `run_fix` | 根据 `last_failure` 修复并复用 implement route | `record --action run_fix --result ok --route-mode <mode> --route-source <source>` |
 | `run_recheck` | 复用 check route，且不得低于 `minimum_check_depth` | 同 `run_check_all`，action 改为 `run_recheck` |
 | `run_spec_update` | 执行 `trellis-update-spec` | `no-op|written` 用 ok；`needs-review` 用 blocked + `spec-needs-review` |
@@ -117,6 +118,17 @@ python3 ./.trellis/scripts/auto_loop.py next
 ```
 
 Check-All 的 ok/failed/blocked 都要带实际 effective depth 与原因。validated auto-loop 不进入普通 Post-Check Stop Gate；检查完成后立即 `record + next`。
+
+Check-All 自动修复当前任务 `implement.md` 或 `brief.md` 时，每个实际变化文件都要用重复的 `--doc-remediation-file` 精确声明；声明集合必须与 action 发出后的真实变化完全一致。`prd.md`、`design.md`、其它任务和其它仓库文件不得使用该参数。
+
+若 Check record 返回 `status=retryable reason=artifact-drift`：
+
+1. 不运行 `next`，保留 runner 返回的 outstanding action。
+2. 若是本 action 的误改，撤回误改后用原 action 重录。
+3. 若是合法 `implement.md` / `brief.md` DOC 修复，补齐精确 `--doc-remediation-file` 后重录。
+4. 若无法安全归因，使用原 action、`--result blocked --failure-type artifact-drift` 重录并停止。
+
+同一 Check action 最多允许 3 次 retryable 自纠，第 4 次进入 terminal blocked。实现、spec update、commit-only 等其它 action 的 artifact drift 不使用该预算。
 
 ## Commit-Only
 
@@ -145,12 +157,13 @@ python3 ./.trellis/scripts/auto_loop.py status [--verbose]
 python3 ./.trellis/scripts/auto_loop.py stop --reason "<原因>"
 ```
 
-默认使用紧凑输出；只有诊断 manifest、dirty、漂移、依赖链或决策详情时加 `--verbose`。`completed_with_blocked` 已是本次 run 的可审计终态，后续恢复由用户显式调用 `retry-blocked`。
+默认使用紧凑输出；只有诊断 manifest、dirty、漂移、依赖链或决策详情时加 `--verbose`。`retryable` 不是终态，由 agent 在同一 outstanding Check action 内立即自纠；`completed_with_blocked` 才是本次 run 的可审计终态，后续恢复由用户显式调用 `retry-blocked`。
 
 ## 禁止事项
 
 - 不手写 `.trellis/.runtime/auto-loop/*.json`，不提交 runtime 或 `.route-prefs.tmp`。
 - 不覆盖、暂存或提交 protected-retained 文件；发生路径冲突只阻塞涉及任务。
 - 不用 `start --force` 代替 `retry-blocked`。
+- `record` 返回 `retryable` 后不得调用 `next` 或重新发起 action。
 - 不把 queue item completed 解释为任务已归档。
 - 不在无人值守执行中替用户回答 Open Questions。
