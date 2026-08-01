@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/logging-guidelines.md", "reason": "约束消息审计正文、指纹、会话推断与敏感内容隔离合同"}
+{"file": ".trellis/spec/backend/message-audit-control-plane.md", "reason": "约束消息审计 service/model 边界与历史详情不重写"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "约束 common JSON 封装、Go 测试与差异质量"}
+{"file": ".trellis/spec/guides/build-upstream-friendly-customization.md", "reason": "约束 build 分支独立文件与原有主流程薄接入"}
