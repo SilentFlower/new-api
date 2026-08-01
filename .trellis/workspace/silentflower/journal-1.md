@@ -955,3 +955,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 28: 完成 GitHub 公共仓库 Key 泄露扫描
+
+**Date**: 2026-08-01
+**Task**: 完成 GitHub 公共仓库 Key 泄露扫描
+**Branch**: `build-bak`
+
+### Summary
+
+完成用户 Key 的 GitHub 公共代码扫描、精确确认、定时/手动任务、站内与钉钉告警、Root 处置 API 和默认前端；Full Check-All、规范更新、业务提交与生产配置已完成。目标服务器两轮 94 个 Key 扫描无命中；release audit 保留受控假 Key 全链路、失败/回滚、最小权限凭据轮换和公网 TLS 的人工复核事项。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `19300bf72` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
