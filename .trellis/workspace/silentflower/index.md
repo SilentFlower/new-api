@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 28
+- **Total Sessions**: 29
 - **Last Active**: 2026-08-01
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~990 | Active |
+| `journal-1.md` | ~1023 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 29 | 2026-08-01 | 修复 Claude 消息审计会话归并 | `1b8a2e88a` | `build-bak` |
 | 28 | 2026-08-01 | 完成 GitHub 公共仓库 Key 泄露扫描 | `19300bf72` | `build-bak` |
 | 27 | 2026-07-29 | 完成消息审计 AI 审核收尾 | `b74db1362`, `10127a30e`, `2c76f9235`, `50cc07632`, `638bb20af`, `fb672fdac`, `2cc1e2d2a`, `df3028009`, `8e394df5c`, `bc287db4d`, `caf44f862`, `b9da2d366` | `build-bak` |
 | 26 | 2026-07-28 | 完成 AI 消息持久化审计 | `b74db1362` `10127a30e` `2c76f9235` | `build-bak` |

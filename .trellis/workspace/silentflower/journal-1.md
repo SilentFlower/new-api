@@ -988,3 +988,36 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 29: 修复 Claude 消息审计会话归并
+
+**Date**: 2026-08-01
+**Task**: 修复 Claude 消息审计会话归并
+**Branch**: `build-bak`
+
+### Summary
+
+为 Claude 消息审计引入独立语义指纹，忽略瞬态 cch、协议 cache_control 和等价文本表示，同时保留实际审计正文与 compressed Blob 锚点；新增回归测试并通过 Full Check-All。
+
+### Main Changes
+
+(Add details)
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1b8a2e88a` | (see git log) |
+
+### Testing
+
+- [OK] (Add test results)
+
+### Status
+
+[OK] **Completed**
+
+### Next Steps
+
+- None - task complete
