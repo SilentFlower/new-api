@@ -223,7 +223,7 @@ logger.LogDebug(ctx, fmt.Sprintf("Redis GET: key=%s, value=%s", key, value))
 
 ### 1. Scope / Trigger
 
-- Trigger：修改 AI 入站消息采集、`MESSAGE_AUDIT_SECRET`、`MessageAuditEnabled`、`MessageAuditRetentionDays`、消息审计表、推断会话、AI 辅助审核、审计管理 API、异步任务或 Default 消息审计页面。
+- Trigger：修改 AI 入站消息采集、`MESSAGE_AUDIT_SECRET`、`MessageAuditEnabled`、`MessageAuditRetentionDays`、消息审计表、推断会话、Claude 会话指纹规范化、AI 辅助审核、审计管理 API、异步任务或 Default 消息审计页面。
 - 本场景是“普通日志不得记录 AI 对话内容”的唯一受控例外。正文只能进入主关系数据库中的独立加密审计表，不能写入控制台/文件日志、`logs.content`、`logs.other`、ClickHouse 日志或管理操作审计。
 - 审计经过验证并完成过滤的客户端入站内容，可包含客户端提交的 system、user、assistant、tool 角色，以及图片生成或编辑请求的提示词和白名单安全参数；不额外保存当前请求新产生的响应正文、流式增量、隐藏思考、请求头、凭证或媒体二进制。
 
@@ -242,6 +242,13 @@ func GetMessageAuditStatus() MessageAuditStatus
 func StartMessageAuditCleanupTask(targetTimestamp int64) (*model.SystemTask, bool, error)
 func StartMessageAuditReview(auditSessionID string, operatorID int) (*model.SystemTask, bool, error)
 func GetMessageAuditReviewResponse(auditSessionID string) (*MessageAuditReviewResponse, error)
+```
+
+Claude 会话指纹内部边界：
+
+```go
+func messageAuditSessionFingerprintEntries(request dto.Request, entries []messageAuditPlaintext) []messageAuditPlaintext
+func (manager *messageAuditManager) buildClaudeMessageAuditSessionFingerprints(userID int, protocol string, fingerprintEntries []messageAuditPlaintext, storedEntries []messageAuditPlaintext) ([]string, []string, string)
 ```
 
 root-only 管理 API：
@@ -279,6 +286,9 @@ message_audit_review_sources
 - 支持 OpenAI Chat、OpenAI Responses、Claude Messages、Gemini GenerateContent 的入站可见内容，以及 OpenAI Image 生成或编辑请求的提示词和白名单安全参数。Responses Compact、Realtime、Alpha Search、Embedding、Rerank、音频任务及异步任务正文不进入审计；图片、蒙版、Base64、媒体 URL、额外透传字段和生成结果不得进入审计。
 - 媒体只记录类型、MIME、大小、来源类别和摘要；Authorization、API Key、Cookie、密码、OAuth/Webhook 密钥、Base64/文件二进制和隐藏 reasoning/thinking/signature 必须过滤。
 - 推断会话仅在同一用户、同一协议内工作。唯一最长完整前缀标记 `prefix`，完全一致标记 `exact`；前缀失败时只允许使用非公共会话内容 HMAC 的高覆盖严格有序子序列标记 `compressed`；无匹配、低覆盖或多候选歧义必须标记 `new`。即使最终为 `metadata_only`，也必须保留无明文滚动 HMAC 和前缀指纹以支持 exact/prefix 归并。
+- Claude exact/prefix 必须基于独立的语义指纹副本：递归忽略 Claude 协议对象上的 `cache_control`，删除以 `x-anthropic-billing-header:` 开头的 system 首行中分号分隔的瞬态 `cch=` 参数，并把字符串与只含 `{type:"text",text:...}` 的单文本块规范化为同一表示。Tool `input` 是用户可见语义载荷，其中同名业务字段必须保留；稳定 system、消息、Tool 输入和 Tool 结果的真实变化仍须改变指纹。
+- Claude 语义规范化不得原地修改实际审计条目。加密正文、详情、消息计数、工具计数、Blob 去重和 `SessionAnchorHMACs` 必须继续基于本次请求实际保存的安全过滤内容；compressed 候选只能使用能解析到真实 `message_audit_blobs` 的原始 HMAC，不能使用只存在于内存中的语义 HMAC。
+- Claude 指纹规则变更不回填历史记录。部署后的第一条请求可以因旧记录仍使用旧 `sequence_fingerprint` 而标记 `new`，后续新请求必须按新规则稳定归并；不得为此解密并批量重写历史会话、父请求或审核关联。
 - 图片协议不生成序列指纹、前缀指纹或压缩锚点，每次图片请求必须分配独立的 `audit_session_id`；相同用户的相同审计块仍可复用加密 blob，但不得因此归并图片请求会话。
 - compressed 候选查询必须先按用户、schema version 和锚点 HMAC 解析既有 blob ID，再从 `message_audit_items.blob_id` 索引反查候选请求；不得从用户历史请求及其全部 item 开始关联扫描。候选仍须加载完整历史锚点并执行有序子序列、尾部覆盖和歧义复核。
 - 默认列表先应用筛选，再按 `audit_session_id` 聚合并返回每个会话的最新请求、`session_request_count` 和 `compressed_request_count`；`audit_session_id` 查询返回该会话的单次请求且最新在前。历史空会话 ID 和 metadata-only 请求必须单独展示。
@@ -302,6 +312,9 @@ message_audit_review_sources
 | 批量插入时 blob 唯一键已存在 | 忽略冲突并批量回查最终 ID，继续写入有序 item，不回滚整次 capture |
 | 批量回查后仍缺少任一 blob ID | 回滚本次 capture，禁止写入悬空或错序 item |
 | 完整前缀落入多个会话 | 创建新的 `audit_session_id`，`session_match=new` |
+| Claude 连续请求只改变 `cch`、移动 `cache_control` 或切换字符串/纯单文本块表示 | 语义指纹保持前缀关系，分别标记 `prefix` 或 `exact` |
+| Claude 稳定 system、可见消息、Tool 输入或 Tool 结果发生变化 | 指纹必须变化，不得按瞬态字段规则误归并 |
+| Claude 语义指纹与实际保存内容不同 | exact/prefix 使用语义 HMAC；compressed 锚点和 Blob 去重继续使用实际保存内容 HMAC |
 | 压缩子序列候选相同或差距不足 | 不强行归并，创建新会话 |
 | 当前锚点的 schema version 与历史 blob 不同 | 不复用其他 schema 的 blob ID，不形成 compressed 匹配 |
 | finalize 模型名非空 | 使用 `ConsumeLogModelName()` 的结果覆盖审计 `model_name` |
@@ -321,16 +334,19 @@ message_audit_review_sources
 - Good：一个请求包含数百条消息和大量重复上下文时，只分批解析唯一 blob，批量写入有序 item；重复消息仍指向同一 blob，`dedup_saved_bytes` 与新增 payload 保持正确。
 - Good：压缩匹配先通过少量锚点 blob ID 命中 `message_audit_items.blob_id` 索引，再对有限候选执行完整 LCS 复核。
 - Good：客户端压缩上下文后保留足够多且顺序一致的旧消息 HMAC，系统标记 `compressed`，不解密正文做匹配。
+- Good：Claude Code 连续请求移动缓存控制、刷新 billing `cch` 或改变等价文本表示时，列表仍聚合为同一会话，详情仍展示每次实际捕获的原始安全内容。
 - Good：模型映射后消费日志显示冻结计费模型，消息审计 finalize 使用同一归一化函数更新为相同名称。
 - Good：图片生成或编辑请求只保存提示词和白名单安全参数，不保存图片、蒙版、Base64、媒体 URL 或生成结果，并且每次请求独立成会话。
 - Base：功能关闭或请求协议不支持正文审计，普通消费日志、计费和转发行为保持不变。
 - Base：完全摘要化且没有足够原始锚点时创建新会话，这是保守边界而不是错误。
+- Base：Claude 指纹规则上线后的第一条请求无法匹配旧指纹而创建新会话，不触发历史数据回填。
 - Base：清空删除全部有效载荷后，数据库已分配空间仍可保持不变并供后续写入复用。
 - Bad：把请求 JSON、提示词或响应正文写入 `logger.LogDebug`、`logs.content` 或 `logs.other`。
 - Bad：使用普通 SHA 哈希去重、跨用户共享消息块或把客户端 session/thread 头作为唯一归属依据。
 - Bad：为了保证审计必达而同步等待数据库写入，导致 relay 延迟或失败。
 - Bad：对每条消息分别尝试插入 blob、冲突后单独查询 ID、再单独插入 item；该模式会把大上下文放大为大量数据库往返。
 - Bad：compressed 查询从历史请求的全部 item 开始联表，再用 blob HMAC 过滤不匹配数据。
+- Bad：为了修复 Claude 会话归并而改写加密审计正文、把 capture 移到渠道覆盖后，或使用语义 HMAC 作为 compressed Blob 查询锚点。
 - Bad：详情切换请求时关闭 Sheet/Drawer，或在分页选项不含当前值时继续渲染受控 Select。
 
 ### 6. Tests Required
@@ -341,6 +357,8 @@ message_audit_review_sources
 - 批量持久化测试必须跨越至少两个数据库批次，断言请求内重复 HMAC 只创建一个 blob、全部 item 顺序不变、重复 item 指向同一 blob、载荷与去重字节正确；SQLite、MySQL 和 PostgreSQL 隔离测试都必须执行同一 capture/detail/cleanup 合同。
 - model 测试必须覆盖 SQLite 写入/查询/清理、共享块回收、纳秒水位、历史秒级水位、精确/前缀/压缩/新建归属，以及前缀和压缩多候选歧义拒绝。
 - compressed 测试必须覆盖 blob ID 候选入口、schema version 隔离、弱证据和多会话歧义，不能只断言最终 session ID。
+- Claude 回归测试必须使用连续请求形态覆盖动态 `cch`、移动或消失的 `cache_control`、字符串/纯单文本块等价表示，并断言真实 `audit_session_id` 的 `prefix` 与 `exact`；反例必须覆盖稳定 system、可见消息、Tool 输入、Tool 结果和单文本块附加语义字段变化。
+- Claude 测试还必须解密或检查实际 capture，确认原始 billing header、`cache_control` 和内容表示没有被指纹副本改写，并断言 `SessionAnchorHMACs` 对应实际保存 Blob 的 HMAC；其他协议的指纹结果必须保持不变。
 - 状态缓存测试必须断言 TTL 内 loader 只执行一次、到期后刷新、刷新失败不覆盖最后一次正确值；前端测试必须断言活动状态为 5 秒、稳定状态为 30 秒。
 - model/service 测试必须断言 finalize 非空模型名会覆盖、空模型名保留旧值，异步 capture 先于 finalize 持久化，并覆盖消费日志模型归一化。
 - 外部数据库测试通过隔离 schema 的 `MESSAGE_AUDIT_MYSQL_DSN`、`MESSAGE_AUDIT_POSTGRES_DSN` 验证迁移、事务、详情和清理；未提供 DSN 时必须明确记录为未执行，不能声称三库已实测。
@@ -405,6 +423,21 @@ blobsByKey := loadExistingBlobs(record.Blobs)
 insertMissingBlobs(record.Blobs, blobsByKey)
 blobsByKey = loadExistingBlobs(record.Blobs)
 tx.CreateInBatches(buildOrderedItems(record.Blobs, blobsByKey), 64)
+```
+
+```go
+// 错误：把指纹规范化直接应用到保存条目，并让 compressed 使用语义 HMAC。
+storedEntries := normalizeClaudeFingerprintEntries(entries)
+prefixes, anchors, sequence := manager.buildMessageAuditSessionFingerprints(userID, protocol, storedEntries)
+
+// 正确：保存条目和语义指纹副本分离，compressed 锚点来自真实保存内容。
+storedEntries, fingerprintEntries, _, _, _, _, err := manager.normalizeRequest(request)
+prefixes, anchors, sequence := manager.buildClaudeMessageAuditSessionFingerprints(
+	userID,
+	protocol,
+	fingerprintEntries,
+	storedEntries,
+)
 ```
 
 ## 场景：消息审计 AI 辅助审核

@@ -327,7 +327,11 @@ func CaptureMessageAudit(input MessageAuditCaptureInput) bool {
 	var sessionAnchorHMACs []string
 	sequenceFingerprint := ""
 	if !isMessageAuditStandaloneProtocol(input.Protocol) {
-		conversationPrefixFingerprints, sessionAnchorHMACs, sequenceFingerprint = manager.buildMessageAuditSessionFingerprints(input.UserID, string(input.Protocol), fingerprintEntries)
+		if input.Protocol == types.RelayFormatClaude {
+			conversationPrefixFingerprints, sessionAnchorHMACs, sequenceFingerprint = manager.buildClaudeMessageAuditSessionFingerprints(input.UserID, string(input.Protocol), fingerprintEntries, entries)
+		} else {
+			conversationPrefixFingerprints, sessionAnchorHMACs, sequenceFingerprint = manager.buildMessageAuditSessionFingerprints(input.UserID, string(input.Protocol), fingerprintEntries)
+		}
 	}
 	capturedPlaintextBytes := messageAuditPlaintextSize(entries)
 	capture := &messageAuditCaptureEvent{
@@ -757,14 +761,14 @@ func (manager *messageAuditManager) normalizeRequest(request dto.Request) ([]mes
 		totalBytes += int64(len(plaintext))
 	}
 	if totalBytes <= messageAuditSnapshotMaxSize {
-		return plainEntries, plainEntries, messageCount, toolCount, totalBytes, false, nil
+		return plainEntries, messageAuditSessionFingerprintEntries(request, plainEntries), messageCount, toolCount, totalBytes, false, nil
 	}
 
 	reducedEntries := reduceMessageAuditEntries(plainEntries)
 	if len(reducedEntries) == 0 || messageAuditPlaintextSize(reducedEntries) > messageAuditReviewTextMaxSize() {
-		return nil, reducedEntries, messageCount, toolCount, totalBytes, true, nil
+		return nil, messageAuditSessionFingerprintEntries(request, reducedEntries), messageCount, toolCount, totalBytes, true, nil
 	}
-	return reducedEntries, reducedEntries, messageCount, toolCount, totalBytes, false, nil
+	return reducedEntries, messageAuditSessionFingerprintEntries(request, reducedEntries), messageCount, toolCount, totalBytes, false, nil
 }
 
 func normalizeMessageAuditImageOption(raw json.RawMessage) (any, bool) {
