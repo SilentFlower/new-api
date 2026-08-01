@@ -30,6 +30,7 @@ import {
   Radio,
   ServerCog,
   Settings,
+  ShieldAlert,
   Ticket,
   User,
   Users,
@@ -119,6 +120,18 @@ export function useSidebarData(): SidebarData {
             title: t('Profile'),
             url: '/profile',
             icon: User,
+          },
+        ],
+      },
+      {
+        id: 'security-alerts',
+        title: t('Security Alerts'),
+        items: [
+          {
+            title: t('Key Leak Detection'),
+            url: '/security-alerts/token-leaks',
+            icon: ShieldAlert,
+            requiredRole: ROLE.SUPER_ADMIN,
           },
         ],
       },

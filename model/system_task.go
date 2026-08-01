@@ -23,6 +23,8 @@ const (
 	SystemTaskTypeAsyncTaskPoll       = "async_task_poll"
 	SystemTaskTypeMessageAuditCleanup = "message_audit_cleanup"
 	SystemTaskTypeMessageAuditReview  = "message_audit_review"
+	SystemTaskTypeTokenLeakScan       = "token_leak_scan"
+	SystemTaskTypeTokenLeakScanManual = "token_leak_scan_manual"
 )
 
 var ErrSystemTaskLockLost = errors.New("system task lock lost")

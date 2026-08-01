@@ -32,6 +32,30 @@ import { useSidebarData } from './use-sidebar-data'
 const ROOT_VIEW_KEY = '__root'
 
 /**
+ * 按当前用户角色过滤根侧边栏，并移除过滤后没有任何入口的分组。
+ *
+ * @param navGroups 已应用用户侧边栏配置的根导航分组。
+ * @param userRole 当前用户角色；未登录时传入 undefined。
+ * @returns 当前角色可见且非空的导航分组。
+ */
+export function filterSidebarNavGroupsByRole(
+  navGroups: NavGroup[],
+  userRole: number | undefined
+): NavGroup[] {
+  const role = userRole ?? ROLE.GUEST
+  const isAdmin = role >= ROLE.ADMIN
+  return navGroups
+    .filter((group) => (group.id === 'admin' ? isAdmin : true))
+    .map((group) => {
+      const items = group.items.filter(
+        (item) => item.requiredRole === undefined || role >= item.requiredRole
+      )
+      return items.length === group.items.length ? group : { ...group, items }
+    })
+    .filter((group) => group.items.length > 0)
+}
+
+/**
  * Resolve the active sidebar view for the current location.
  *
  * - Returns the matching nested {@link SidebarView} (with its nav
@@ -51,18 +75,10 @@ export function useSidebarView(): ResolvedSidebarView {
   const rootSidebarData = useSidebarData()
   const configFilteredRoot = useSidebarConfig(rootSidebarData.navGroups)
 
-  const rootNavGroups = useMemo<NavGroup[]>(() => {
-    const role = userRole ?? ROLE.GUEST
-    const isAdmin = role >= ROLE.ADMIN
-    return configFilteredRoot
-      .filter((group) => (group.id === 'admin' ? isAdmin : true))
-      .map((group) => {
-        const items = group.items.filter(
-          (item) => item.requiredRole === undefined || role >= item.requiredRole
-        )
-        return items.length === group.items.length ? group : { ...group, items }
-      })
-  }, [configFilteredRoot, userRole])
+  const rootNavGroups = useMemo<NavGroup[]>(
+    () => filterSidebarNavGroupsByRole(configFilteredRoot, userRole),
+    [configFilteredRoot, userRole]
+  )
 
   const view = resolveSidebarView(pathname)
 

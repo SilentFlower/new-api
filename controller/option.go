@@ -237,6 +237,19 @@ func UpdateOption(c *gin.Context) {
 			common.ApiErrorMsg(c, "消息审计保留天数必须在 1 到 30 之间")
 			return
 		}
+	case "token_leak_scan.enabled":
+		if option.Value == "true" {
+			if err := service.ValidateTokenLeakScanConfiguration(); err != nil {
+				common.ApiErrorMsg(c, tokenLeakScanErrorMessage(err))
+				return
+			}
+		}
+	case "token_leak_scan.interval_hours":
+		intervalHours, parseErr := strconv.Atoi(option.Value.(string))
+		if parseErr != nil || !operation_setting.ValidateTokenLeakScanInterval(intervalHours) {
+			common.ApiErrorMsg(c, "Key 泄露扫描周期必须在 1 到 168 小时之间")
+			return
+		}
 	case "message_audit_review.config":
 		config, parseErr := service.ParseMessageAuditReviewConfig(option.Value.(string))
 		if parseErr != nil {

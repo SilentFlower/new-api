@@ -42,6 +42,8 @@ const defaultSecuritySettings: SecuritySettings = {
   'fetch_setting.allowed_ports': [],
   'fetch_setting.apply_ip_filter_for_domain': false,
   'token_setting.max_user_tokens': 1000,
+  'token_leak_scan.enabled': false,
+  'token_leak_scan.interval_hours': 24,
 }
 
 export function SecuritySettings() {

@@ -16,6 +16,8 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import { TokenLeakScanSettingsSection } from '@/features/token-leak-scan/components/token-leak-scan-settings-section'
+
 import { RateLimitSection } from '../request-limits/rate-limit-section'
 import { SensitiveWordsSection } from '../request-limits/sensitive-words-section'
 import { SSRFSection } from '../request-limits/ssrf-section'
@@ -86,6 +88,19 @@ const SECURITY_SECTIONS = [
         defaultValues={{
           'token_setting.max_user_tokens':
             settings['token_setting.max_user_tokens'],
+        }}
+      />
+    ),
+  },
+  {
+    id: 'token-leak-scan',
+    titleKey: 'GitHub Key Leak Scan',
+    build: (settings: SecuritySettings) => (
+      <TokenLeakScanSettingsSection
+        defaultValues={{
+          'token_leak_scan.enabled': settings['token_leak_scan.enabled'],
+          'token_leak_scan.interval_hours':
+            settings['token_leak_scan.interval_hours'],
         }}
       />
     ),

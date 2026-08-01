@@ -30,6 +30,7 @@ var auditContentTemplates = map[string]string{
 	"user.reset_passkey":        "Reset the user passkey",
 	"option.update":             "Updated system setting ${key}",
 	"message_audit.detail_view": "Viewed message audit request ${request_id}",
+	"token_leak.disable":        "Disabled leaked token ${token_id} from finding ${finding_id}",
 
 	"channel.create":             "Created channel ${name} (type ${type}, count ${count})",
 	"channel.update":             "Updated channel ${name} (ID: ${id})",

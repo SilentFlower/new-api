@@ -300,6 +300,14 @@ func SetApiRouter(router *gin.Engine) {
 			systemTaskRoute.GET("/current", controller.GetCurrentSystemTask)
 			systemTaskRoute.GET("/:task_id", controller.GetSystemTask)
 		}
+		tokenLeakScanRoute := apiRouter.Group("/token-leak-scan")
+		tokenLeakScanRoute.Use(middleware.RootAuth())
+		{
+			tokenLeakScanRoute.GET("/status", controller.GetTokenLeakScanStatus)
+			tokenLeakScanRoute.GET("/findings", controller.GetTokenLeakScanFindings)
+			tokenLeakScanRoute.POST("/run", middleware.CriticalRateLimit(), controller.CreateTokenLeakScanTask)
+			tokenLeakScanRoute.POST("/findings/:id/disable-token", middleware.CriticalRateLimit(), controller.DisableTokenLeakFindingToken)
+		}
 		systemInfoRoute := apiRouter.Group("/system-info")
 		systemInfoRoute.Use(middleware.RootAuth())
 		{
