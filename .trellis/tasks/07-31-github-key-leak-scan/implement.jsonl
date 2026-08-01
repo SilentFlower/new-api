@@ -1,0 +1,6 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"约束新增能力使用独立文件和最小接入点，降低与上游 new-api 同步冲突。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"扫描任务横跨配置、数据库、服务、API、前端和通知，需要按跨层数据流实施。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"新增三张表及迁移必须同时兼容 SQLite、MySQL 和 PostgreSQL。"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"约束 root-only 状态、列表、触发和禁用接口的请求响应与错误契约。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"完整 Key、搜索锚点和外部凭据必须在日志、错误和任务状态中严格脱敏。"}
+{"file":".trellis/spec/frontend/base-ui-composition.md","reason":"默认前端设置分区、状态展示、表格与确认交互需遵循现有 Base UI 组合规范。"}

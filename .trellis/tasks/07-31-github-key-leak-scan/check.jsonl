@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查真实行为、回归路径、错误处理与测试质量，而非只验证代码可运行。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"复核模型索引、迁移与查询在三种数据库上的兼容性。"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"复核 root 权限、参数边界、任务幂等和敏感字段响应契约。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"专项检查 Key、锚点、PAT、Webhook 和请求 URL 未进入日志或持久化状态。"}
+{"file":".trellis/spec/frontend/base-ui-composition.md","reason":"检查默认前端设置页、弹窗、表格和异步状态符合项目 UI 约定。"}
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"确认实现保持独立模块与薄接入，避免无关重构和上游冲突。"}

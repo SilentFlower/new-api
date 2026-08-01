@@ -1,0 +1,48 @@
+{
+  "id": "github-key-leak-scan",
+  "name": "github-key-leak-scan",
+  "title": "GitHub 公共仓库 Key 泄露扫描",
+  "description": "",
+  "status": "in_progress",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-07-31",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-07-31T02:42:27Z",
+      "contextKey": "codex_019fb605-1a6f-7a61-8c84-768a36583c7f",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "37098c9b968b5cef0ceffd1ff37a8562efbd8d71",
+        "status": []
+      }
+    }
+  },
+  "progress": {
+    "updatedAt": "2026-08-01T09:03:46+08:00",
+    "completedSteps": [
+      "完成 GitHub 公共仓库用户 Key 泄露扫描、精确确认与持久化状态",
+      "接入定时/手动互斥任务、站内与钉钉告警、Root 处置 API 和管理 UI",
+      "修复多次重开通知幂等并通过 Full Check-All 与规范更新"
+    ],
+    "partialStep": null,
+    "nextStep": "单独取得部署授权后，在目标服务器注入专用凭据并使用受控假 token 完成全链路验收",
+    "notes": "生产部署、凭据注入和周期任务启用未在本次 Git 提交中执行。"
+  }
+}
