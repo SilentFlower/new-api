@@ -33,7 +33,7 @@ interactive 模式完成所有可继续检查和允许的 `DOC-*` 自动修复�
 
 [<通过/未通过/阻塞>] <N> 个维度 · CHK <N> · 自动修复 DOC <N> · P0 <N> / P1 <N> / P2 <N> · 验证 <通过>/<总数>
 
-任务：<任务名称或无活动任务>
+工作：<任务名称 | Untracked work: work-id | 无活动工作>
 范围：<文件数与层级摘要；包含自动修复产生的文档 diff>
 画像：requested=<auto/light/full> · effective=<light/full> · confidence=<high/fallback-full/escalated> · <原因摘要>
 结论：<一句话结论>
@@ -94,7 +94,7 @@ interactive 模式完成所有可继续检查和允许的 `DOC-*` 自动修复�
 
 用户选择修复范围后：
 
-1. 主会话复用当前任务已有的合法 implement route，批量修复选中的无歧义 `CHK-*`；不存在合法 implement route 时先进入 `trellis-route(target=implement)`，不得自行默认 inline/subagent。
+1. 主会话复用当前 task 已有的合法 implement route；untracked 则重新直接读取个人 pref。不存在合法 route 时进入 `trellis-route(target=implement)`，不得自行默认 inline/subagent。
 2. 修复过程中不对每个问题重复确认。
 3. 新增业务歧义、破坏性风险或范围扩张时才暂停，并一次性说明受影响问题。
 4. 完成定向验证后复用当前 check route 重新执行 Check-All。
@@ -124,6 +124,8 @@ interactive 模式完成所有可继续检查和允许的 `DOC-*` 自动修复�
 ```
 
 检查通过后的动作由下方 `Interactive Post-Check Stop Gate` 判断：普通交互停止等待，符合 direct Git 严格通过条件时同轮进入 Phase 3.3 `trellis-update-spec`，再到 Phase 3.4 `trellis-push`。仍有 `CHK-*` 时停留在修复/重检循环。
+
+untracked 在最终报告前调用 `untracked_flow.py record-check`：严格通过记录 `pass`，有问题记录 `findings`，部分验证记录 `partial`，真正阻塞记录 `blocked`。普通严格通过但尚未继续时保持 `stage=check`；只有 direct Git 同轮继续或用户后续明确继续时才 `advance --stage spec`。任何报告后的新编辑先回到 `prepare-edit`，旧检查证据随 fingerprint 失效。
 
 ---
 

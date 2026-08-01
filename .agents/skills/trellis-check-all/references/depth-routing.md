@@ -23,9 +23,9 @@ git log --oneline -10
 
 如果确认范围内确实无变更，提示用户并终止。
 
-### 0.2 读取任务与规范
+### 0.2 读取工作上下文与规范
 
-读取当前任务：
+存在当前 task 时读取：
 
 - `prd.md`；没有时三件套实现维度标记 `N/A`。
 - `design.md`（若存在）。
@@ -34,6 +34,14 @@ git log --oneline -10
 - 变更包对应的 `.trellis/spec/` 具体规范。
 
 不得只依赖 session 摘要推断规划内容，必须读取实际文件。
+
+没有当前 task 时运行 `python3 ./.trellis/scripts/untracked_flow.py status --verbose`：
+
+- `hit`：读取 work id、summary、stage、scope、baseline/current fingerprint 和已有验证证据；三件套实现维度标记 `N/A`，其余维度仍对实际 diff 与相关 spec 负责。
+- `miss`：仅当用户明确要求检查一个无状态的已知 diff 时继续，并把工作上下文缺失列为风险；否则停止并回到 Request Triage。
+- `error` 或 workspace drift：按阻塞报告，禁止用聊天摘要恢复或覆盖状态。
+
+untracked 检查必须处于 `stage=check`，且只读取个人 check 偏好，不创建 task-scoped route decision。
 
 ### 0.3 验证运行上下文
 

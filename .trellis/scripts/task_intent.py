@@ -9,6 +9,7 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -20,6 +21,12 @@ from common.active_task import (
 from common.io import read_json, write_json
 from common.paths import get_repo_root, get_tasks_dir
 from common.task_utils import is_safe_task_path, resolve_task_dir
+from git_evidence import (
+    GitEvidenceError,
+    capture_workspace_evidence,
+    task_compat_baseline,
+)
+from untracked_flow import STATE_KEY, read_untracked_state
 
 
 class IntentTaskError(Exception):
@@ -57,34 +64,6 @@ def _run_git(repo_root: Path, args: list[str], *, binary: bool = False) -> subpr
     )
 
 
-def _decode_path(value: bytes) -> str:
-    """按文件系统编码无损解码 Git -z 路径。"""
-    return os.fsdecode(value)
-
-
-def _parse_porcelain_z(value: bytes) -> list[dict[str, str]]:
-    """解析 `git status --porcelain=v1 -z`，保留 rename/copy 双路径。"""
-    parts = value.split(b"\0")
-    entries: list[dict[str, str]] = []
-    index = 0
-    while index < len(parts):
-        item = parts[index]
-        index += 1
-        if not item:
-            continue
-        if len(item) < 4 or item[2:3] != b" ":
-            raise IntentTaskError("git-status-invalid", "无法解析 Git porcelain 状态")
-        status = item[:2].decode("ascii", errors="replace")
-        entry = {"status": status, "path": _decode_path(item[3:])}
-        if "R" in status or "C" in status:
-            if index >= len(parts) or not parts[index]:
-                raise IntentTaskError("git-status-invalid", "Git rename/copy 状态缺少第二路径")
-            entry["originalPath"] = _decode_path(parts[index])
-            index += 1
-        entries.append(entry)
-    return entries
-
-
 def capture_git_baseline(repo_root: Path) -> dict:
     """捕获 task 创建前的 Git HEAD 与 dirty 状态。
 
@@ -94,19 +73,34 @@ def capture_git_baseline(repo_root: Path) -> dict:
     Returns:
         包含 head 与结构化 porcelain entries 的基线。
     """
-    head_result = _run_git(repo_root, ["rev-parse", "HEAD"])
-    head = head_result.stdout.strip() if head_result.returncode == 0 else None
-    status_result = _run_git(
-        repo_root,
-        ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
-        binary=True,
+    try:
+        evidence = capture_workspace_evidence(repo_root, block_unsafe=False)
+    except GitEvidenceError as error:
+        raise IntentTaskError(error.reason, str(error)) from error
+    return task_compat_baseline(evidence)
+
+
+def _write_json_atomic(path: Path, data: dict) -> None:
+    """使用同目录临时文件原子替换 JSON。"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
     )
-    if status_result.returncode != 0:
-        raise IntentTaskError("git-status-failed", "无法读取 task 创建前的 Git 状态")
-    return {
-        "head": head,
-        "status": _parse_porcelain_z(status_result.stdout),
-    }
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(data, indent=2, ensure_ascii=False) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _task_script() -> Path:
@@ -123,17 +117,11 @@ def _find_created_task(stdout: str) -> str:
     raise IntentTaskError("create-output-invalid", "task.py create 未返回可识别的 task 路径")
 
 
-def create_auto_task(args: argparse.Namespace) -> dict:
-    """创建并标记由当前请求自动路由产生的 planning task。
-
-    Args:
-        args: create 子命令参数。
-
-    Returns:
-        创建结果、task 路径与基线摘要。
-    """
-    repo_root = get_repo_root()
-    baseline = capture_git_baseline(repo_root)
+def _create_planning_task(
+    repo_root: Path,
+    args: argparse.Namespace,
+) -> tuple[str, Path, dict]:
+    """调用 task.py 创建 planning task 并读取元数据。"""
     command = [
         sys.executable,
         str(_task_script()),
@@ -165,8 +153,7 @@ def create_auto_task(args: argparse.Namespace) -> dict:
 
     task_ref = _find_created_task(result.stdout)
     task_dir = resolve_task_dir(task_ref, repo_root)
-    task_json = task_dir / "task.json"
-    data = read_json(task_json)
+    data = read_json(task_dir / "task.json")
     if not data:
         _rollback_created_task(
             task_dir,
@@ -175,6 +162,22 @@ def create_auto_task(args: argparse.Namespace) -> dict:
             repo_root,
         )
         raise IntentTaskError("task-json-invalid", "新 task 的 task.json 无法读取")
+    return task_ref, task_dir, data
+
+
+def create_auto_task(args: argparse.Namespace) -> dict:
+    """创建并标记由当前请求自动路由产生的 planning task。
+
+    Args:
+        args: create 子命令参数。
+
+    Returns:
+        创建结果、task 路径与基线摘要。
+    """
+    repo_root = get_repo_root()
+    baseline = capture_git_baseline(repo_root)
+    task_ref, task_dir, data = _create_planning_task(repo_root, args)
+    task_json = task_dir / "task.json"
     meta = data.get("meta") if isinstance(data.get("meta"), dict) else {}
     context_key = resolve_context_key()
     meta["intentRouting"] = {
@@ -200,6 +203,126 @@ def create_auto_task(args: argparse.Namespace) -> dict:
         "task": task_ref,
         "autoDiscardEligible": auto_discard_eligible,
         "baselineEntries": len(baseline["status"]),
+        "baselineRepositories": len(baseline.get("repositories", [])),
+    }
+
+
+def _session_snapshot(repo_root: Path, context_key: str) -> tuple[Path, dict]:
+    """读取 adoption 前的当前 session 原文对象。"""
+    path = repo_root / ".trellis/.runtime/sessions" / f"{context_key}.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError as exc:
+        raise IntentTaskError("session-runtime-missing", "当前 untracked session runtime 不存在") from exc
+    except json.JSONDecodeError as exc:
+        raise IntentTaskError("session-runtime-corrupt", "当前 session runtime 已损坏") from exc
+    except OSError as exc:
+        raise IntentTaskError("session-runtime-io_error", "当前 session runtime 无法读取") from exc
+    if not isinstance(data, dict):
+        raise IntentTaskError("session-runtime-corrupt", "当前 session runtime 根节点不是对象")
+    return path, data
+
+
+def _rollback_adoption(
+    task_dir: Path,
+    task_data: dict,
+    task_ref: str,
+    repo_root: Path,
+    session_path: Path,
+    session_before: dict,
+) -> None:
+    """补偿删除 adoption 新 task 并恢复原 session。"""
+    try:
+        _rollback_created_task(task_dir, task_data, task_ref, repo_root)
+        _write_json_atomic(session_path, session_before)
+    except (IntentTaskError, OSError) as exc:
+        raise IntentTaskError(
+            "adoption-rollback-failed",
+            f"纳管失败且无法完整恢复原 untracked 状态:{exc}",
+        ) from exc
+
+
+def adopt_untracked_work(args: argparse.Namespace) -> dict:
+    """把当前 untracked diff 和证据原地接管到 planning task。
+
+    Args:
+        args: adopt 子命令参数。
+
+    Returns:
+        新 planning task、来源 work id 和接管阶段。
+    """
+    repo_root = get_repo_root()
+    context_key = resolve_context_key()
+    if not context_key:
+        raise IntentTaskError("no-session-context", "无法解析当前 AI session")
+    try:
+        untracked = read_untracked_state(repo_root, validate_workspace=True)
+    except Exception as exc:
+        reason = getattr(exc, "reason", "untracked-state-invalid")
+        raise IntentTaskError(reason, str(exc)) from exc
+    if untracked.get("status") != "hit":
+        raise IntentTaskError("no-active-untracked-work", "当前 session 没有可纳管的无任务事项")
+    state = untracked["state"]
+    session_path, session_before = _session_snapshot(repo_root, context_key)
+    raw_state = session_before.get(STATE_KEY)
+    if not isinstance(raw_state, dict) or raw_state.get("id") != state["id"]:
+        raise IntentTaskError("untracked-state-mismatch", "纳管前 untracked 状态已变化")
+
+    task_ref = ""
+    task_dir: Path | None = None
+    task_data: dict = {}
+    try:
+        task_ref, task_dir, task_data = _create_planning_task(repo_root, args)
+        task_json = task_dir / "task.json"
+        meta = task_data.get("meta") if isinstance(task_data.get("meta"), dict) else {}
+        meta["intentRouting"] = {
+            "autoCreated": False,
+            "adoptedUntracked": True,
+            "createdAt": _utc_now(),
+            "contextKey": context_key,
+            "untrackedWorkId": state["id"],
+            "implementationStarted": state["stage"] != "inspect",
+            "baseline": state.get("baseline"),
+            "adoptedStage": state["stage"],
+            "workspaceFingerprint": state.get("workspaceFingerprint"),
+            "evidence": state.get("evidence", {}),
+        }
+        task_data["meta"] = meta
+        _write_json_atomic(task_json, task_data)
+
+        active = resolve_active_task(repo_root)
+        if (
+            active.context_key != context_key
+            or normalize_task_ref(active.task_path or "") != normalize_task_ref(task_ref)
+        ):
+            raise IntentTaskError("task-session-bind-failed", "新 task 未绑定到当前 session")
+
+        current_session_path, current_session = _session_snapshot(repo_root, context_key)
+        current_state = current_session.get(STATE_KEY)
+        if not isinstance(current_state, dict) or current_state.get("id") != state["id"]:
+            raise IntentTaskError("untracked-state-mismatch", "清理前 untracked 状态已变化")
+        current_session.pop(STATE_KEY, None)
+        _write_json_atomic(current_session_path, current_session)
+    except (IntentTaskError, OSError) as exc:
+        if task_dir is not None and task_ref:
+            _rollback_adoption(
+                task_dir,
+                task_data,
+                task_ref,
+                repo_root,
+                session_path,
+                session_before,
+            )
+        if isinstance(exc, IntentTaskError):
+            raise
+        raise IntentTaskError("adoption-write-failed", f"无法完成 untracked 纳管:{exc}") from exc
+
+    return {
+        "status": "adopted",
+        "task": task_ref,
+        "workId": state["id"],
+        "adoptedStage": state["stage"],
+        "implementationStarted": state["stage"] != "inspect",
     }
 
 
@@ -434,7 +557,7 @@ def build_parser() -> argparse.ArgumentParser:
     """构造 task intent helper CLI parser。
 
     Returns:
-        已配置 create/discard 子命令的 parser。
+        已配置 create/discard/adopt 子命令的 parser。
     """
     parser = argparse.ArgumentParser(description="Trellis task intent helper")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -449,6 +572,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     discard_parser = subparsers.add_parser("discard", help="安全丢弃自动路由 planning task")
     discard_parser.add_argument("--task", required=True)
+    adopt_parser = subparsers.add_parser("adopt", help="把当前 untracked 事项纳管为 planning task")
+    adopt_parser.add_argument("title")
+    adopt_parser.add_argument("--slug", required=True)
+    adopt_parser.add_argument("--parent")
+    adopt_parser.add_argument("--package")
+    adopt_parser.add_argument("--priority", default="P2")
+    adopt_parser.add_argument("--description")
     return parser
 
 
@@ -460,7 +590,12 @@ def main() -> int:
     """
     args = build_parser().parse_args()
     try:
-        payload = create_auto_task(args) if args.command == "create" else discard_auto_task(args)
+        if args.command == "create":
+            payload = create_auto_task(args)
+        elif args.command == "adopt":
+            payload = adopt_untracked_work(args)
+        else:
+            payload = discard_auto_task(args)
         _emit(payload)
         return 0
     except IntentTaskError as exc:

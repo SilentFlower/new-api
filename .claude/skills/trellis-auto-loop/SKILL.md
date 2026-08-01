@@ -16,7 +16,7 @@ description: "启动、恢复和推进 Trellis 自动任务循环。用于用户
 - `record` 返回 `status=retryable` 时保留的是同一个 outstanding Check action：不得运行 `next`，必须先按返回指令消解漂移并重录。
 - 本地提交是自动终点。不得 push、merge、release、deploy、finish-work 或 archive；queue item 完成后 Trellis task 仍保持 `in_progress`。
 - 任务顺序只决定稳定调度顺序，不隐含依赖。依赖必须通过 `--depends-on dependent=dependency` 明确传入或由 planning artifacts 明确声明。
-- 任务级失败只阻塞自身及显式依赖项；独立任务继续。fix/recheck 与 planning repair 各最多 3 轮，队列结束后不自动执行第二遍恢复扫描。
+- 任务级失败只阻塞自身及显式依赖项；独立任务继续。fix/recheck、planning repair 与安全的 commit-only repair 各最多 3 轮，队列结束后不自动执行第二遍恢复扫描。
 - schema 1 runtime 继续按 runner 返回的旧 action 恢复，包括 outstanding `confirm_brief`；不要把旧 run 改写成 schema 2。
 
 启动或恢复前静默清除交互式 pre-check hold；miss、task mismatch 或损坏诊断不阻断 runner：
@@ -105,7 +105,7 @@ python3 ./.trellis/scripts/auto_loop.py decide \
 | `run_fix` | 根据 `last_failure` 修复并复用 implement route | `record --action run_fix --result ok --route-mode <mode> --route-source <source>` |
 | `run_recheck` | 复用 check route，且不得低于 `minimum_check_depth` | 同 `run_check_all`，action 改为 `run_recheck` |
 | `run_spec_update` | 执行 `trellis-update-spec` | `no-op|written` 用 ok；`needs-review` 用 blocked + `spec-needs-review` |
-| `commit_only` | 复用 `trellis-push` 内部精确本地提交能力，不 push | `record --action commit_only --result ok --commit <hash> --files <exact...> --commit-message "..."` |
+| `commit_only` | 复用 `trellis-push` 内部多仓精确本地提交能力，不 push | `record --action commit_only --result ok --commit <primary-or-last-hash> [--repo-commit <repository>::<hash> ...] --files <exact...> --commit-message "..."` |
 
 失败或越权时必须回写，runner 决定重试、blocked 或继续队列：
 
@@ -113,6 +113,7 @@ python3 ./.trellis/scripts/auto_loop.py decide \
 python3 ./.trellis/scripts/auto_loop.py record \
   --action <action> --result failed|blocked \
   --failure-type <type> --summary "<摘要>" \
+  [--repo-commit <repository>::<hash> ...] \
   [--files <repository>::<path> ...]
 python3 ./.trellis/scripts/auto_loop.py next
 ```
@@ -128,17 +129,20 @@ Check-All 自动修复当前任务 `implement.md` 或 `brief.md` 时，每个实
 3. 若是合法 `implement.md` / `brief.md` DOC 修复，补齐精确 `--doc-remediation-file` 后重录。
 4. 若无法安全归因，使用原 action、`--result blocked --failure-type artifact-drift` 重录并停止。
 
-同一 Check action 最多允许 3 次 retryable 自纠，第 4 次进入 terminal blocked。实现、spec update、commit-only 等其它 action 的 artifact drift 不使用该预算。
+同一 Check action 最多允许 3 次 retryable 自纠，第 4 次进入 terminal blocked。实现、spec update、commit-only 等其它 action 的 artifact drift 不使用该预算；commit-only 只有下方明确的 `commit-repairable` 本地失败可以使用独立三轮预算。
 
 ## Commit-Only
 
 收到 `commit_only` 后：
 
 1. 用 `status` 确认 active run、profile、outstanding action 和 task 一致。
-2. 读取任务 artifacts、Git status/diff，生成 exact files、message 和归属理由。
-3. staged 必须为空；不得包含冲突、未完成集成、runtime、route prefs、其它任务目录或 protected-retained。
-4. 使用 `trellis-push` 内部 commit-only 提交 exact files。不得裸 `git add .`、`git add -A`、push 或按时间差猜归属。
-5. 用提交 hash 和 exact files record，然后立即 next。
+2. 调用 `trellis-push` 内部 `commit-only`，由它根据任务 artifacts、项目 SOP/spec、受版本控制脚本和可验证 Git/submodule 关系，从当前真实 Git 状态生成有序 `commit -> generate -> commit` 链。不得仅因多个仓库、submodule pin 或证据充分的本地生成命令返回 `multi-repo-commit-boundary`。
+3. 仓库发现、证据冲突处理、生成入口校验、exact/retained 归属和逐步 Git 预检都由 `trellis-push` 负责；本 skill 不另行猜测依赖、拼接命令或绕过其计划。只有本地生成入口确定性、可重复、受版本控制且无外部副作用，并且计划外 dirty、retained、staged、分支和 HEAD 都满足其安全契约时才继续。
+4. 按 `trellis-push` 的计划精确提交和运行生成入口。不得裸 `git add .`、`git add -A`、push、按时间差猜归属或撤销已经成功的本地 commit。
+5. 确定性生成失败、生成结果尚未收敛或可重新规划的本地预检失败时，用 `--result failed --failure-type commit-repairable` 回写全部已完成 `--repo-commit`，然后立即 `next`。runner 前 3 次会重新发出同一个 action；每次都从真实 Git 状态重建计划，验证并跳过已完成提交，安全重跑生成，后续仓 clean 时跳过空提交。第 4 次失败进入 `commit-repair-budget-exhausted`。
+6. 全部完成后，用主仓或最后提交传 `--commit`，并为每个已完成仓库重复传入 `--repo-commit <repositories[].root>::<hash>`；同时传 `--files`、`--retained-files` 和 `--commit-message`，record 成功后立即 next。
+
+`commit-repairable` 只用于继续执行仍然安全的本地确定性链。外部副作用风险或任何 Git 安全边界问题必须用 `blocked` 或非 repairable `failed` 立即结束当前项。部分成功提交跨 retry/resume 保留，不回滚、不 amend、不重复创建。
 
 `decisions.jsonl` 属于当前任务文件，发生决策时应进入该任务最终精确提交。任务 `task.json.status` 不因 queue item completed 而改写。
 

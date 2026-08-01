@@ -317,7 +317,20 @@ def _write_prefs(repo_root: Path, prefs: dict[str, str]) -> None:
         if value:
             lines.append(f"{target}={value}")
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temp_path = Path(temp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+    except Exception:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def _normalized_decision(decision: Any, target: str, current_task: str) -> dict[str, Any] | None:
@@ -643,6 +656,74 @@ def write_route(args: argparse.Namespace) -> int:
     )
 
 
+def read_pref(args: argparse.Namespace) -> int:
+    """读取不依赖任务或 session 的个人 route 偏好。
+
+    Args:
+        args: 包含 target 和 verbose 的命令行参数。
+
+    Returns:
+        命令退出码。
+    """
+    repo_root = _repo_root()
+    if repo_root is None:
+        return _print({"status": "miss", "reason": "not-trellis-project"})
+    mode = _read_prefs(repo_root).get(args.target)
+    if mode not in PREF_MODES[args.target]:
+        return _output(
+            args,
+            {"status": "miss", "reason": "no-valid-pref", "target": args.target},
+            {"pref_path": _rel_path(repo_root, _pref_path(repo_root))},
+        )
+    return _output(
+        args,
+        {
+            "status": "hit",
+            "target": args.target,
+            "mode": mode,
+            "source": "route-prefs",
+        },
+        {"pref_path": _rel_path(repo_root, _pref_path(repo_root))},
+    )
+
+
+def write_pref(args: argparse.Namespace) -> int:
+    """写入不依赖任务或 session 的个人 route 偏好。
+
+    Args:
+        args: 包含 target、mode 和 verbose 的命令行参数。
+
+    Returns:
+        命令退出码。
+    """
+    mode = _normalize_mode(args.target, args.mode)
+    if mode not in PREF_MODES[args.target]:
+        return _print(
+            {
+                "status": "error",
+                "reason": "invalid-mode",
+                "target": args.target,
+                "mode": args.mode,
+            }
+        )
+    repo_root = _repo_root()
+    if repo_root is None:
+        return _print({"status": "skipped", "reason": "not-trellis-project"})
+    prefs = _read_prefs(repo_root)
+    prefs[args.target] = mode
+    _write_prefs(repo_root, prefs)
+    return _output(
+        args,
+        {
+            "status": "written",
+            "target": args.target,
+            "mode": mode,
+            "source": "route-prefs",
+        },
+        {"pref_path": _rel_path(repo_root, _pref_path(repo_root))},
+    )
+
+
 def clear_pref(args: argparse.Namespace) -> int:
     """清除当前 target 的个人默认 route 配置。"""
     repo_root = _repo_root()
@@ -687,6 +768,17 @@ def build_parser() -> argparse.ArgumentParser:
     write_parser.add_argument("--save-pref", action="store_true")
     write_parser.add_argument("--verbose", action="store_true", help="include diagnostic paths and session metadata")
     write_parser.set_defaults(func=write_route)
+
+    read_pref_parser = subparsers.add_parser("read-pref", help="read a personal route preference")
+    read_pref_parser.add_argument("--target", choices=sorted(PREF_MODES), required=True)
+    read_pref_parser.add_argument("--verbose", action="store_true", help="include preference path metadata")
+    read_pref_parser.set_defaults(func=read_pref)
+
+    write_pref_parser = subparsers.add_parser("write-pref", help="write a personal route preference")
+    write_pref_parser.add_argument("--target", choices=sorted(PREF_MODES), required=True)
+    write_pref_parser.add_argument("--mode", required=True)
+    write_pref_parser.add_argument("--verbose", action="store_true", help="include preference path metadata")
+    write_pref_parser.set_defaults(func=write_pref)
 
     clear_parser = subparsers.add_parser("clear-pref", help="clear a personal route preference")
     clear_parser.add_argument("--target", choices=sorted(PREF_MODES), required=True)

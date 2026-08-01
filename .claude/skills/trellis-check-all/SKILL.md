@@ -12,12 +12,13 @@ description: "统一 Check-All 入口：确认范围与运行上下文，按 req
 
 ## 入口职责
 
-1. 确认本轮检查范围、任务材料、项目规范和运行上下文。
+1. 确认本轮检查范围、task artifacts 或 untracked state、项目规范和运行上下文。
 2. 解析 `requested_depth`，生成 `check_profile`，决定 `effective_depth=light|full`。
 3. 按有效深度读取并执行对应 profile。
 4. 全程收集普通问题到 `CHK-*`，收集低风险文档漂移到 `DOC-*`。
 5. 在最终报告前处理允许自动修复的文档漂移，并把修复内容展示在报告里。
 6. 根据 interactive / validated auto-loop 边界输出下一步或完成 runner `record + next`。
+7. untracked 上下文在最终 diff 稳定后调用 `untracked_flow.py record-check`；只有严格通过且 disposition 确认继续时才 `advance --stage spec`。
 
 ---
 
@@ -62,7 +63,7 @@ description: "统一 Check-All 入口：确认范围与运行上下文，按 req
 
 | 顺序 | 维度 | 检查内容 | 对照物 |
 | --- | --- | --- | --- |
-| 1 | 三件套实现 | 规划是否正确落地 | `prd.md` + 可选 `design.md` / `implement.md` |
+| 1 | 三件套实现 | 规划是否正确落地 | task 的 `prd.md` + 可选 `design.md` / `implement.md`；untracked 为 `N/A` |
 | 2 | 实现假设 | API、组件、历史数据、数据流和测试假设是否成立 | 源码、真实契约、可用验证证据 |
 | 3 | 完整性与规范 | 影响面是否同步、代码是否符合 spec、验证是否通过 | 实际变更范围 + 项目 spec |
 

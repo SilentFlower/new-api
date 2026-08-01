@@ -202,6 +202,32 @@ def get_active_task(root: Path, input_data: dict) -> Optional[tuple[str, str, st
     return task_id, status, active.source
 
 
+def _get_untracked_work(root: Path, input_data: dict) -> Optional[tuple[str, str, str]]:
+    """Return (work_id, stage, summary) for the current session's untracked work."""
+    scripts_dir = root / ".trellis" / "scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+    try:
+        from untracked_flow import read_untracked_state  # type: ignore[import-not-found]
+
+        result = read_untracked_state(
+            root,
+            input_data,
+            platform=_detect_platform(input_data),
+            validate_workspace=False,
+        )
+    except Exception:
+        return None
+    if result.get("status") != "hit":
+        return None
+    work_id = result.get("workId")
+    stage = result.get("stage")
+    summary = result.get("summary")
+    if not all(isinstance(value, str) and value for value in (work_id, stage, summary)):
+        return None
+    return work_id, stage, summary
+
+
 # ---------------------------------------------------------------------------
 # Breadcrumb loading: parse workflow.md, fall back to hardcoded defaults
 # ---------------------------------------------------------------------------
@@ -320,6 +346,8 @@ def build_breadcrumb(
     templates: dict[str, str],
     source: str | None = None,
     breadcrumb_key: str | None = None,
+    subject_label: str | None = None,
+    subject_summary: str | None = None,
 ) -> str:
     """Build the <workflow-state>...</workflow-state> block.
 
@@ -334,7 +362,12 @@ def build_breadcrumb(
         body = templates.get(status)
     if body is None:
         body = "Refer to workflow.md for current step."
-    header = f"Status: {status}" if task_id is None else f"Task: {task_id} ({status})"
+    if subject_label:
+        header = subject_label
+    else:
+        header = f"Status: {status}" if task_id is None else f"Task: {task_id} ({status})"
+    if subject_summary:
+        body = f"Summary: {subject_summary}\n{body}"
     return f"<workflow-state>\n{header}\n{body}\n</workflow-state>"
 
 
@@ -393,12 +426,25 @@ def main() -> int:
     config = _read_trellis_config(root)
     task = get_active_task(root, data)
     if task is None:
-        # No active task — still emit a breadcrumb nudging AI toward
-        # trellis-brainstorm + task.py create when user describes real work.
-        no_task_key = resolve_breadcrumb_key("no_task", platform, config)
-        breadcrumb = build_breadcrumb(
-            None, "no_task", templates, breadcrumb_key=no_task_key
-        )
+        untracked = _get_untracked_work(root, data)
+        if untracked is None:
+            # No active task or untracked work — still emit a breadcrumb nudging
+            # the AI toward intent routing when the user describes real work.
+            no_task_key = resolve_breadcrumb_key("no_task", platform, config)
+            breadcrumb = build_breadcrumb(
+                None, "no_task", templates, breadcrumb_key=no_task_key
+            )
+        else:
+            work_id, stage, summary = untracked
+            untracked_key = resolve_breadcrumb_key("untracked", platform, config)
+            breadcrumb = build_breadcrumb(
+                None,
+                "untracked",
+                templates,
+                breadcrumb_key=untracked_key,
+                subject_label=f"Untracked work: {work_id} ({stage})",
+                subject_summary=summary,
+            )
     else:
         task_id, status, source = task
         status_key = resolve_breadcrumb_key(status, platform, config)

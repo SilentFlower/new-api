@@ -16,9 +16,12 @@ from common.active_task import resolve_active_task, resolve_context_key
 
 
 PREFERENCE_KEY = "pre_check_preference"
-PREFERENCE_VERSION = 1
+PREFERENCE_VERSION = 2
+LEGACY_PREFERENCE_VERSION = 1
 VALID_SOURCES = {"user-explicit", "follow-up-edit"}
-SESSION_START_HINT = "Pre-check: deferred for current task; latest user intent may override."
+UNTRACKED_STATE_VERSION = 1
+UNTRACKED_STAGES = {"inspect", "implement", "check", "spec", "push"}
+SESSION_START_HINT = "Pre-check: deferred for current work; latest user intent may override."
 
 
 def _find_repo_root(start: Path | None = None) -> Path | None:
@@ -91,11 +94,22 @@ def _runtime_scope(
     platform: str | None,
     active: Any | None,
 ) -> dict[str, Any]:
-    """解析严格绑定当前 session 的任务和 runtime 路径。"""
+    """解析严格绑定当前 session 的 task 或 untracked subject。"""
     context_key = resolve_context_key(platform_input, platform)
     if not context_key:
         return {"status": "miss", "reason": "no-session-context"}
 
+    path = _session_path(repo_root, context_key)
+    result = _read_json_result(path)
+    if result["status"] in {"corrupt", "io_error"}:
+        return {
+            "status": "error",
+            "reason": f"session-runtime-{result['status']}",
+            "context_key": context_key,
+            "path": path,
+            "error": result.get("error"),
+        }
+    context = result["data"] if isinstance(result.get("data"), dict) else {}
     active_task = active or resolve_active_task(repo_root, platform_input, platform)
     source_type = getattr(active_task, "source_type", None)
     if source_type in {"session-corrupt", "session-io_error"}:
@@ -103,22 +117,83 @@ def _runtime_scope(
             "status": "error",
             "reason": f"session-runtime-{source_type.removeprefix('session-')}",
             "context_key": context_key,
-            "path": _session_path(repo_root, context_key),
+            "path": path,
         }
     task = getattr(active_task, "task_path", None)
-    if not isinstance(task, str) or not task:
-        return {"status": "miss", "reason": "no-current-task"}
+    if isinstance(task, str) and task:
+        # 不接受 unique-session fallback。新 AI session 即使看到旧任务指针，也不能继承旧 hold。
+        if getattr(active_task, "context_key", None) != context_key:
+            return {"status": "miss", "reason": "session-task-mismatch"}
+        return {
+            "status": "ok",
+            "subject": {"kind": "task", "id": task},
+            "task": task,
+            "context_key": context_key,
+            "path": path,
+            "context": context,
+        }
 
-    # 不接受 unique-session fallback。新 AI session 即使看到旧任务指针，也不能继承旧 hold。
-    if getattr(active_task, "context_key", None) != context_key:
-        return {"status": "miss", "reason": "session-task-mismatch"}
+    untracked = context.get("untracked_flow")
+    if isinstance(untracked, dict):
+        work_id = untracked.get("id")
+        if not (
+            untracked.get("version") == UNTRACKED_STATE_VERSION
+            and isinstance(work_id, str)
+            and work_id.strip()
+            and untracked.get("stage") in UNTRACKED_STAGES
+        ):
+            return {
+                "status": "error",
+                "reason": "invalid-untracked-state",
+                "context_key": context_key,
+                "path": path,
+            }
+        return {
+            "status": "ok",
+            "subject": {"kind": "untracked", "id": work_id},
+            "workId": work_id,
+            "context_key": context_key,
+            "path": path,
+            "context": context,
+        }
 
-    return {
-        "status": "ok",
-        "task": task,
-        "context_key": context_key,
-        "path": _session_path(repo_root, context_key),
-    }
+    return {"status": "miss", "reason": "no-current-work"}
+
+
+def _preference_subject(preference: dict[str, Any]) -> dict[str, str] | None:
+    """读取 v2 subject，并兼容旧版 task 绑定。"""
+    if preference.get("version") == PREFERENCE_VERSION:
+        subject = preference.get("subject")
+        if not isinstance(subject, dict):
+            return None
+        kind = subject.get("kind")
+        identifier = subject.get("id")
+        if kind in {"task", "untracked"} and isinstance(identifier, str) and identifier:
+            return {"kind": kind, "id": identifier}
+        return None
+    if preference.get("version") == LEGACY_PREFERENCE_VERSION:
+        task = preference.get("task")
+        if isinstance(task, str) and task:
+            return {"kind": "task", "id": task}
+    return None
+
+
+def _context_matches_subject(context: dict[str, Any], subject: dict[str, str]) -> bool:
+    """判断 runtime 当前工作是否仍与 hold subject 一致。"""
+    if subject["kind"] == "task":
+        return context.get("current_task") == subject["id"]
+    state = context.get("untracked_flow")
+    return isinstance(state, dict) and state.get("id") == subject["id"]
+
+
+def _subject_result_fields(subject: dict[str, str]) -> dict[str, Any]:
+    """构造兼容 task 调用方并支持 untracked 的结果字段。"""
+    fields: dict[str, Any] = {"subject": subject}
+    if subject["kind"] == "task":
+        fields["task"] = subject["id"]
+    else:
+        fields["workId"] = subject["id"]
+    return fields
 
 
 def read_pre_check_preference(
@@ -127,7 +202,7 @@ def read_pre_check_preference(
     platform: str | None = None,
     active: Any | None = None,
 ) -> dict[str, Any]:
-    """读取当前任务的 Check-All 前暂缓偏好。
+    """读取当前工作的 Check-All 前暂缓偏好。
 
     Args:
         repo_root: Trellis 项目根目录。
@@ -155,17 +230,19 @@ def read_pre_check_preference(
     if not isinstance(preference, dict):
         return {**scope, "status": "miss", "reason": "no-hold"}
     if (
-        preference.get("version") != PREFERENCE_VERSION
-        or preference.get("mode") != "hold"
+        preference.get("mode") != "hold"
         or preference.get("source") not in VALID_SOURCES
     ):
         return {**scope, "status": "miss", "reason": "invalid-hold"}
-    if preference.get("task") != scope["task"]:
-        return {**scope, "status": "miss", "reason": "task-mismatch"}
+    subject = _preference_subject(preference)
+    if subject is None:
+        return {**scope, "status": "miss", "reason": "invalid-hold"}
+    if subject != scope["subject"]:
+        return {**scope, "status": "miss", "reason": "subject-mismatch"}
     return {
         "status": "hit",
         "mode": "hold",
-        "task": scope["task"],
+        **_subject_result_fields(subject),
         "source": preference["source"],
         "updated_at": preference.get("updated_at"),
         "context_key": scope["context_key"],
@@ -179,7 +256,7 @@ def set_pre_check_hold(
     platform_input: dict[str, Any] | None = None,
     platform: str | None = None,
 ) -> dict[str, Any]:
-    """为当前 session 的活动任务写入软暂缓偏好。
+    """为当前 session 的活动工作写入软暂缓偏好。
 
     Args:
         repo_root: Trellis 项目根目录。
@@ -205,11 +282,11 @@ def set_pre_check_hold(
             "error": result.get("error"),
         }
     context = result["data"] if isinstance(result.get("data"), dict) else {}
-    if context.get("current_task") != scope["task"]:
-        return {**scope, "status": "error", "reason": "runtime-task-mismatch"}
+    if not _context_matches_subject(context, scope["subject"]):
+        return {**scope, "status": "error", "reason": "runtime-subject-mismatch"}
     preference = {
         "version": PREFERENCE_VERSION,
-        "task": scope["task"],
+        "subject": scope["subject"],
         "mode": "hold",
         "source": source,
         "updated_at": _utc_now(),
@@ -222,7 +299,7 @@ def set_pre_check_hold(
     return {
         "status": "held",
         "mode": "hold",
-        "task": scope["task"],
+        **_subject_result_fields(scope["subject"]),
         "source": source,
         "updated_at": preference["updated_at"],
         "context_key": scope["context_key"],
@@ -235,7 +312,7 @@ def clear_pre_check_preference(
     platform_input: dict[str, Any] | None = None,
     platform: str | None = None,
 ) -> dict[str, Any]:
-    """清除当前任务匹配的软暂缓偏好。
+    """清除当前工作匹配的软暂缓偏好。
 
     Args:
         repo_root: Trellis 项目根目录。
@@ -261,8 +338,9 @@ def clear_pre_check_preference(
     preference = context.get(PREFERENCE_KEY)
     if not isinstance(preference, dict):
         return {**scope, "status": "cleared", "existed": False}
-    if preference.get("task") != scope["task"]:
-        return {**scope, "status": "miss", "reason": "task-mismatch"}
+    subject = _preference_subject(preference)
+    if subject != scope["subject"]:
+        return {**scope, "status": "miss", "reason": "subject-mismatch"}
 
     context.pop(PREFERENCE_KEY, None)
     try:
@@ -301,7 +379,7 @@ def _compact_result(result: dict[str, Any], verbose: bool) -> dict[str, Any]:
         if isinstance(path, Path):
             payload["path"] = str(path)
         return payload
-    keys = ("status", "reason", "mode", "task", "source", "existed")
+    keys = ("status", "reason", "mode", "subject", "task", "workId", "source", "existed")
     return {key: result[key] for key in keys if key in result}
 
 

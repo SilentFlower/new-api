@@ -16,13 +16,16 @@ You are already the `trellis-implement` sub-agent that the main session dispatch
 - If SessionStart context, workflow-state breadcrumbs, or workflow.md say to dispatch `trellis-implement` / `trellis-check`, treat that as a main-session instruction that is already satisfied by your current role.
 - Only the main session may dispatch Trellis implement/check agents. If more parallel work is needed, report that recommendation instead of spawning.
 
+<!-- BEGIN skill-garden patch markdown-agents-untracked-context v0.6 -->
 ## Trellis Context Loading Protocol
 
-Look for the `<!-- trellis-hook-injected -->` marker in your input above.
+Resolve exactly one dispatch subject from the first prompt line:
 
-- **If the marker is present**: prd / spec / research files have already been auto-loaded for you above. Proceed with the implementation work directly.
-- **If the marker is absent**: hook injection didn't fire (Windows + Claude Code, `--continue` resume, fork distribution, hooks disabled, etc.). Find the active task path from your dispatch prompt's first line `Active task: <path>`, then Read `<task-path>/implement.jsonl`, each listed file, `<task-path>/prd.md`, `<task-path>/design.md` if present, and `<task-path>/implement.md` if present before doing the work.
+- `Active task: <path>`: use the normal task path. Read the role manifest (`implement.jsonl` for implement, `check.jsonl` for check), every listed file, then `prd.md`, optional `design.md`, and optional `implement.md`.
+- `Untracked work: <work-id>`: run `python3 ./.trellis/scripts/untracked_flow.py status --verbose`, require the same work id, and use the complete summary/scope/baseline/fingerprint/evidence/spec context supplied by the main session. Do not require or invent task artifacts or JSONL files.
 
+If hook-injected context is present, it may satisfy the task branch. The untracked branch remains prompt-driven and must still validate the helper state. If neither first-line contract is present or the resolved subject mismatches, stop and report the missing context; do not guess or switch subjects.
+<!-- END skill-garden patch markdown-agents-untracked-context v0.6 -->
 ## Context
 
 Before implementing, read:

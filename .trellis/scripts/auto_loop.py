@@ -20,11 +20,13 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from decision_log import DecisionLogError, append_decision
+from git_evidence import GitEvidenceError, discover_git_repositories, parse_porcelain_z
 
 SCHEMA_VERSION = 2
 LEGACY_SCHEMA_VERSION = 1
 DEFAULT_PROFILE = "commit-only"
 MAX_FIX_RECHECK = 3
+MAX_COMMIT_REPAIR = MAX_FIX_RECHECK
 MAX_PLANNING_REPAIR = 3
 MAX_ARTIFACT_RECONCILE = 3
 DECISION_LOG_LIMIT = 20
@@ -53,6 +55,7 @@ RECOVERABLE_BLOCK_REASONS = {
     "missing-check-context",
     "planning-repair-budget-exhausted",
     "retry-budget-exhausted",
+    "commit-repair-budget-exhausted",
     "artifact-drift",
     "protected-path-conflict",
     "protected-baseline-drift",
@@ -499,23 +502,50 @@ def _progress_stable_fields(progress: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _repo_commit_summaries(item: dict[str, Any], full: bool = False) -> list[str]:
+    """返回队列项已记录仓库提交的紧凑摘要。
+
+    Args:
+        item: Auto-Loop 队列项。
+        full: 是否保留完整提交哈希。
+
+    Returns:
+        `<repository>:<hash>` 摘要列表。
+    """
+    commits = item.get("commits") if isinstance(item.get("commits"), list) else []
+    summaries: list[str] = []
+    for entry in commits:
+        if not isinstance(entry, dict):
+            continue
+        repository = str(entry.get("repository") or ".")
+        commit = str(entry.get("commit") or "")
+        if not commit:
+            continue
+        summaries.append(f"{repository}:{commit if full else commit[:7]}")
+    return summaries
+
+
 def _progress_for_completed(state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
     """构造 auto-loop 本地提交完成后的任务进度。"""
     commit = str(item.get("commit") or "")
     short_commit = commit[:7] if commit else "unknown"
+    repo_commits = _repo_commit_summaries(item)
+    completed_label = ", ".join(repo_commits) if repo_commits else short_commit
+    full_repo_commits = _repo_commit_summaries(item, full=True)
     notes = "; ".join(
         part
         for part in (
             f"run_id={state.get('run_id')}",
             f"task={item.get('task')}",
             f"commit={commit or 'unknown'}",
+            f"commits={','.join(full_repo_commits)}" if full_repo_commits else "",
             f"status={state.get('status')}",
         )
         if part
     )
     return {
         "updatedAt": _utc_now(),
-        "completedSteps": [f"auto-loop: 本地提交完成 {short_commit}"],
+        "completedSteps": [f"auto-loop: 本地提交完成 {completed_label}"],
         "partialStep": None,
         "nextStep": "auto-loop 已本地提交；需要用户显式运行 finish-work/archive 或继续后续人工流程",
         "notes": _trim_text(notes),
@@ -529,6 +559,8 @@ def _progress_for_blocked(state: dict[str, Any], item: dict[str, Any]) -> dict[s
     summary = str(blocked.get("summary") or "")
     task = str(item.get("task") or "")
     run_id = str(state.get("run_id") or "")
+    repo_commits = _repo_commit_summaries(item)
+    full_repo_commits = _repo_commit_summaries(item, full=True)
     command = f"python3 ./.trellis/scripts/auto_loop.py retry-blocked --run-id {run_id} --task {task}"
     notes = "; ".join(
         part
@@ -538,12 +570,13 @@ def _progress_for_blocked(state: dict[str, Any], item: dict[str, Any]) -> dict[s
             f"status={state.get('status')}",
             f"reason={reason}",
             f"summary={summary}" if summary else "",
+            f"commits={','.join(full_repo_commits)}" if full_repo_commits else "",
         )
         if part
     )
     return {
         "updatedAt": _utc_now(),
-        "completedSteps": [],
+        "completedSteps": [f"auto-loop: 已保留本地提交 {', '.join(repo_commits)}"] if repo_commits else [],
         "partialStep": f"auto-loop blocked: {reason}",
         "nextStep": f"auto-loop 已阻断；确认后运行 {command}",
         "notes": _trim_text(notes),
@@ -697,6 +730,14 @@ def _normalize_record_file(raw: str) -> str:
     return _baseline_key(".", value.removeprefix("./"))
 
 
+def _normalize_repository_root(raw: str) -> str:
+    """把 record 中的仓库根规范化为 run baseline 使用的相对路径。"""
+    value = raw.strip()
+    if value == ".":
+        return "."
+    return value.removeprefix("./").rstrip("/")
+
+
 def _planning_digest(task_dir: Path) -> tuple[str, list[str]]:
     """返回当前 planning authoritative artifacts 的内容摘要。"""
     return _artifact_digest([
@@ -749,6 +790,167 @@ def _git_output(repo: Path, *args: str) -> subprocess.CompletedProcess[bytes]:
     )
 
 
+def _validated_repo_commits(
+    repo_root: Path,
+    state: dict[str, Any],
+    raw_values: list[str],
+) -> tuple[list[dict[str, str]], dict[str, Any] | None]:
+    """校验并解析 `--repo-commit` 参数。
+
+    Args:
+        repo_root: 当前 Trellis 项目根目录。
+        state: 当前 Auto-Loop runtime 状态。
+        raw_values: 重复传入的 `<repository>::<commit>` 参数。
+
+    Returns:
+        规范化提交列表和可选错误对象。
+    """
+    repositories = state.get("repositories") if isinstance(state.get("repositories"), list) else []
+    known = {
+        str(entry.get("root") or ".")
+        for entry in repositories
+        if isinstance(entry, dict)
+    }
+    parsed: list[dict[str, str]] = []
+    by_repository: dict[str, str] = {}
+    for raw in raw_values:
+        if "::" not in raw:
+            return [], {
+                "status": "error",
+                "reason": "invalid-repo-commit",
+                "message": f"repo-commit 必须是 <repository>::<commit>:{raw}",
+            }
+        repository_raw, commit_raw = raw.split("::", 1)
+        repository = _normalize_repository_root(repository_raw)
+        commit = commit_raw.strip()
+        if not repository or not commit:
+            return [], {
+                "status": "error",
+                "reason": "invalid-repo-commit",
+                "message": f"repo-commit 的仓库和提交不能为空:{raw}",
+            }
+        if repository not in known:
+            return [], {
+                "status": "error",
+                "reason": "repo-commit-repository-not-in-run",
+                "repository": repository,
+            }
+        if not 7 <= len(commit) <= 64 or any(char not in "0123456789abcdefABCDEF" for char in commit):
+            return [], {
+                "status": "error",
+                "reason": "invalid-repo-commit-hash",
+                "repository": repository,
+                "commit": commit,
+            }
+        repository_path = repo_root if repository == "." else repo_root / repository
+        try:
+            resolved = _git_output(repository_path, "rev-parse", "--verify", f"{commit}^{{commit}}")
+        except OSError as exc:
+            return [], {
+                "status": "error",
+                "reason": "repo-commit-repository-unreadable",
+                "repository": repository,
+                "commit": commit,
+                "message": str(exc),
+            }
+        if resolved.returncode != 0:
+            return [], {
+                "status": "error",
+                "reason": "repo-commit-not-a-commit",
+                "repository": repository,
+                "commit": commit,
+                "message": resolved.stderr.decode("utf-8", errors="replace").strip(),
+            }
+        full_commit = resolved.stdout.decode("utf-8", errors="replace").strip()
+        previous = by_repository.get(repository)
+        if previous and previous != full_commit:
+            return [], {
+                "status": "error",
+                "reason": "repo-commit-conflict",
+                "repository": repository,
+                "commits": [previous, full_commit],
+            }
+        if previous == full_commit:
+            continue
+        by_repository[repository] = full_commit
+        parsed.append({"repository": repository, "commit": full_commit})
+    return parsed, None
+
+
+def _merge_repo_commits(
+    item: dict[str, Any],
+    additions: list[dict[str, str]],
+) -> dict[str, Any] | None:
+    """把新提交幂等合并进队列项，并拒绝同仓冲突哈希。"""
+    existing = item.get("commits") if isinstance(item.get("commits"), list) else []
+    merged: list[dict[str, str]] = []
+    by_repository: dict[str, str] = {}
+    for entry in [*existing, *additions]:
+        if not isinstance(entry, dict):
+            continue
+        repository = str(entry.get("repository") or ".")
+        commit = str(entry.get("commit") or "")
+        if not commit:
+            continue
+        previous = by_repository.get(repository)
+        if previous and previous != commit:
+            return {
+                "status": "error",
+                "reason": "repo-commit-conflict",
+                "repository": repository,
+                "commits": [previous, commit],
+            }
+        if previous == commit:
+            continue
+        by_repository[repository] = commit
+        merged.append({"repository": repository, "commit": commit})
+    if merged:
+        item["commits"] = merged
+    return None
+
+
+def _resolved_primary_repo_commit(
+    item: dict[str, Any],
+    raw_commit: str | None,
+) -> tuple[str | None, dict[str, Any] | None]:
+    """把多仓兼容主提交解析为 `commits[]` 中的完整哈希。
+
+    Args:
+        item: Auto-Loop 队列项。
+        raw_commit: `record --commit` 传入的兼容主提交。
+
+    Returns:
+        完整主提交哈希和可选错误对象；单仓旧协议不参与该校验。
+    """
+    commits = item.get("commits") if isinstance(item.get("commits"), list) else []
+    if not commits or not raw_commit:
+        return raw_commit, None
+    candidate = raw_commit.strip()
+    if not 7 <= len(candidate) <= 64 or any(char not in "0123456789abcdefABCDEF" for char in candidate):
+        return None, {
+            "status": "error",
+            "reason": "repo-commit-primary-mismatch",
+            "commit": candidate,
+            "message": "多仓兼容主 commit 必须是 commits[] 中提交的哈希或唯一前缀",
+        }
+    matches = {
+        str(entry.get("commit") or "")
+        for entry in commits
+        if isinstance(entry, dict)
+        and str(entry.get("commit") or "").lower().startswith(candidate.lower())
+    }
+    matches.discard("")
+    if len(matches) != 1:
+        return None, {
+            "status": "error",
+            "reason": "repo-commit-primary-mismatch",
+            "commit": candidate,
+            "commits": sorted(matches),
+            "message": "多仓兼容主 commit 必须唯一匹配 commits[] 中的已验证提交",
+        }
+    return next(iter(matches)), None
+
+
 def _integration_in_progress(repo: Path) -> list[str]:
     """返回当前仓库未完成的 Git 集成状态名称。"""
     result = _git_output(repo, "rev-parse", "--git-path", ".")
@@ -768,55 +970,42 @@ def _integration_in_progress(repo: Path) -> list[str]:
 
 
 def _git_repositories(repo_root: Path) -> list[Path]:
-    """返回主仓和已初始化子模块仓库。"""
-    probe = _git_output(repo_root, "rev-parse", "--show-toplevel")
-    if probe.returncode != 0:
-        return []
-    root = Path(probe.stdout.decode("utf-8", errors="replace").strip()).resolve()
-    repositories = [root]
-    submodules = _git_output(
-        root,
-        "submodule",
-        "foreach",
-        "--recursive",
-        "--quiet",
-        "pwd",
-    )
-    if submodules.returncode == 0:
-        for raw in submodules.stdout.decode("utf-8", errors="replace").splitlines():
-            path = Path(raw.strip()).resolve()
-            if path.is_dir() and path not in repositories:
-                repositories.append(path)
-    return repositories
+    """返回主仓、递归子模块和配置独立 Git package。"""
+    try:
+        return discover_git_repositories(repo_root)
+    except GitEvidenceError as error:
+        # auto-loop 的纯状态机测试和只读恢复场景允许临时目录不是 Git 仓库；
+        # 真正开始任务时，后续 task/Git 门禁仍会给出明确阻断。
+        if error.reason == "git-root-unreadable":
+            return []
+        raise
 
 
 def _parse_porcelain_z(repo: Path, payload: bytes) -> list[dict[str, str]]:
     """解析 `git status --porcelain=v1 -z` 输出。"""
-    entries: list[dict[str, str]] = []
-    parts = payload.split(b"\0")
-    index = 0
-    while index < len(parts):
-        raw = parts[index]
-        index += 1
-        if not raw:
-            continue
-        text = raw.decode("utf-8", errors="surrogateescape")
-        if len(text) < 4:
-            continue
-        xy = text[:2]
-        path = text[3:]
-        original = ""
-        if xy[0] in {"R", "C"} and index < len(parts):
-            original = parts[index].decode("utf-8", errors="surrogateescape")
-            index += 1
-        entries.append({"xy": xy, "path": path, "original_path": original})
-    return entries
+    _ = repo
+    return [
+        {
+            "xy": entry["status"],
+            "path": entry["path"],
+            "original_path": entry.get("originalPath", ""),
+        }
+        for entry in parse_porcelain_z(payload)
+    ]
 
 
 def _capture_git_baseline(repo_root: Path) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
     """捕获 Git dirty baseline，并返回全局阻断信息。"""
     repositories: list[dict[str, Any]] = []
-    for repo in _git_repositories(repo_root):
+    try:
+        git_repositories = _git_repositories(repo_root)
+    except GitEvidenceError as error:
+        return [], {
+            "reason": error.reason,
+            "message": str(error),
+            **error.details,
+        }
+    for repo in git_repositories:
         status = _git_output(repo, "status", "--porcelain=v1", "-z", "--untracked-files=all")
         if status.returncode != 0:
             return [], {
@@ -1352,6 +1541,11 @@ def _resume_capsule(state: dict[str, Any]) -> dict[str, Any]:
     current = _current_queue_item(state)
     auto_completed = [item.get("task") for item in queue if item.get("status") == "completed"]
     blocked = [item.get("task") for item in queue if item.get("status") == "blocked"]
+    recorded_commits = [
+        {"task": item.get("task"), "commits": _repo_commit_summaries(item)}
+        for item in queue
+        if _repo_commit_summaries(item)
+    ]
     counts = _queue_counts(state)
     return {
         "run_id": state.get("run_id"),
@@ -1363,6 +1557,7 @@ def _resume_capsule(state: dict[str, Any]) -> dict[str, Any]:
         "blocked": counts["blocked"],
         "remaining": counts["remaining"],
         "auto_completed_tasks": auto_completed,
+        "recorded_commits": recorded_commits,
         "task_lifecycle_note": "auto-loop completed means local commit completed; run finish-work/archive explicitly when ready" if auto_completed else None,
         "blocked_tasks": blocked,
     }
@@ -1423,7 +1618,10 @@ def _outstanding_action(state: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
-def _completed_task_summaries(state: dict[str, Any]) -> list[dict[str, Any]]:
+def _completed_task_summaries(
+    state: dict[str, Any],
+    include_detail: bool = False,
+) -> list[dict[str, Any]]:
     """返回已完成任务的紧凑摘要。"""
     completed: list[dict[str, Any]] = []
     for item in _queue_items(state):
@@ -1432,6 +1630,9 @@ def _completed_task_summaries(state: dict[str, Any]) -> list[dict[str, Any]]:
         task = {"task": item.get("task")}
         if item.get("commit"):
             task["commit"] = item.get("commit")
+        repo_commits = item.get("commits") if isinstance(item.get("commits"), list) else []
+        if repo_commits:
+            task["commits"] = repo_commits if include_detail else _repo_commit_summaries(item)
         completed.append(task)
     return completed
 
@@ -1450,6 +1651,10 @@ def _blocked_task_summaries(state: dict[str, Any], include_detail: bool = False)
         }
         if include_detail:
             task["detail"] = blocked_data.get("detail") or {}
+            if isinstance(item.get("commits"), list) and item.get("commits"):
+                task["commits"] = item.get("commits")
+        elif _repo_commit_summaries(item):
+            task["commits"] = _repo_commit_summaries(item)
         blocked_tasks.append(task)
     return blocked_tasks
 
@@ -1468,6 +1673,10 @@ def _pending_task_summaries(state: dict[str, Any], include_status: bool = False)
         if include_status:
             task["last_failure"] = item.get("last_failure")
             task["attempts"] = item.get("attempts")
+            if isinstance(item.get("commits"), list) and item.get("commits"):
+                task["commits"] = item.get("commits")
+        elif _repo_commit_summaries(item):
+            task["commits"] = _repo_commit_summaries(item)
         pending.append(task)
     return pending
 
@@ -1513,6 +1722,7 @@ def _summary(state: dict[str, Any]) -> dict[str, Any]:
     """返回 verbose 诊断状态摘要。"""
     summary = _compact_summary(state)
     summary.update({
+        "completed_tasks": _completed_task_summaries(state, include_detail=True),
         "blocked_tasks": _blocked_task_summaries(state, include_detail=True),
         "pending_tasks": _pending_task_summaries(state, include_status=True),
         "recent_decisions": _decision_tail(state, DECISION_LOG_LIMIT, include_data=True),
@@ -1559,7 +1769,7 @@ def _make_item(repo_root: Path, task_ref: str) -> dict[str, Any]:
         "blocked_by": [],
         "owned_dirty": [],
         "decision_count": 0,
-        "attempts": {"fix_recheck": 0, "artifact_reconcile": 0},
+        "attempts": {"fix_recheck": 0, "artifact_reconcile": 0, "commit_repair": 0},
         "last_failure": None,
         "last_check": None,
         "last_action": None,
@@ -2317,14 +2527,16 @@ def cmd_retry_blocked(args: argparse.Namespace) -> int:
         item["status"] = "pending"
         item["blocked"] = None
         item["last_action"] = None
-        if reason in {"retry-budget-exhausted", "artifact-drift"}:
+        if reason in {"retry-budget-exhausted", "artifact-drift", "commit-repair-budget-exhausted"}:
             attempts = item.get("attempts")
             if not isinstance(attempts, dict):
                 attempts = {}
             if reason == "retry-budget-exhausted":
                 attempts["fix_recheck"] = 0
-            else:
+            elif reason == "artifact-drift":
                 attempts["artifact_reconcile"] = 0
+            else:
+                attempts["commit_repair"] = 0
             item["attempts"] = attempts
         item["task_status"] = _task_status(repo_root, str(item.get("task")))
         item["updated_at"] = _utc_now()
@@ -2612,7 +2824,8 @@ def _advance_after_ok(item: dict[str, Any], action: str, args: argparse.Namespac
     elif action == "commit_only":
         item["status"] = "completed"
         item["current_step"] = "done"
-        item["commit"] = args.commit
+        repo_commits = item.get("commits") if isinstance(item.get("commits"), list) else []
+        item["commit"] = args.commit or (repo_commits[-1].get("commit") if repo_commits else None)
         if args.summary:
             item["commit_summary"] = args.summary
         _append_item_decision(
@@ -2624,6 +2837,7 @@ def _advance_after_ok(item: dict[str, Any], action: str, args: argparse.Namespac
                 "retained_files": args.retained_files or [],
                 "commit_message": args.commit_message,
                 "snapshot_commit": args.snapshot_commit,
+                "commits": repo_commits,
             },
         )
         _append_item_decision(
@@ -2631,9 +2845,10 @@ def _advance_after_ok(item: dict[str, Any], action: str, args: argparse.Namespac
             "commit_completed",
             "trellis-push commit-only 本地提交完成",
             {
-                "commit": args.commit,
+                "commit": item.get("commit"),
                 "commit_message": args.commit_message,
                 "snapshot_commit": args.snapshot_commit,
+                "commits": repo_commits,
             },
         )
         _append_item_decision(
@@ -2641,9 +2856,10 @@ def _advance_after_ok(item: dict[str, Any], action: str, args: argparse.Namespac
             "task_auto_completed",
             "auto-loop item 已完成本地提交；任务生命周期仍等待 finish-work/archive",
             {
-                "commit": args.commit,
+                "commit": item.get("commit"),
                 "summary": args.summary,
                 "task_status": item.get("task_status"),
+                "commits": repo_commits,
             },
         )
     item["updated_at"] = _utc_now()
@@ -2656,6 +2872,7 @@ def _record_failure(item: dict[str, Any], action: str, args: argparse.Namespace)
         "failure_type": args.failure_type,
         "summary": args.summary,
         "files": args.files or [],
+        "commits": item.get("commits", []),
         "failed_at": _utc_now(),
     }
     if action in {"run_implement", "run_check_all", "run_fix", "run_recheck"}:
@@ -2675,6 +2892,32 @@ def _record_failure(item: dict[str, Any], action: str, args: argparse.Namespace)
                 "failure_type": args.failure_type,
                 "files": args.files or [],
                 "attempts": item.setdefault("attempts", {}).get("fix_recheck", 0),
+            },
+        )
+        return
+    if action == "commit_only" and args.failure_type == "commit-repairable":
+        attempts = item.setdefault("attempts", {})
+        attempts["commit_repair"] = int(attempts.get("commit_repair", 0)) + 1
+        if attempts["commit_repair"] > MAX_COMMIT_REPAIR:
+            _block_item(
+                item,
+                "commit-repair-budget-exhausted",
+                args.summary or "commit-only 达到默认 3 轮可恢复重试预算",
+                {"commits": item.get("commits", [])},
+            )
+        else:
+            item["current_step"] = "commit_only"
+            item["updated_at"] = _utc_now()
+        _append_item_decision(
+            item,
+            "warning",
+            args.summary or "commit-only 执行失败，将从真实 Git 状态重新规划",
+            {
+                "action": action,
+                "failure_type": args.failure_type,
+                "files": args.files or [],
+                "commits": item.get("commits", []),
+                "attempts": attempts["commit_repair"],
             },
         )
         return
@@ -3275,6 +3518,29 @@ def cmd_record(args: argparse.Namespace) -> int:
         })
 
     action = args.action
+    if args.repo_commit and action != "commit_only":
+        return _print({
+            "status": "error",
+            "reason": "repo-commit-action-mismatch",
+            "message": "--repo-commit 只允许用于 commit_only action",
+            "task": item.get("task"),
+            "action": action,
+        })
+    if action == "commit_only":
+        repo_commits, repo_commit_error = _validated_repo_commits(repo_root, state, args.repo_commit or [])
+        if repo_commit_error is not None:
+            repo_commit_error.update({"task": item.get("task"), "action": action})
+            return _print(repo_commit_error)
+        merge_error = _merge_repo_commits(item, repo_commits)
+        if merge_error is not None:
+            merge_error.update({"task": item.get("task"), "action": action})
+            return _print(merge_error)
+        if args.result == "ok":
+            primary_commit, primary_error = _resolved_primary_repo_commit(item, args.commit)
+            if primary_error is not None:
+                primary_error.update({"task": item.get("task"), "action": action})
+                return _print(primary_error)
+            args.commit = primary_commit
     if action == "review_open_questions":
         review_error = _record_open_questions_review(repo_root, item, args)
         if review_error is not None:
@@ -3456,6 +3722,7 @@ def cmd_record(args: argparse.Namespace) -> int:
         "item_status": item.get("status"),
         "current_step": item.get("current_step"),
         "commit": item.get("commit"),
+        "commits": item.get("commits", []),
         "summary": _format_summary(state, args),
     }
     if getattr(args, "verbose", False):
@@ -3627,6 +3894,7 @@ def build_parser() -> argparse.ArgumentParser:
     record.add_argument("--doc-remediation-file", action="append", default=[])
     record.add_argument("--retained-files", nargs="*")
     record.add_argument("--commit")
+    record.add_argument("--repo-commit", action="append", default=[])
     record.add_argument("--commit-message")
     record.add_argument("--snapshot-commit")
     record.add_argument("--route-mode")

@@ -6,6 +6,8 @@ Full 是完整验收映射和全影响面审查。只有 `check_profile.effectiv
 
 ## Step 1：对照规划三件套检查实现
 
+untracked 上下文没有 task artifacts，本 Step 标记 `N/A`；不得把 summary、scope 或聊天记录当成 PRD。仍须完整执行 Step 2 与 Step 3，并对实际 diff、相关 spec、状态机证据和多仓分发边界负责。
+
 ### 1.1 验收依据
 
 - PRD Requirement / Acceptance Criteria：行为基线。

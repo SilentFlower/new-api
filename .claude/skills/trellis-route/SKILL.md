@@ -13,7 +13,7 @@ description: |
 
 # Trellis 路由器：implement / check 执行模式选择
 
-主 agent 进入 Phase 2.1 实现路由或 Phase 2.2 检查路由时调用本 skill。当前上下文或 session runtime state 内已有合法来源、target 匹配、且 task 等于当前任务路径的最近 route 决策时，后续实现、修复、重检默认复用该决策；没有合法决策时才进入本 skill 或同编号 fallback。提交前确实需要最终复查时，回到 Phase 2.2 并复用当前任务的合法 check route，除非用户明确要求重选。
+主 agent 进入 Phase 2.1 实现路由或 Phase 2.2 检查路由时调用本 skill。task 上下文继续使用 task-scoped session route decision；untracked 上下文只读取个人 `.trellis/.route-prefs.tmp`，不读取或写入 `route_decisions`。提交前确实需要最终复查时，回到 Phase 2.2 并按当前 subject 的同一规则解析 route。
 
 个人配置只写入 `.trellis/.route-prefs.tmp`。该文件匹配 `.trellis/.gitignore` 的 `*.tmp` 规则，属于开发者本地偏好，不纳入 git，也不影响其他开发者。auto-loop 可在 `.trellis/.runtime/auto-loop/<run-id>.json` 写入临时 route 授权；它不是个人偏好，优先级低于 `.route-prefs.tmp`，只用于减少 auto 模式下的交互打断。
 
@@ -23,9 +23,15 @@ description: |
 
 ## Step 0: 识别目标与用户意图
 
-个人 route 配置只决定“已获准执行后的模式”，不是开工授权。调用 helper 前，必须确认当前 workflow 已允许进入对应 target：implement 需要任务已完成规划确认并处于 `in_progress`；check 用于 Phase 2.2 检查执行，或用户明确要求最终复查 / 轻量检查。最终复查只有在 Phase 2.2 结果缺失、风险较高或用户明确要求复查时才回到 Phase 2.2；回到 Phase 2.2 后优先复用当前任务的合法 check route，除非用户明确要求重选/临时改/清除默认。如果仍在 planning、等待用户确认，或用户表达“等一下 / 我再想想”，停止，不读取 runtime/prefs。
+个人 route 配置只决定“已获准执行后的模式”，不是开工授权。调用 helper 前，必须确认当前 workflow 已允许进入对应 target：task implement 需要任务已完成规划确认并处于 `in_progress`；untracked implement 需要 `untracked_flow.py status` 命中当前 session；check 需要 Phase 2.2 或 untracked `stage=check`。如果仍在 planning、等待用户确认，或用户表达“等一下 / 我再想想”，停止，不读取 runtime/prefs。
 
-合法 route 决策必须能追溯到 `trellis-route`、同编号 fallback 选项、由本 skill 读取到的有效 `.trellis/.route-prefs.tmp` 配置，或由 route helper 校验过的 auto-loop 临时 route 授权，并且 `task` 字段必须等于当前 `task.py current --source` 返回的任务路径。runtime state 只能保存和恢复这些原始合法来源，不能把 `.runtime` 自身当成新的 `route_decision.source`。用户自然语言说过“inline/subagent”、compact summary、ordinary summary、SessionStart 摘要、replacement history、`codex-mode`、空 `.route-prefs.tmp`、旧单值偏好、历史用户裸数字，都不能单独作为有效 route 决策。
+先用 `task.py current --source` 与 `untracked_flow.py status` 确认 subject，二者只能命中一个：
+
+- task 命中：`scope=task`，继续使用本 skill 既有 runtime -> prefs -> auto-loop 顺序。
+- 无 task 且 untracked 命中：`scope=untracked`，只使用 pref-only CLI；不得伪造 task 路径或 task artifacts。
+- 二者都未命中：返回 workflow Request Triage，不展示执行 route。
+
+task 的合法 route 决策必须能追溯到 `trellis-route`、同编号 fallback 选项、有效 `.trellis/.route-prefs.tmp`，或 route helper 校验过的 auto-loop 临时授权，并且 `task` 字段等于当前任务路径。untracked 的合法 route 只来自本次紧邻选择或 `read-pref` 命中；不写 runtime，也不接受 auto-loop 授权。用户自然语言、摘要、SessionStart 提示、`codex-mode`、空偏好或历史裸数字都不能单独作为有效 route 决策。
 
 当前上下文内已有 target 匹配、task 等于当前任务路径、且来源合法的 route 决策时，后续实现、check 发现问题、用户指出刚检查过的实现有问题、修复后重检、提交前复查均默认复用最近 implement/check 路由；除非用户明确要求重选/临时改/清除默认，不再调用本 skill。当前上下文没有 route 决策但 runtime state 命中时，本 skill 恢复该决策并输出同样的结构化 `route_decision`。如果上下文里只有上一个任务的 `route_decision`，必须忽略并重新解析当前任务。
 
@@ -49,7 +55,7 @@ Codex inline mode 只表示主会话默认直接执行，不是 route 选项过�
 
 ## Step 0.5: 解析已有 route state
 
-仅在没有覆盖意图、当前上下文没有 target + 当前 task 匹配的合法 `route_decision` 时调用 helper 解析已有状态。helper 的解析顺序固定为：当前 session runtime 文件里的 `route_decisions` → `.trellis/.route-prefs.tmp` → `.trellis/.runtime/auto-loop/<run-id>.json` 临时授权。命中 `.route-prefs.tmp` 或 auto-loop 临时授权时，helper 会自动把对应决策写回当前 session runtime，后续压缩恢复不需要再次读 prefs 或 auto-loop 状态。
+task 仅在没有覆盖意图、当前上下文没有 target + 当前 task 匹配的合法 `route_decision` 时调用 `resolve`，解析顺序固定为 runtime -> prefs -> auto-loop。untracked 不调用 `resolve`，每次直接调用 `read-pref`；命中即可执行，miss 才进入 Step 2。
 
 调用随本 skill 分发的 helper；不要在对话中内嵌或改写 helper 逻辑：
 
@@ -57,6 +63,14 @@ Codex inline mode 只表示主会话默认直接执行，不是 route 选项过�
 python3 .agents/skills/trellis-route/scripts/route_state.py resolve --target <implement|check>
 # Claude 平台若只有 .claude skill 副本，则使用：
 python3 .claude/skills/trellis-route/scripts/route_state.py resolve --target <implement|check>
+```
+
+untracked 调用：
+
+```bash
+python3 .agents/skills/trellis-route/scripts/route_state.py read-pref --target <implement|check>
+# Claude 平台若只有 .claude skill 副本，则使用：
+python3 .claude/skills/trellis-route/scripts/route_state.py read-pref --target <implement|check>
 ```
 
 helper 只接受当前 session 或唯一 session fallback 的 `.trellis/.runtime/sessions/<context-key>.json`，并只从 `route_decisions.<target>` 恢复当前任务的决策。命中时输出 `{"status":"hit", ...}`，其中默认输出里的 `task` / `mode` / `source` 已经过 task/target/source/mode/scope 校验，可跳过 Step 2 并进入 Step 3 输出决策。`origin=route-prefs` 表示来自个人 route 配置，并且 helper 已写回 session runtime state；`origin=auto-loop` 表示来自 auto-loop 临时授权且 helper 已写回 session runtime state；`origin=runtime` 表示来自 session runtime state。
@@ -137,7 +151,7 @@ fi
 
 ## Step 2.6: 写入 route state / 默认配置
 
-用户选择本次模式后，调用 helper 写入当前 session runtime。选项含“保存默认”或“更新默认”时，加 `--save-pref`，helper 会同时更新 `.trellis/.route-prefs.tmp` 并保留另一个 target 的偏好。
+task 用户选择本次模式后，调用 helper 写入当前 session runtime。选项含“保存默认”或“更新默认”时，加 `--save-pref`。untracked 的“仅本次”只用于当前调用，不写任何 runtime 或偏好；“保存默认/更新默认”只调用 `write-pref`。
 
 只影响本次：
 
@@ -153,6 +167,14 @@ python3 .claude/skills/trellis-route/scripts/route_state.py write --target <impl
 python3 .agents/skills/trellis-route/scripts/route_state.py write --target <implement|check> --mode <mode> --source <trellis-route|numbered-fallback> --save-pref
 # Claude 平台若只有 .claude skill 副本，则使用：
 python3 .claude/skills/trellis-route/scripts/route_state.py write --target <implement|check> --mode <mode> --source <trellis-route|numbered-fallback> --save-pref
+```
+
+untracked 保存 / 更新默认：
+
+```bash
+python3 .agents/skills/trellis-route/scripts/route_state.py write-pref --target <implement|check> --mode <mode>
+# Claude 平台若只有 .claude skill 副本，则使用：
+python3 .claude/skills/trellis-route/scripts/route_state.py write-pref --target <implement|check> --mode <mode>
 ```
 
 清除默认：
@@ -177,12 +199,16 @@ helper 写入规则：保留另一个 target 的 runtime 决策和偏好；覆�
 
 | 路由决定 | 主 agent 应执行 |
 |---------|----------------|
-| `inline implement` | `Skill({skill: "trellis-before-dev"})` 加载 spec → 读任务文档 → 主线程实施 → 跑必要验证 → 回到 Phase 2.1 completion contract 解析 Pre-Check，不得在局部验证后直接结束 |
-| `subagent implement` | `Agent({subagent_type: "trellis-implement"})`；若 `subagent_skip_compile=true`，dispatch prompt 附加“跳过 mvn install / npm run build / tsc 等耗时编译类检查（已由主 agent 验证或最终统一执行）”；主 agent 收到结果后回到 Phase 2.1 completion contract 解析 Pre-Check |
+| `inline implement` | `Skill({skill: "trellis-before-dev"})` 加载 spec；task 再读任务文档，untracked 读取 helper 状态与实际 scope → 主线程实施 → 跑必要验证 → 回到 Phase 2.1 completion contract |
+| `subagent implement` | `Agent({subagent_type: "trellis-implement"})`；task 使用 `Active task:`，untracked 使用下方自包含 `Untracked work:` 契约；主 agent 收到结果后回到 Phase 2.1 completion contract |
 | `inline check-all` | `Skill({skill: "trellis-check-all"})` |
 | `subagent check-all` | 优先使用明确 audit-only 的 `trellis-check-all` agent；不存在时使用平台通用 subagent，并用下方 dispatch 契约执行本地 `trellis-check-all`。subagent 只返回 `DOC-*` 文档漂移候选，不写文件；主会话负责允许的文档自修。禁止 fallback 到会直接修改工作区的 `trellis-check` agent；无兼容 subagent 时停止并请用户改选 inline |
 
 implement 路由只决定执行位置，不拥有实现后的停止策略。无论 inline 或 subagent，focused validation 完成后都必须返回 workflow Phase 2.1 的 completion contract；由该 owner 处理 auto-loop、用户显式继续/暂缓、已有 hold 和默认立即 Check-All 的优先级。
+
+### Untracked Subagent Dispatch 契约
+
+untracked 的 implement/check subagent prompt 第一行固定为 `Untracked work: <work-id>`，并包含事项摘要、stage、scope、baseline 仓库摘要、current fingerprint、已有验证证据、相关 spec 路径和本轮明确职责。不得写 `Active task:`，不得要求 `prd.md`、`implement.jsonl` 或 `check.jsonl`。agent 必须直接执行，不得递归 dispatch implement/check agent。
 
 ### Subagent Check-All Dispatch 契约
 
@@ -219,8 +245,9 @@ route_decision:
   target: <implement | check>
   mode: <inline | subagent | check-all-inline | check-all-subagent>
   source: <trellis-route | route-prefs | auto-loop | numbered-fallback>
-  scope: task
-  task: <current task path>
+  scope: <task | untracked>
+  task: <current task path; task only>
+  work_id: <current untracked work id; untracked only>
 
 接下来主 agent 应当：
 - <路由表里对应的工具调用形式>
