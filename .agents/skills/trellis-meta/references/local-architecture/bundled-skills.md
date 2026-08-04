@@ -34,32 +34,44 @@ The set is discovered at runtime by listing directories under `templates/common/
 
 The list is discovered at runtime, so adding a new directory under `bundled-skills/` is the only step required to register a new skill (see "Adding a New Bundled Skill" below).
 
+<!-- BEGIN skill-garden patch trellis-meta-managed-platform-skill-roots v0.6 -->
 ## Where Bundled Skills Land Per Platform
 
-Each platform configurator calls `writeSkills(<root>, <workflowSkills>, resolveBundledSkills(ctx))` during `trellis init`. `resolveBundledSkills` reads every directory under `templates/common/bundled-skills/`, resolves placeholders, and returns a flat list of `{relativePath, content}` entries. `writeSkills` then mirrors them under the platform's skill root.
+Each platform configurator writes the result of `resolveBundledSkills(ctx)` into a specific skill root during `trellis init`, and its collector must return the same paths for `trellis update` hash tracking.
 
 | Platform | Bundled skill root | Notes |
 | --- | --- | --- |
 | Claude Code | `.claude/skills/<skill>/` | `configureClaude` |
 | Cursor | `.cursor/skills/<skill>/` | `configureCursor` |
-| Codex | `.agents/skills/<skill>/` | `configureCodex` writes the shared `.agents/skills/` root, which Gemini CLI 0.40+ also reads |
-| Gemini CLI | `.agents/skills/<skill>/` | Same shared root as Codex; the two configurators are required to produce byte-identical output |
-| Kiro | `.kiro/skills/<skill>/` | `configureKiro` (skills-based platform — no commands) |
+| OpenCode | `.opencode/skills/<skill>/` | `collectOpenCodeTemplates` and `configureOpenCode` |
+| Codex | `.agents/skills/<skill>/` | Shared neutral root |
+| Gemini CLI | `.agents/skills/<skill>/` | Shared neutral root |
+| Pi Agent | `.agents/skills/<skill>/` | Shared neutral root; `.pi/` holds prompts, agents, extensions, and settings |
+| Kimi Code | `.agents/skills/<skill>/` | Shared neutral root; `.kimi-code/skills/` holds commands and agent prompts, not bundled skills |
+| Kiro | `.kiro/skills/<skill>/` | `configureKiro` |
 | Qoder | `.qoder/skills/<skill>/` | `configureQoder` |
-| Codebuddy | `.codebuddy/skills/<skill>/` | `configureCodebuddy` |
-| Copilot | `.github/skills/<skill>/` | `configureCopilot` |
-| Droid | `.factory/skills/<skill>/` | `configureDroid` |
+| CodeBuddy | `.codebuddy/skills/<skill>/` | `configureCodebuddy` |
+| GitHub Copilot | `.github/skills/<skill>/` | `configureCopilot` |
+| Factory Droid | `.factory/skills/<skill>/` | `configureDroid` |
 | Antigravity | `.agent/skills/<skill>/` | `configureAntigravity` |
 | Devin | `.devin/skills/<skill>/` | `configureDevin` |
 | Kilo | `.kilocode/skills/<skill>/` | `configureKilo` |
-| OpenCode | (handled by `collectOpenCodeTemplates`) | Uses the same `resolveBundledSkills(ctx)` output |
-| Pi, Reasonix | (their own collectors) | Same `resolveBundledSkills(ctx)` output |
+| ZCode | `.zcode/skills/<skill>/` | `configureZcode` |
+| Trae | `.trae/skills/<skill>/` | `configureTrae` |
+| Reasonix | `.reasonix/skills/<skill>/` | Workflow, bundled, and sub-agent skills share one root |
+| Oh My Pi | `.omp/skills/<skill>/` | `configureOmp` |
+| Grok Build | `.grok/skills/<skill>/` | `configureGrok` |
+| Snow CLI | `.snow/skills/<skill>/` | `configureSnow` |
+
+The physical bundled-skill roots are therefore the platform-private roots above plus the single shared `.agents/skills/` root. `.pi/skills/` is not a current target, and `.kimi-code/skills/` must not receive a second bundled copy.
 
 Two paths exercise the same data:
 
 1. `configureX(cwd)` writes files during `trellis init`.
-2. `collectPlatformTemplates(platformId)` (in `configurators/index.ts`) returns a `Map<filePath, content>` that `trellis update` uses to detect drift and to populate `.trellis/.template-hashes.json`. Both must produce byte-identical output, so they both call `resolveBundledSkills(ctx)` and `collectSkillTemplates(root, …, resolveBundledSkills(ctx))`.
+2. `collectPlatformTemplates(platformId)` (in `configurators/index.ts`) returns a `Map<filePath, content>` that `trellis update` uses to detect drift and to populate `.trellis/.template-hashes.json`.
 
+Both paths must resolve to byte-identical bundled-skill output for a given root. Shared `.agents/skills/` writers additionally use the neutral resolver so Codex, Gemini CLI, Pi Agent, and Kimi Code do not overwrite each other with platform-specific text.
+<!-- END skill-garden patch trellis-meta-managed-platform-skill-roots v0.6 -->
 ## Dispatch Wiring (Code Path)
 
 The mechanism that auto-dispatches bundled skills to platform skill roots lives in two files:
@@ -110,7 +122,7 @@ The shape and dispatch wiring are already generic, so adding a skill requires on
    - Source files exist on the branch being tagged.
    - `pnpm --filter @mindfoldhq/trellis build` copies the asset into `dist/templates/common/bundled-skills/<skill>/`.
    - `npm pack --dry-run --json` includes the expected `dist/**` paths.
-   - In a fresh temp project, `trellis init` writes `.claude/skills/<skill>/SKILL.md`, `.agents/skills/<skill>/SKILL.md`, etc.
+   - In a fresh temp project, `trellis init` writes `.claude/skills/<skill>/SKILL.md`, `.agents/skills/<skill>/SKILL.md`, `.zcode/skills/<skill>/SKILL.md`, etc.
    - `.trellis/.template-hashes.json` lists the generated files.
    - `trellis update --dry-run` in that temp project reports "Already up to date!".
 

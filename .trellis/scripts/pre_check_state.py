@@ -19,7 +19,7 @@ PREFERENCE_KEY = "pre_check_preference"
 PREFERENCE_VERSION = 2
 LEGACY_PREFERENCE_VERSION = 1
 VALID_SOURCES = {"user-explicit", "follow-up-edit"}
-UNTRACKED_STATE_VERSION = 1
+UNTRACKED_STATE_VERSIONS = {1, 2}
 UNTRACKED_STAGES = {"inspect", "implement", "check", "spec", "push"}
 SESSION_START_HINT = "Pre-check: deferred for current work; latest user intent may override."
 
@@ -137,7 +137,7 @@ def _runtime_scope(
     if isinstance(untracked, dict):
         work_id = untracked.get("id")
         if not (
-            untracked.get("version") == UNTRACKED_STATE_VERSION
+            untracked.get("version") in UNTRACKED_STATE_VERSIONS
             and isinstance(work_id, str)
             and work_id.strip()
             and untracked.get("stage") in UNTRACKED_STAGES

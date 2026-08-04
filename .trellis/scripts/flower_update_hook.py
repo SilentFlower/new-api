@@ -139,8 +139,8 @@ def _ai_instruction(data: dict, command: str | None) -> str | None:
     instruction = ai.get("instruction")
     if ai.get("mode") == "ask" and command:
         if _has_release_notes(data):
-            return "先展示 release_notes 摘要和 recommended_command,再询问用户确认;确认前禁止执行 recommended_command。"
-        return "先展示 recommended_command,再询问用户确认;确认前禁止执行 recommended_command。"
+            return "先展示 release_notes 摘要和 recommended_command,再询问用户确认;确认前禁止执行 recommended_command;用户拒绝本次升级时执行 snooze_command,明确跳过时执行 skip_command。"
+        return "先展示 recommended_command,再询问用户确认;确认前禁止执行 recommended_command;用户拒绝本次升级时执行 snooze_command,明确跳过时执行 skip_command。"
     return instruction if isinstance(instruction, str) and instruction else None
 
 
@@ -150,6 +150,7 @@ def _format_context(data: dict) -> str:
     project = data.get("project") or {}
     remote = data.get("remote") or {}
     ai = data.get("ai") or {}
+    prompt = data.get("prompt") or {}
     safety = data.get("safety") or {}
     out_of_sync_reasons = project.get("outOfSyncReasons") or []
     current_trellis = current.get("bundledTrellisVersion")
@@ -175,6 +176,14 @@ def _format_context(data: dict) -> str:
     command = (data.get("commands") or {}).get("recommended") or ai.get("command")
     if command:
         lines.append(f"recommended_command: {command}")
+    prompt_commands = prompt.get("commands") if isinstance(prompt, dict) else {}
+    if isinstance(prompt_commands, dict):
+        snooze_command = prompt_commands.get("snooze")
+        skip_command = prompt_commands.get("skip")
+        if isinstance(snooze_command, str) and snooze_command:
+            lines.append(f"snooze_command: {snooze_command}")
+        if isinstance(skip_command, str) and skip_command:
+            lines.append(f"skip_command: {skip_command}")
     if safety.get("reasons"):
         lines.append(f"safety_reasons: {', '.join(safety.get('reasons') or [])}")
     instruction = _ai_instruction(data, command)
@@ -190,8 +199,8 @@ def _system_message(data: dict) -> str:
     command = (data.get("commands") or {}).get("recommended") or ai.get("command")
     if ai.get("mode") == "ask" and command:
         if _has_release_notes(data):
-            return "flower-trellis 发现可执行更新;必须先展示更新摘要并询问用户是否执行 recommended_command,确认前禁止运行。"
-        return "flower-trellis 发现可执行更新;必须先询问用户是否执行 recommended_command,确认前禁止运行。"
+            return "flower-trellis 发现可执行更新;必须先展示更新摘要并询问用户是否执行 recommended_command,确认前禁止运行;用户拒绝时执行 snooze_command。"
+        return "flower-trellis 发现可执行更新;必须先询问用户是否执行 recommended_command,确认前禁止运行;用户拒绝时执行 snooze_command。"
     if command:
         return "flower-trellis 发现可执行更新;已注入 recommended_command。"
     return "flower-trellis update context injected"

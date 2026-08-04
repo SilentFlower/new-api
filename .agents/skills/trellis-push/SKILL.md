@@ -17,7 +17,7 @@ description: "按确认的精确文件范围提交普通变更或完成已就绪
 - 不发起、终止或解决分支合并；只允许普通模式完成已经开始、冲突已清零且索引完全可归属的 merge commit。
 - 不处理上线核对、任务归档、会话日志或自动任务队列状态。
 - 不使用 `git add .`、`git add -A`，不要求工作区整体干净，也不提交计划外文件。
-- untracked 上下文只接受 `stage=push` 且 Check-All / Update-Spec 证据与当前 workspace fingerprint 一致；不生成任务进度提交。
+- untracked 上下文只接受 `stage=push`；该状态只负责路由，不替代本 skill 的正式计划、确认和 Git 安全检查，也不生成任务进度提交。
 
 ## 模式
 
@@ -40,7 +40,7 @@ description: "按确认的精确文件范围提交普通变更或完成已就绪
 
 auto-loop 内部 `commit-only` 已由 runner 的 `run_check_all -> run_spec_update -> commit_only` 状态机和预授权保证顺序，因此不重复记录或判断本交互证据。
 
-没有活动 task 时运行 `python3 ./.trellis/scripts/untracked_flow.py status --verbose`。命中 untracked 后，以 helper 返回的 stage、scope、baseline、current fingerprint、Check-All 和 Update-Spec 证据填写上述完成链；必须为 `stage=push` 且证据仍有效。`miss` 才按既有“无活动任务”普通 Git 路径处理；`error` 或 workspace drift 停止，不从摘要猜测。
+没有活动 task 时运行 `python3 ./.trellis/scripts/untracked_flow.py status --verbose`。命中 untracked 后，记录 work id、summary 和 stage，并要求 `stage=push`；完成链证据仍从当前 Check-All / Update-Spec 结果与实际 diff 获取。`miss` 才按既有“无活动任务”普通 Git 路径处理；损坏状态停止，不从摘要猜测。游标命中不表示 Push 已计划、已确认或已执行。
 
 ## Step 1：发现仓库与任务
 
@@ -67,7 +67,7 @@ python3 ./.trellis/scripts/task_progress.py status --json || true
 git status --short --untracked-files=all -- <task-dir>
 ```
 
-不得把默认 `git status --short` 可能返回的 `?? <task-dir>/` 折叠目录当成 exact file、展示条目或 pathspec。无活动 task 时仍可提交相关代码，但不生成任务进度。untracked 命中时，所有业务 `planned` 文件必须能由当前 state scope 与实际 diff 归属，计划同时显示 work id；scope 外文件只能保留或作为归属风险。存在活动 task 时，结合 `brief.md`、`implement.md`、当前 diff 与本轮执行范围生成一行语义进度；同时识别当前任务目录中已存在且可归属的 dirty/untracked 产物，供 Step 5 生成任务记录 exact files。不得从旧进度推断 Git 动作。
+不得把默认 `git status --short` 可能返回的 `?? <task-dir>/` 折叠目录当成 exact file、展示条目或 pathspec。无活动 task 时仍可提交相关代码，但不生成任务进度。untracked 命中时，结合当前请求、work summary 和实际 diff 判断业务 `planned` 文件归属，计划同时显示 work id；无法明确归属的文件只能保留或作为风险。存在活动 task 时，结合 `brief.md`、`implement.md`、当前 diff 与本轮执行范围生成一行语义进度；同时识别当前任务目录中已存在且可归属的 dirty/untracked 产物，供 Step 5 生成任务记录 exact files。不得从旧进度推断 Git 动作。
 
 ## Step 2：预检与文件归属
 
@@ -245,7 +245,7 @@ auto-loop 内部链失败时向调用方返回全部已完成仓库提交和失�
 
 ## Step 5：同步任务进度
 
-仅普通模式且存在活动 task 时由本 skill 执行。untracked、用户 `commit-only` 与 auto-loop 内部 `commit-only` 都跳过本 Step；Auto-Loop runner 在 action record/next 后按自身契约写入本地 `task.json.progress`，不属于这里的任务进度提交或推送。全部业务仓库成功后写完整进度；已有仓库成功而后续仓库失败时写 partial 进度，明确 completed、失败位置、next 和 notes。尚未发生成功 Git 动作就失败时，不记录虚假的 completed steps；只有父仓仍可安全提交并推送时才允许记录 failure notes。
+仅普通模式且存在活动 task 时由本 skill 执行。untracked、用户 `commit-only` 与 auto-loop 内部 `commit-only` 都跳过本 Step；Auto-Loop runner 在 action record/next 后按自身契约写入本地 `task.json.progress`，不属于这里的任务进度提交或推送。全部业务仓库成功后先写完整进度并保持 `in_progress`，只在任务进度 commit/push 成功后原子请求 `in_progress -> completed`；已有仓库成功而后续仓库失败时只写 partial 进度，明确 completed、失败位置、next 和 notes，状态保持 `in_progress`。尚未发生成功 Git 动作就失败时，不记录虚假的 completed steps；只有父仓仍可安全提交并推送时才允许记录 failure notes。
 
 新进度固定为：
 
@@ -267,7 +267,7 @@ auto-loop 内部链失败时向调用方返回全部已完成仓库提交和失�
 - 父仓分支、upstream 和冲突状态安全。
 - 推送不会携带无法归属的历史 ahead commits。
 
-通过 helper 写入：
+全部业务 commit/push 成功时先通过 helper 写入最终 progress，但不得携带 `--complete`：
 
 ```bash
 python3 ./.trellis/scripts/task_progress.py write \
@@ -275,6 +275,8 @@ python3 ./.trellis/scripts/task_progress.py write \
   --progress-json '<progress-json>' \
   --json
 ```
+
+部分成功时调用同一 helper，并写入精确恢复位置。用户 `commit-only`、auto-loop 内部 `commit-only` 和尚未发生任何成功业务 Git 动作的失败都不得请求 complete。helper 写入失败时任务保持原状态，不得继续任务进度提交或报告完成。
 
 然后只提交并推送首次确认的当前任务 exact files；该集合包含 helper 更新后的 `task.json`，以及首次计划时已存在且可归属的当前任务 dirty/untracked 产物：
 
@@ -284,7 +286,19 @@ git commit --only -m "chore(task): update <task-name> progress" -- <current-task
 git push origin <current-branch>
 ```
 
-该动作属于用户已确认的普通 push 计划，不增加第二次确认。提交后必须验证 commit 只包含首次确认的当前任务 exact files；其他任务和无关 dirty/staged 文件保持原状。如果写入、提交或推送失败，不回滚已成功的业务 Git 动作，并单独报告进度同步失败。
+该动作属于用户已确认的普通 push 计划，不增加第二次确认。提交后必须验证 commit 只包含首次确认的当前任务 exact files；其他任务和无关 dirty/staged 文件保持原状。如果写入、提交或推送失败，不回滚已成功的业务 Git 动作，并单独报告进度同步失败；任务必须保持 `in_progress`，不得进入完成态。
+
+只有进度 commit 和 push 都成功后，才用同一份最终 progress 原子写入本地 `status=completed` 和 `completedAt`：
+
+```bash
+python3 ./.trellis/scripts/task_progress.py write \
+  --task <task-dir> \
+  --progress-json '<same-final-progress-json>' \
+  --complete \
+  --json
+```
+
+该完成态写入不再创建第二个 progress commit；它作为活动任务的预归档生命周期变化保留，由显式 `trellis-finish-work` 的 archive bookkeeping commit 承接。如果完成态写入失败，远端最终 progress 已同步，但任务仍为 `in_progress`；报告完成态激活失败并允许精确重试该 helper，禁止重新执行已成功的业务 push 或 progress push。
 
 ## Step 6：结果
 
@@ -307,7 +321,7 @@ untracked 的全部已确认 Git 动作成功后，最后运行 `python3 ./.trel
 
 ### 任务进度
 
-状态：<✓ 已同步 · `<progress-hash>` / · 已跳过 / ❌ 同步失败>
+状态：<✓ 已同步并进入 completed · `<progress-hash>` / ✓ partial 已同步且保持 in_progress / · 已跳过 / ❌ 同步失败，不得报告完成>
 记录：<N> 个当前任务文件
 进度：completed=<...> | partial=<...> | next=<...>
 [失败时追加：原因和恢复动作]

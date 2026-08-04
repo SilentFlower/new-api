@@ -125,7 +125,7 @@ interactive 模式完成所有可继续检查和允许的 `DOC-*` 自动修复�
 
 检查通过后的动作由下方 `Interactive Post-Check Stop Gate` 判断：普通交互停止等待，符合 direct Git 严格通过条件时同轮进入 Phase 3.3 `trellis-update-spec`，再到 Phase 3.4 `trellis-push`。仍有 `CHK-*` 时停留在修复/重检循环。
 
-untracked 在最终报告前调用 `untracked_flow.py record-check`：严格通过记录 `pass`，有问题记录 `findings`，部分验证记录 `partial`，真正阻塞记录 `blocked`。普通严格通过但尚未继续时保持 `stage=check`；只有 direct Git 同轮继续或用户后续明确继续时才 `advance --stage spec`。任何报告后的新编辑先回到 `prepare-edit`，旧检查证据随 fingerprint 失效。
+untracked helper 不记录 Check-All 证据。普通严格通过但尚未继续时保持 `stage=check`；只有 direct Git 同轮继续或用户后续明确继续时才 `advance --stage spec`。有 findings、部分验证、阻塞或报告后的新编辑时，先 `advance --stage implement` 再返回实现。
 
 ---
 

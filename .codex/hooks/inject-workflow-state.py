@@ -17,12 +17,12 @@ missing or a tag is absent, the breadcrumb degrades to a generic
 "Refer to workflow.md for current step." line so users see (and fix)
 the broken state instead of the hook silently masking it.
 
-Shared across platforms with a per-turn workflow-state hook (Claude, Codex,
-Gemini, Qoder, Copilot, CodeBuddy, Droid, Kiro, Trae). Kiro wires this via the
-CLI custom agent's ``hooks.userPromptSubmit`` and the IDE ``.kiro.hook``
+Shared across all hook-capable platforms (Claude, Cursor, Codex, Qoder,
+CodeBuddy, Droid, Gemini, Copilot, Kiro). Kiro wires this via the CLI
+custom agent's ``hooks.userPromptSubmit`` and the IDE ``.kiro.hook``
 ``promptSubmit`` event; its output branch emits a plain-text breadcrumb
-(Kiro adds hook stdout directly to the conversation context). Written to each
-platform's hooks directory via writeSharedHooks() at init time.
+(Kiro adds hook stdout directly to the conversation context). Written to
+each platform's hooks directory via writeSharedHooks() at init time.
 
 Silent exit 0 cases (no output):
   - No .trellis/ directory found (not a Trellis project)
@@ -53,12 +53,12 @@ if sys.platform.startswith("win"):
             try:
                 _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
             except Exception:
-                pass
+                pass  # Optional Windows stream setup; keep hook startup non-fatal.
         elif hasattr(_stream, "detach"):
             try:
                 setattr(sys, _stream_name, _io.TextIOWrapper(_stream.detach(), encoding="utf-8", errors="replace"))
             except Exception:
-                pass
+                pass  # Optional Windows stream setup; keep hook startup non-fatal.
 from typing import Optional
 
 
@@ -68,15 +68,11 @@ from typing import Optional
 CODEX_NO_TASK_BOOTSTRAP_NOTICE = """<trellis-bootstrap>
 If you have not already loaded Trellis context this session, read the `trellis-start` skill once.
 </trellis-bootstrap>"""
+# BEGIN skill-garden patch workflow-state-codex-session-start-guard v0.6
 
 
 def _codex_has_trellis_session_start(root: Path) -> bool:
-    """判断 Codex 主 SessionStart hook 是否已注册并可执行。
-
-    `trellis-start` bootstrap 是没有 SessionStart hook 时的兜底。flower-managed
-    Codex 项目会补 `.codex/hooks/session-start.py`,因此已注册时不应每轮重复提示。
-    读取失败时保守返回 False,继续保留兜底提示。
-    """
+    """Return whether the managed Codex SessionStart hook is registered."""
     session_start = root / ".codex" / "hooks" / "session-start.py"
     if not session_start.is_file():
         return False
@@ -103,24 +99,85 @@ def _codex_has_trellis_session_start(root: Path) -> bool:
             if isinstance(command, str) and ".codex/hooks/session-start.py" in command:
                 return True
     return False
+# END skill-garden patch workflow-state-codex-session-start-guard v0.6
 
 
 # ---------------------------------------------------------------------------
 # CWD-robust Trellis root discovery (fixes hook-path-robustness for this hook)
 # ---------------------------------------------------------------------------
 
-def find_trellis_root(start: Path) -> Optional[Path]:
-    """Walk up from start to find directory containing .trellis/.
+# BEGIN skill-garden patch workflow-state-worktree-root-fallback v0.6
+def _git_output(start: Path, *args: str) -> Optional[str]:
+    """Run a read-only git command for best-effort Trellis root fallback."""
+    import subprocess
 
-    Handles CWD drift: subdirectory launches, monorepo packages, etc.
-    Returns None if no .trellis/ found (silent no-op).
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(start), *args],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    output = result.stdout.strip()
+    return output or None
+
+
+def _resolve_git_common_dir(start: Path) -> Optional[Path]:
+    """Return the current repository's common git dir."""
+    output = _git_output(start, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if output is None:
+        output = _git_output(start, "rev-parse", "--git-common-dir")
+    if output is None:
+        return None
+    common_dir = Path(output)
+    if common_dir.is_absolute():
+        return common_dir.resolve()
+    top_level = _git_output(start, "rev-parse", "--show-toplevel")
+    if top_level is None:
+        return None
+    return (Path(top_level) / common_dir).resolve()
+
+
+def _find_trellis_root_from_git(start: Path) -> Optional[Path]:
+    """Find a sibling worktree that carries .trellis/ for this Git repository."""
+    common_dir = _resolve_git_common_dir(start)
+    if common_dir is not None:
+        candidate = common_dir.parent
+        if (candidate / ".trellis").is_dir():
+            return candidate
+
+    output = _git_output(start, "worktree", "list", "--porcelain")
+    if output is None:
+        return None
+    for line in output.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        candidate = Path(line.split(" ", 1)[1]).expanduser().resolve()
+        if (candidate / ".trellis").is_dir():
+            return candidate
+    return None
+
+
+def find_trellis_root(start: Path) -> Optional[Path]:
+    """Walk up from start, then fall back to the Git worktree carrying .trellis/.
+
+    Linked worktrees often do not contain the untracked .trellis/ runtime. The
+    hook still needs the main worktree's runtime state so direct-edit cursors can
+    be resumed from the linked worktree without copying .trellis/.
     """
     cur = start.resolve()
     while cur != cur.parent:
         if (cur / ".trellis").is_dir():
             return cur
         cur = cur.parent
-    return None
+    return _find_trellis_root_from_git(start.resolve())
+# END skill-garden patch workflow-state-worktree-root-fallback v0.6
 
 
 # ---------------------------------------------------------------------------
@@ -131,6 +188,9 @@ def _detect_platform(input_data: dict) -> str | None:
     if isinstance(input_data.get("cursor_version"), str):
         return "cursor"
     env_map = {
+        # ZCode may set both ZCODE_PROJECT_DIR and CLAUDE_PROJECT_DIR; check
+        # ZCODE first so ZCode sessions aren't misdetected as claude.
+        "ZCODE_PROJECT_DIR": "zcode",
         "CLAUDE_PROJECT_DIR": "claude",
         "CURSOR_PROJECT_DIR": "cursor",
         "CODEBUDDY_PROJECT_DIR": "codebuddy",
@@ -163,6 +223,8 @@ def _detect_platform(input_data: dict) -> str | None:
         return "kiro"
     if ".trae" in script_parts:
         return "trae"
+    if ".zcode" in script_parts:
+        return "zcode"
     return None
 
 
@@ -185,7 +247,9 @@ def get_active_task(root: Path, input_data: dict) -> Optional[tuple[str, str, st
     if not task_dir.is_absolute():
         task_dir = root / task_dir
     if active.stale:
+# BEGIN skill-garden patch workflow-state-stale-task-status v0.6
         return task_dir.name, "missing_task", active.source
+# END skill-garden patch workflow-state-stale-task-status v0.6
 
     task_json = task_dir / "task.json"
     if not task_json.is_file():
@@ -200,6 +264,7 @@ def get_active_task(root: Path, input_data: dict) -> Optional[tuple[str, str, st
     if not isinstance(status, str) or not status:
         return None
     return task_id, status, active.source
+# BEGIN skill-garden patch workflow-state-untracked-helper v0.6
 
 
 def _get_untracked_work(root: Path, input_data: dict) -> Optional[tuple[str, str, str]]:
@@ -214,7 +279,6 @@ def _get_untracked_work(root: Path, input_data: dict) -> Optional[tuple[str, str
             root,
             input_data,
             platform=_detect_platform(input_data),
-            validate_workspace=False,
         )
     except Exception:
         return None
@@ -226,6 +290,7 @@ def _get_untracked_work(root: Path, input_data: dict) -> Optional[tuple[str, str
     if not all(isinstance(value, str) and value for value in (work_id, stage, summary)):
         return None
     return work_id, stage, summary
+# END skill-garden patch workflow-state-untracked-helper v0.6
 
 
 # ---------------------------------------------------------------------------
@@ -284,33 +349,75 @@ def _read_trellis_config(root: Path) -> dict:
         return {}
 
 
-def _codex_mode_banner(config: dict) -> str:
-    """Emit a `<codex-mode>` banner for the additionalContext payload.
+DEFAULT_PROMPT_INJECTION_SKIP_KEYWORD = "no-trellis"
 
-    Reads `codex.dispatch_mode` from .trellis/config.yaml; defaults to
-    `inline` when missing or invalid because Codex sub-agents run with
-    `fork_turns="none"` isolation and can't inherit the parent session's
-    task context. The banner makes the active mode explicit to Codex AI
-    per turn, complementing the workflow-state body which is per-status.
-    Mode tells AI which dispatch protocol to follow; workflow-state tells
-    AI what step it's at.
+
+def _resolve_skip_keyword(config: dict) -> str:
+    """Read `prompt_injection.skip_keyword` from parsed .trellis/config.yaml.
+
+    Mirrors `common.config.get_prompt_injection_config()`. Defaults to
+    "no-trellis"; "" disables the escape hatch entirely. A non-string value
+    falls back to the default.
     """
-    mode = "inline"
+    if isinstance(config, dict):
+        section = config.get("prompt_injection")
+        if isinstance(section, dict):
+            raw = section.get("skip_keyword", DEFAULT_PROMPT_INJECTION_SKIP_KEYWORD)
+            if isinstance(raw, str):
+                return raw
+    return DEFAULT_PROMPT_INJECTION_SKIP_KEYWORD
+
+
+def prompt_has_skip_keyword(prompt: str, keyword: str) -> bool:
+    """Case-insensitive, word-boundary match of `keyword` in `prompt`.
+
+    Hyphen counts as a word char so "no-trellisx" / "xno-trellis" /
+    "foo-no-trellis" don't match, but punctuation/whitespace boundaries do.
+    Empty keyword never matches (disables the escape hatch).
+    """
+    if not keyword or not isinstance(prompt, str):
+        return False
+    pattern = r"(?<![\w-])" + re.escape(keyword) + r"(?![\w-])"
+    return re.search(pattern, prompt, re.IGNORECASE) is not None
+
+
+# BEGIN skill-garden patch flower-codex-route-capability-hook v0.6
+def _resolve_codex_dispatch_mode(config: dict) -> str:
+    """Normalize `codex.dispatch_mode` from .trellis/config.yaml to "auto" or "inline".
+
+    ``auto`` keeps native subagent context injection and JSONL readiness
+    available. It is not a route decision. The legacy ``sub-agent`` value is
+    an alias for ``auto``; invalid explicit values retain the upstream inline
+    fallback until a Flower-managed update normalizes the project.
+    """
+    mode = "auto"
     if isinstance(config, dict):
         codex_cfg = config.get("codex")
         if isinstance(codex_cfg, dict):
-            cfg_mode = codex_cfg.get("dispatch_mode")
-            if cfg_mode in ("inline", "sub-agent"):
-                mode = cfg_mode
-    if mode == "sub-agent":
+            cfg_mode = str(codex_cfg.get("dispatch_mode", mode)).strip().lower()
+            if cfg_mode == "inline":
+                mode = "inline"
+            elif cfg_mode in ("auto", "sub-agent"):
+                mode = "auto"
+            else:
+                mode = "inline"
+    return mode
+
+
+def _codex_mode_banner(config: dict) -> str:
+    """Emit Codex capability context without choosing an execution route."""
+    mode = _resolve_codex_dispatch_mode(config)
+    if mode == "auto":
         meaning = (
-            "sub-agent: implement/check work defaults to Trellis sub-agents; "
-            "the main session still coordinates, clarifies, updates specs, commits, and finishes."
+            "auto: native Codex sub-agent context injection and task readiness are available. "
+            "Implement/check execution mode is selected by trellis-route; this banner is not "
+            "a route decision."
         )
     else:
         meaning = (
-            "inline: the main session implements/checks directly; "
-            "do not dispatch implement/check sub-agents."
+            "inline: upstream native sub-agent context readiness is disabled. Flower-managed "
+            "projects normalize this capability to auto; actual execution mode is still "
+            "selected by trellis-route."
         )
     return f"<codex-mode>{meaning}</codex-mode>"
 
@@ -318,28 +425,20 @@ def _codex_mode_banner(config: dict) -> str:
 def resolve_breadcrumb_key(
     status: str, platform: str | None, config: dict
 ) -> str:
-    """Pick the breadcrumb tag key based on Codex dispatch_mode.
+    """Pick the Codex context variant without treating it as route evidence.
 
-    Codex defaults to ``inline`` because sub-agents run with ``fork_turns="none"``
-    isolation and can't inherit the parent session's task context. Users can
-    opt into ``codex.dispatch_mode: sub-agent`` in ``.trellis/config.yaml``
-    to use the parallel ``<status>-inline`` tag → ``<status>`` flip. Invalid
-    or missing values fall back to inline.
-
-    Non-codex platforms return the plain status unchanged.
+    The ordinary state carries native subagent readiness and the ``-inline``
+    state is the upstream compatibility variant. Neither variant authorizes
+    or filters a ``trellis-route`` inline/subagent decision.
     """
     if platform == "codex":
-        mode = "inline"
-        if isinstance(config, dict):
-            codex_cfg = config.get("codex")
-            if isinstance(codex_cfg, dict):
-                cfg_mode = codex_cfg.get("dispatch_mode")
-                if cfg_mode in ("inline", "sub-agent"):
-                    mode = cfg_mode
+        mode = _resolve_codex_dispatch_mode(config)
         return f"{status}-inline" if mode == "inline" else status
     return status
+# END skill-garden patch flower-codex-route-capability-hook v0.6
 
 
+# BEGIN skill-garden patch workflow-state-breadcrumb-subject v0.6
 def build_breadcrumb(
     task_id: Optional[str],
     status: str,
@@ -369,6 +468,7 @@ def build_breadcrumb(
     if subject_summary:
         body = f"Summary: {subject_summary}\n{body}"
     return f"<workflow-state>\n{header}\n{body}\n</workflow-state>"
+# END skill-garden patch workflow-state-breadcrumb-subject v0.6
 
 
 # ---------------------------------------------------------------------------
@@ -384,12 +484,12 @@ def _load_hook_input() -> dict:
     short daemon read preserves that path while failing closed to `{}` for
     non-piping hosts.
     """
-    result_queue: "queue.Queue[str | BaseException]" = queue.Queue(maxsize=1)
+    result_queue: "queue.Queue[str | Exception]" = queue.Queue(maxsize=1)
 
     def _read() -> None:
         try:
             result_queue.put(sys.stdin.read())
-        except BaseException as exc:
+        except Exception as exc:
             result_queue.put(exc)
 
     reader = threading.Thread(target=_read, daemon=True)
@@ -399,7 +499,7 @@ def _load_hook_input() -> dict:
     except queue.Empty:
         return {}
 
-    if isinstance(raw, BaseException):
+    if isinstance(raw, Exception):
         return {}
     try:
         data = json.loads(raw) if raw.strip() else {}
@@ -408,6 +508,7 @@ def _load_hook_input() -> dict:
     return data if isinstance(data, dict) else {}
 
 
+# BEGIN skill-garden patch workflow-state-main-subject-routing v0.6
 def main() -> int:
     if os.environ.get("TRELLIS_HOOKS") == "0" or os.environ.get("TRELLIS_DISABLE_HOOKS") == "1":
         return 0
@@ -421,9 +522,12 @@ def main() -> int:
     if root is None:
         return 0  # not a Trellis project
 
+    config = _read_trellis_config(root)
+    if prompt_has_skip_keyword(data.get("prompt", ""), _resolve_skip_keyword(config)):
+        return 0  # user opted out of the per-turn breadcrumb for this turn
+
     templates = load_breadcrumbs(root)
     platform = _detect_platform(data)
-    config = _read_trellis_config(root)
     task = get_active_task(root, data)
     if task is None:
         untracked = _get_untracked_work(root, data)
@@ -436,10 +540,11 @@ def main() -> int:
             )
         else:
             work_id, stage, summary = untracked
-            untracked_key = resolve_breadcrumb_key("untracked", platform, config)
+            untracked_status = "untracked" if stage == "implement" else f"untracked_{stage}"
+            untracked_key = resolve_breadcrumb_key(untracked_status, platform, config)
             breadcrumb = build_breadcrumb(
                 None,
-                "untracked",
+                untracked_status,
                 templates,
                 breadcrumb_key=untracked_key,
                 subject_label=f"Untracked work: {work_id} ({stage})",
@@ -483,6 +588,7 @@ def main() -> int:
     }
     print(json.dumps(output))
     return 0
+# END skill-garden patch workflow-state-main-subject-routing v0.6
 
 
 if __name__ == "__main__":

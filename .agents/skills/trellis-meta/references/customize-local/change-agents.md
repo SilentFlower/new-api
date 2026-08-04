@@ -25,7 +25,7 @@ When the user wants to change `trellis-research`, `trellis-implement`, or `trell
 | Factory Droid | `.factory/droids/trellis-*.md` |
 | Pi Agent | `.pi/agents/trellis-*.md` |
 | Reasonix | `.reasonix/skills/trellis-*/SKILL.md` (subagent frontmatter) |
-| ZCode | `.zcode/cli/agents/trellis-*.md` |
+| ZCode | `.zcode/agents/trellis-*.md` |
 
 Use the actual paths in the user project as authoritative.
 
@@ -35,7 +35,9 @@ Use the actual paths in the user project as authoritative.
 | --- | --- |
 | Research must write files, not only reply in chat | `trellis-research` |
 | Certain local specs must be read before implementation | `trellis-implement` + `implement.jsonl` configuration rules |
-| Specific commands must run during checking | `trellis-check` |
+<!-- BEGIN skill-garden patch trellis-meta-managed-check-all-agent-route v0.6 -->
+| Unified Check-All commands must run during checking | `trellis-check-all`; self-fixing reviewer-only commands remain in `trellis-check` |
+<!-- END skill-garden patch trellis-meta-managed-check-all-agent-route v0.6 -->
 | Agent must not modify certain directories | The corresponding agent's write boundary instructions |
 | Agent output format must be fixed | The corresponding agent's final/reporting instructions |
 

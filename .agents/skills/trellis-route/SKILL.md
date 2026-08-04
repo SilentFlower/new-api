@@ -35,7 +35,7 @@ task 的合法 route 决策必须能追溯到 `trellis-route`、同编号 fallba
 
 当前上下文内已有 target 匹配、task 等于当前任务路径、且来源合法的 route 决策时，后续实现、check 发现问题、用户指出刚检查过的实现有问题、修复后重检、提交前复查均默认复用最近 implement/check 路由；除非用户明确要求重选/临时改/清除默认，不再调用本 skill。当前上下文没有 route 决策但 runtime state 命中时，本 skill 恢复该决策并输出同样的结构化 `route_decision`。如果上下文里只有上一个任务的 `route_decision`，必须忽略并重新解析当前任务。
 
-Codex inline mode 只表示主会话默认直接执行，不是 route 选项过滤器。即使当前上下文出现 `<codex-mode>inline...do not dispatch...</codex-mode>` 或 `workflow-state:in_progress-inline`，也不能推断“只能 inline”或跳过 subagent 选项；仍必须通过 helper resolve runtime/prefs，或在无有效配置时展示正常 inline/subagent 选项。若本 skill 的紧邻路由决定是 subagent，本步骤允许主 agent dispatch 对应 implement/check sub-agent；禁止的是绕过 `trellis-route` 直接 dispatch。
+Codex 的 `<codex-mode>` 与 `workflow-state:*-inline` 只描述上游原生上下文/readiness 能力，不是 route 决策或选项过滤器。实际执行位置只读取本 skill 的 runtime/prefs/本轮选择；若紧邻路由决定是 subagent，主 agent 按 catalog dispatch 对应角色。禁止绕过 `trellis-route` 直接从 Codex banner 推导执行模式。
 
 先判断本次路由目标：
 
@@ -50,8 +50,6 @@ Codex inline mode 只表示主会话默认直接执行，不是 route 选项过�
 - 清除默认：`清除默认` / `删除 route 默认` / `reset route`
 
 如果命中上述覆盖意图，即使 `.trellis/.route-prefs.tmp` 存在，也不能直接使用配置；必须进入 Step 2 展示对应选项。
-
----
 
 ## Step 0.5: 解析已有 route state
 
@@ -200,19 +198,25 @@ helper 写入规则：保留另一个 target 的 runtime 决策和偏好；覆�
 | 路由决定 | 主 agent 应执行 |
 |---------|----------------|
 | `inline implement` | `Skill({skill: "trellis-before-dev"})` 加载 spec；task 再读任务文档，untracked 读取 helper 状态与实际 scope → 主线程实施 → 跑必要验证 → 回到 Phase 2.1 completion contract |
-| `subagent implement` | `Agent({subagent_type: "trellis-implement"})`；task 使用 `Active task:`，untracked 使用下方自包含 `Untracked work:` 契约；主 agent 收到结果后回到 Phase 2.1 completion contract |
+| `subagent implement` | 按下方当前平台执行配方调用 `trellis-implement`；task 使用 `Active task:`，untracked 使用下方自包含 `Untracked work:` 契约；主 agent 收到结果后回到 Phase 2.1 completion contract |
 | `inline check-all` | `Skill({skill: "trellis-check-all"})` |
-| `subagent check-all` | 优先使用明确 audit-only 的 `trellis-check-all` agent；不存在时使用平台通用 subagent，并用下方 dispatch 契约执行本地 `trellis-check-all`。subagent 只返回 `DOC-*` 文档漂移候选，不写文件；主会话负责允许的文档自修。禁止 fallback 到会直接修改工作区的 `trellis-check` agent；无兼容 subagent 时停止并请用户改选 inline |
+| `subagent check-all` | 读取 catalog 当前平台条目，只调用 `checkAll.target` 声明的专用 audit-only `trellis-check-all` 角色，并按 `checkAll.launch` 启动；subagent 只返回 `CHK-*` / `DOC-*` 候选，不写文件。目标缺失、host 未发现或资格不成立时停止并请用户改选 inline；禁止通用 agent 与 `trellis-check` fallback |
 
 implement 路由只决定执行位置，不拥有实现后的停止策略。无论 inline 或 subagent，focused validation 完成后都必须返回 workflow Phase 2.1 的 completion contract；由该 owner 处理 auto-loop、用户显式继续/暂缓、已有 hold 和默认立即 Check-All 的优先级。
 
+### 平台 Dispatch Catalog
+
+`references/platform-dispatch.json` 是平台启动契约的唯一事实源。当前条目提供稳定 `id`、`implement.launch/target`、`checkAll.launch/target/format/verification` 和 `inlineOnlyReason`。仅当 route 已选中 subagent 时，主 agent 才从当前运行平台上下文确定稳定平台 ID，读取 catalog 对应条目，并把 `launch` 字段翻译成当前 host 的工具调用。inline 路径不读取 catalog，也不预先过滤 route 选项。
+
+dispatch prompt 第一行始终遵守当前 task/untracked 契约。agent 文件存在只证明项目产物已投影；实际 dispatch 时还必须确认当前 host 暴露 catalog 声明的 launch 能力。目标、launcher 或资格不可用时停止并让用户改选 inline，不得静默降级、发明替代 agent 或使用上游 workspace-write `trellis-check`。`verification` 只说明该角色如何证明只读资格，不放宽 Check-All 边界；`eligible=false` 时同时展示 `inlineOnlyReason`。
+
 ### Untracked Subagent Dispatch 契约
 
-untracked 的 implement/check subagent prompt 第一行固定为 `Untracked work: <work-id>`，并包含事项摘要、stage、scope、baseline 仓库摘要、current fingerprint、已有验证证据、相关 spec 路径和本轮明确职责。不得写 `Active task:`，不得要求 `prd.md`、`implement.jsonl` 或 `check.jsonl`。agent 必须直接执行，不得递归 dispatch implement/check agent。
+untracked 的 implement/check subagent prompt 第一行固定为 `Untracked work: <work-id>`，并包含事项摘要、当前 stage、实际 diff、相关 spec 路径、已有验证上下文和本轮明确职责。helper 只提供流程游标，不提供 scope、baseline、fingerprint 或 owner evidence。不得写 `Active task:`，不得要求 `prd.md`、`implement.jsonl` 或 `check.jsonl`。agent 必须直接执行，不得递归 dispatch implement/check agent。
 
 ### Subagent Check-All Dispatch 契约
 
-使用专用或通用 subagent 时，dispatch prompt 第一行必须是当前任务路径，并包含以下完整边界：
+使用 catalog 声明的专用 subagent 时，dispatch prompt 第一行必须是当前任务路径，并包含以下完整边界：
 
 ```text
 Active task: <task path from task.py current>
@@ -229,7 +233,7 @@ Active task: <task path from task.py current>
 返回：统一 Check-All 结果、`DOC-*` 候选、已执行验证和剩余风险。不要输出 commit/push 计划。
 ```
 
-平台存在专用 `trellis-check-all` agent 时，也必须先确认其角色说明明确 audit-only：允许识别 `DOC-*` 候选，但不得写文件。名称相同但会直接自修复代码、测试、配置或普通 `CHK-*` 的 agent 不可使用。平台没有专用或通用 subagent 时，不得静默改成 inline，也不得使用 `trellis-check` 代替；停止并让用户重新选择 check route。
+必须确认 catalog 目标内容明确 audit-only：允许识别 `DOC-*` 候选，但不得写文件。名称相同但会直接自修复代码、测试、配置或普通 `CHK-*` 的 agent 不可使用。平台没有合格专用角色时，不得静默改成 inline，也不得使用通用 agent 或 `trellis-check` 代替；停止并让用户重新选择 check route。
 
 ### 输出模板
 
@@ -274,7 +278,7 @@ route_decision:
 9. **check-all subagent 保持只读**：不得 fallback 到强制自修复的 `trellis-check` agent；不兼容时显式阻塞并让用户重选。
 10. **决策与执行分离**：本 skill 只输出指令，下一轮由主 agent 调工具。
 11. **严格执行用户选择**：路由结论一旦输出，主 agent 必须按指令执行，不可“出于谨慎”再换路径。
-12. **Codex inline 不裁剪选项**：Codex inline 是默认执行模式，不是只能 inline 的强制模式；route 明确选中 subagent 时，本步骤可按 subagent 路径执行。
+12. **Codex capability 不裁剪选项**：Codex mode banner 只描述原生上下文/readiness 能力；route 明确选中 subagent 时，按 catalog 路径执行。
 
 ---
 

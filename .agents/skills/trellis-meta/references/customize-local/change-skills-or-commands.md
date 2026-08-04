@@ -77,6 +77,7 @@ Explicit entry points should state:
 
 If a command only repeats workflow rules, prefer making it reference/read `.trellis/workflow.md` instead of maintaining a second copy of the flow.
 
+<!-- BEGIN skill-garden patch trellis-meta-managed-common-paths v0.6 -->
 ## Common Paths
 
 | Platform | Entry directories |
@@ -91,13 +92,17 @@ If a command only repeats workflow rules, prefer making it reference/read `.trel
 | CodeBuddy | `.codebuddy/skills/`, `.codebuddy/commands/` |
 | GitHub Copilot | `.github/skills/`, `.github/prompts/` |
 | Factory Droid | `.factory/skills/`, `.factory/commands/` |
-| Pi Agent | `.pi/skills/` |
+| Pi Agent | `.agents/skills/`, `.pi/prompts/` |
+| Oh My Pi | `.omp/skills/`, `.omp/commands/` |
+| Grok Build | `.grok/skills/`, `.grok/commands/` |
+| Kimi Code | `.agents/skills/`, `.kimi-code/skills/` |
+| Snow CLI | `.snow/skills/`, `.snow/commands/` |
 | Reasonix | `.reasonix/skills/` (no separate commands dir; slash commands built into the platform) |
-| ZCode | `.agents/skills/`, `.zcode/commands/` |
-| Kilo / Antigravity / Devin | workflows + skills |
+| ZCode | `.zcode/skills/`, `.zcode/commands/` |
+| Kilo / Antigravity / Devin / Trae | workflows or commands + skills |
 
-Every directory above is a deploy target for the four bundled skills. Each platform receives a full copy on `trellis init` and refresh on `trellis update`; nothing has to be wired by hand.
-
+Only each platform's skill root receives the bundled skills. `.agents/skills/` is the shared root used by Codex, Gemini CLI, Pi Agent, and Kimi Code; `.pi/prompts/` and `.kimi-code/skills/` contain their platform-private entry points rather than another bundled-skill copy.
+<!-- END skill-garden patch trellis-meta-managed-common-paths v0.6 -->
 ## Add A Project-Local Skill
 
 If the user wants to document team-private customizations, create a project-local skill — never put project-private content into a bundled skill directory, since `trellis update` will overwrite it.
@@ -107,7 +112,9 @@ If the user wants to document team-private customizations, create a project-loca
 └── SKILL.md
 ```
 
-For multi-platform projects, add equivalent versions in each platform skill directory, or use `.agents/skills/` on platforms that support the shared layer (Codex, Gemini CLI).
+<!-- BEGIN skill-garden patch trellis-meta-managed-shared-skill-consumers v0.6 -->
+For multi-platform projects, add equivalent versions in each platform skill directory, or use `.agents/skills/` on platforms that support the shared layer (Codex, Gemini CLI, Pi Agent, Kimi Code).
+<!-- END skill-garden patch trellis-meta-managed-shared-skill-consumers v0.6 -->
 
 Pick a name that does **not** collide with the bundled set:
 

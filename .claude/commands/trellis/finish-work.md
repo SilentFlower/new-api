@@ -18,7 +18,21 @@ Unrelated planning tasks, old archives, and files from other windows remain unto
 
 Follow the steps below in order.
 
-### 1. Decision Audit
+### 1. Completion State Gate
+
+Run:
+
+```bash
+python3 ./.trellis/scripts/task_progress.py status --task <task-name> --json
+```
+
+Read the current task's `task.json` as the authoritative lifecycle record. Continue only when `taskStatus=completed` and `completedAt` is present. Progress text is recovery evidence and never substitutes for the task status.
+
+- `in_progress`: stop and return to Phase 3.4 `trellis-push`; finish-work must not manufacture completion.
+- `completed`: keep the active task pointer until archive succeeds, then continue below.
+- Missing, corrupt, or any other status: fail closed and report the exact blocker.
+
+### 2. Decision Audit
 
 Run:
 
@@ -32,9 +46,9 @@ python3 ./.trellis/scripts/decision_log.py status --task <task-name> --json
 - Request changes: run `decision_log.py review --task <task-name> --verdict changes-requested --decision-id <id> [...] --notes <text>`, stop before release audit, and return the task for rework.
 - A corrupt decision log fails closed. Do not edit or discard it to bypass review.
 
-`task.py archive` repeats this guard before any status write, session cleanup, or directory move.
+`task.py archive` repeats the completion-state and decision guards before any session cleanup or directory move. It preserves the existing `completedAt` and performs no lifecycle status write.
 
-### 2. Current Task Release Audit
+### 3. Current Task Release Audit
 
 Run `trellis-release audit-current`. It reads task artifacts and Git evidence and returns `no-op`, `written`, or `needs-review`.
 
@@ -43,7 +57,7 @@ Run `trellis-release audit-current`. It reads task artifacts and Git evidence an
 - A written `<task>/release.md` moves with the task archive.
 - `needs-review` or `Needs human review` does not block archival, but remains visible in the final result.
 
-### 3. Archive to Disk
+### 4. Archive to Disk
 
 Always run:
 
@@ -53,7 +67,7 @@ python3 ./.trellis/scripts/task.py archive <task-name> --no-commit
 
 Use the command result and scoped diff to identify the original task source, actual archive destination, and child `task.json` files changed by parent archival. Never stage the `.trellis/tasks` or `.trellis/tasks/archive` root directory.
 
-### 4. Record the Journal
+### 5. Record the Journal
 
 Always run:
 
@@ -66,7 +80,7 @@ python3 ./.trellis/scripts/add_session.py --no-commit \
 
 Use the command result and scoped diff to determine the exact journal/index paths changed by this invocation.
 
-### 5. Exact Commits
+### 6. Exact Commits
 
 When `session_auto_commit: false`, keep the archive and journal changes on disk without committing or pushing. Report the exact dirty paths.
 
@@ -84,7 +98,7 @@ git commit --only -m "<configured session commit message>" -- <exact journal/ind
 
 Skip the second commit when the journal did not change. After each commit, use `git show --name-status -M --format=` to verify exact paths and renames, and confirm unrelated staged paths remain staged. The whole worktree does not need to be clean.
 
-### 6. Eligible Automatic Push
+### 7. Eligible Automatic Push
 
 Use only the Git baseline captured at the start:
 
@@ -94,7 +108,7 @@ Use only the Git baseline captured at the start:
 
 Never force push. Push eligibility is independent of task progress fields and overall worktree cleanliness.
 
-### 7. Final Result
+### 8. Final Result
 
 Report separately:
 

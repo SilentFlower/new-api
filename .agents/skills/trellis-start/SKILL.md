@@ -48,7 +48,7 @@ From Step 1 you know the current task and status. Check the task directory:
   python3 ./.trellis/scripts/get_context.py --mode phase --step 2.1 --platform codex
   ```
 <!-- BEGIN skill-garden patch start-no-task-routing v0.6 -->
-- **No active task** -> first run `python3 ./.trellis/scripts/untracked_flow.py status`. On `hit`, resume the reported stage through `[workflow-state:untracked]`; on `miss`, follow the workflow `Request Triage` contract before acting. Use `task_intent.py create` for inferred complex planning, `task.py create` for explicit task planning, and ask only for material ambiguity or an independent safety boundary.
+- **No active task** -> first run `python3 ./.trellis/scripts/untracked_flow.py status`. On `hit`, resume the reported stage through the matching `[workflow-state:untracked*]` breadcrumb; on `miss`, follow the workflow `Request Triage` contract before acting. Use `task_intent.py create` for inferred complex planning, `task.py create` for explicit task planning, and ask only for material ambiguity or an independent safety boundary.
 <!-- END skill-garden patch start-no-task-routing v0.6 -->
 
 ---

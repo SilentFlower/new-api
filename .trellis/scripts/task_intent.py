@@ -243,7 +243,7 @@ def _rollback_adoption(
 
 
 def adopt_untracked_work(args: argparse.Namespace) -> dict:
-    """把当前 untracked diff 和证据原地接管到 planning task。
+    """把当前 untracked diff 和流程游标原地接管到 planning task。
 
     Args:
         args: adopt 子命令参数。
@@ -256,7 +256,7 @@ def adopt_untracked_work(args: argparse.Namespace) -> dict:
     if not context_key:
         raise IntentTaskError("no-session-context", "无法解析当前 AI session")
     try:
-        untracked = read_untracked_state(repo_root, validate_workspace=True)
+        untracked = read_untracked_state(repo_root)
     except Exception as exc:
         reason = getattr(exc, "reason", "untracked-state-invalid")
         raise IntentTaskError(reason, str(exc)) from exc
@@ -267,6 +267,7 @@ def adopt_untracked_work(args: argparse.Namespace) -> dict:
     raw_state = session_before.get(STATE_KEY)
     if not isinstance(raw_state, dict) or raw_state.get("id") != state["id"]:
         raise IntentTaskError("untracked-state-mismatch", "纳管前 untracked 状态已变化")
+    baseline = capture_git_baseline(repo_root)
 
     task_ref = ""
     task_dir: Path | None = None
@@ -281,11 +282,9 @@ def adopt_untracked_work(args: argparse.Namespace) -> dict:
             "createdAt": _utc_now(),
             "contextKey": context_key,
             "untrackedWorkId": state["id"],
-            "implementationStarted": state["stage"] != "inspect",
-            "baseline": state.get("baseline"),
+            "implementationStarted": True,
+            "baseline": baseline,
             "adoptedStage": state["stage"],
-            "workspaceFingerprint": state.get("workspaceFingerprint"),
-            "evidence": state.get("evidence", {}),
         }
         task_data["meta"] = meta
         _write_json_atomic(task_json, task_data)
@@ -322,7 +321,7 @@ def adopt_untracked_work(args: argparse.Namespace) -> dict:
         "task": task_ref,
         "workId": state["id"],
         "adoptedStage": state["stage"],
-        "implementationStarted": state["stage"] != "inspect",
+        "implementationStarted": True,
     }
 
 

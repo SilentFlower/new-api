@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""管理当前 session 的无任务 direct-edit 完成链。"""
+"""管理当前 session 的无任务 direct-edit 流程游标。"""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import uuid
@@ -14,23 +15,51 @@ from pathlib import Path
 from typing import Any
 
 from common.active_task import resolve_context_key
-from git_evidence import GitEvidenceError, capture_workspace_evidence
 
 
 STATE_KEY = "untracked_flow"
-STATE_VERSION = 1
+STATE_VERSION = 2
+LEGACY_STATE_VERSION = 1
 VALID_SOURCES = {"inferred", "user-explicit"}
-VALID_STAGES = {"inspect", "implement", "check", "spec", "push"}
-VALID_CLEAR_REASONS = {
-    "completed",
-    "abandoned",
-    "adopted",
-    "baseline-restored",
-    "invalidated",
+VALID_BEGIN_MODES = {"tracked-direct-edit"}
+VALID_STAGES = {"implement", "check", "spec", "push"}
+LEGACY_STAGES = VALID_STAGES | {"inspect"}
+VALID_CLEAR_REASONS = {"completed", "abandoned", "adopted"}
+STAGE_CONTRACTS = {
+    "implement": {
+        "owner": "trellis-route(target=implement)",
+        "remainingOwners": [
+            "trellis-route(target=implement)",
+            "trellis-check-all",
+            "trellis-update-spec",
+            "trellis-push",
+        ],
+        "advanceAfterOwner": "python3 ./.trellis/scripts/untracked_flow.py advance --stage check",
+    },
+    "check": {
+        "owner": "trellis-check-all",
+        "remainingOwners": [
+            "trellis-check-all",
+            "trellis-update-spec",
+            "trellis-push",
+        ],
+        "advanceAfterOwner": "python3 ./.trellis/scripts/untracked_flow.py advance --stage spec",
+        "advanceOnFindings": "python3 ./.trellis/scripts/untracked_flow.py advance --stage implement",
+    },
+    "spec": {
+        "owner": "trellis-update-spec",
+        "remainingOwners": [
+            "trellis-update-spec",
+            "trellis-push",
+        ],
+        "advanceAfterOwner": "python3 ./.trellis/scripts/untracked_flow.py advance --stage push",
+    },
+    "push": {
+        "owner": "trellis-push",
+        "remainingOwners": ["trellis-push"],
+        "clearAfterOwner": "python3 ./.trellis/scripts/untracked_flow.py clear --reason completed",
+    },
 }
-CHECK_RESULTS = {"pass", "findings", "partial", "blocked"}
-SPEC_RESULTS = {"no-op", "written", "needs-review"}
-VALIDATION_RESULTS = {"pass", "fail", "partial"}
 
 
 class UntrackedFlowError(Exception):
@@ -54,9 +83,9 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def _find_repo_root(start: Path | None = None) -> Path | None:
-    """从当前路径向上查找 Trellis 项目根目录。"""
-    current = (start or Path.cwd()).resolve()
+def _find_root_upwards(start: Path) -> Path | None:
+    """从指定路径向上查找带 .trellis 的目录。"""
+    current = start.resolve()
     if current.is_file():
         current = current.parent
     while True:
@@ -65,6 +94,80 @@ def _find_repo_root(start: Path | None = None) -> Path | None:
         if current == current.parent:
             return None
         current = current.parent
+
+
+def _git_output(start: Path, *args: str) -> str | None:
+    """执行只读 git 命令并返回 stdout，失败时返回 None。"""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(start), *args],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    output = result.stdout.strip()
+    return output or None
+
+
+def _resolve_git_common_dir(start: Path) -> Path | None:
+    """返回当前 Git 仓库的 common dir，兼容旧 git 的相对路径输出。"""
+    output = _git_output(start, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if output is None:
+        output = _git_output(start, "rev-parse", "--git-common-dir")
+    if output is None:
+        return None
+    common_dir = Path(output)
+    if common_dir.is_absolute():
+        return common_dir.resolve()
+    top_level = _git_output(start, "rev-parse", "--show-toplevel")
+    if top_level is None:
+        return None
+    return (Path(top_level) / common_dir).resolve()
+
+
+def _find_root_from_git_worktrees(start: Path) -> Path | None:
+    """从同一个 Git worktree 集合里寻找承载 .trellis 的主项目根。"""
+    current = start.resolve()
+    if current.is_file():
+        current = current.parent
+
+    common_dir = _resolve_git_common_dir(current)
+    if common_dir is not None:
+        candidate = common_dir.parent
+        if (candidate / ".trellis").is_dir():
+            return candidate
+
+    output = _git_output(current, "worktree", "list", "--porcelain")
+    if output is None:
+        return None
+    for line in output.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        candidate = Path(line.split(" ", 1)[1]).expanduser().resolve()
+        if (candidate / ".trellis").is_dir():
+            return candidate
+    return None
+
+
+def _find_repo_root(start: Path | None = None) -> Path | None:
+    """查找 Trellis 项目根目录，兼容没有 .trellis 的 linked worktree。"""
+    current = (start or Path.cwd()).resolve()
+    root = _find_root_upwards(current)
+    if root is not None:
+        return root
+    root = _find_root_from_git_worktrees(current)
+    if root is not None:
+        return root
+    for parent in Path(__file__).resolve().parents:
+        if (parent / ".trellis").is_dir():
+            return parent
+    return None
 
 
 def _session_path(repo_root: Path, context_key: str) -> Path:
@@ -146,45 +249,60 @@ def _runtime_scope(
 
 
 def _normalized_state(value: Any) -> dict[str, Any] | None:
-    """校验并归一化 untracked 状态，非法时返回 None。"""
+    """校验并投影 v1/v2 untracked 状态，非法时返回 None。"""
     if not isinstance(value, dict):
         return None
+    version = value.get("version")
+    if version not in {LEGACY_STATE_VERSION, STATE_VERSION}:
+        return None
+    if version == LEGACY_STATE_VERSION and value.get("mode") != "direct_edit":
+        return None
+    source = value.get("source")
+    stage = value.get("stage")
+    work_id = value.get("id")
+    summary = value.get("summary")
     if (
-        value.get("version") != STATE_VERSION
-        or value.get("mode") != "direct_edit"
-        or value.get("source") not in VALID_SOURCES
-        or value.get("stage") not in VALID_STAGES
-        or not isinstance(value.get("id"), str)
-        or not value["id"].strip()
-        or not isinstance(value.get("summary"), str)
-        or not value["summary"].strip()
+        source not in VALID_SOURCES
+        or stage not in LEGACY_STAGES
+        or not isinstance(work_id, str)
+        or not work_id.strip()
+        or not isinstance(summary, str)
+        or not summary.strip()
     ):
         return None
-    normalized = dict(value)
-    normalized["scope"] = sorted(
-        {
-            str(path).replace("\\", "/")
-            for path in value.get("scope", [])
-            if isinstance(path, str) and path.strip()
-        }
-    )
-    normalized["evidence"] = (
-        dict(value["evidence"]) if isinstance(value.get("evidence"), dict) else {}
-    )
-    return normalized
+    created_at = value.get("createdAt")
+    updated_at = value.get("updatedAt")
+    return {
+        "version": STATE_VERSION,
+        "id": work_id,
+        "source": source,
+        "summary": summary,
+        "stage": "implement" if stage == "inspect" else stage,
+        "createdAt": created_at if isinstance(created_at, str) else "",
+        "updatedAt": updated_at if isinstance(updated_at, str) else "",
+    }
 
 
 def _state_summary(state: dict[str, Any]) -> dict[str, Any]:
     """返回默认输出需要的最小状态字段。"""
-    return {
+    stage = state.get("stage")
+    summary = {
         "workId": state.get("id"),
         "summary": state.get("summary"),
         "source": state.get("source"),
-        "stage": state.get("stage"),
-        "scope": state.get("scope", []),
-        "baselineCaptured": isinstance(state.get("baseline"), dict),
-        "workspaceFingerprint": state.get("workspaceFingerprint"),
-        "evidence": state.get("evidence", {}),
+        "stage": stage,
+    }
+    if isinstance(stage, str) and stage in STAGE_CONTRACTS:
+        summary.update(_stage_contract(stage))
+    return summary
+
+
+def _stage_contract(stage: str) -> dict[str, Any]:
+    """返回当前阶段的 Trellis owner 和剩余完成链提示。"""
+    contract = STAGE_CONTRACTS[stage]
+    return {
+        key: list(value) if isinstance(value, list) else value
+        for key, value in contract.items()
     }
 
 
@@ -193,7 +311,9 @@ def _persist(scope: dict[str, Any], state: dict[str, Any] | None) -> None:
     context = dict(scope["context"])
     context.setdefault(
         "platform",
-        scope["context_key"].split("_", 1)[0] if "_" in scope["context_key"] else "session",
+        scope["context_key"].split("_", 1)[0]
+        if "_" in scope["context_key"]
+        else "session",
     )
     context["last_seen_at"] = _utc_now()
     if state is None:
@@ -203,70 +323,11 @@ def _persist(scope: dict[str, Any], state: dict[str, Any] | None) -> None:
     _write_json(scope["path"], context)
 
 
-def _normalize_paths(repo_root: Path, values: list[str]) -> list[str]:
-    """校验并归一化事项文件范围。"""
-    normalized: set[str] = set()
-    root = repo_root.resolve()
-    for raw in values:
-        value = raw.strip()
-        if not value:
-            continue
-        candidate = Path(value)
-        absolute = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
-        try:
-            relative = absolute.relative_to(root).as_posix()
-        except ValueError as exc:
-            raise UntrackedFlowError(
-                "scope-path-invalid",
-                "事项范围路径逃逸项目根目录",
-                path=value,
-            ) from exc
-        normalized.add(relative)
-    if not normalized:
-        raise UntrackedFlowError("scope-empty", "首次修改前必须提供至少一个事项路径")
-    return sorted(normalized)
-
-
-def _capture(repo_root: Path) -> dict[str, Any]:
-    """捕获 workspace 证据并转换底层错误。"""
-    try:
-        return capture_workspace_evidence(repo_root)
-    except GitEvidenceError as error:
-        raise UntrackedFlowError(error.reason, str(error), **error.details) from error
-
-
-def _ensure_workspace_matches(repo_root: Path, state: dict[str, Any]) -> dict[str, Any]:
-    """校验当前 workspace 与状态记录的有效 fingerprint 一致。"""
-    current = _capture(repo_root)
-    expected = state.get("workspaceFingerprint")
-    if isinstance(expected, str) and expected and current["fingerprint"] != expected:
-        raise UntrackedFlowError(
-            "workspace-drift",
-            "当前 workspace 与 untracked 状态记录不匹配",
-            expected=expected,
-            actual=current["fingerprint"],
-        )
-    return current
-
-
-def _baseline_restored(state: dict[str, Any], current: dict[str, Any]) -> bool:
-    """判断已实际推进的事项是否回到原始 baseline。"""
-    baseline = state.get("baseline")
-    if not isinstance(baseline, dict) or current.get("fingerprint") != baseline.get("fingerprint"):
-        return False
-    evidence = state.get("evidence")
-    return (
-        state.get("stage") in {"check", "spec", "push"}
-        or isinstance(state.get("workspaceFingerprint"), str)
-        or isinstance(evidence, dict) and bool(evidence)
-        or state.get("preparedFingerprint") != baseline.get("fingerprint")
-    )
-
-
 def begin_untracked_work(
     repo_root: Path,
     summary: str,
     source: str,
+    mode: str | None,
     platform_input: dict[str, Any] | None = None,
     platform: str | None = None,
 ) -> dict[str, Any]:
@@ -276,12 +337,20 @@ def begin_untracked_work(
         repo_root: Trellis 项目根目录。
         summary: 当前事项摘要。
         source: ``inferred`` 或 ``user-explicit``。
+        mode: 入口模式，必须是 ``tracked-direct-edit``。
         platform_input: 可选平台 hook 输入。
         platform: 可选平台名称。
 
     Returns:
         创建或命中同一事项的结构化结果。
     """
+    if mode not in VALID_BEGIN_MODES:
+        raise UntrackedFlowError(
+            "invalid-entry-mode",
+            "只有需要跨轮恢复的无任务直接修改才能创建无任务事项",
+            mode=mode,
+            allowed=sorted(VALID_BEGIN_MODES),
+        )
     clean_summary = summary.strip()
     if not clean_summary:
         raise UntrackedFlowError("summary-empty", "无任务事项摘要不能为空")
@@ -289,19 +358,6 @@ def begin_untracked_work(
         raise UntrackedFlowError("invalid-source", "无任务事项来源不合法", source=source)
     scope = _runtime_scope(repo_root, platform_input, platform)
     existing = _normalized_state(scope["context"].get(STATE_KEY))
-    if existing and existing.get("baseline") is not None:
-        current = _capture(repo_root)
-        baseline = existing["baseline"]
-        if (
-            isinstance(baseline, dict)
-            and current["fingerprint"] == baseline.get("fingerprint")
-            and (existing["summary"] != clean_summary or _baseline_restored(existing, current))
-        ):
-            _persist(scope, None)
-            scope["context"] = {
-                key: value for key, value in scope["context"].items() if key != STATE_KEY
-            }
-            existing = None
     if existing:
         if existing["summary"] == clean_summary:
             return {"status": "hit", **_state_summary(existing)}
@@ -318,119 +374,14 @@ def begin_untracked_work(
     state = {
         "version": STATE_VERSION,
         "id": f"uw-{uuid.uuid4().hex[:12]}",
-        "mode": "direct_edit",
         "source": source,
         "summary": clean_summary,
-        "stage": "inspect",
-        "baseline": None,
-        "scope": [],
-        "preparedFingerprint": None,
-        "workspaceFingerprint": None,
-        "evidence": {},
+        "stage": "implement",
         "createdAt": now,
         "updatedAt": now,
     }
     _persist(scope, state)
     return {"status": "created", **_state_summary(state)}
-
-
-def prepare_edit(
-    repo_root: Path,
-    paths: list[str],
-    platform_input: dict[str, Any] | None = None,
-    platform: str | None = None,
-) -> dict[str, Any]:
-    """在实际文件写入前捕获 baseline 并进入 implement。
-
-    Args:
-        repo_root: Trellis 项目根目录。
-        paths: 本次准备修改的项目相对路径。
-        platform_input: 可选平台 hook 输入。
-        platform: 可选平台名称。
-
-    Returns:
-        更新后的事项状态与 baseline 摘要。
-    """
-    scope = _runtime_scope(repo_root, platform_input, platform)
-    state = _normalized_state(scope["context"].get(STATE_KEY))
-    if state is None:
-        raise UntrackedFlowError("no-active-work", "当前 session 没有活跃无任务事项")
-
-    current = _capture(repo_root)
-    expected = state.get("workspaceFingerprint")
-    if isinstance(expected, str):
-        if current["fingerprint"] != expected:
-            raise UntrackedFlowError(
-                "workspace-drift",
-                "进入新一轮修改前 workspace 已偏离已验证证据",
-                expected=expected,
-                actual=current["fingerprint"],
-            )
-    elif state["stage"] in {"check", "spec", "push"}:
-        raise UntrackedFlowError(
-            "workspace-drift",
-            "进入新一轮修改前缺少有效 workspace 证据",
-            expected=expected,
-            actual=current["fingerprint"],
-        )
-
-    normalized_paths = _normalize_paths(repo_root, paths)
-    if state.get("baseline") is None:
-        state["baseline"] = current
-    state["scope"] = sorted(set(state.get("scope", [])) | set(normalized_paths))
-    state["stage"] = "implement"
-    state["preparedFingerprint"] = current["fingerprint"]
-    state["workspaceFingerprint"] = None
-    state["evidence"] = {}
-    state["updatedAt"] = _utc_now()
-    _persist(scope, state)
-    return {
-        "status": "prepared",
-        **_state_summary(state),
-        "baselineFingerprint": state["baseline"].get("fingerprint"),
-        "preparedFingerprint": current["fingerprint"],
-    }
-
-
-def record_validation(
-    repo_root: Path,
-    result: str,
-    summary: str,
-    platform_input: dict[str, Any] | None = None,
-    platform: str | None = None,
-) -> dict[str, Any]:
-    """记录 focused validation 结果和当前 workspace fingerprint。
-
-    Args:
-        repo_root: Trellis 项目根目录。
-        result: ``pass``、``fail`` 或 ``partial``。
-        summary: 定向验证摘要。
-        platform_input: 可选平台 hook 输入。
-        platform: 可选平台名称。
-
-    Returns:
-        记录后的事项状态摘要。
-    """
-    if result not in VALIDATION_RESULTS:
-        raise UntrackedFlowError("invalid-validation-result", "定向验证结果不合法")
-    scope = _runtime_scope(repo_root, platform_input, platform)
-    state = _normalized_state(scope["context"].get(STATE_KEY))
-    if state is None or state["stage"] != "implement":
-        raise UntrackedFlowError("stage-mismatch", "只有 implement 阶段可以记录定向验证")
-    current = _capture(repo_root)
-    now = _utc_now()
-    state["workspaceFingerprint"] = current["fingerprint"]
-    state["evidence"] = {
-        "focusedValidation": {
-            "result": result,
-            "summary": summary.strip(),
-            "fingerprint": current["fingerprint"],
-            "recordedAt": now,
-        }
-    }
-    state["updatedAt"] = now
-    _persist(scope, state)
-    return {"status": "recorded", **_state_summary(state)}
 
 
 def advance_stage(
@@ -439,121 +390,29 @@ def advance_stage(
     platform_input: dict[str, Any] | None = None,
     platform: str | None = None,
 ) -> dict[str, Any]:
-    """在前置证据满足时推进 untracked 完成链阶段。
+    """更新当前 untracked 事项的流程游标。
 
     Args:
         repo_root: Trellis 项目根目录。
-        stage: ``check``、``spec`` 或 ``push``。
+        stage: ``implement``、``check``、``spec`` 或 ``push``。
         platform_input: 可选平台 hook 输入。
         platform: 可选平台名称。
 
     Returns:
-        推进后的事项状态摘要。
+        更新后的事项状态摘要。
     """
-    if stage not in {"check", "spec", "push"}:
+    if stage not in VALID_STAGES:
         raise UntrackedFlowError("invalid-stage", "目标阶段不合法", stage=stage)
     scope = _runtime_scope(repo_root, platform_input, platform)
     state = _normalized_state(scope["context"].get(STATE_KEY))
     if state is None:
         raise UntrackedFlowError("no-active-work", "当前 session 没有活跃无任务事项")
-    _ensure_workspace_matches(repo_root, state)
-    evidence = state["evidence"]
-    if stage == "check":
-        focused = evidence.get("focusedValidation")
-        if state["stage"] != "implement" or not isinstance(focused, dict) or focused.get("result") != "pass":
-            raise UntrackedFlowError("focused-validation-required", "进入 Check-All 前需要通过定向验证")
-    elif stage == "spec":
-        checked = evidence.get("checkAll")
-        if state["stage"] != "check" or not isinstance(checked, dict) or checked.get("result") != "pass":
-            raise UntrackedFlowError("check-all-required", "进入 Update-Spec 前需要 Check-All 严格通过")
-    else:
-        spec = evidence.get("updateSpec")
-        if (
-            state["stage"] != "spec"
-            or not isinstance(spec, dict)
-            or spec.get("result") not in {"no-op", "written"}
-        ):
-            raise UntrackedFlowError("update-spec-required", "进入 Push 前需要完成 Update-Spec")
     state["stage"] = stage
     state["updatedAt"] = _utc_now()
+    if not state.get("createdAt"):
+        state["createdAt"] = state["updatedAt"]
     _persist(scope, state)
     return {"status": "advanced", **_state_summary(state)}
-
-
-def record_check(
-    repo_root: Path,
-    result: str,
-    summary: str,
-    platform_input: dict[str, Any] | None = None,
-    platform: str | None = None,
-) -> dict[str, Any]:
-    """记录 Check-All 结果并绑定当前 workspace fingerprint。
-
-    Args:
-        repo_root: Trellis 项目根目录。
-        result: Check-All 结果类别。
-        summary: Check-All 结果摘要。
-        platform_input: 可选平台 hook 输入。
-        platform: 可选平台名称。
-
-    Returns:
-        记录后的事项状态摘要。
-    """
-    if result not in CHECK_RESULTS:
-        raise UntrackedFlowError("invalid-check-result", "Check-All 结果不合法")
-    scope = _runtime_scope(repo_root, platform_input, platform)
-    state = _normalized_state(scope["context"].get(STATE_KEY))
-    if state is None or state["stage"] != "check":
-        raise UntrackedFlowError("stage-mismatch", "只有 check 阶段可以记录 Check-All")
-    current = _ensure_workspace_matches(repo_root, state)
-    now = _utc_now()
-    state["evidence"]["checkAll"] = {
-        "result": result,
-        "summary": summary.strip(),
-        "fingerprint": current["fingerprint"],
-        "recordedAt": now,
-    }
-    state["updatedAt"] = now
-    _persist(scope, state)
-    return {"status": "recorded", **_state_summary(state)}
-
-
-def record_spec(
-    repo_root: Path,
-    result: str,
-    summary: str,
-    platform_input: dict[str, Any] | None = None,
-    platform: str | None = None,
-) -> dict[str, Any]:
-    """记录 Update-Spec 结果并绑定当前 workspace fingerprint。
-
-    Args:
-        repo_root: Trellis 项目根目录。
-        result: Update-Spec 结果类别。
-        summary: Update-Spec 结果摘要。
-        platform_input: 可选平台 hook 输入。
-        platform: 可选平台名称。
-
-    Returns:
-        记录后的事项状态摘要。
-    """
-    if result not in SPEC_RESULTS:
-        raise UntrackedFlowError("invalid-spec-result", "Update-Spec 结果不合法")
-    scope = _runtime_scope(repo_root, platform_input, platform)
-    state = _normalized_state(scope["context"].get(STATE_KEY))
-    if state is None or state["stage"] != "spec":
-        raise UntrackedFlowError("stage-mismatch", "只有 spec 阶段可以记录 Update-Spec")
-    current = _ensure_workspace_matches(repo_root, state)
-    now = _utc_now()
-    state["evidence"]["updateSpec"] = {
-        "result": result,
-        "summary": summary.strip(),
-        "fingerprint": current["fingerprint"],
-        "recordedAt": now,
-    }
-    state["updatedAt"] = now
-    _persist(scope, state)
-    return {"status": "recorded", **_state_summary(state)}
 
 
 def read_untracked_state(
@@ -562,20 +421,21 @@ def read_untracked_state(
     platform: str | None = None,
     *,
     allow_active_task: bool = False,
-    validate_workspace: bool = True,
+    validate_workspace: bool | None = None,
 ) -> dict[str, Any]:
-    """读取并校验当前 session 的 untracked 状态。
+    """读取当前 session 的 untracked 流程游标。
 
     Args:
         repo_root: Trellis 项目根目录。
         platform_input: 可选平台 hook 输入。
         platform: 可选平台名称。
         allow_active_task: 是否允许 session 同时已有 task，供 adoption 清理使用。
-        validate_workspace: 是否校验已稳定阶段的 workspace fingerprint。
+        validate_workspace: 兼容旧调用方的废弃参数；不再读取或校验 Git workspace。
 
     Returns:
         ``hit`` 或 ``miss`` 的结构化状态。
     """
+    del validate_workspace
     scope = _runtime_scope(
         repo_root,
         platform_input,
@@ -588,23 +448,6 @@ def read_untracked_state(
     state = _normalized_state(raw)
     if state is None:
         raise UntrackedFlowError("invalid-state", "当前 session 的无任务状态已损坏")
-    if validate_workspace and isinstance(state.get("baseline"), dict):
-        current = _capture(repo_root)
-        if _baseline_restored(state, current):
-            _persist(scope, None)
-            return {
-                "status": "miss",
-                "reason": "baseline-restored",
-                "contextKey": scope["context_key"],
-            }
-    if validate_workspace and state["stage"] in {"check", "spec", "push"}:
-        _ensure_workspace_matches(repo_root, state)
-    if (
-        validate_workspace
-        and state["stage"] == "implement"
-        and isinstance(state.get("evidence", {}).get("focusedValidation"), dict)
-    ):
-        _ensure_workspace_matches(repo_root, state)
     return {
         "status": "hit",
         **_state_summary(state),
@@ -627,7 +470,7 @@ def clear_untracked_state(
 
     Args:
         repo_root: Trellis 项目根目录。
-        reason: 完成、放弃、纳管、恢复 baseline 或失效原因。
+        reason: 完成、放弃或纳管原因。
         platform_input: 可选平台 hook 输入。
         platform: 可选平台名称。
         work_id: 可选的精确事项 ID 防误清。
@@ -679,18 +522,22 @@ def session_start_hint(
         命中时返回一行提示，否则返回 None。
     """
     try:
-        result = read_untracked_state(
-            repo_root,
-            platform_input,
-            platform,
-            validate_workspace=False,
-        )
+        result = read_untracked_state(repo_root, platform_input, platform)
     except UntrackedFlowError:
         return None
     if result.get("status") != "hit":
         return None
+    owner = result.get("owner")
+    remaining_owners = result.get("remainingOwners")
+    remaining = (
+        [value for value in remaining_owners if isinstance(value, str) and value]
+        if isinstance(remaining_owners, list)
+        else []
+    )
+    remaining_text = " -> ".join(remaining) if remaining else str(owner)
     return (
         f"Untracked work: {result['workId']}; stage={result['stage']}; "
+        f"owner={owner}; remaining={remaining_text}; "
         f"summary={result['summary']}."
     )
 
@@ -711,30 +558,16 @@ def build_parser() -> argparse.ArgumentParser:
     Returns:
         已配置全部状态命令的 parser。
     """
-    parser = argparse.ArgumentParser(description="Trellis untracked workflow state helper")
+    parser = argparse.ArgumentParser(description="Trellis untracked workflow cursor helper")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     begin_parser = subparsers.add_parser("begin", help="create one untracked work item")
     begin_parser.add_argument("--summary", required=True)
     begin_parser.add_argument("--source", choices=sorted(VALID_SOURCES), required=True)
+    begin_parser.add_argument("--mode", required=True)
 
-    prepare_parser = subparsers.add_parser("prepare-edit", help="capture baseline before editing")
-    prepare_parser.add_argument("--paths", nargs="+", required=True)
-
-    validation_parser = subparsers.add_parser("record-validation", help="record focused validation")
-    validation_parser.add_argument("--result", choices=sorted(VALIDATION_RESULTS), required=True)
-    validation_parser.add_argument("--summary", default="")
-
-    advance_parser = subparsers.add_parser("advance", help="advance workflow stage")
-    advance_parser.add_argument("--stage", choices=["check", "spec", "push"], required=True)
-
-    check_parser = subparsers.add_parser("record-check", help="record Check-All result")
-    check_parser.add_argument("--result", choices=sorted(CHECK_RESULTS), required=True)
-    check_parser.add_argument("--summary", default="")
-
-    spec_parser = subparsers.add_parser("record-spec", help="record Update-Spec result")
-    spec_parser.add_argument("--result", choices=sorted(SPEC_RESULTS), required=True)
-    spec_parser.add_argument("--summary", default="")
+    advance_parser = subparsers.add_parser("advance", help="set workflow stage cursor")
+    advance_parser.add_argument("--stage", choices=sorted(VALID_STAGES), required=True)
 
     status_parser = subparsers.add_parser("status", help="read current untracked work state")
     status_parser.add_argument("--verbose", action="store_true")
@@ -762,17 +595,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     try:
         if args.command == "begin":
-            payload = begin_untracked_work(repo_root, args.summary, args.source)
-        elif args.command == "prepare-edit":
-            payload = prepare_edit(repo_root, args.paths)
-        elif args.command == "record-validation":
-            payload = record_validation(repo_root, args.result, args.summary)
+            payload = begin_untracked_work(
+                repo_root,
+                args.summary,
+                args.source,
+                args.mode,
+            )
         elif args.command == "advance":
             payload = advance_stage(repo_root, args.stage)
-        elif args.command == "record-check":
-            payload = record_check(repo_root, args.result, args.summary)
-        elif args.command == "record-spec":
-            payload = record_spec(repo_root, args.result, args.summary)
         elif args.command == "status":
             payload = read_untracked_state(repo_root)
         elif args.command == "session-start-hint":

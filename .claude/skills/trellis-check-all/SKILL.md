@@ -18,7 +18,7 @@ description: "统一 Check-All 入口：确认范围与运行上下文，按 req
 4. 全程收集普通问题到 `CHK-*`，收集低风险文档漂移到 `DOC-*`。
 5. 在最终报告前处理允许自动修复的文档漂移，并把修复内容展示在报告里。
 6. 根据 interactive / validated auto-loop 边界输出下一步或完成 runner `record + next`。
-7. untracked 上下文在最终 diff 稳定后调用 `untracked_flow.py record-check`；只有严格通过且 disposition 确认继续时才 `advance --stage spec`。
+7. untracked helper 只保存流程游标：findings 或新编辑设回 `implement`；只有严格通过且 disposition 确认继续时才 `advance --stage spec`。
 
 ---
 

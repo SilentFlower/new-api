@@ -33,16 +33,16 @@ Stable owner categories are:
 | --- | --- |
 | Request intent and project knowledge discovery | Request Triage, `trellis-start`, and the referenced router helper |
 | Active task scope safety | Request Triage and the active-task scope guard |
-| Untracked work completion | `workflow-state:untracked`, Phase 2/3 owners, and `untracked_flow.py` |
-| Untracked task adoption | Request Triage, `trellis-brainstorm`, and `task_intent.py adopt` |
-| Planning handoff | `trellis-task-brief` and the task-start brief guard |
+| Untracked work completion | `workflow-state:untracked*`, Phase 2/3 owners, and `untracked_flow.py` |
+| Untracked task adoption | `workflow-state:untracked*`, `trellis-brainstorm`, and `task_intent.py adopt` |
+| Planning handoff and activation | `trellis-task-brief` and the task-start Brief guard |
 | Implement/check execution mode | `trellis-route` |
 | Unified quality verification | `trellis-check-all` |
 | Automatic task loop and return gate | `trellis-auto-loop` plus the matching Check-All result |
 | Executable knowledge capture | `trellis-update-spec` |
-| Commit/push safety | `trellis-push` |
-| Archive and session bookkeeping | `trellis-finish-work` |
-| Cross-session task progress recovery | `trellis-continue` and its progress helper |
+| Commit/push safety and completion activation | `trellis-push` and `task_progress.py` |
+| Completed-task archive and session bookkeeping | `trellis-finish-work` and the archive implementation |
+| Cross-session task progress discovery and recovery | `trellis-continue` owns the recovery decision, `task_progress.py` owns candidate evidence and completed-task reopen, and `task.py start` with `.trellis/scripts/common/active_task.py` owns explicit session binding |
 
 This reference names owners; it does not copy their command schemas, interaction templates, state formats, or error matrices. Read `.trellis/workflow.md`, the local owner skill/helper, available `overrides/bundles/`, and `.flower/state.json` for the installed version. Do not maintain a fixed Skill-Garden skill count or exhaustive capability list here.
 <!-- END skill-garden patch trellis-meta-managed-owner-routing v0.6 -->
@@ -64,12 +64,16 @@ Start from the runtime section, then move to its owner:
 | --- | --- |
 | Add or reorder a phase | Workflow Patch/source plus every affected owner handoff |
 | Change task creation or scope policy | Request Triage, task-intent helper, and the managed workflow/state Patch |
-| Change untracked completion or adoption | `workflow-state:untracked`, Phase 2/3 owners, `untracked_flow.py`, and `task_intent.py adopt` |
-| Change planning activation | `trellis-task-brief` and the task-start guard |
+| Change untracked completion or adoption | `workflow-state:untracked*`, Phase 2/3 owners, `untracked_flow.py`, and `task_intent.py adopt` |
+| Change planning handoff or activation | `trellis-task-brief` and the task-start Brief guard |
 | Change implement/check execution | `trellis-route`; Check-All remains the unified check entry |
 | Change automatic continuation | `trellis-auto-loop` and its runner action contract |
-| Change spec/commit/archive behavior | `trellis-update-spec`, `trellis-push`, or `trellis-finish-work` respectively |
-| Change recovery after interruption | `trellis-continue` and task-progress state |
+| Change spec capture | `trellis-update-spec` |
+| Change commit safety or normal completion activation | `trellis-push` and `task_progress.py` |
+| Change recovery decisions or candidate discovery | `trellis-continue` and `task_progress.py` |
+| Change explicit candidate rebind | `trellis-continue` owns the decision, and `task.py start` with `.trellis/scripts/common/active_task.py` owns the session pointer write |
+| Change completed-task reopen | The explicit `task_progress.py reopen` path |
+| Change final archive or session bookkeeping | `trellis-finish-work` and the archive implementation |
 | Change one platform adapter | The owning platform file/Patch while preserving the shared workflow contract |
 
 In managed mode, update the source Patch and owner, run the synchronization and compiled-target checks, then reread the final `.trellis/workflow.md`. In native mode, a narrow local edit remains valid when no Plugin ownership claim applies.

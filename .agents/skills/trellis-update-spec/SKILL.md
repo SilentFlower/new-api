@@ -312,7 +312,7 @@ Read real evidence in this order. Do not decide from the chat summary, task titl
 
 1. For task context, the current task's `implement.jsonl` / `check.jsonl` and every file they reference.
 2. For task context, the current task's `prd.md`, `design.md`, and `implement.md`.
-3. For untracked context, `untracked_flow.py status --verbose`, including summary, scope, baseline/current fingerprint, focused validation, and Check-All evidence.
+3. For untracked context, `untracked_flow.py status --verbose` for work id, summary, and stage; obtain validation evidence from the current Check-All result and current change set rather than the cursor helper.
 4. The final Check-All conclusion and its actual validation evidence.
 5. The current subject's actual diff, source code, tests, and commit evidence.
 6. Existing specs and their indexes returned by `spec_router.py`.
@@ -341,7 +341,7 @@ When applicable, also validate indexes/links, code signatures, or project-specif
 - Interactive: after a passed Check-All stop, when the user says “下一步”, “继续”, `next`, `continue`, or an equivalent continuation intent, run this skill. A `no-op` or `written` result must load `trellis-push` in the same turn and present its single confirmation plan. A `needs-review` result stops and must not generate a Push plan.
 - Interactive direct Git: when the latest user message that triggered the current completion chain explicitly requests an ordinary push or a user-initiated `commit-only`, use that request only as conditional continuation after a strictly passed Check-All. After the existing standard Check-All report is shown, run this skill in the same turn when no currently valid `spec_update_result` exists. Only `no-op` or `written` may proceed to `trellis-push`; `needs-review` stops. Do not infer this intent from history, summaries, dirty state, or an auto-loop internal `commit-only`.
 - Validated auto-loop: for `no-op` or `written`, execute `record --action run_spec_update --result ok` and immediately run `next`. For `needs-review`, execute `record --action run_spec_update --result blocked --failure-type spec-needs-review`; never disguise it as `no-op`.
-- Untracked: after the final spec diff stabilizes, run `untracked_flow.py record-spec --result <no-op|written|needs-review> --summary <summary>`. Only `no-op` or `written` may advance to `push`; `needs-review` stays at `spec`. Any later edit outside this skill's allowed `.trellis/spec/**` batch must return through `prepare-edit` and invalidate downstream evidence.
+- Untracked: keep the cursor at `spec` for `needs-review`. For `no-op` or `written`, run `untracked_flow.py advance --stage push`. Any later product edit returns the cursor to `implement`; the helper does not validate or preserve owner evidence.
 
 Do not ask again or rerun when a currently valid `no-op` or `written` result already exists. Re-evaluate after the actual diff, Check-All conclusion, or the user's spec intent changes.
 <!-- END skill-garden patch trellis-update-spec-autonomous-evaluation v0.6 -->

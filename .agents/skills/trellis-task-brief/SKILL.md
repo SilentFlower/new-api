@@ -12,7 +12,7 @@ description: "从最新 prd.md、design.md、implement.md 生成、刷新、校�
 - 每次运行都重新读取最新 `prd.md`、`design.md if present`、`implement.md if present`。
 - 已存在的 `brief.md` 不能作为跳过同步的理由。
 - `brief.md` 必须以三件套为准覆盖旧内容；无法从三件套追溯的旧内容不能保留为事实。
-- 不要在 `brief.md` 里发明三件套没有表达的新需求。缺失字段写“未明确”，并提示应补充三件套。
+- 不要在 `brief.md` 里发明三件套没有表达的新需求。必填字段缺失时写“未明确”，并提示应补充三件套；没有相关内容时直接省略 `Risks / Deferred` 整节。
 - 写回 `brief.md` 后，必须在当前对话中展示 brief 正文；不要只给文件路径。
 - Phase 1.4 前必须展示完整 brief。默认等待用户确认后再运行 `task.py start`；只有用户明确把当前任务或最终 Brief 与“展示后直接开始 / 不用再次确认 / 视为已确认”绑定时，才可在范围未变化的前提下免除第二次确认。
 - “开始做吧”“按你建议来”“可以创建任务”等普通实现或建任务意图不是 Brief 预授权，不能据此跳过确认。
@@ -39,9 +39,11 @@ description: "从最新 prd.md、design.md、implement.md 生成、刷新、校�
    - `Goal`：任务目标一句话。
    - `Scope`：本轮实现范围。
    - `Non-Goals`：明确不做的范围。
-   - `Key Context`：关键文件、模块、入口、约束或风险。
+   - `Key Decisions`：已经收敛、存在实质方案分叉且会改变产品行为、范围、UX、兼容性、风险或核心架构的决定；只提炼最终选择及其影响，不复制完整决策台账。
+   - `Key Context`：关键文件、模块、入口和约束。
+   - `Risks / Deferred`：仍需在实现或验证中关注的风险，以及明确延后的事项；没有内容时不生成该 section。
    - `Acceptance`：主要验收标准。
-   - `Next Step`：进入实现后的下一步。
+   - `Next Step`：只写进入下一阶段后的一个直接动作，不展开完整实施计划。
 6. 写回 `<task>/brief.md`。如果文件已存在，仍用最新三件套派生内容覆盖旧正文。
 7. 在对话中展示 brief 正文，并说明来源文件：
    - 无有效预授权：展示后结束当前回合，等待用户确认。
@@ -64,9 +66,17 @@ description: "从最新 prd.md、design.md、implement.md 生成、刷新、校�
 
 - <本轮明确不做的事情>
 
+## Key Decisions
+
+- <已经收敛且影响实施批准的关键决定>
+
 ## Key Context
 
-- <关键文件、模块、入口、约束或风险>
+- <关键文件、模块、入口和约束>
+
+## Risks / Deferred
+
+- <仅在存在相关风险或明确延后事项时生成；否则省略整个 section>
 
 ## Acceptance
 
@@ -86,7 +96,7 @@ Phase 1.4 review 前：
 
 <brief.md 正文>
 
-请确认 planning artifacts 和上述 brief；确认后才运行 `task.py start <task>`。
+请确认上述 brief；确认后才运行 `task.py start <task>`。
 ```
 
 存在有效预授权时：
@@ -103,14 +113,15 @@ Phase 1.4 review 前：
 
 ```markdown
 当前任务 brief：<目标一句话>
-范围/约束：<不失真的压缩要点>
+范围/决定/上下文/约束：<不失真的压缩要点>
+风险/延后：<存在时展示；没有则省略>
 验收：<不失真的压缩要点>
 完整摘要：<task>/brief.md
 
 下一步：进入 `trellis-route(implement)`。
 ```
 
-压缩重述不能丢掉会影响实现判断的范围、约束、风险和验收条件。
+压缩重述不能丢掉会影响实现判断的范围、关键决定、约束、风险和验收条件。
 
 ## 不要做
 

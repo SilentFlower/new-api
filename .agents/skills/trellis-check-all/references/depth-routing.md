@@ -37,9 +37,9 @@ git log --oneline -10
 
 没有当前 task 时运行 `python3 ./.trellis/scripts/untracked_flow.py status --verbose`：
 
-- `hit`：读取 work id、summary、stage、scope、baseline/current fingerprint 和已有验证证据；三件套实现维度标记 `N/A`，其余维度仍对实际 diff 与相关 spec 负责。
+- `hit`：读取 work id、summary 和 stage；三件套实现维度标记 `N/A`，其余维度仍对实际 diff、相关 spec 和本轮可验证证据负责。
 - `miss`：仅当用户明确要求检查一个无状态的已知 diff 时继续，并把工作上下文缺失列为风险；否则停止并回到 Request Triage。
-- `error` 或 workspace drift：按阻塞报告，禁止用聊天摘要恢复或覆盖状态。
+- `error`：按损坏状态阻塞报告，禁止用聊天摘要恢复或覆盖游标。
 
 untracked 检查必须处于 `stage=check`，且只读取个人 check 偏好，不创建 task-scoped route decision。
 

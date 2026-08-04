@@ -47,23 +47,22 @@ If the formal Phase 1 flow also needs to change, synchronize the Phase 1 section
 
 If the user wants only one platform to avoid sub-agents, first confirm whether that platform has a separate group in the workflow. Then change Phase 2 routing for that platform group instead of deleting all `trellis-implement` / `trellis-check` instructions across platforms.
 
-## `/trellis:continue` Route Table
+<!-- BEGIN skill-garden patch trellis-meta-managed-continue-recovery v0.6 -->
+## `/trellis:continue` Recovery Ownership
 
-`/trellis:continue` resumes a task by deciding which phase step to load next. The decision combines `task.json.status` with the presence of artifacts inside the task directory. The mapping is fixed in the command itself; forks that add custom statuses must extend both the workflow.md tag block and this table.
+`trellis-continue` owns resume decisions and uses `task_progress.py status --json` only as advisory recovery evidence. Do not maintain a second fixed route table in this reference; read the installed workflow, the owner skill, and the helper for the current version.
 
-| `status` | Artifact state | Resume at |
-| --- | --- | --- |
-| `planning` | `prd.md` missing | Phase 1.1 (load `trellis-brainstorm`) |
-| `planning` | lightweight task with `prd.md` complete | ask for start review, then run `task.py start` |
-| `planning` | complex task missing `design.md` or `implement.md` | complete missing planning artifacts |
-| `planning` | complex task has `prd.md`, `design.md`, and `implement.md` | ask for start review, then run `task.py start` |
-| `in_progress` | no implementation in conversation history | Phase 2.1 (`trellis-implement`) |
-| `in_progress` | implementation done, no `trellis-check` run | Phase 2.2 (`trellis-check`) |
-| `in_progress` | check passed | Phase 3.3 (spec update) → 3.4 (commit) |
-| `completed` | task is still in active tree | Phase 3.5 (run `/trellis:finish-work` to archive) |
+Stable boundaries are:
 
-When you add a custom status (e.g. `in-review`), add a `[workflow-state:in-review]` block in `.trellis/workflow.md` for the per-turn breadcrumb AND extend this route table — usually by editing the `/trellis:continue` command file (`.{platform}/commands/trellis/continue.md` or equivalent) to add a row that decides where to resume from. Without the route entry, `/trellis:continue` will fall through to a default branch and the user will not land on the step you intended.
+- With no active task pointer, surface each healthy candidate with its `taskStatus` and only the diagnostics needed to distinguish invalid progress or scan failures. Suggest an explicit rebind when appropriate; never bind a session automatically.
+- A `planning` task returns through `trellis-brainstorm` readiness, a refreshed `brief.md`, and the task-start review gate before implementation.
+- An `in_progress` task resumes from current artifacts and validated workflow evidence. Implement/check execution goes through `trellis-route`; saved progress must not infer a phase or restore Git behavior.
+- A `completed` task points only to explicit `trellis-finish-work` and archive. Rework requires an explicit reopen before implementation, and material scope changes require refreshed planning artifacts and Brief approval.
 
+When changing recovery behavior, update `trellis-continue`, `task_progress.py`, the relevant workflow owner/state, and final-output tests together. Keep detailed progress schemas, command arguments, and error matrices in the owner skill/helper rather than duplicating them here.
+<!-- END skill-garden patch trellis-meta-managed-continue-recovery v0.6 -->
 ## Notes
 
-`.trellis/workflow.md` is the local project workflow, not an immutable template. The user can adapt it to team habits. After editing it, platform entry files may still contain old descriptions, so inspect them too.
+<!-- BEGIN skill-garden patch trellis-meta-managed-workflow-notes v0.6 -->
+`.trellis/workflow.md` is the current runtime contract. Before editing, determine whether the target is project-local or Skill-Garden-owned. Direct edits are valid only for unowned local sections; managed sections must be changed through their canonical Patch and owner, synchronized across affected platform entries, and verified in compiled and dogfood outputs.
+<!-- END skill-garden patch trellis-meta-managed-workflow-notes v0.6 -->

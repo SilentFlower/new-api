@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -121,6 +122,11 @@ def _progress_summary(progress: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _utc_date() -> str:
+    """返回 UTC 日期，保持 task.json 既有 completedAt 格式。"""
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def _legacy_progress(snapshot: dict[str, Any]) -> dict[str, Any]:
     """把旧 last_push_snapshot 映射为新进度结构。"""
     completed = snapshot.get("completed_steps")
@@ -171,6 +177,7 @@ def _load_task_progress(repo_root: Path, task_dir: Path) -> dict[str, Any]:
     return {
         "status": "ok",
         "task": task_rel,
+        "taskStatus": data.get("status"),
         "source": source,
         "progress": validated,
         "summary": _progress_summary(validated),
@@ -207,7 +214,7 @@ def _progress_candidates(
                 "reason": "invalid-task-json",
             })
             continue
-        if data.get("status") != "in_progress":
+        if data.get("status") not in ("in_progress", "completed"):
             continue
         progress, source = _extract_progress(data)
         if progress is None:
@@ -223,6 +230,7 @@ def _progress_candidates(
             continue
         candidates.append({
             "task": _rel_path(repo_root, task_dir),
+            "taskStatus": data.get("status"),
             "source": source,
             **_progress_summary(validated),
         })
@@ -277,6 +285,7 @@ def _print_status_text(data: dict[str, Any]) -> int:
     if status == "ok":
         summary = data.get("summary") if isinstance(data.get("summary"), dict) else {}
         print(f"任务：{data.get('task')}")
+        print(f"任务状态：{data.get('taskStatus') or '(unknown)'}")
         print(f"来源：{data.get('source')}")
         print(f"completedSteps: {summary.get('completedSteps', [])}")
         print(f"partialStep: {summary.get('partialStep') or '(none)'}")
@@ -288,7 +297,10 @@ def _print_status_text(data: dict[str, Any]) -> int:
         print("无活动任务。任务进度候选：")
         if isinstance(candidates, list) and candidates:
             for item in candidates:
-                print(f"- {item.get('task')}: nextStep={item.get('nextStep') or '(none)'}")
+                print(
+                    f"- {item.get('task')} ({item.get('taskStatus') or 'unknown'}): "
+                    f"nextStep={item.get('nextStep') or '(none)'}"
+                )
         else:
             print("(none)")
         invalid = data.get("invalidCandidates")
@@ -381,9 +393,22 @@ def cmd_write(args: argparse.Namespace, repo_root: Path) -> int:
             print(f"- {error}", file=sys.stderr)
         return 1
 
+    if data.get("status") != "in_progress":
+        result = {
+            "status": "error",
+            "reason": "invalid-status-transition",
+            "task": _rel_path(repo_root, task_dir),
+            "taskStatus": data.get("status"),
+            "expectedStatus": "in_progress",
+        }
+        return _print_json(result, 1) if args.json else _print_status_text(result)
+
     migrated = isinstance(data.get("last_push_snapshot"), dict)
     data["progress"] = progress
     data.pop("last_push_snapshot", None)
+    if getattr(args, "complete", False):
+        data["status"] = "completed"
+        data["completedAt"] = _utc_date()
     try:
         _write_json(task_json, data)
     except OSError as exc:
@@ -403,12 +428,60 @@ def cmd_write(args: argparse.Namespace, repo_root: Path) -> int:
         "task": _rel_path(repo_root, task_dir),
         "path": _rel_path(repo_root, task_json),
         "migratedLegacySnapshot": migrated,
+        "taskStatus": data.get("status"),
         "summary": _progress_summary(progress),
     }
     if args.json:
         return _print_json(result)
     print(f"✓ 已更新任务进度：{result['path']}")
     print(f"nextStep: {result['summary'].get('nextStep') or '(none)'}")
+    return 0
+
+
+def cmd_reopen(args: argparse.Namespace, repo_root: Path) -> int:
+    """把已完成任务显式恢复为进行中并保留进度证据。"""
+    task_dir = _resolve_task_dir(repo_root, args.task)
+    task_json = _task_json_path(task_dir)
+    data = _read_json(task_json)
+    if data is None:
+        result = {
+            "status": "error",
+            "reason": "invalid-task-json",
+            "task": _rel_path(repo_root, task_dir),
+        }
+        return _print_json(result, 1) if args.json else _print_status_text(result)
+    if data.get("status") != "completed":
+        result = {
+            "status": "error",
+            "reason": "invalid-status-transition",
+            "task": _rel_path(repo_root, task_dir),
+            "taskStatus": data.get("status"),
+            "expectedStatus": "completed",
+        }
+        return _print_json(result, 1) if args.json else _print_status_text(result)
+
+    data["status"] = "in_progress"
+    data["completedAt"] = None
+    try:
+        _write_json(task_json, data)
+    except OSError as exc:
+        result = {
+            "status": "error",
+            "reason": "write-failed",
+            "message": str(exc),
+            "task": _rel_path(repo_root, task_dir),
+        }
+        return _print_json(result, 1) if args.json else _print_status_text(result)
+
+    result = {
+        "status": "reopened",
+        "task": _rel_path(repo_root, task_dir),
+        "path": _rel_path(repo_root, task_json),
+        "taskStatus": "in_progress",
+    }
+    if args.json:
+        return _print_json(result)
+    print(f"✓ 已重新打开任务：{result['task']}")
     return 0
 
 
@@ -424,7 +497,16 @@ def build_parser() -> argparse.ArgumentParser:
     write = subparsers.add_parser("write", help="写入任务进度")
     write.add_argument("--task", required=True, help="任务目录、路径或任务名")
     write.add_argument("--progress-json", required=True, help="progress JSON 对象")
+    write.add_argument(
+        "--complete",
+        action="store_true",
+        help="与最终进度原子写入 completed 状态和 completedAt",
+    )
     write.add_argument("--json", action="store_true", help="输出 JSON")
+
+    reopen = subparsers.add_parser("reopen", help="把 completed 任务恢复为 in_progress")
+    reopen.add_argument("--task", required=True, help="任务目录、路径或任务名")
+    reopen.add_argument("--json", action="store_true", help="输出 JSON")
 
     return parser
 
@@ -442,6 +524,8 @@ def main() -> int:
         return cmd_status(args, repo_root)
     if args.command == "write":
         return cmd_write(args, repo_root)
+    if args.command == "reopen":
+        return cmd_reopen(args, repo_root)
     parser.print_help()
     return 1
 
