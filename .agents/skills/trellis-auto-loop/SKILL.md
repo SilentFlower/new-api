@@ -14,7 +14,7 @@ description: "启动、恢复和推进 Trellis 自动任务循环。用于用户
 - 新 run 先 prepare 全部显式任务，Open Questions 全部收敛后才进入 running。running 中不再询问 route、planning 或普通 Check-All 停止边界。
 - 每个 action 完成后，必须用同名 `record --action ...` 精确回写并立即 `next`。不得根据聊天摘要手改 runtime 或跳步。
 - `record` 返回 `status=retryable` 时保留的是同一个 outstanding Check action：不得运行 `next`，必须先按返回指令消解漂移并重录。
-- 本地提交是自动终点。不得 push、merge、release、deploy、finish-work 或 archive；queue item 完成后 Trellis task 仍保持 `in_progress`。
+- 本地提交是自动终点。不得 push、merge、release、deploy、finish-work 或 archive；runner 在 item 本地提交成功后把该任务写入本地完成态（`status=completed` + `completedAt`），归档仍需用户显式执行。
 - 任务顺序只决定稳定调度顺序，不隐含依赖。依赖必须通过 `--depends-on dependent=dependency` 明确传入或由 planning artifacts 明确声明。
 - 任务级失败只阻塞自身及显式依赖项；独立任务继续。fix/recheck、planning repair 与安全的 commit-only repair 各最多 3 轮，队列结束后不自动执行第二遍恢复扫描。
 - schema 1 runtime 继续按 runner 返回的旧 action 恢复，包括 outstanding `confirm_brief`；不要把旧 run 改写成 schema 2。
@@ -144,7 +144,7 @@ Check-All 自动修复当前任务 `implement.md` 或 `brief.md` 时，每个实
 
 `commit-repairable` 只用于继续执行仍然安全的本地确定性链。外部副作用风险或任何 Git 安全边界问题必须用 `blocked` 或非 repairable `failed` 立即结束当前项。部分成功提交跨 retry/resume 保留，不回滚、不 amend、不重复创建。
 
-`decisions.jsonl` 属于当前任务文件，发生决策时应进入该任务最终精确提交。任务 `task.json.status` 不因 queue item completed 而改写。
+`decisions.jsonl` 属于当前任务文件，发生决策时应进入该任务最终精确提交。runner 在 item 本地提交成功后把 `task.json.status` 写为 `completed` 并补 `completedAt`；只允许 `in_progress -> completed` 这一个跃迁，既有 `completedAt` 保持不变。这是本地完成态，不代表已归档。
 
 ## Resume, Retry, Stop
 
@@ -163,6 +163,16 @@ python3 ./.trellis/scripts/auto_loop.py stop --reason "<原因>"
 
 默认使用紧凑输出；只有诊断 manifest、dirty、漂移、依赖链或决策详情时加 `--verbose`。`retryable` 不是终态，由 agent 在同一 outstanding Check action 内立即自纠；`completed_with_blocked` 才是本次 run 的可审计终态，后续恢复由用户显式调用 `retry-blocked`。
 
+## Run 收尾交接
+
+队列到达终态后必须向用户报告归档待办，不得只说 run 已完成。待办从终态 `next`、`record` 或 `status` 的 `summary.pending_archive` 读取：
+
+- `tasks_awaiting_archive`：已写入本地完成态、等待用户显式归档的队列任务，逐项列出。
+- `parent_tasks_outside_queue`：队列任务声明的父任务中未纳入本次队列的部分。父任务只负责范围、依赖顺序和集成复核，不进入实现流水线，但必须排在全部子任务归档之后单独 finish-work。
+- run 结束后 pointer 已清除，`status` 走最近 run 列表；`pending_archive` 在该列表里同样可读。
+
+run 期间新建的后补子任务不在冻结队列内，runner 不追踪；发现时按普通任务单独推进，不得手改 runtime 塞进当前 run。归档动作本身始终由用户发起。
+
 ## 禁止事项
 
 - 不手写 `.trellis/.runtime/auto-loop/*.json`，不提交 runtime 或 `.route-prefs.tmp`。
@@ -170,4 +180,5 @@ python3 ./.trellis/scripts/auto_loop.py stop --reason "<原因>"
 - 不用 `start --force` 代替 `retry-blocked`。
 - `record` 返回 `retryable` 后不得调用 `next` 或重新发起 action。
 - 不把 queue item completed 解释为任务已归档。
+- 不只报告 run 已完成而省略 `pending_archive` 待办，也不代用户执行 finish-work 或 archive。
 - 不在无人值守执行中替用户回答 Open Questions。

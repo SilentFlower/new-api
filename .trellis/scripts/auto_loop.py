@@ -91,6 +91,11 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+def _utc_date() -> str:
+    """返回 UTC 日期，保持 task.json 既有 completedAt 格式。"""
+    return datetime.now(timezone.utc).date().isoformat()
+
+
 def _repo_root() -> Path | None:
     """从当前目录向上寻找 Trellis 项目根。"""
     current = Path.cwd().resolve()
@@ -484,6 +489,37 @@ def _task_status(repo_root: Path, task_ref: str) -> str:
     return str(_load_task_json(repo_root, task_ref).get("status") or "unknown")
 
 
+def _parents_outside_queue(repo_root: Path, queue: list[dict[str, Any]]) -> list[str]:
+    """返回队列任务的父任务中未纳入本次队列的引用。
+
+    父任务通常只负责范围、依赖顺序和集成复核，不进入 auto-loop 实现流水线，
+    但它的归档必须排在全部子任务之后。runner 不会替它跑实现，也无法自动归档，
+    所以要在 run 摘要里显式列出，避免无人值守跑完后父任务被静默漏掉。
+
+    Args:
+        repo_root: Trellis 项目根。
+        queue: 本次 run 的队列项列表。
+
+    Returns:
+        规范化后的父任务引用列表，保持首次出现顺序且不含队列内任务。
+    """
+    queued = {str(item.get("task") or "") for item in queue}
+    parents: list[str] = []
+    for item in queue:
+        parent = _load_task_json(repo_root, str(item.get("task") or "")).get("parent")
+        if not isinstance(parent, str) or not parent.strip():
+            continue
+        try:
+            ref = _normalize_task_ref(repo_root, parent)
+        except ValueError:
+            # 父任务可能已归档或被移除；缺失不阻断 run，也不进入待归档提示。
+            continue
+        if ref in queued or ref in parents:
+            continue
+        parents.append(ref)
+    return parents
+
+
 def _trim_text(value: Any, limit: int = TASK_PROGRESS_NOTE_LIMIT) -> str:
     """把 progress notes 中的长文本压到固定上限。"""
     text = str(value or "").replace("\n", " ").strip()
@@ -547,7 +583,7 @@ def _progress_for_completed(state: dict[str, Any], item: dict[str, Any]) -> dict
         "updatedAt": _utc_now(),
         "completedSteps": [f"auto-loop: 本地提交完成 {completed_label}"],
         "partialStep": None,
-        "nextStep": "auto-loop 已本地提交；需要用户显式运行 finish-work/archive 或继续后续人工流程",
+        "nextStep": "auto-loop 已本地提交并置为本地完成态；需要用户显式运行 finish-work/archive 完成归档",
         "notes": _trim_text(notes),
     }
 
@@ -592,8 +628,30 @@ def _auto_progress_for_item(state: dict[str, Any], item: dict[str, Any]) -> dict
     return None
 
 
+def _apply_local_completion(item: dict[str, Any], task_data: dict[str, Any]) -> bool:
+    """把已本地提交的队列项写入任务本地完成态，返回 task.json 是否发生变化。
+
+    auto-loop 的终点是本地提交，但归档守卫要求 `status=completed` 且有 `completedAt`；
+    若不在这里落地本地完成态，任务会卡在既无法 finish-work 也无法 archive 的状态。
+    只允许 `in_progress -> completed` 这一个跃迁，并保留既有 `completedAt`，
+    避免覆盖人工已确认的完成日期或把 planning/已完成任务重复改写。
+    """
+    if item.get("status") != "completed":
+        return False
+    if not item.get("commit") and not _repo_commit_summaries(item):
+        return False
+    changed = False
+    if task_data.get("status") == "in_progress":
+        task_data["status"] = "completed"
+        changed = True
+    if task_data.get("status") == "completed" and not task_data.get("completedAt"):
+        task_data["completedAt"] = _utc_date()
+        changed = True
+    return changed
+
+
 def _write_auto_task_progress(repo_root: Path, state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any] | None:
-    """把 auto-loop 下一步写入对应 task.json.progress。"""
+    """把 auto-loop 下一步写入对应 task.json.progress 与本地完成态。"""
     progress = _auto_progress_for_item(state, item)
     if progress is None:
         return None
@@ -607,16 +665,26 @@ def _write_auto_task_progress(repo_root: Path, state: dict[str, Any], item: dict
             "path": _rel_path(repo_root, task_json_path),
         }
     existing = task_data.get("progress")
-    if isinstance(existing, dict) and _progress_stable_fields(existing) == _progress_stable_fields(progress):
+    progress_changed = not (
+        isinstance(existing, dict)
+        and _progress_stable_fields(existing) == _progress_stable_fields(progress)
+    )
+    # 生命周期写入独立判定：progress 稳定字段未变时也可能仍缺本地完成态。
+    lifecycle_changed = _apply_local_completion(item, task_data)
+    if not progress_changed and not lifecycle_changed:
         return None
-    task_data["progress"] = progress
+    if progress_changed:
+        task_data["progress"] = progress
     task_data.pop("last_push_snapshot", None)
     _write_json(task_json_path, task_data)
-    return {
+    result = {
         "task": task_ref,
         "status": "written",
         "path": _rel_path(repo_root, task_json_path),
     }
+    if lifecycle_changed:
+        result["lifecycle"] = "completed"
+    return result
 
 
 def _sync_auto_task_progress(repo_root: Path, state: dict[str, Any]) -> None:
@@ -1486,7 +1554,9 @@ def _recent_run_summaries(repo_root: Path, limit: int = 8) -> list[dict[str, Any
         state = result["data"]
         counts = _queue_counts(state)
         current = _current_queue_item(state)
-        runs.append({
+        # run 终态会清除 pointer，之后 status 只走本列表；归档待办必须在这里也可见。
+        handoff = _pending_archive_handoff(state)
+        entry = {
             "run_id": state.get("run_id") or path.stem,
             "path": _rel_path(repo_root, path),
             "run_status": state.get("status"),
@@ -1498,7 +1568,10 @@ def _recent_run_summaries(repo_root: Path, limit: int = 8) -> list[dict[str, Any
             "remaining": counts["remaining"],
             "current_task": current.get("task") if current else None,
             "next_step": current.get("current_step") if current else "done",
-        })
+        }
+        if handoff:
+            entry["pending_archive"] = handoff
+        runs.append(entry)
     return runs
 
 
@@ -1535,6 +1608,37 @@ def _clear_pointer_if_current(repo_root: Path, run_id: str | None) -> None:
         pass
 
 
+def _pending_archive_handoff(state: dict[str, Any]) -> dict[str, Any] | None:
+    """返回本次 run 遗留的归档待办。
+
+    runner 只推进到本地提交与本地完成态，归档必须由用户显式执行；
+    父任务不进入实现流水线，但必须排在全部子任务归档之后单独收尾。
+    没有任何待办时返回 None，避免在摘要里留下空字段。
+
+    Args:
+        state: Auto run 状态。
+
+    Returns:
+        含待归档任务与队列外父任务的交接信息，或 None。
+    """
+    awaiting = [
+        str(item.get("task") or "")
+        for item in _queue_items(state)
+        if item.get("status") == "completed"
+    ]
+    parents = [str(ref) for ref in (state.get("parent_tasks_outside_queue") or []) if str(ref)]
+    if not awaiting and not parents:
+        return None
+    handoff: dict[str, Any] = {
+        "note": "auto-loop 已写入本地 completed+completedAt；归档仍需用户显式运行 finish-work",
+        "tasks_awaiting_archive": awaiting,
+    }
+    if parents:
+        handoff["parent_tasks_outside_queue"] = parents
+        handoff["parent_note"] = "父任务未纳入队列；需在全部子任务归档后单独 finish-work"
+    return handoff
+
+
 def _resume_capsule(state: dict[str, Any]) -> dict[str, Any]:
     """生成短小的人类可读恢复摘要。"""
     queue = _queue_items(state)
@@ -1547,6 +1651,7 @@ def _resume_capsule(state: dict[str, Any]) -> dict[str, Any]:
         if _repo_commit_summaries(item)
     ]
     counts = _queue_counts(state)
+    handoff = _pending_archive_handoff(state)
     return {
         "run_id": state.get("run_id"),
         "status": state.get("status"),
@@ -1558,7 +1663,8 @@ def _resume_capsule(state: dict[str, Any]) -> dict[str, Any]:
         "remaining": counts["remaining"],
         "auto_completed_tasks": auto_completed,
         "recorded_commits": recorded_commits,
-        "task_lifecycle_note": "auto-loop completed means local commit completed; run finish-work/archive explicitly when ready" if auto_completed else None,
+        "task_lifecycle_note": handoff["note"] if handoff else None,
+        "pending_archive": handoff,
         "blocked_tasks": blocked,
     }
 
@@ -1713,8 +1819,10 @@ def _compact_summary(state: dict[str, Any]) -> dict[str, Any]:
             "decision_count": sum(int(item.get("decision_count") or 0) for item in _queue_items(state)),
             "queue_reordered": bool(state.get("queue_reordered")),
         })
-    if completed_tasks:
-        summary["task_lifecycle_note"] = "completed 仅表示 auto-loop item 已本地提交；任务归档仍需显式 finish-work/archive"
+    handoff = _pending_archive_handoff(state)
+    if handoff:
+        summary["task_lifecycle_note"] = handoff["note"]
+        summary["pending_archive"] = handoff
     return summary
 
 
@@ -2409,6 +2517,7 @@ def cmd_start(args: argparse.Namespace) -> int:
             "profile": args.profile,
         },
         "original_order": [str(item["task"]) for item in queue],
+        "parent_tasks_outside_queue": _parents_outside_queue(repo_root, queue),
         "repositories": repositories,
         "dirty_classified": not bool(_dirty_entries({"repositories": repositories})),
         "prepare_action": None,

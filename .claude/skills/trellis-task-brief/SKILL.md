@@ -109,19 +109,17 @@ Phase 1.4 review 前：
 已按你对当前 Brief 的明确预授权完成复核；范围未扩大、无未解决问题，继续启动任务。
 ```
 
-任务已经是 `in_progress` 时，如果 brief 存在，进入 implement route 前重述：
+任务已经是 `in_progress` 时，如果 brief 存在，进入 implement route 前复用同样的完整展示：
 
 ```markdown
-当前任务 brief：<目标一句话>
-范围/决定/上下文/约束：<不失真的压缩要点>
-风险/延后：<存在时展示；没有则省略>
-验收：<不失真的压缩要点>
-完整摘要：<task>/brief.md
+当前任务 brief：<task>/brief.md
+
+<brief.md 正文>
 
 下一步：进入 `trellis-route(implement)`。
 ```
 
-压缩重述不能丢掉会影响实现判断的范围、关键决定、约束、风险和验收条件。
+三个展示场景都完整展示 `brief.md` 正文，不压缩、不摘录、不改写字段结构。压缩重述会丢掉 Non-Goals、关键决定或验收条件中影响实现判断的内容，因此不再使用。
 
 ## 不要做
 

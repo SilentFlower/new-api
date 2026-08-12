@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import uuid
@@ -91,83 +90,18 @@ def _find_root_upwards(start: Path) -> Path | None:
     while True:
         if (current / ".trellis").is_dir():
             return current
+        # `.git` 文件或目录标记当前 worktree 边界；本地缺 Trellis 时不能继续读父 worktree。
+        if (current / ".git").exists() or (current / ".git").is_symlink():
+            return None
         if current == current.parent:
             return None
         current = current.parent
 
 
-def _git_output(start: Path, *args: str) -> str | None:
-    """执行只读 git 命令并返回 stdout，失败时返回 None。"""
-    try:
-        result = subprocess.run(
-            ["git", "-C", str(start), *args],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            timeout=2,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if result.returncode != 0:
-        return None
-    output = result.stdout.strip()
-    return output or None
-
-
-def _resolve_git_common_dir(start: Path) -> Path | None:
-    """返回当前 Git 仓库的 common dir，兼容旧 git 的相对路径输出。"""
-    output = _git_output(start, "rev-parse", "--path-format=absolute", "--git-common-dir")
-    if output is None:
-        output = _git_output(start, "rev-parse", "--git-common-dir")
-    if output is None:
-        return None
-    common_dir = Path(output)
-    if common_dir.is_absolute():
-        return common_dir.resolve()
-    top_level = _git_output(start, "rev-parse", "--show-toplevel")
-    if top_level is None:
-        return None
-    return (Path(top_level) / common_dir).resolve()
-
-
-def _find_root_from_git_worktrees(start: Path) -> Path | None:
-    """从同一个 Git worktree 集合里寻找承载 .trellis 的主项目根。"""
-    current = start.resolve()
-    if current.is_file():
-        current = current.parent
-
-    common_dir = _resolve_git_common_dir(current)
-    if common_dir is not None:
-        candidate = common_dir.parent
-        if (candidate / ".trellis").is_dir():
-            return candidate
-
-    output = _git_output(current, "worktree", "list", "--porcelain")
-    if output is None:
-        return None
-    for line in output.splitlines():
-        if not line.startswith("worktree "):
-            continue
-        candidate = Path(line.split(" ", 1)[1]).expanduser().resolve()
-        if (candidate / ".trellis").is_dir():
-            return candidate
-    return None
-
-
 def _find_repo_root(start: Path | None = None) -> Path | None:
-    """查找 Trellis 项目根目录，兼容没有 .trellis 的 linked worktree。"""
+    """只在当前 worktree 路径向上查找 Trellis 项目根目录。"""
     current = (start or Path.cwd()).resolve()
-    root = _find_root_upwards(current)
-    if root is not None:
-        return root
-    root = _find_root_from_git_worktrees(current)
-    if root is not None:
-        return root
-    for parent in Path(__file__).resolve().parents:
-        if (parent / ".trellis").is_dir():
-            return parent
-    return None
+    return _find_root_upwards(current)
 
 
 def _session_path(repo_root: Path, context_key: str) -> Path:

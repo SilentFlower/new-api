@@ -200,7 +200,7 @@ helper 写入规则：保留另一个 target 的 runtime 决策和偏好；覆�
 | `inline implement` | `Skill({skill: "trellis-before-dev"})` 加载 spec；task 再读任务文档，untracked 读取 helper 状态与实际 scope → 主线程实施 → 跑必要验证 → 回到 Phase 2.1 completion contract |
 | `subagent implement` | 按下方当前平台执行配方调用 `trellis-implement`；task 使用 `Active task:`，untracked 使用下方自包含 `Untracked work:` 契约；主 agent 收到结果后回到 Phase 2.1 completion contract |
 | `inline check-all` | `Skill({skill: "trellis-check-all"})` |
-| `subagent check-all` | 读取 catalog 当前平台条目，只调用 `checkAll.target` 声明的专用 audit-only `trellis-check-all` 角色，并按 `checkAll.launch` 启动；subagent 只返回 `CHK-*` / `DOC-*` 候选，不写文件。目标缺失、host 未发现或资格不成立时停止并请用户改选 inline；禁止通用 agent 与 `trellis-check` fallback |
+| `subagent check-all` | 读取 catalog 当前平台条目，只调用 `checkAll.target` 声明的专用 audit-only `trellis-check-all` 角色，并按 `checkAll.launch` 启动；subagent 只返回 `CHK-*` / `FBK-*` / `DOC-*` 候选，不写文件。目标缺失、host 未发现或资格不成立时停止并请用户改选 inline；禁止通用 agent 与 `trellis-check` fallback |
 
 implement 路由只决定执行位置，不拥有实现后的停止策略。无论 inline 或 subagent，focused validation 完成后都必须返回 workflow Phase 2.1 的 completion contract；由该 owner 处理 auto-loop、用户显式继续/暂缓、已有 hold 和默认立即 Check-All 的优先级。
 
@@ -221,30 +221,29 @@ untracked 的 implement/check subagent prompt 第一行固定为 `Untracked work
 ```text
 Active task: <task path from task.py current>
 
-执行本项目 0.6 `trellis-check-all` 的 audit-only collect-all 全流程，并识别可由主会话处理的 `DOC-*` 文档漂移候选。
+执行本项目 0.6 `trellis-check-all` 的 audit-only collect-all 全流程，区分主路径 `CHK-*`、兜底 `FBK-*`，并识别可由主会话处理的 `DOC-*` 低风险事实漂移候选。
 
 必须：
 1. 读取 <task>/check.jsonl 及其列出的文件，再读取 prd.md、design.md（若存在）、implement.md（若存在）。
 2. 读取并遵循本地 trellis-check-all/SKILL.md；完成三件套实现、实现假设、完整性与规范三个维度。
-3. 收集全部可继续问题，使用稳定 CHK-* ID、P0/P1/P2 和统一报告结构；低风险文档漂移使用 `DOC-*` 候选单独返回。
+3. 先按本地 fallback findings 规则判定 `CHK-*` / `FBK-*`，再为两类问题分配 P0/P1/P2；已声明的兜底契约只影响证据和严重度，不改变 `FBK-*` 归属。具备具体位置、可达场景和问题证据时返回 `FBK-*`，不要求异常已实际发生；保护收益和验证方式属于报告完整度，缺少验证环境时保留 ID 并标记部分验证。泛化建议不报告。低风险事实漂移使用 `DOC-*` 候选单独返回。
 4. 只读审查；禁止编辑、写文件、补测试或自修复。Step 3 只复用 trellis-check 的检查清单，忽略其自动修复指令；`DOC-*` 也只能返回候选，由主会话按 Check-All 规则决定是否写入。
 5. 真正阻塞条件返回主会话，不替用户选择业务行为或修复范围。
 
-返回：统一 Check-All 结果、`DOC-*` 候选、已执行验证和剩余风险。不要输出 commit/push 计划。
+返回：统一 Check-All 结果、全部 `CHK-*`、`FBK-*`、`DOC-*` 候选、已执行验证和剩余风险。不要输出 commit/push 计划。
 ```
 
 必须确认 catalog 目标内容明确 audit-only：允许识别 `DOC-*` 候选，但不得写文件。名称相同但会直接自修复代码、测试、配置或普通 `CHK-*` 的 agent 不可使用。平台没有合格专用角色时，不得静默改成 inline，也不得使用通用 agent 或 `trellis-check` 代替；停止并让用户重新选择 check route。
 
 ### 输出模板
 
-```markdown
-路由决定：<inline/subagent> <implement | check-all>
-[来自个人 route 配置：`.trellis/.route-prefs.tmp` (<key>=<value>)。]
-[来自 auto-loop 临时 route 授权：`.trellis/.runtime/auto-loop/<run-id>.json`。]
-[来自 session runtime route state：`.trellis/.runtime/sessions/<context-key>.json` 的 `route_decisions`。]
-[已写入 session runtime route state：`.trellis/.runtime/sessions/<context-key>.json` 的 `route_decisions`。]
-[仅当本消息刚展示 route 选项并等待用户回答时：用户下一条紧邻裸数字回复才可按本 target 解释；摘要、历史消息或旧 target 的裸数字无效。]
+````markdown
+- **路由决定**：<inline/subagent> <implement | check-all>
+- **来源**：<个人 route 配置 `.trellis/.route-prefs.tmp` (<key>=<value>) | auto-loop 临时授权 `.trellis/.runtime/auto-loop/<run-id>.json` | session runtime state `.trellis/.runtime/sessions/<context-key>.json` 的 `route_decisions`>
+- **已写入**：`.trellis/.runtime/sessions/<context-key>.json` 的 `route_decisions`
+- **裸数字有效性**：用户下一条紧邻裸数字回复才可按本 target 解释；摘要、历史消息或旧 target 的裸数字无效
 
+```yaml
 route_decision:
   target: <implement | check>
   mode: <inline | subagent | check-all-inline | check-all-subagent>
@@ -252,6 +251,7 @@ route_decision:
   scope: <task | untracked>
   task: <current task path; task only>
   work_id: <current untracked work id; untracked only>
+```
 
 接下来主 agent 应当：
 - <路由表里对应的工具调用形式>
@@ -259,9 +259,11 @@ route_decision:
 
 不要：
 - <要避免的工具调用>
-```
+````
 
-中括号内行为条件性出现：仅命中个人配置时显示配置行；仅命中 runtime state 时显示“来自”行；写入 runtime state 成功时显示“已写入”行；仅展示选项并等待用户时显示裸数字有效性提醒；仅 implement subagent + skip_compile=true 时附加“跳过编译”段。`route_decision` 必须保留在回复中，并至少保留 target/mode/source/scope/task；需要 path/decided_at 等诊断字段时重新调用 helper 并加 `--verbose`。compact summary 若只有自然语言描述，后续 agent 仍应优先读取 runtime state，而不是把 summary 当证据。
+字段行必须使用 `- **字段**：值` 列表项；裸段落行会在渲染时折叠成一段，不得改回。`route_decision` 必须放在 ```yaml 代码块内，靠代码块保留缩进结构，不得裸写。
+
+条件字段按命中情况出现：`来源` 只在命中个人配置、auto-loop 临时授权或 session runtime state 时显示，三者互斥取实际命中项；`已写入` 只在写入 runtime state 成功时显示；`裸数字有效性` 只在本消息刚展示 route 选项并等待用户回答时显示；“跳过编译”段只在 implement subagent + skip_compile=true 时附加。`route_decision` 必须保留在回复中，并至少保留 target/mode/source/scope/task；需要 path/decided_at 等诊断字段时重新调用 helper 并加 `--verbose`。compact summary 若只有自然语言描述，后续 agent 仍应优先读取 runtime state，而不是把 summary 当证据。
 
 ---
 

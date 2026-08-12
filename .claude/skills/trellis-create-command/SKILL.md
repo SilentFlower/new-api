@@ -221,23 +221,28 @@ cp -r <target>/.agents/skills/trellis-<X> <skill-garden>/.trellis/0.6/.agents/sk
 ```markdown
 ✓ 已创建 trellis 入口：<name>
 
-形态：<command | skill>
-范围：<本项目 | 本项目 + skill-garden 0.6>
+- **形态**：<command | skill>
+- **范围**：<本项目 | 本项目 + skill-garden 0.6>
 
-副本：
-  • <target>/.claude/<path>
-  • <target>/.agents/skills/trellis-<X>/SKILL.md
-  <• <skill-garden>/.trellis/0.6/ 同步位置 × 2（仅 skill 形态）>
+### 副本
 
-触发方式：
-  • 自然语：<触发词例子>
-  • 显式：<`/trellis:<X>` 或 `/trellis-<X>`>
+- `<target>/.claude/<path>`
+- `<target>/.agents/skills/trellis-<X>/SKILL.md`
+- `<skill-garden>/.trellis/0.6/` 同步位置 × 2（仅 skill 形态时显示）
 
-下一步建议：
-  • 在当前对话试一次触发，观察 Claude 是否正确路由
-  • 触发失败时调整 description（精准化 when/exclusion）
-  • 内容有遗漏时补充 Step 或 checklist
+### 触发方式
+
+- **自然语**：<触发词例子>
+- **显式**：<`/trellis:<X>` 或 `/trellis-<X>`>
+
+### 下一步建议
+
+- 在当前对话试一次触发，观察 Claude 是否正确路由
+- 触发失败时调整 description（精准化 when/exclusion）
+- 内容有遗漏时补充 Step 或 checklist
 ```
+
+字段行与分组条目必须使用 Markdown 列表项。`•` 是普通字符，Markdown 不识别，缩进两格也不构成代码块，整块会折叠成一段；不得用 `•` 或裸段落行代替列表。
 
 ---
 
