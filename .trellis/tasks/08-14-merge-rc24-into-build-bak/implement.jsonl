@@ -1,0 +1,16 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"约束 build 分支定制逻辑在上游新结构中的薄接入与独立实现方式"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"合并跨越认证、API、service、model、relay 与前端，需要逐层追踪契约"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"统一后端 JSON、DTO、测试、受保护信息和构建质量规则"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"处理 model 与 migration 冲突时保持三数据库兼容"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"保持管理 API、筛选参数和兼容 header 的跨层契约"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"保留 Alpha Search、Responses Compact 和 WebSocket 能力"}
+{"file":".trellis/spec/backend/relay-vision-assist.md","reason":"保留视觉辅助、端点模式和请求体重放边界"}
+{"file":".trellis/spec/backend/relay-websearch-emulation.md","reason":"保留 Claude WebSearch 模拟和敏感信息边界"}
+{"file":".trellis/spec/backend/relay-billing-model.md","reason":"合并映射后模型计费、tiered snapshot、重试和日志"}
+{"file":".trellis/spec/backend/relay-nonstream-keepalive.md","reason":"合并非流式 JSON keepalive 与 rc.24 HTTP transport"}
+{"file":".trellis/spec/backend/channel-user-concurrency.md","reason":"保留通道单用户并发租约和取消传播"}
+{"file":".trellis/spec/backend/message-audit-control-plane.md","reason":"保留消息审计清空、AI 重审和 Tool 降级"}
+{"file":".trellis/spec/backend/token-leak-scan.md","reason":"保留 GitHub Key 泄漏扫描、通知幂等和脱敏"}
+{"file":".trellis/spec/frontend/dashboard-guidelines.md","reason":"迁移 Dashboard 筛选、图表和 i18n 契约到新 web"}
+{"file":".trellis/spec/frontend/base-ui-composition.md","reason":"迁移 Default 定制 UI 时保持 rc.24 Base UI 组合约束"}
+{"file":"pkg/billingexpr/expr.md","reason":"tiered billing 合并必须遵循表达式、token 归一化和结算契约"}

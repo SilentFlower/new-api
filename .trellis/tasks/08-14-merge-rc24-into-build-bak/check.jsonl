@@ -1,0 +1,16 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"检查冲突解决是否恢复旧结构或给上游文件引入过厚定制"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查每项定制能力是否形成完整跨层闭环"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查格式、JSON、DTO、测试和受保护信息规则"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"检查 migration 与查询的 SQLite/MySQL/PostgreSQL 兼容性"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"检查认证、筛选和日志 API 的向后兼容契约"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"验证 Search、Compact 与 Responses WebSocket 无回退"}
+{"file":".trellis/spec/backend/relay-vision-assist.md","reason":"验证视觉辅助和请求体重试稳定性"}
+{"file":".trellis/spec/backend/relay-websearch-emulation.md","reason":"验证 WebSearch 模拟和密钥脱敏"}
+{"file":".trellis/spec/backend/relay-billing-model.md","reason":"验证映射模型、预扣结算、重试和日志一致性"}
+{"file":".trellis/spec/backend/relay-nonstream-keepalive.md","reason":"验证 keepalive 不改变响应、错误和重试语义"}
+{"file":".trellis/spec/backend/channel-user-concurrency.md","reason":"验证租约生命周期、取消传播及 429/503 语义"}
+{"file":".trellis/spec/backend/message-audit-control-plane.md","reason":"验证消息审计和 AI 重审能力完整"}
+{"file":".trellis/spec/backend/token-leak-scan.md","reason":"验证泄漏扫描互斥、通知与敏感信息边界"}
+{"file":".trellis/spec/frontend/dashboard-guidelines.md","reason":"检查 Dashboard 功能和六语言同步"}
+{"file":".trellis/spec/frontend/base-ui-composition.md","reason":"检查迁移后的 Base UI 组件上下文和交互"}
+{"file":"pkg/billingexpr/expr.md","reason":"检查 tiered billing token 归一化、表达式和 quota 转换"}

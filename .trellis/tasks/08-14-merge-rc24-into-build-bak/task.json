@@ -1,0 +1,48 @@
+{
+  "id": "merge-rc24-into-build-bak",
+  "name": "merge-rc24-into-build-bak",
+  "title": "合并 v1.0.0-rc.24 到 build-bak",
+  "description": "完整合并官方 v1.0.0-rc.24，按上游新结构解决冲突并保留 build-bak 定制能力与 ai-fund 鉴权兼容性",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "full-stack",
+  "package": "backend,relay,web",
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-08-14",
+  "completedAt": "2026-08-13",
+  "branch": null,
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "middleware/",
+    "model/",
+    "controller/",
+    "service/",
+    "relay/",
+    "relaykit/",
+    "web/",
+    "web/default/",
+    "web/classic/"
+  ],
+  "notes": "精确合并标签提交 5c3abffe8572aa8a49f15c3916707d2019d66af4；已确认跟随 rc.24 移除 Classic，仅迁移 Default 定制到新 web。",
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-08-14T02:14:16+08:00",
+    "completedSteps": [
+      "完成 v1.0.0-rc.24 精确合并与 96 个冲突消解",
+      "完成 build-bak 定制能力迁移与 ai-fund 认证兼容验证",
+      "完成后端、前端、Git 范围与 Check-All 全量验证",
+      "完成带 [build] 标记的业务合并提交并推送"
+    ],
+    "partialStep": null,
+    "nextStep": "执行 /trellis:finish-work 归档任务",
+    "notes": "rc.24 精确标签提交已作为第二父提交合入；rc.24 之后的 main 提交未带入。"
+  }
+}
