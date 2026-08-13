@@ -149,27 +149,3 @@ func GetLogsSelfStat(c *gin.Context) {
 	})
 	return
 }
-
-// DeleteHistoryLogs 是旧版同步日志清理接口（DELETE /api/log/）。
-// 默认前端使用 POST /api/system-task/log-cleanup，这里保留给 classic 前端兼容。
-func DeleteHistoryLogs(c *gin.Context) {
-	targetTimestamp, _ := strconv.ParseInt(c.Query("target_timestamp"), 10, 64)
-	if targetTimestamp == 0 {
-		c.JSON(http.StatusOK, gin.H{
-			"success": false,
-			"message": "target timestamp is required",
-		})
-		return
-	}
-	count, err := model.DeleteOldLog(c.Request.Context(), targetTimestamp, 100)
-	if err != nil {
-		common.ApiError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"success": true,
-		"message": "",
-		"data":    count,
-	})
-	return
-}

@@ -53,6 +53,9 @@ token.migrate_invalid_ids: "請提供 1-100 個有效的令牌 ID"
 token.migrate_batch_too_many: "單次遷移最多 {{.Max}} 個令牌"
 token.migrate_not_found: "令牌不存在或不屬於當前使用者"
 token.migrate_username_conflict: "用戶名衝突重試次數過多，請修改令牌名後重試"
+token.auto_groups_too_many: "每個令牌最多可選擇 {{.Max}} 個 Auto 分組"
+token.auto_groups_duplicate: "Auto 分組 {{.Group}} 重複"
+token.auto_groups_invalid: "Auto 分組 {{.Group}} 不可用或無權存取"
 
 # Redemption messages
 redemption.name_length: "兌換碼名稱長度必須在1-20之間"

@@ -12,11 +12,12 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	appconstant "github.com/QuantumNous/new-api/constant"
-	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert"
+	relaytypes "github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/service/relayconvert"
 	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
@@ -107,10 +108,10 @@ func newResponsesCompactPassthroughTestInfo(c *gin.Context, mode relayconstant.R
 	}}
 	if mode == relayconstant.ResponsesCompactModeV1Path {
 		info.RelayMode = relayconstant.RelayModeResponsesCompact
-		info.RelayFormat = types.RelayFormatOpenAIResponsesCompaction
+		info.RelayFormat = relaytypes.RelayFormatOpenAIResponsesCompaction
 	} else {
 		info.RelayMode = relayconstant.RelayModeResponses
-		info.RelayFormat = types.RelayFormatOpenAIResponses
+		info.RelayFormat = relaytypes.RelayFormatOpenAIResponses
 	}
 	if mode != relayconstant.ResponsesCompactModeV1Path {
 		if info.ResponsesUsageInfo == nil {
@@ -153,9 +154,9 @@ func TestPrepareResponsesCompactPassthroughRequiresSelectedChannelCapability(t *
 	require.NotNil(t, apiErr)
 	assert.Equal(t, responsesCompactPassthroughDisabledErrorCode, apiErr.GetErrorCode())
 	assert.Equal(t, http.StatusServiceUnavailable, apiErr.StatusCode)
-	assert.True(t, types.IsSkipRetryError(apiErr))
-	assert.False(t, types.IsChannelError(apiErr))
-	assert.False(t, types.IsRecordErrorLog(apiErr))
+	assert.True(t, relaytypes.IsSkipRetryError(apiErr))
+	assert.False(t, relaytypes.IsChannelError(apiErr))
+	assert.False(t, relaytypes.IsRecordErrorLog(apiErr))
 	assert.Equal(t, "gpt-5.6-sol", request.Model)
 }
 
@@ -191,8 +192,8 @@ func TestResponsesCompactPassthroughRejectsUnsupportedAPITypeForEveryHTTPMode(t 
 			apiErr := ResponsesCompactPassthroughHelper(c, info)
 
 			require.NotNil(t, apiErr)
-			assert.Equal(t, types.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
-			assert.True(t, types.IsSkipRetryError(apiErr))
+			assert.Equal(t, relaytypes.ErrorCodeInvalidRequest, apiErr.GetErrorCode())
+			assert.True(t, relaytypes.IsSkipRetryError(apiErr))
 		})
 	}
 }

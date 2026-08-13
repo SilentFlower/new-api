@@ -112,15 +112,9 @@ func exchangeJwtForAccessToken(ctx context.Context, signedJWT string, info *rela
 	data.Set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer")
 	data.Set("assertion", signedJWT)
 
-	var client *http.Client
-	var err error
-	if info.ChannelSetting.Proxy != "" {
-		client, err = service.NewProxyHttpClient(info.ChannelSetting.Proxy)
-		if err != nil {
-			return "", fmt.Errorf("new proxy http client failed: %w", err)
-		}
-	} else {
-		client = service.GetHttpClient()
+	client, err := service.GetHttpClientWithProxySettings(info.ChannelSetting.Proxy, info.ChannelSetting)
+	if err != nil {
+		return "", fmt.Errorf("new proxy http client failed: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, authURL, strings.NewReader(data.Encode()))
@@ -180,7 +174,7 @@ func exchangeJwtForAccessTokenWithProxyContext(ctx context.Context, signedJWT st
 	var client *http.Client
 	var err error
 	if proxy != "" {
-		client, err = service.NewProxyHttpClient(proxy)
+		client, err = service.GetHttpClientWithProxy(proxy)
 		if err != nil {
 			return "", fmt.Errorf("new proxy http client failed: %w", err)
 		}

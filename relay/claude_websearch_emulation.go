@@ -8,12 +8,12 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/dto"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/relay/helper"
 	"github.com/QuantumNous/new-api/relay/websearch"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 )
@@ -78,7 +78,7 @@ func handleClaudeWebSearchEmulation(c *gin.Context, info *relaycommon.RelayInfo,
 
 	info.SetFirstResponseTime()
 	c.Set("claude_web_search_requests", 1)
-	if request.IsStream(c) {
+	if request.IsStream(c.Request) {
 		info.IsStream = true
 		if err := writeClaudeWebSearchStream(c, messageID, toolUseID, modelName, query, searchResp.Results, inputTokens, outputTokens); err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeBadResponseBody, http.StatusInternalServerError, types.ErrOptionWithSkipRetry())

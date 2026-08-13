@@ -52,6 +52,9 @@ token.migrate_invalid_ids: "Please provide 1-100 valid token IDs"
 token.migrate_batch_too_many: "A single migration request can include at most {{.Max}} tokens"
 token.migrate_not_found: "Token does not exist or does not belong to the current user"
 token.migrate_username_conflict: "Too many username conflicts; please rename the token and retry"
+token.auto_groups_too_many: "A token can select at most {{.Max}} Auto groups"
+token.auto_groups_duplicate: "Auto group {{.Group}} is duplicated"
+token.auto_groups_invalid: "Auto group {{.Group}} is unavailable or unauthorized"
 
 # Redemption messages
 redemption.name_length: "Redemption code name length must be between 1-20"

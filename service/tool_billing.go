@@ -80,7 +80,7 @@ func ComputeToolCallQuota(usage ToolCallUsage, groupRatio float64) ToolCallResul
 	}
 
 	if usage.ImageGenerationCall {
-		price := operation_setting.GetGPTImage1PriceOnceCall(usage.ImageGenerationQuality, usage.ImageGenerationSize)
+		price := operation_setting.GetToolPriceForModel("image_generation", usage.ModelName) / 1000
 		quota, clamp := common.QuotaRoundChecked(price * common.QuotaPerUnit * groupRatio)
 		if quotaClamp == nil && clamp != nil {
 			quotaClamp = clamp

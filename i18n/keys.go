@@ -61,6 +61,9 @@ const (
 	MsgTokenMigrateBatchTooMany     = "token.migrate_batch_too_many"
 	MsgTokenMigrateNotFound         = "token.migrate_not_found"
 	MsgTokenMigrateUsernameConflict = "token.migrate_username_conflict"
+	MsgTokenAutoGroupsTooMany       = "token.auto_groups_too_many"
+	MsgTokenAutoGroupsDuplicate     = "token.auto_groups_duplicate"
+	MsgTokenAutoGroupsInvalid       = "token.auto_groups_invalid"
 )
 
 // Redemption related messages

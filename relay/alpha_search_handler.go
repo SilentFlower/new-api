@@ -12,8 +12,8 @@ import (
 	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/types"
 
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/sjson"
@@ -41,19 +41,18 @@ func AlphaSearchHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAP
 		return types.NewError(fmt.Errorf("invalid api type: %d", info.ApiType), types.ErrorCodeInvalidApiType, types.ErrOptionWithSkipRetry())
 	}
 	adaptor.Init(info)
-
 	jsonData, newAPIError := prepareAlphaSearchRequestBody(c, info)
 	if newAPIError != nil {
 		return newAPIError
 	}
-	body, size, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
+	body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
 	}
 	defer closer.Close()
-	info.UpstreamRequestBodySize = size
+	info.UpstreamRequestBodySize = body.Size()
 
-	req, err := newAlphaSearchUpstreamRequest(c, info, adaptor, body, size)
+	req, err := newAlphaSearchUpstreamRequest(c, info, adaptor, body, body.Size())
 	if err != nil {
 		return types.NewOpenAIError(errors.New("upstream error: build request failed"), types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 	}
@@ -171,6 +170,8 @@ func newAlphaSearchUpstreamRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 			req.Host = value
 		}
 	}
+	channel.ApplyUpstreamBodyMetadata(req, body)
+	info.UpstreamRequestURLPath = req.URL.EscapedPath()
 	return req, nil
 }
 
@@ -204,4 +205,20 @@ func safeAlphaSearchResponse(c *gin.Context, response *http.Response) *http.Resp
 		}
 	}
 	return cloned
+}
+
+// buildAlphaSearchRequestBody 在模型发生映射时只改写 model，并保留所有未知字段。
+func buildAlphaSearchRequestBody(rawBody []byte, originModel, upstreamModel string) ([]byte, error) {
+	if len(rawBody) == 0 {
+		return nil, errors.New("empty alpha search request body")
+	}
+	if upstreamModel == "" || upstreamModel == originModel {
+		return rawBody, nil
+	}
+	var body map[string]any
+	if err := common.Unmarshal(rawBody, &body); err != nil {
+		return nil, err
+	}
+	body["model"] = upstreamModel
+	return common.Marshal(body)
 }
