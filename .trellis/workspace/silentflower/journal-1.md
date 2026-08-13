@@ -1021,3 +1021,37 @@
 ### Next Steps
 
 - None - task complete
+
+
+## Session 30: 完成 rc.24 合并与归档
+
+**Date**: 2026-08-14
+**Task**: 完成 rc.24 合并与归档
+**Branch**: `build-bak`
+
+### Summary
+
+将 v1.0.0-rc.24 精确合并到 build-bak，保留定制能力和 ai-fund 认证兼容，完成全量验证、带 [build] 推送、上线审计与任务归档。
+
+### Main Changes
+
+- 完成 96 个冲突的语义消解并保留 build-bak 定制能力
+- 采用 rc.24 的认证会话、RelayKit 与扁平化 web 结构
+- 补充上线数据库迁移、认证配置、多节点顺序和回滚说明
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `9af37f5b28dd61fc99e01465e580640b6e908ceb` | (see git log) |
+| `d17d0686e6153516366984880ff1cf626ee2a72d` | (see git log) |
+
+### Testing
+
+- [OK] 根模块与 relaykit 的 Go 测试和 vet 通过
+- [OK] 前端测试、类型检查、格式检查、i18n 与生产构建通过
+- [OK] 认证、并发、Compact、WebSocket、计费等定向与 race 验证通过
+
+### Status
+
+[OK] **Completed**
