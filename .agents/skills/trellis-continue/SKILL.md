@@ -32,7 +32,7 @@ Treat the structured result as advisory recovery evidence only:
 - For `status=candidates`, relay each healthy candidate with its `taskStatus` plus necessary `invalidCandidates` or `scanWarnings`, and suggest an explicit rebind when appropriate. After explicit rebind, a completed candidate uses the same Push preflight. Never rebind the session or task automatically.
 - For `status=no-progress` or `status=no-current-task`, continue without inventing saved progress. For `status=error`, report the structured blocker instead of guessing.
 
-Progress never overrides the task `status`, planning artifacts, workflow ordering, auto-loop runtime, or Git publication evidence. Do not inspect or classify completed Git recovery here, infer a Phase from progress, restore a previous push mode, or resume Git/commit orchestration from progress text.
+Progress never overrides the task `status`, planning artifacts, workflow ordering, auto-loop runtime, or Git publication evidence. Do not inspect or classify completed Git recovery here. Do not infer a Phase from progress, restore a previous push mode, or resume Git/commit orchestration from progress text.
 
 To rework a completed task, first obtain an explicit user decision, then run:
 

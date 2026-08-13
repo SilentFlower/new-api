@@ -598,6 +598,8 @@ For untracked work, route reads only the personal pref helper and never creates 
 
 Route preference recovery, fallback choices, and runtime evidence belong to `trellis-route`; do not reproduce them here.
 
+When the implementation scope contains a Maven reactor, load `trellis-maven-verify` before composing validation commands. Iteration may use its `quick` source-stale plan with necessary upstreams; handoff requires a successful `final` plan/evidence that covers confirmed changed modules, upstreams, consumers, tests, and artifacts, or an explicit blocked/partial explanation. Final defaults to conservative compilation; use source-stale final only when task/spec/user evidence confirms an internal low-risk change with no public API/DTO/constant, annotation processor, POM, resource-contract, or cross-module protocol impact. Do not broaden to `clean`, `package`, `install`, `deploy`, or full-reactor Maven by habit. Decide whether to pass `--threads` from the current reactor shape, plugin thread safety, shared test resources, and machine capacity; do not run extra Maven builds merely to compare thread counts. Report the evidence path, lifecycle level, compile strategy, covered modules, skipped bindings, and residual risk instead of only saying "compile passed".
+
 After implementation and focused verification, resolve the next action in this order:
 
 For untracked work, focused validation remains owned by the implementation path. When it is complete, advance the cursor to `check`; a failed or partial validation stays at `implement`.
