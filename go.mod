@@ -59,7 +59,7 @@ require (
 	gopkg.in/yaml.v3 v3.0.1
 	gorm.io/driver/mysql v1.4.3
 	gorm.io/driver/postgres v1.5.2
-	gorm.io/gorm v1.25.12
+	gorm.io/gorm v1.25.2
 )
 
 require (
@@ -74,9 +74,6 @@ require (
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.7.1 // indirect
 	github.com/goccy/go-yaml v1.19.2 // indirect
-	github.com/gorilla/context v1.1.2 // indirect
-	github.com/gorilla/securecookie v1.1.2 // indirect
-	github.com/gorilla/sessions v1.4.0 // indirect
 	github.com/hashicorp/go-version v1.7.0 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
 	github.com/paulmach/orb v0.11.1 // indirect
@@ -178,7 +175,6 @@ require (
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.32.0
 	github.com/QuantumNous/new-api/relaykit v0.0.0
-	github.com/gin-contrib/sessions v1.1.0
 )
 
 replace github.com/QuantumNous/new-api/relaykit => ./relaykit
