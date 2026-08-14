@@ -406,6 +406,8 @@ type VisionAssistResult struct {
 
 ```go
 func extractVisionAssistUserMessage(request dto.Request) string
+func extractVisionAssistUserTexts(request dto.Request) []visionAssistUserText
+func resolveVisionAssistUserMessages(request dto.Request, images []VisionAssistImage) map[int]string
 func normalizedVisionAssistMultiImageMode(setting dto.ChannelVisionAssistSettings) string
 func buildVisionAssistUnits(images []VisionAssistImage, multiImageMode string) []visionAssistUnit
 func buildVisionAssistRequest(setting dto.ChannelVisionAssistSettings, prompt string, userMessage string, images []VisionAssistImage) *dto.GeneralOpenAIRequest
@@ -423,7 +425,10 @@ vision_assist_multi_image_mode: VisionAssistMultiImageMode
 ### 3. Contracts
 
 - 用户意图解析：
-  - 从请求尾部向前查找最新的非空用户文本；最新图片消息无文本时继续回溯。
+  - `extractVisionAssistUserMessage` 保留“返回最新非空用户文本”的兼容语义；`ApplyVisionAssist` 必须通过 `resolveVisionAssistUserMessages` 为每个识图单元解析自己的用户问题。
+  - 图片默认只绑定同一 `MessageIndex` 的非空用户文本，不能继承更早消息的问题；新一轮只发图片时应使用通用识图规则。
+  - 仅当最新用户文本位于全部图片之后，也就是纯文本追问没有携带新图片时，才把该文本绑定到最近一组历史图片并重新识图。
+  - 最新用户消息携带新图片时，最新问题只能绑定该消息的图片；历史图片继续使用各自原始问题和缓存键，不能被最新问题触发重复识别。
   - OpenAI Chat 使用 `Message.ParseContent()`，Claude 兼容字符串内容和 `type=text` 内容块，Responses 兼容字符串 `input` 和普通 `role=user` 消息。
   - `function_call_output`、`custom_tool_call_output`、system、assistant、tool 内容不得成为用户问题。
   - 完全没有用户文本时返回空字符串，辅助请求退化为“识图规则 + 图片”。
@@ -435,7 +440,7 @@ vision_assist_multi_image_mode: VisionAssistMultiImageMode
   - 合并调用失败时遵循现有重试和失败策略，不隐式降级为逐张识别。
   - 合并结果只写回一次“多图综合信息”；图片数、缓存命中数和失败数仍按实际图片数量统计。
 - 前端新建渠道默认 `combined`；编辑历史渠道时，缺失或非法 `multi_image_mode` 必须显示为 `separate`。读取、切换和保存都使用同一组 `separate | combined` 值。
-- 缓存键必须包含辅助渠道、辅助模型、识图规则哈希、规范化用户文本哈希、规范化多图模式，以及当前识图单元内按顺序排列的图片源哈希、detail 和 MIME。
+- 缓存键必须按识图单元生成，并包含辅助渠道、辅助模型、识图规则哈希、该单元用户文本哈希、规范化多图模式，以及当前识图单元内按顺序排列的图片源哈希、detail 和 MIME；不得用请求级最新问题统一生成全部历史图片的缓存键。
 - 缓存值只保存识图文本；日志不得新增用户原文、请求正文或图片内容。
 - 写回主请求时必须保留原始用户文本和非图片内容顺序，使用中性的“图片相关信息”说明，并要求目标模型保留识图结果中的不确定性。
 
@@ -444,7 +449,9 @@ vision_assist_multi_image_mode: VisionAssistMultiImageMode
 | 条件 | 行为 |
 | --- | --- |
 | 用户发送图片并提问 | 辅助请求同时包含识图规则、用户问题和图片，且只有一条 user 消息 |
-| 最新用户消息只有图片 | 回溯最近一条非空用户文本 |
+| 新一轮用户消息只有图片 | 不继承旧问题，使用通用识图规则处理新图片 |
+| 最新用户消息只有文本，图片均来自历史消息 | 把最新文本视为对最近一组历史图片的追问，仅该图片组使用新问题重新识图 |
+| 最新用户消息同时包含文本和新图片 | 新问题只绑定新图片；历史图片按原问题命中缓存，不重复调用辅助模型 |
 | 请求完全没有用户文本 | 不生成用户问题区块，继续执行通用识图 |
 | Responses 工具输出含文本和图片 | 图片可以触发视觉辅助，工具输出文本不得成为用户问题 |
 | `multi_image_mode=combined` | 同一消息多图一次调用，不同消息分别调用 |
@@ -457,16 +464,21 @@ vision_assist_multi_image_mode: VisionAssistMultiImageMode
 ### 5. Good/Base/Bad Cases
 
 - Good: 用户在同一消息上传两张图片并询问差异，渠道配置 `combined`；辅助模型一次看到问题和两张图片，下游只收到一段综合结果。
+- Good: 第二轮发送“这个呢？”和一张新图片；历史图片命中第一轮缓存，只调用辅助模型识别新图片，`separate` 与 `combined` 都不得跨消息重复识别。
 - Good: 历史渠道没有 `multi_image_mode`；编辑表单显示逐张识别，后端也继续逐张调用。
 - Base: 单图请求在 `combined` 模式下仍只有一个识图单元，写回使用普通图片编号语义。
-- Base: 同图同问题重复请求命中缓存；仅问题变化时重新识图。
+- Base: 纯文本追问历史图片时，最近图片组使用新问题重新识图；其他历史图片仍按原问题复用缓存。
 - Bad: 对配置先执行 `strings.ToLower(strings.TrimSpace(value))`，会把本应非法回退的 `COMBINED` 或带空格值错误放行为合并识别。
 - Bad: 把请求中的全部图片合成一个单元，会跨原始消息合并不相关图片并破坏写回定位。
+- Bad: 把请求级最新用户问题传给全部识图单元，会改变历史图片缓存键，导致每轮对话重复调用辅助模型。
 - Bad: 缓存键只包含图片，不包含用户问题和多图模式，会把通用描述或逐张结果复用到不同问题和合并请求。
 
 ### 6. Tests Required
 
 - `TestExtractVisionAssistUserMessage`: 覆盖 Chat、Claude、Responses、回溯、空文本和工具输出排除。
+- `TestResolveVisionAssistUserMessagesKeepsHistoricalIntent`: 断言 Chat 与 Responses 中每组图片保留所属消息的问题。
+- `TestResolveVisionAssistUserMessagesDoesNotReuseOlderQuestionForNewImage`: 断言新一轮图片消息无文本时不继承旧问题。
+- `TestApplyVisionAssistDoesNotReidentifyHistoricalClaudeImage`: 断言第二轮携带新图片时历史图片命中缓存、辅助调用总数只增加一次，并覆盖 `combined` 模式。
 - `TestBuildVisionAssistRequestIncludesUserMessage`: 断言单 user 消息以及规则、问题、图片的内容顺序。
 - `TestApplyVisionAssistUsesDescriptionForMultipleImagesSeparatelyByDefault`: 断言缺省配置保持逐张调用。
 - `TestApplyVisionAssistCombinesImagesFromSameMessage`: 断言同消息多图只调用一次、只写回一次并按实际图片数记日志。
@@ -505,6 +517,22 @@ func normalizedVisionAssistMultiImageMode(setting dto.ChannelVisionAssistSetting
 		return VisionAssistMultiImageModeCombined
 	}
 	return VisionAssistMultiImageModeSeparate
+}
+```
+
+用户问题也不能按请求统一复用：
+
+```go
+// Wrong: 最新问题会污染全部历史图片的缓存键。
+userMessage := extractVisionAssistUserMessage(request)
+for _, unit := range units {
+	cacheKey := buildVisionAssistCacheKey(setting, prompt, userMessage, multiImageMode, unit.Images)
+}
+
+// Correct: 每个识图单元使用所属消息的问题。
+userMessages := resolveVisionAssistUserMessages(request, images)
+for i := range units {
+	units[i].UserMessage = userMessages[units[i].Images[0].MessageIndex]
 }
 ```
 

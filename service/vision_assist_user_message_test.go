@@ -114,6 +114,75 @@ func TestExtractVisionAssistUserMessage(t *testing.T) {
 	}
 }
 
+func TestResolveVisionAssistUserMessagesKeepsHistoricalIntent(t *testing.T) {
+	responsesInput, err := common.Marshal([]any{
+		map[string]any{
+			"type": "message",
+			"role": "user",
+			"content": []any{
+				map[string]any{"type": "input_text", "text": "第一张图是谁？"},
+				map[string]any{"type": "input_image", "image_url": "data:image/png;base64,first"},
+			},
+		},
+		map[string]any{"type": "message", "role": "assistant", "content": "第一轮回答"},
+		map[string]any{
+			"type": "message",
+			"role": "user",
+			"content": []any{
+				map[string]any{"type": "input_text", "text": "这个呢？"},
+				map[string]any{"type": "input_image", "image_url": "data:image/png;base64,second"},
+			},
+		},
+	})
+	require.NoError(t, err)
+	images := []VisionAssistImage{{MessageIndex: 0}, {MessageIndex: 2}}
+	tests := []struct {
+		name    string
+		request dto.Request
+	}{
+		{
+			name: "OpenAI Chat",
+			request: &dto.GeneralOpenAIRequest{Messages: []dto.Message{
+				{Role: "user", Content: []any{
+					map[string]any{"type": "text", "text": "第一张图是谁？"},
+					map[string]any{"type": "image_url", "image_url": "data:image/png;base64,first"},
+				}},
+				{Role: "assistant", Content: "第一轮回答"},
+				{Role: "user", Content: []any{
+					map[string]any{"type": "text", "text": "这个呢？"},
+					map[string]any{"type": "image_url", "image_url": "data:image/png;base64,second"},
+				}},
+			}},
+		},
+		{
+			name:    "OpenAI Responses",
+			request: &dto.OpenAIResponsesRequest{Input: responsesInput},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, map[int]string{0: "第一张图是谁？", 2: "这个呢？"}, resolveVisionAssistUserMessages(tt.request, images))
+		})
+	}
+}
+
+func TestResolveVisionAssistUserMessagesDoesNotReuseOlderQuestionForNewImage(t *testing.T) {
+	request := &dto.ClaudeRequest{Messages: []dto.ClaudeMessage{
+		{Role: "user", Content: "第一张图是谁？"},
+		{Role: "assistant", Content: "第一轮回答"},
+		{
+			Role: "user",
+			Content: []dto.ClaudeMediaMessage{{
+				Type:   "image",
+				Source: &dto.ClaudeMessageSource{Type: "base64", MediaType: "image/png", Data: "second-image"},
+			}},
+		},
+	}}
+
+	assert.Empty(t, resolveVisionAssistUserMessages(request, []VisionAssistImage{{MessageIndex: 2}}))
+}
+
 func TestBuildVisionAssistRequestIncludesUserMessage(t *testing.T) {
 	setting := dto.ChannelVisionAssistSettings{AssistModel: "vision-model"}
 	request := buildVisionAssistRequest(setting, "识图规则", "  这个人物是谁？  ", []VisionAssistImage{{
@@ -228,6 +297,89 @@ func TestApplyVisionAssistSeparatesCacheByUserMessage(t *testing.T) {
 		assert.Contains(t, common.GetJsonString(request.Messages[0].Content), "[图片相关信息]")
 		assert.NotContains(t, common.GetJsonString(request.Messages[0].Content), "image_url")
 	}
+}
+
+func TestApplyVisionAssistDoesNotReidentifyHistoricalClaudeImage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	require.NoError(t, getVisionAssistCache().Purge())
+	t.Cleanup(func() {
+		assert.NoError(t, getVisionAssistCache().Purge())
+	})
+	strip := true
+	setting := dto.ChannelSettings{VisionAssist: dto.ChannelVisionAssistSettings{
+		Enabled:         true,
+		AssistChannelId: 32,
+		AssistModel:     "vision-history-cache-test",
+		StripImage:      &strip,
+		MultiImageMode:  VisionAssistMultiImageModeCombined,
+	}}
+	callCount := 0
+	seenSources := make([]string, 0, 2)
+	caller := func(ctx *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, images []VisionAssistImage) ([]VisionAssistResult, *types.NewAPIError) {
+		callCount++
+		require.Len(t, images, 1)
+		source := images[0].Source.GetRawData()
+		seenSources = append(seenSources, source)
+		contents := request.Messages[0].ParseContent()
+		resultText := "第一张图片信息"
+		if source == "second-image" {
+			resultText = "第二张图片信息"
+			require.Len(t, contents, 4)
+			assert.Contains(t, contents[1].Text, "这个呢？")
+		} else {
+			require.Len(t, contents, 3)
+		}
+		return []VisionAssistResult{{Image: images[0], Text: resultText}}, nil
+	}
+	apply := func(request *dto.ClaudeRequest) (*gin.Context, *dto.ClaudeRequest) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		info := &relaycommon.RelayInfo{
+			Request:         request,
+			OriginModelName: "target",
+			ChannelMeta: &relaycommon.ChannelMeta{
+				ChannelId:         3,
+				UpstreamModelName: "target",
+				ChannelSetting:    setting,
+			},
+		}
+		require.Nil(t, ApplyVisionAssist(c, info, caller))
+		return c, request
+	}
+
+	apply(&dto.ClaudeRequest{Messages: []dto.ClaudeMessage{{
+		Role: "user",
+		Content: []dto.ClaudeMediaMessage{{
+			Type:   "image",
+			Source: &dto.ClaudeMessageSource{Type: "base64", MediaType: "image/png", Data: "first-image"},
+		}},
+	}}})
+	secondContext, secondRequest := apply(&dto.ClaudeRequest{Messages: []dto.ClaudeMessage{
+		{
+			Role: "user",
+			Content: []dto.ClaudeMediaMessage{{
+				Type:   "image",
+				Source: &dto.ClaudeMessageSource{Type: "base64", MediaType: "image/png", Data: "first-image"},
+			}},
+		},
+		{Role: "assistant", Content: "第一轮回答"},
+		{
+			Role: "user",
+			Content: []dto.ClaudeMediaMessage{
+				{Type: dto.ContentTypeText, Text: common.GetPointer("这个呢？")},
+				{Type: "image", Source: &dto.ClaudeMessageSource{Type: "base64", MediaType: "image/png", Data: "second-image"}},
+			},
+		},
+	}})
+
+	assert.Equal(t, 2, callCount)
+	assert.Equal(t, []string{"first-image", "second-image"}, seenSources)
+	assert.Contains(t, common.GetJsonString(secondRequest.Messages[0].Content), "第一张图片信息")
+	assert.Contains(t, common.GetJsonString(secondRequest.Messages[2].Content), "这个呢？")
+	assert.Contains(t, common.GetJsonString(secondRequest.Messages[2].Content), "第二张图片信息")
+	logOther, ok := common.GetContextKeyType[map[string]interface{}](secondContext, constant.ContextKeyLogOther)
+	require.True(t, ok)
+	assert.Equal(t, 1, logOther["vision_assist_cache_hits"])
+	assert.Equal(t, 2, logOther["vision_assist_image_count"])
 }
 
 func TestApplyVisionAssistUsesDescriptionForMultipleImagesSeparatelyByDefault(t *testing.T) {

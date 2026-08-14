@@ -66,7 +66,13 @@ type VisionAssistResult struct {
 }
 
 type visionAssistUnit struct {
-	Images []VisionAssistImage
+	Images      []VisionAssistImage
+	UserMessage string
+}
+
+type visionAssistUserText struct {
+	MessageIndex int
+	Text         string
 }
 
 type visionAssistCacheValue struct {
@@ -115,7 +121,6 @@ func ApplyVisionAssist(c *gin.Context, info *relaycommon.RelayInfo, caller Visio
 	}
 
 	prompt := normalizedVisionAssistPrompt(setting)
-	userMessage := extractVisionAssistUserMessage(request)
 	ttl := normalizedVisionAssistTTL(setting)
 	stats := visionAssistExecutionStats{
 		EndpointMode:   normalizedVisionAssistEndpointMode(setting),
@@ -125,13 +130,19 @@ func ApplyVisionAssist(c *gin.Context, info *relaycommon.RelayInfo, caller Visio
 	}
 	multiImageMode := normalizedVisionAssistMultiImageMode(setting)
 	units := buildVisionAssistUnits(images, multiImageMode)
+	userMessages := resolveVisionAssistUserMessages(request, images)
+	for i := range units {
+		if len(units[i].Images) > 0 {
+			units[i].UserMessage = userMessages[units[i].Images[0].MessageIndex]
+		}
+	}
 	results := make([]VisionAssistResult, 0, len(units))
 	missing := make([]visionAssistUnit, 0, len(units))
 	requestCache := map[string]string{}
 	missingByCacheKey := map[string][]visionAssistUnit{}
 
 	for _, unit := range units {
-		cacheKey := buildVisionAssistCacheKey(setting, prompt, userMessage, multiImageMode, unit.Images)
+		cacheKey := buildVisionAssistCacheKey(setting, prompt, unit.UserMessage, multiImageMode, unit.Images)
 		if text, ok := requestCache[cacheKey]; ok {
 			results = append(results, newVisionAssistResult(unit, text, true, false))
 			continue
@@ -152,7 +163,7 @@ func ApplyVisionAssist(c *gin.Context, info *relaycommon.RelayInfo, caller Visio
 	}
 
 	if len(missing) > 0 {
-		executionResults := executeVisionAssistMissingUnits(c, info, setting, prompt, userMessage, missing, caller)
+		executionResults := executeVisionAssistMissingUnits(c, info, setting, prompt, missing, caller)
 		var firstErr *types.NewAPIError
 		for _, item := range executionResults {
 			if stats.ResolvedEndpointMode == "" && item.resolvedEndpointMode != "" {
@@ -160,7 +171,7 @@ func ApplyVisionAssist(c *gin.Context, info *relaycommon.RelayInfo, caller Visio
 			}
 			stats.RetryAttempts += item.retryAttempts
 			if item.err != nil {
-				cacheKey := buildVisionAssistCacheKey(setting, prompt, userMessage, multiImageMode, item.unit.Images)
+				cacheKey := buildVisionAssistCacheKey(setting, prompt, item.unit.UserMessage, multiImageMode, item.unit.Images)
 				stats.FailedImageCount += countVisionAssistUnitImages(missingByCacheKey[cacheKey])
 				if firstErr == nil {
 					firstErr = item.err
@@ -174,7 +185,7 @@ func ApplyVisionAssist(c *gin.Context, info *relaycommon.RelayInfo, caller Visio
 				if result.Text == "" {
 					continue
 				}
-				cacheKey := buildVisionAssistCacheKey(setting, prompt, userMessage, multiImageMode, item.unit.Images)
+				cacheKey := buildVisionAssistCacheKey(setting, prompt, item.unit.UserMessage, multiImageMode, item.unit.Images)
 				requestCache[cacheKey] = result.Text
 				results = append(results, result)
 				for _, duplicatedUnit := range missingByCacheKey[cacheKey][1:] {
@@ -263,7 +274,7 @@ func countVisionAssistUnitImages(units []visionAssistUnit) int {
 	return count
 }
 
-func executeVisionAssistMissingUnits(c *gin.Context, info *relaycommon.RelayInfo, setting dto.ChannelVisionAssistSettings, prompt string, userMessage string, missing []visionAssistUnit, caller VisionAssistCaller) []visionAssistUnitAttemptResult {
+func executeVisionAssistMissingUnits(c *gin.Context, info *relaycommon.RelayInfo, setting dto.ChannelVisionAssistSettings, prompt string, missing []visionAssistUnit, caller VisionAssistCaller) []visionAssistUnitAttemptResult {
 	results := make([]visionAssistUnitAttemptResult, len(missing))
 	maxConcurrency := normalizedVisionAssistMaxConcurrency(setting)
 	if maxConcurrency > len(missing) {
@@ -271,7 +282,7 @@ func executeVisionAssistMissingUnits(c *gin.Context, info *relaycommon.RelayInfo
 	}
 	if maxConcurrency <= 1 {
 		for i, unit := range missing {
-			results[i] = executeVisionAssistUnitWithRetry(c, info, setting, prompt, userMessage, unit, caller)
+			results[i] = executeVisionAssistUnitWithRetry(c, info, setting, prompt, unit, caller)
 		}
 		return results
 	}
@@ -283,7 +294,7 @@ func executeVisionAssistMissingUnits(c *gin.Context, info *relaycommon.RelayInfo
 		go func() {
 			defer wg.Done()
 			for index := range jobs {
-				results[index] = executeVisionAssistUnitWithRetry(c, info, setting, prompt, userMessage, missing[index], caller)
+				results[index] = executeVisionAssistUnitWithRetry(c, info, setting, prompt, missing[index], caller)
 			}
 		}()
 	}
@@ -295,7 +306,7 @@ func executeVisionAssistMissingUnits(c *gin.Context, info *relaycommon.RelayInfo
 	return results
 }
 
-func executeVisionAssistUnitWithRetry(c *gin.Context, info *relaycommon.RelayInfo, setting dto.ChannelVisionAssistSettings, prompt string, userMessage string, unit visionAssistUnit, caller VisionAssistCaller) visionAssistUnitAttemptResult {
+func executeVisionAssistUnitWithRetry(c *gin.Context, info *relaycommon.RelayInfo, setting dto.ChannelVisionAssistSettings, prompt string, unit visionAssistUnit, caller VisionAssistCaller) visionAssistUnitAttemptResult {
 	retryCount := normalizedVisionAssistRetryCount(setting)
 	backoff := normalizedVisionAssistRetryBackoff(setting)
 	var lastErr *types.NewAPIError
@@ -305,7 +316,7 @@ func executeVisionAssistUnitWithRetry(c *gin.Context, info *relaycommon.RelayInf
 		if attempt > 0 {
 			retryAttempts++
 		}
-		assistRequest := buildVisionAssistRequest(setting, prompt, userMessage, unit.Images)
+		assistRequest := buildVisionAssistRequest(setting, prompt, unit.UserMessage, unit.Images)
 		attemptCtx := cloneVisionAssistContext(c)
 		newResults, apiErr := caller(attemptCtx, info, assistRequest, unit.Images)
 		if resolved := common.GetContextKeyString(attemptCtx, constant.ContextKeyVisionAssistEndpointMode); resolved != "" {
@@ -539,12 +550,21 @@ func normalizedVisionAssistPrompt(setting dto.ChannelVisionAssistSettings) strin
 }
 
 func extractVisionAssistUserMessage(request dto.Request) string {
+	userTexts := extractVisionAssistUserTexts(request)
+	if len(userTexts) == 0 {
+		return ""
+	}
+	return userTexts[len(userTexts)-1].Text
+}
+
+func extractVisionAssistUserTexts(request dto.Request) []visionAssistUserText {
+	userTexts := make([]visionAssistUserText, 0)
 	switch req := request.(type) {
 	case *dto.GeneralOpenAIRequest:
 		if req == nil {
-			return ""
+			return userTexts
 		}
-		for i := len(req.Messages) - 1; i >= 0; i-- {
+		for i := range req.Messages {
 			if !strings.EqualFold(strings.TrimSpace(req.Messages[i].Role), "user") {
 				continue
 			}
@@ -558,20 +578,20 @@ func extractVisionAssistUserMessage(request dto.Request) string {
 				}
 			}
 			if len(parts) > 0 {
-				return strings.Join(parts, "\n")
+				userTexts = append(userTexts, visionAssistUserText{MessageIndex: i, Text: strings.Join(parts, "\n")})
 			}
 		}
 	case *dto.ClaudeRequest:
 		if req == nil {
-			return ""
+			return userTexts
 		}
-		for i := len(req.Messages) - 1; i >= 0; i-- {
+		for i := range req.Messages {
 			if !strings.EqualFold(strings.TrimSpace(req.Messages[i].Role), "user") {
 				continue
 			}
 			if req.Messages[i].IsStringContent() {
 				if text := strings.TrimSpace(req.Messages[i].GetStringContent()); text != "" {
-					return text
+					userTexts = append(userTexts, visionAssistUserText{MessageIndex: i, Text: text})
 				}
 				continue
 			}
@@ -589,28 +609,28 @@ func extractVisionAssistUserMessage(request dto.Request) string {
 				}
 			}
 			if len(parts) > 0 {
-				return strings.Join(parts, "\n")
+				userTexts = append(userTexts, visionAssistUserText{MessageIndex: i, Text: strings.Join(parts, "\n")})
 			}
 		}
 	case *dto.OpenAIResponsesRequest:
 		if req == nil || len(req.Input) == 0 {
-			return ""
+			return userTexts
 		}
 		if common.GetJsonType(req.Input) == "string" {
 			var text string
-			if err := common.Unmarshal(req.Input, &text); err == nil {
-				return strings.TrimSpace(text)
+			if err := common.Unmarshal(req.Input, &text); err == nil && strings.TrimSpace(text) != "" {
+				userTexts = append(userTexts, visionAssistUserText{MessageIndex: 0, Text: strings.TrimSpace(text)})
 			}
-			return ""
+			return userTexts
 		}
 		if common.GetJsonType(req.Input) != "array" {
-			return ""
+			return userTexts
 		}
 		var inputItems []any
 		if err := common.Unmarshal(req.Input, &inputItems); err != nil {
-			return ""
+			return userTexts
 		}
-		for i := len(inputItems) - 1; i >= 0; i-- {
+		for i := range inputItems {
 			inputItem, ok := inputItems[i].(map[string]any)
 			if !ok {
 				continue
@@ -624,7 +644,7 @@ func extractVisionAssistUserMessage(request dto.Request) string {
 			}
 			if text, ok := inputItem["content"].(string); ok {
 				if text = strings.TrimSpace(text); text != "" {
-					return text
+					userTexts = append(userTexts, visionAssistUserText{MessageIndex: i, Text: text})
 				}
 				continue
 			}
@@ -643,11 +663,44 @@ func extractVisionAssistUserMessage(request dto.Request) string {
 				}
 			}
 			if len(parts) > 0 {
-				return strings.Join(parts, "\n")
+				userTexts = append(userTexts, visionAssistUserText{MessageIndex: i, Text: strings.Join(parts, "\n")})
 			}
 		}
 	}
-	return ""
+	return userTexts
+}
+
+func resolveVisionAssistUserMessages(request dto.Request, images []VisionAssistImage) map[int]string {
+	userMessages := make(map[int]string)
+	if len(images) == 0 {
+		return userMessages
+	}
+	userTexts := extractVisionAssistUserTexts(request)
+	userTextByMessage := make(map[int]string, len(userTexts))
+	for _, userText := range userTexts {
+		userTextByMessage[userText.MessageIndex] = userText.Text
+	}
+	latestImageMessageIndex := images[0].MessageIndex
+	for _, image := range images {
+		if image.MessageIndex > latestImageMessageIndex {
+			latestImageMessageIndex = image.MessageIndex
+		}
+		if _, ok := userMessages[image.MessageIndex]; ok {
+			continue
+		}
+		if userText := userTextByMessage[image.MessageIndex]; userText != "" {
+			userMessages[image.MessageIndex] = userText
+		}
+	}
+	if len(userTexts) == 0 {
+		return userMessages
+	}
+	latestUserText := userTexts[len(userTexts)-1]
+	if latestUserText.MessageIndex > latestImageMessageIndex {
+		// 只有最新用户消息没有图片时，才把它视为对最近一组历史图片的追问。
+		userMessages[latestImageMessageIndex] = latestUserText.Text
+	}
+	return userMessages
 }
 
 func normalizedVisionAssistTTL(setting dto.ChannelVisionAssistSettings) time.Duration {
