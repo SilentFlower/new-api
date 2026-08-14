@@ -1,0 +1,37 @@
+{
+  "id": "chat-websearch-emulation",
+  "name": "chat-websearch-emulation",
+  "title": "扩展 WebSearch 模拟到 Chat Completions",
+  "description": "为 OpenAI /v1/chat/completions 增加渠道级 WebSearch 本地模拟，复用现有 Tavily/AnySearch provider、渠道配置与计费链路。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-08-14",
+  "completedAt": "2026-08-14",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-08-14T14:40:13+08:00",
+    "completedSteps": [
+      "完成 Chat Completions WebSearch 本地模拟",
+      "完成单次 WebSearch 计费保护与回归测试",
+      "完成 full Check-All 和规范同步"
+    ],
+    "partialStep": null,
+    "nextStep": "等待显式 finish-work",
+    "notes": "定向测试、go test ./... -count=1、go vet ./... 和 git diff --check 均通过。"
+  }
+}

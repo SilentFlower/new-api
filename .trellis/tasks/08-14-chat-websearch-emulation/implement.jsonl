@@ -1,0 +1,1 @@
+{"file":".trellis/spec/backend/relay-websearch-emulation.md","reason":"实现必须保持现有 Claude WebSearch provider、短路、请求体稳定性、错误和计费契约，并在其上扩展 Chat 协议"}
