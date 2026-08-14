@@ -1055,3 +1055,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 31: 完成 Chat Completions WebSearch 模拟
+
+**Date**: 2026-08-14
+**Task**: 完成 Chat Completions WebSearch 模拟
+**Branch**: `build-bak`
+
+### Summary
+
+为 Chat Completions 增加渠道级 WebSearch 本地模拟，复用现有搜索 provider，并完成单次计费保护、全量验证、规范同步与任务归档。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `cd81f1075` | (see git log) |
+
+### Status
+
+[OK] **Completed**
