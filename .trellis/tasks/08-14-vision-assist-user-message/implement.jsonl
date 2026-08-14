@@ -1,0 +1,8 @@
+{"file":".trellis/spec/backend/relay-vision-assist.md","reason":"约束辅助请求保持单条 user 多模态消息、跨端点转换、Responses 工具输出、缓存和写回行为。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"约束 JSON 封装、测试断言、日志隐私和变更质量。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"确认视觉辅助业务继续收敛在 service 层，不扩散到无关模块。"}
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"约束 build 分支定制使用现有独立领域文件并保持最小冲突面。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查 Chat、Claude、Responses 到辅助请求、缓存和下游写回的数据流边界。"}
+{"file": "web/AGENTS.md", "reason": "新增渠道表单字段，需遵循前端 TypeScript、表单、测试与构建规范。"}
+{"file": ".trellis/spec/frontend/i18n-merge-guidelines.md", "reason": "新增多图模式用户可见文案，必须通过脚本同步七语言并执行源码缺键扫描。"}
+{"file": ".trellis/spec/frontend/base-ui-composition.md", "reason": "新增渠道模式选择控件，需遵循 Base UI 受控组件和组合上下文契约。"}

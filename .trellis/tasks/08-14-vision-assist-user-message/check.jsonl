@@ -1,0 +1,7 @@
+{"file":".trellis/spec/backend/relay-vision-assist.md","reason":"核对单 user 消息、跨协议转换、Responses 工具输出、缓存隔离和写回契约。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"核对 JSON 使用、测试质量、日志隐私和全量验证。"}
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"核对改动是否仅落在视觉辅助领域边界并保持上游同步友好。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"反向扫描用户文本从原请求到辅助请求、缓存和下游写回的完整数据流。"}
+{"file": "web/AGENTS.md", "reason": "核对渠道表单字段、类型、测试、lint、typecheck 和生产构建。"}
+{"file": ".trellis/spec/frontend/i18n-merge-guidelines.md", "reason": "核对七语言键完整性、源码缺键扫描和 i18n 同步报告。"}
+{"file": ".trellis/spec/frontend/base-ui-composition.md", "reason": "核对多图模式选择控件的 Base UI 组合与受控值契约。"}

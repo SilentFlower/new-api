@@ -1,0 +1,42 @@
+{
+  "id": "vision-assist-user-message",
+  "name": "vision-assist-user-message",
+  "title": "视觉辅助引入用户原始问题",
+  "description": "让视觉辅助模型同时感知当前用户原始问题，按用户意图生成识图结果，并保证缓存、跨协议转换和下游写回语义正确。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-08-14",
+  "completedAt": "2026-08-14",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "service/vision_assist.go",
+    "service/vision_assist_test.go",
+    "service/vision_assist_user_message_test.go",
+    ".trellis/spec/backend/relay-vision-assist.md"
+  ],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-08-14T16:54:12+08:00",
+    "completedSteps": [
+      "实现视觉辅助携带用户原始问题",
+      "增加渠道级逐张与合并识别模式并默认合并",
+      "完成全量 Check-All 与规范同步"
+    ],
+    "partialStep": null,
+    "nextStep": "按需运行 trellis-finish-work 归档任务",
+    "notes": ""
+  }
+}
