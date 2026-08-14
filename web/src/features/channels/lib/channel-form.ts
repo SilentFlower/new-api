@@ -451,6 +451,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   http2_connection_shards: 1,
   pass_through_body_enabled: false,
   ...BUILD_CHANNEL_SETTING_DEFAULTS,
+  vision_assist_multi_image_mode: 'combined',
   system_prompt: '',
   system_prompt_override: false,
   // Type-specific settings

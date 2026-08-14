@@ -32,6 +32,11 @@ export const visionAssistEndpointModes = [
 export type VisionAssistEndpointMode =
   (typeof visionAssistEndpointModes)[number]
 
+export const visionAssistMultiImageModes = ['separate', 'combined'] as const
+
+export type VisionAssistMultiImageMode =
+  (typeof visionAssistMultiImageModes)[number]
+
 export const webSearchProviders = ['tavily', 'anysearch'] as const
 export type WebSearchProvider = (typeof webSearchProviders)[number]
 
@@ -59,6 +64,9 @@ export const buildChannelSettingFormSchema = {
   vision_assist_failure_policy: z.enum(['error', 'skip']).optional(),
   vision_assist_strip_image: z.boolean().optional(),
   vision_assist_endpoint_mode: z.enum(visionAssistEndpointModes).optional(),
+  vision_assist_multi_image_mode: z
+    .enum(visionAssistMultiImageModes)
+    .optional(),
   vision_assist_max_concurrency: z.number().min(1).max(8).optional(),
   vision_assist_retry_count: z.number().min(0).max(5).optional(),
   vision_assist_retry_backoff_ms: z.number().min(1).max(30000).optional(),
@@ -91,6 +99,7 @@ export const BUILD_CHANNEL_SETTING_DEFAULTS = {
   vision_assist_failure_policy: 'error' as const,
   vision_assist_strip_image: true,
   vision_assist_endpoint_mode: 'auto' as const,
+  vision_assist_multi_image_mode: 'separate' as const,
   vision_assist_max_concurrency: 2,
   vision_assist_retry_count: 1,
   vision_assist_retry_backoff_ms: 500,
@@ -123,6 +132,7 @@ export const BUILD_CHANNEL_SETTING_FORM_FIELDS = [
   'vision_assist_failure_policy',
   'vision_assist_strip_image',
   'vision_assist_endpoint_mode',
+  'vision_assist_multi_image_mode',
   'vision_assist_max_concurrency',
   'vision_assist_retry_count',
   'vision_assist_retry_backoff_ms',
@@ -190,6 +200,17 @@ export function normalizeVisionAssistEndpointMode(
     : 'auto'
 }
 
+export function normalizeVisionAssistMultiImageMode(
+  value: unknown
+): VisionAssistMultiImageMode {
+  const multiImageMode = String(value || '')
+  return visionAssistMultiImageModes.includes(
+    multiImageMode as VisionAssistMultiImageMode
+  )
+    ? (multiImageMode as VisionAssistMultiImageMode)
+    : 'separate'
+}
+
 export function normalizeWebSearchProvider(value: unknown): WebSearchProvider {
   const provider = String(value || '')
   return webSearchProviders.includes(provider as WebSearchProvider)
@@ -255,6 +276,9 @@ export function parseBuildChannelSettingDefaults(
         : visionAssist.strip_image !== false,
     vision_assist_endpoint_mode: normalizeVisionAssistEndpointMode(
       visionAssist.endpoint_mode
+    ),
+    vision_assist_multi_image_mode: normalizeVisionAssistMultiImageMode(
+      visionAssist.multi_image_mode
     ),
     vision_assist_max_concurrency: minNumberOrDefault(
       visionAssist.max_concurrency,
@@ -344,6 +368,9 @@ export function buildChannelSettingFields(
       strip_image: formData.vision_assist_strip_image !== false,
       endpoint_mode: normalizeVisionAssistEndpointMode(
         formData.vision_assist_endpoint_mode
+      ),
+      multi_image_mode: normalizeVisionAssistMultiImageMode(
+        formData.vision_assist_multi_image_mode
       ),
       max_concurrency: minNumberOrDefault(
         formData.vision_assist_max_concurrency,

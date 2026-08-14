@@ -42,6 +42,7 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 import type { ChannelFormValues } from '../../../lib'
 import { ResponsesCompactPassthroughField } from './responses-compact-passthrough-field'
@@ -485,11 +486,58 @@ export function BuildChannelExtraSettingsFields() {
                 />
               </FormControl>
               <FormDescription>
-                {t('Prompt sent to the assist model for each image')}
+                {t('Prompt sent to the assist model for image analysis')}
               </FormDescription>
               <FormMessage />
             </FormItem>
           )}
+        />
+
+        <FormField
+          control={form.control}
+          name='vision_assist_multi_image_mode'
+          render={({ field }) => {
+            const currentValue = field.value || 'separate'
+            return (
+              <FormItem>
+                <FormLabel>{t('Multi-image mode')}</FormLabel>
+                <FormControl>
+                  <ToggleGroup
+                    value={[currentValue]}
+                    onValueChange={(value) => {
+                      const nextValue = value.find(
+                        (item) => item !== currentValue
+                      )
+                      if (nextValue) field.onChange(nextValue)
+                    }}
+                    aria-label={t('Multi-image mode')}
+                    variant='outline'
+                    spacing={2}
+                    className='grid w-full grid-cols-2 gap-2'
+                  >
+                    <ToggleGroupItem
+                      value='separate'
+                      className='h-auto min-h-10 w-full px-3 py-2'
+                    >
+                      {t('Separate images')}
+                    </ToggleGroupItem>
+                    <ToggleGroupItem
+                      value='combined'
+                      className='h-auto min-h-10 w-full px-3 py-2'
+                    >
+                      {t('Combine images')}
+                    </ToggleGroupItem>
+                  </ToggleGroup>
+                </FormControl>
+                <FormDescription>
+                  {t(
+                    'Separate sends one assist request per image; combined sends images from the same message in one request'
+                  )}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )
+          }}
         />
 
         <div className='grid gap-4 sm:grid-cols-2'>

@@ -21,6 +21,7 @@ import { test } from 'node:test'
 
 import type { Channel } from '../types'
 import {
+  CHANNEL_FORM_DEFAULT_VALUES,
   channelFormSchema,
   transformChannelToFormDefaults,
   transformFormDataToCreatePayload,
@@ -150,6 +151,7 @@ test('Build 渠道设置保持未知字段和 WebSearch API Key 状态', () => {
         assist_channel_id: 12,
         assist_model: 'gpt-4o-mini',
         target_models: ['gpt-4o'],
+        multi_image_mode: 'combined',
         future_vision_flag: 'keep',
       },
     })
@@ -161,6 +163,7 @@ test('Build 渠道设置保持未知字段和 WebSearch API Key 状态', () => {
   assert.equal(defaults.web_search_clear_api_key, false)
   assert.equal(defaults.vision_assist_channel_id, 12)
   assert.equal(defaults.vision_assist_target_models, 'gpt-4o')
+  assert.equal(defaults.vision_assist_multi_image_mode, 'combined')
 
   const payload = transformFormDataToUpdatePayload(defaults, channel.id)
   const setting = JSON.parse(payload.setting || '{}') as Record<string, unknown>
@@ -172,6 +175,30 @@ test('Build 渠道设置保持未知字段和 WebSearch API Key 状态', () => {
   assert.equal(webSearch.api_key, undefined)
   assert.equal(webSearch.clear_api_key, false)
   assert.equal(visionAssist.future_vision_flag, 'keep')
+  assert.equal(visionAssist.multi_image_mode, 'combined')
+})
+
+test('新建渠道默认使用合并识别', () => {
+  assert.equal(
+    CHANNEL_FORM_DEFAULT_VALUES.vision_assist_multi_image_mode,
+    'combined'
+  )
+})
+
+test('视觉辅助多图模式缺失或非法时保持逐张识别', () => {
+  const empty = transformChannelToFormDefaults(createChannel(''))
+  const historical = transformChannelToFormDefaults(
+    createChannel('{"vision_assist":{"enabled":true}}')
+  )
+  const invalid = transformChannelToFormDefaults(
+    createChannel(
+      '{"vision_assist":{"enabled":true,"multi_image_mode":"invalid"}}'
+    )
+  )
+
+  assert.equal(empty.vision_assist_multi_image_mode, 'separate')
+  assert.equal(historical.vision_assist_multi_image_mode, 'separate')
+  assert.equal(invalid.vision_assist_multi_image_mode, 'separate')
 })
 
 test('Build WebSearch 支持清空旧 Key 或替换为新 Key', () => {

@@ -83,7 +83,7 @@ func TestRewriteOpenAIVisionAssistRequestStripImage(t *testing.T) {
 	assert.Equal(t, dto.ContentTypeText, contents[0].Type)
 	assert.Equal(t, "原始问题", contents[0].Text)
 	assert.Equal(t, dto.ContentTypeText, contents[1].Type)
-	assert.Contains(t, contents[1].Text, "[图片内容]")
+	assert.Contains(t, contents[1].Text, "[图片相关信息]")
 	assert.Contains(t, contents[1].Text, "一张图片")
 	assert.NotContains(t, contents[1].Text, "辅助识别")
 }
@@ -270,7 +270,7 @@ func TestExtractAndRewriteClaudeVisionAssistImages(t *testing.T) {
 	require.Len(t, contents, 2)
 	assert.Equal(t, dto.ContentTypeText, contents[0].Type)
 	assert.Equal(t, dto.ContentTypeText, contents[1].Type)
-	assert.Contains(t, contents[1].GetText(), "[图片内容]")
+	assert.Contains(t, contents[1].GetText(), "[图片相关信息]")
 	assert.Contains(t, contents[1].GetText(), "图片里有文字")
 	assert.NotContains(t, contents[1].GetText(), "辅助识别")
 }
@@ -286,7 +286,7 @@ func TestVisionAssistTextSkipsEmptyResultsAndHidesImplementationDetails(t *testi
 		Image: VisionAssistImage{Index: 1, MessageIndex: 0},
 		Text:  "图片里有表格",
 	}})
-	assert.Contains(t, text, "[图片内容]")
+	assert.Contains(t, text, "[图片相关信息]")
 	assert.Contains(t, text, "图片里有表格")
 	assert.NotContains(t, text, "辅助识别")
 }
@@ -302,15 +302,17 @@ func TestVisionAssistCacheKeyUsesAssistSettings(t *testing.T) {
 		MimeType: "image/png",
 	}
 
-	keyA := buildVisionAssistCacheKey(setting, "prompt-a", image)
+	keyA := buildVisionAssistCacheKey(setting, "prompt-a", "", VisionAssistMultiImageModeSeparate, []VisionAssistImage{image})
 	setting.AssistModel = "vision-b"
-	keyB := buildVisionAssistCacheKey(setting, "prompt-a", image)
+	keyB := buildVisionAssistCacheKey(setting, "prompt-a", "", VisionAssistMultiImageModeSeparate, []VisionAssistImage{image})
 	setting.AssistModel = "vision-a"
-	keyC := buildVisionAssistCacheKey(setting, "prompt-c", image)
+	keyC := buildVisionAssistCacheKey(setting, "prompt-c", "", VisionAssistMultiImageModeSeparate, []VisionAssistImage{image})
+	keyD := buildVisionAssistCacheKey(setting, "prompt-a", "", VisionAssistMultiImageModeCombined, []VisionAssistImage{image})
 
 	assert.NotEmpty(t, keyA)
 	assert.NotEqual(t, keyA, keyB)
 	assert.NotEqual(t, keyA, keyC)
+	assert.NotEqual(t, keyA, keyD)
 	assert.NotContains(t, keyA, "image-data")
 }
 
@@ -721,26 +723,39 @@ func TestVisionAssistExecutionSettingsNormalizeDefaults(t *testing.T) {
 	setting := dto.ChannelVisionAssistSettings{}
 
 	assert.Equal(t, VisionAssistEndpointModeAuto, normalizedVisionAssistEndpointMode(setting))
+	assert.Equal(t, VisionAssistMultiImageModeSeparate, normalizedVisionAssistMultiImageMode(setting))
 	assert.Equal(t, 1, normalizedVisionAssistMaxConcurrency(setting))
 	assert.Equal(t, 0, normalizedVisionAssistRetryCount(setting))
 	assert.Equal(t, defaultVisionAssistRetryBackoffMs, normalizedVisionAssistRetryBackoff(setting))
 
 	setting.EndpointMode = VisionAssistEndpointModeGeminiNative
+	setting.MultiImageMode = VisionAssistMultiImageModeCombined
 	setting.MaxConcurrency = 99
 	setting.RetryCount = 99
 	setting.RetryBackoffMs = 99999
 
 	assert.Equal(t, VisionAssistEndpointModeGeminiNative, normalizedVisionAssistEndpointMode(setting))
+	assert.Equal(t, VisionAssistMultiImageModeCombined, normalizedVisionAssistMultiImageMode(setting))
 	assert.Equal(t, 8, normalizedVisionAssistMaxConcurrency(setting))
 	assert.Equal(t, 5, normalizedVisionAssistRetryCount(setting))
 	assert.Equal(t, 30000, normalizedVisionAssistRetryBackoff(setting))
+}
+
+func TestNormalizedVisionAssistMultiImageModeRejectsInvalidValues(t *testing.T) {
+	for _, value := range []string{"COMBINED", " combined ", "invalid"} {
+		t.Run(value, func(t *testing.T) {
+			setting := dto.ChannelVisionAssistSettings{MultiImageMode: value}
+
+			assert.Equal(t, VisionAssistMultiImageModeSeparate, normalizedVisionAssistMultiImageMode(setting))
+		})
+	}
 }
 
 func TestBuildVisionAssistRequestKeepsTypedMediaContentParsable(t *testing.T) {
 	setting := dto.ChannelVisionAssistSettings{
 		AssistModel: "gemini-2.5-flash",
 	}
-	request := buildVisionAssistRequest(setting, "描述图片", []VisionAssistImage{{
+	request := buildVisionAssistRequest(setting, "描述图片", "", []VisionAssistImage{{
 		Index:    1,
 		Source:   &testFileSource{raw: "data:image/png;base64,abc"},
 		Detail:   "low",

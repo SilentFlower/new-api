@@ -54,6 +54,7 @@ const ADVANCED_SETTINGS_FIELDS = new Set<FieldPath<ChannelFormValues>>([
   'vision_assist_failure_policy',
   'vision_assist_strip_image',
   'vision_assist_endpoint_mode',
+  'vision_assist_multi_image_mode',
   'vision_assist_max_concurrency',
   'vision_assist_retry_count',
   'vision_assist_retry_backoff_ms',

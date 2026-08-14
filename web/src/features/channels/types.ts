@@ -106,6 +106,7 @@ export interface ChannelSettings {
       | 'openai_responses'
       | 'anthropic_messages'
       | 'gemini_native'
+    multi_image_mode?: 'separate' | 'combined'
     max_concurrency?: number
     retry_count?: number
     retry_backoff_ms?: number

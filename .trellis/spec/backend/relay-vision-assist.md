@@ -15,7 +15,7 @@
 - Service 层构造 OpenAI 兼容的内部辅助请求：
 
 ```go
-func buildVisionAssistRequest(setting dto.ChannelVisionAssistSettings, prompt string, images []VisionAssistImage) *dto.GeneralOpenAIRequest
+func buildVisionAssistRequest(setting dto.ChannelVisionAssistSettings, prompt string, userMessage string, images []VisionAssistImage) *dto.GeneralOpenAIRequest
 ```
 
 - DTO 层写入和读取多模态内容必须走 `Message` 的媒体内容契约：
@@ -44,6 +44,8 @@ func buildVisionAssistGeminiRequest(c *gin.Context, request *dto.GeneralOpenAIRe
 - `buildVisionAssistRequest` 只能生成一条 `role = "user"` 的内部辅助消息。
 - 内部辅助消息内容必须包含：
   - 第一段文本: 视觉辅助 prompt。
+  - 用户原始问题非空时: 独立的用户问题说明与文本块。
+  - 当前识图单元包含多张图片时: 独立的多图联合分析说明。
   - 每张图片前的文本标记: `图片 <index>：`。
   - 图片内容: `dto.MediaContent{Type: dto.ContentTypeImageURL, ImageUrl: *dto.MessageImageUrl}`。
 - 写入 `dto.Message.Content` 时必须调用 `message.SetMediaContent(content)`；`ParseContent()` 必须能读回 `[]dto.MediaContent`。不要只把 `Content` 赋值成 `[]dto.MediaContent` 后依赖旧的 `[]any` 解析路径。
@@ -371,4 +373,152 @@ rewrittenItems = append(rewrittenItems, map[string]any{
         map[string]any{"type": "input_text", "text": text},
     },
 })
+```
+
+## 场景：用户意图驱动与渠道级多图识别
+
+### 1. Scope / Trigger
+
+- Trigger: 修改视觉辅助用户文本解析、默认提示词、识图单元划分、`multi_image_mode`、缓存键、识图结果写回或渠道表单。
+- 适用范围: OpenAI Chat、Claude Messages、OpenAI Responses 主请求，以及 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini Native 辅助端点。
+- 风险背景: 用户问题缺失会让辅助模型只生成通用图片描述；多图分组、历史配置回退或缓存隔离错误会造成跨消息合并、错误复用或重复写回。
+
+### 2. Signatures
+
+- 渠道配置与识图结果：
+
+```go
+type ChannelVisionAssistSettings struct {
+	MultiImageMode string `json:"multi_image_mode,omitempty"`
+}
+
+type VisionAssistResult struct {
+	Image      VisionAssistImage
+	ImageCount int
+	Combined   bool
+	Text       string
+	CacheHit   bool
+	Reused     bool
+}
+```
+
+- Service 层用户意图、识图单元、请求和缓存入口：
+
+```go
+func extractVisionAssistUserMessage(request dto.Request) string
+func normalizedVisionAssistMultiImageMode(setting dto.ChannelVisionAssistSettings) string
+func buildVisionAssistUnits(images []VisionAssistImage, multiImageMode string) []visionAssistUnit
+func buildVisionAssistRequest(setting dto.ChannelVisionAssistSettings, prompt string, userMessage string, images []VisionAssistImage) *dto.GeneralOpenAIRequest
+func buildVisionAssistCacheKey(setting dto.ChannelVisionAssistSettings, prompt string, userMessage string, multiImageMode string, images []VisionAssistImage) string
+```
+
+- 前端表单字段：
+
+```ts
+type VisionAssistMultiImageMode = 'separate' | 'combined'
+
+vision_assist_multi_image_mode: VisionAssistMultiImageMode
+```
+
+### 3. Contracts
+
+- 用户意图解析：
+  - 从请求尾部向前查找最新的非空用户文本；最新图片消息无文本时继续回溯。
+  - OpenAI Chat 使用 `Message.ParseContent()`，Claude 兼容字符串内容和 `type=text` 内容块，Responses 兼容字符串 `input` 和普通 `role=user` 消息。
+  - `function_call_output`、`custom_tool_call_output`、system、assistant、tool 内容不得成为用户问题。
+  - 完全没有用户文本时返回空字符串，辅助请求退化为“识图规则 + 图片”。
+- 辅助请求继续只有一条 `role=user` 多模态消息，内容顺序固定为：识图规则、可选用户问题、可选多图说明、按原顺序排列的图片编号和图片。
+- 用户问题只决定识图重点，不能覆盖渠道识图规则；默认提示词必须把图片文字视为待分析内容而不是可执行指令，并保留人物身份等结论的不确定性。
+- 多图模式：
+  - 后端只接受精确值 `combined`；空值、大小写变体、前后空格和未知值一律归一化为 `separate`。
+  - `separate` 每张图片生成一个识图单元；`combined` 只按 `VisionAssistImage.MessageIndex` 合并同一原始消息的图片，不跨消息合并。
+  - 合并调用失败时遵循现有重试和失败策略，不隐式降级为逐张识别。
+  - 合并结果只写回一次“多图综合信息”；图片数、缓存命中数和失败数仍按实际图片数量统计。
+- 前端新建渠道默认 `combined`；编辑历史渠道时，缺失或非法 `multi_image_mode` 必须显示为 `separate`。读取、切换和保存都使用同一组 `separate | combined` 值。
+- 缓存键必须包含辅助渠道、辅助模型、识图规则哈希、规范化用户文本哈希、规范化多图模式，以及当前识图单元内按顺序排列的图片源哈希、detail 和 MIME。
+- 缓存值只保存识图文本；日志不得新增用户原文、请求正文或图片内容。
+- 写回主请求时必须保留原始用户文本和非图片内容顺序，使用中性的“图片相关信息”说明，并要求目标模型保留识图结果中的不确定性。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 用户发送图片并提问 | 辅助请求同时包含识图规则、用户问题和图片，且只有一条 user 消息 |
+| 最新用户消息只有图片 | 回溯最近一条非空用户文本 |
+| 请求完全没有用户文本 | 不生成用户问题区块，继续执行通用识图 |
+| Responses 工具输出含文本和图片 | 图片可以触发视觉辅助，工具输出文本不得成为用户问题 |
+| `multi_image_mode=combined` | 同一消息多图一次调用，不同消息分别调用 |
+| `multi_image_mode` 缺失、非法、`COMBINED` 或 ` combined ` | 后端与历史渠道表单都回退 `separate` |
+| 新建渠道打开表单 | 默认选中 `combined` |
+| 合并识图失败且策略为 `skip` | 不写入空结果，失败图片数按该单元实际图片数累计 |
+| 用户问题、模式、图片顺序或图片内容变化 | 不命中原缓存结果 |
+| 合并结果成功 | 只注入一段“多图综合信息”，日志图片数仍为实际图片数 |
+
+### 5. Good/Base/Bad Cases
+
+- Good: 用户在同一消息上传两张图片并询问差异，渠道配置 `combined`；辅助模型一次看到问题和两张图片，下游只收到一段综合结果。
+- Good: 历史渠道没有 `multi_image_mode`；编辑表单显示逐张识别，后端也继续逐张调用。
+- Base: 单图请求在 `combined` 模式下仍只有一个识图单元，写回使用普通图片编号语义。
+- Base: 同图同问题重复请求命中缓存；仅问题变化时重新识图。
+- Bad: 对配置先执行 `strings.ToLower(strings.TrimSpace(value))`，会把本应非法回退的 `COMBINED` 或带空格值错误放行为合并识别。
+- Bad: 把请求中的全部图片合成一个单元，会跨原始消息合并不相关图片并破坏写回定位。
+- Bad: 缓存键只包含图片，不包含用户问题和多图模式，会把通用描述或逐张结果复用到不同问题和合并请求。
+
+### 6. Tests Required
+
+- `TestExtractVisionAssistUserMessage`: 覆盖 Chat、Claude、Responses、回溯、空文本和工具输出排除。
+- `TestBuildVisionAssistRequestIncludesUserMessage`: 断言单 user 消息以及规则、问题、图片的内容顺序。
+- `TestApplyVisionAssistUsesDescriptionForMultipleImagesSeparatelyByDefault`: 断言缺省配置保持逐张调用。
+- `TestApplyVisionAssistCombinesImagesFromSameMessage`: 断言同消息多图只调用一次、只写回一次并按实际图片数记日志。
+- `TestBuildVisionAssistUnitsDoesNotCombineAcrossMessages`: 断言 `combined` 不跨 `MessageIndex` 合并。
+- `TestApplyVisionAssistCombinedFailureCountsAllImages`: 断言合并失败按实际图片数累计。
+- `TestVisionAssistCombinedCacheKeyUsesImageOrder` 与用户问题缓存测试: 断言问题、模式和图片顺序参与缓存隔离。
+- `TestNormalizedVisionAssistMultiImageModeRejectsInvalidValues`: 断言大小写、空格和未知值回退 `separate`。
+- 渠道表单 round-trip 测试必须覆盖新建默认 `combined`、历史/非法值回退 `separate` 及保存后的 JSON 字段。
+- 多图模式组件交互测试必须断言默认选中、双向切换和当前选项不可被点击取消。
+- 回归命令：
+  - `go test ./service ./relay -count=1`
+  - `go test -race ./controller ./relay ./service -run 'VisionAssist|RelayErrorLog|RequestPreparationState' -count=1`
+  - `cd relaykit && GOWORK=off go build ./...`
+  - `cd web && bun test src/features/channels/lib/channel-form.test.ts src/features/channels/components/drawers/sections/__tests__/vision-assist-multi-image-mode.test.tsx`
+  - `cd web && bun run typecheck && bun run build`
+  - `go test ./... -count=1`
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+mode := strings.ToLower(strings.TrimSpace(setting.MultiImageMode))
+if mode == VisionAssistMultiImageModeCombined {
+	return mode
+}
+```
+
+问题：配置契约要求任何非精确合法值都回退逐张识别；宽松规范化会静默改变历史或手工配置的执行方式。
+
+#### Correct
+
+```go
+func normalizedVisionAssistMultiImageMode(setting dto.ChannelVisionAssistSettings) string {
+	if setting.MultiImageMode == VisionAssistMultiImageModeCombined {
+		return VisionAssistMultiImageModeCombined
+	}
+	return VisionAssistMultiImageModeSeparate
+}
+```
+
+合并单元必须按原始消息索引建立，不能直接返回包含全部图片的单个切片：
+
+```go
+unitIndexByMessage := make(map[int]int)
+for _, image := range images {
+	unitIndex, ok := unitIndexByMessage[image.MessageIndex]
+	if !ok {
+		unitIndex = len(units)
+		unitIndexByMessage[image.MessageIndex] = unitIndex
+		units = append(units, visionAssistUnit{})
+	}
+	units[unitIndex].Images = append(units[unitIndex].Images, image)
+}
 ```

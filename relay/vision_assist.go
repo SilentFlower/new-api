@@ -151,14 +151,15 @@ func callVisionAssistModel(c *gin.Context, info *relaycommon.RelayInfo, request 
 	}
 	service.PostTextConsumeQuota(c, assistInfo, usage, []string{"视觉辅助识别"})
 
-	results := make([]service.VisionAssistResult, 0, len(images))
-	for _, image := range images {
-		results = append(results, service.VisionAssistResult{
-			Image: image,
-			Text:  text,
-		})
+	if len(images) == 0 {
+		return nil, nil
 	}
-	return results, nil
+	return []service.VisionAssistResult{{
+		Image:      images[0],
+		ImageCount: len(images),
+		Combined:   len(images) > 1,
+		Text:       text,
+	}}, nil
 }
 
 func prepareVisionAssistRequest(c *gin.Context, parent *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, channelModel *model.Channel) (*visionAssistPreparedRequest, *types.NewAPIError) {

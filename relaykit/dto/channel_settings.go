@@ -40,6 +40,7 @@ type ChannelVisionAssistSettings struct {
 	MaxConcurrency  int      `json:"max_concurrency,omitempty"`
 	RetryCount      int      `json:"retry_count,omitempty"`
 	RetryBackoffMs  int      `json:"retry_backoff_ms,omitempty"`
+	MultiImageMode  string   `json:"multi_image_mode,omitempty"`
 }
 
 const (
