@@ -160,6 +160,7 @@ func calculateTextToolCallSurcharge(ctx *gin.Context, relayInfo *relaycommon.Rel
 		}
 	}
 	if relayInfo.RelayMode != relayconstant.RelayModeResponses &&
+		!common.GetContextKeyBool(ctx, constant.ContextKeyChatWebSearchLocalEmulation) &&
 		strings.HasSuffix(summary.ModelName, "search-preview") {
 		items = collectToolSurchargeItem(items, dto.BuildInToolWebSearchPreview, 1, summary.ModelName)
 	}

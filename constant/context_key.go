@@ -58,6 +58,8 @@ const (
 	ContextKeyLocalCountTokens ContextKey = "local_count_tokens"
 
 	ContextKeySystemPromptOverride ContextKey = "system_prompt_override"
+	// ContextKeyChatWebSearchLocalEmulation 标记 Chat WebSearch 已由本地模拟完成。
+	ContextKeyChatWebSearchLocalEmulation ContextKey = "chat_web_search_local_emulation"
 
 	ContextKeyVisionAssistProcessing   ContextKey = "vision_assist_processing"
 	ContextKeyVisionAssistPrepared     ContextKey = "vision_assist_prepared"

@@ -20,7 +20,7 @@
 | [API 契约规范](./api-contracts.md) | 管理 API 查询参数、跨层契约和边界行为 | 已完成 |
 | [Relay 视觉辅助契约](./relay-vision-assist.md) | 视觉辅助请求构造、端点模式、Gemini Native 边界行为 | 已完成 |
 | [Relay Alpha Search 与 Responses Compact 契约](./relay-alpha-search-compact.md) | standalone Search 透明转发，以及 Compact 基础模型选渠、原始透传、Responses WebSocket、管理端渠道测试、计费与日志隔离 | 已完成 |
-| [Relay WebSearch 模拟契约](./relay-websearch-emulation.md) | Claude Code 纯 WebSearch 渠道级模拟、provider、密钥脱敏和请求体稳定性 | 已完成 |
+| [Relay WebSearch 模拟契约](./relay-websearch-emulation.md) | Claude Messages 与 Chat Completions 纯 WebSearch 渠道级模拟、provider、密钥脱敏、请求体稳定性和单次计费 | 已完成 |
 | [Relay 计费模型快照契约](./relay-billing-model.md) | 模型映射后的计费模型选择、冻结、重试清理、任务历史兼容和日志一致性 | 已完成 |
 | [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) | JSON 空白心跳、响应提交、重试、错误体、响应头和并发 writer 生命周期 | 已完成 |
 | [渠道单用户并发限制契约](./channel-user-concurrency.md) | 渠道配置、Redis/内存租约、HTTP/WebSocket/任务生命周期、429/503 错误与取消传播 | 已完成 |
@@ -64,9 +64,9 @@
 
 - [Relay Alpha Search 与 Responses Compact 契约](./relay-alpha-search-compact.md) — standalone Search 上游路径，以及 Compact 检测、基础模型与路径、能力门禁、Responses WebSocket、管理端渠道测试、计费和日志隔离
 
-### 涉及 Claude Code WebSearch 模拟
+### 涉及 Claude Messages 或 Chat Completions WebSearch 模拟
 
-- [Relay WebSearch 模拟契约](./relay-websearch-emulation.md) — 纯 WebSearch 识别、渠道配置、provider 调用、密钥脱敏、请求体稳定性和计费
+- [Relay WebSearch 模拟契约](./relay-websearch-emulation.md) — 两种协议的纯 WebSearch 识别、渠道配置、provider 调用、密钥脱敏、请求体稳定性和单次计费
 
 ### 涉及模型映射计费、预扣、结算、任务或消费日志
 
