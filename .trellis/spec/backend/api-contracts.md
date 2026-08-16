@@ -453,3 +453,115 @@ if cacheRead > 0 || cacheWrite > 0 {
     inputTokenCell = styledCell(styles.text, formatExportInputTokens(promptTokens, cacheRead, cacheWrite))
 }
 ```
+
+## 场景：视觉辅助渠道模型选项 API
+
+### 1. Scope / Trigger
+
+- Trigger：新增或修改视觉辅助渠道/模型选择器、启用渠道模型摘要查询，或复用管理端渠道模型选项。
+- 适用范围：`GET /api/channel/model-options`、`model/channel_model_option.go`、渠道编辑 Drawer 及对应测试。
+- 目标：管理员按渠道名称或 ID 选择视觉辅助渠道，并从该渠道配置模型中选择或输入模型，同时不向前端暴露渠道密钥和完整设置。
+
+### 2. Signatures
+
+```http
+GET /api/channel/model-options
+Permission: ChannelRead
+```
+
+```go
+type ChannelModelOption struct {
+	ID     int      `json:"id"`
+	Name   string   `json:"name"`
+	Models []string `json:"models" gorm:"-:all"`
+}
+
+func ListEnabledChannelModelOptions() ([]ChannelModelOption, error)
+func GetChannelModelOptions(c *gin.Context)
+```
+
+```ts
+type ChannelModelOption = {
+  id: number
+  name: string
+  models: string[]
+}
+
+export async function getChannelModelOptions(): Promise<ChannelModelOption[]>
+```
+
+### 3. Contracts
+
+- 路由必须位于渠道管理 `AdminAuth` 组内并使用 `ChannelRead`，且静态路径 `/model-options` 必须注册在 `/:id` 之前。
+- Model 查询只允许选择 `id, name, models`，只返回 `status = ChannelStatusEnabled` 的渠道，并按 `id asc` 排序。
+- `models` 必须通过 `Channel.GetModels()` 解析；响应使用现有 `{success,message,data}` 管理 API 包装。
+- 响应不得包含 `key`、Base URL、代理、请求头覆盖、渠道设置或其他鉴权数据。
+- 渠道选项的可见标签固定包含名称和 ID，格式为 `<渠道名> (#<ID>)`；搜索同时匹配名称和 ID，同名渠道依靠 ID 区分。
+- 渠道 ID 不允许自定义输入；模型来自所选渠道的 `models`，但允许输入未登记的自定义模型名。
+- 已保存渠道或模型不在当前响应时，前端必须合成当前值选项并标记不可用，不能静默清空历史配置。
+- 用户实际切换渠道时只清空 `vision_assist_model`，不得改写其他视觉辅助字段。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 数据库查询失败 | Controller 使用 `common.ApiError` 返回业务失败；前端展示字段级失败状态和重试入口 |
+| 没有启用渠道 | 成功返回空 `data`；渠道控件展示空状态 |
+| 两个渠道名称相同 | 两项都展示各自 `(#ID)`，按 ID 可搜索到唯一选项 |
+| 历史渠道已停用或删除 | 保留已保存 ID，显示“不可用渠道 (#ID)” |
+| 历史模型不在渠道模型列表 | 保留模型值并标记不可用 |
+| 未选择渠道 | 禁用模型控件 |
+| 渠道加载中或加载失败 | 保持当前表单值；加载中禁止切换，失败后允许重试 |
+| 用户切换到另一个渠道 | 清空旧辅助模型并把表单标记为 dirty |
+
+### 5. Good / Base / Bad Cases
+
+- Good：两个启用渠道都叫“视觉渠道”，ID 分别为 12 和 34；界面展示“视觉渠道 (#12)”与“视觉渠道 (#34)”，输入 `34` 只匹配第二项。
+- Good：编辑历史配置时渠道 99 已删除、模型 `legacy-model` 已移除；两个值仍可见，管理员可以显式改选。
+- Base：渠道有已配置模型时，管理员直接搜索选择；渠道没有模型时仍可输入上游实际支持的自定义模型。
+- Bad：为了选择器复用 `/api/channel/` 完整列表，把密钥或完整渠道设置发送到浏览器。
+- Bad：只显示渠道名称，导致同名渠道无法辨认；或接口返回后立即清空不在选项中的历史值。
+
+### 6. Tests Required
+
+- Model：`TestListEnabledChannelModelOptionsExcludesDisabledChannelsAndSecrets` 断言只返回启用渠道、模型顺序正确，序列化结果不含密钥。
+- Router：`TestChannelModelOptionsRouteUsesReadPermission` 断言静态路由使用 `ChannelRead`。
+- Frontend API：断言 `getChannelModelOptions()` 请求 `/api/channel/model-options` 并解析精简响应。
+- Frontend 交互：断言同名渠道显示不同 ID、按 ID 搜索、切换渠道清空模型、历史失效值保留、自定义模型、加载/空数据/失败/禁用状态以及表单 ARIA 属性。
+- 回归命令：`go test ./model ./controller ./router`，以及 `cd web && bun test src/features/channels && bun run typecheck`。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+// 错误：完整 Channel 会把选择器不需要的敏感字段带到响应。
+var channels []Channel
+DB.Where("status = ?", common.ChannelStatusEnabled).Find(&channels)
+common.ApiSuccess(c, channels)
+```
+
+```ts
+// 错误：同名渠道不可区分，历史值也可能因不在 options 中消失。
+const options = channels.map((channel) => ({
+  value: String(channel.id),
+  label: channel.name,
+}))
+```
+
+#### Correct
+
+```go
+var channels []Channel
+err := DB.Select("id, name, models").
+	Where("status = ?", common.ChannelStatusEnabled).
+	Order("id asc").
+	Find(&channels).Error
+```
+
+```ts
+const options = channels.map((channel) => ({
+  value: String(channel.id),
+  label: `${channel.name} (#${channel.id})`,
+}))
+```

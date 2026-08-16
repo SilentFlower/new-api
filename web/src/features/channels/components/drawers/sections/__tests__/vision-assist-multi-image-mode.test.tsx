@@ -57,6 +57,8 @@ for (const key of domGlobals) {
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { useForm } = await import('react-hook-form')
+const { QueryClient, QueryClientProvider } =
+  await import('@tanstack/react-query')
 const { createInstance } = await import('i18next')
 const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { Form } = await import('@/components/ui/form')
@@ -119,8 +121,18 @@ test('多图模式默认合并且可在两个选项间切换', async () => {
   const container = document.createElement('div')
   document.body.append(container)
   const root = createRoot(container)
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  queryClient.setQueryData(['channel-model-options'], [])
 
-  await act(async () => root.render(<Harness />))
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={queryClient}>
+        <Harness />
+      </QueryClientProvider>
+    )
+  )
 
   const separateButton = findModeButton(container, 'Separate images')
   const combinedButton = findModeButton(container, 'Combine images')
@@ -149,4 +161,5 @@ test('多图模式默认合并且可在两个选项间切换', async () => {
 
   await act(async () => root.unmount())
   container.remove()
+  queryClient.clear()
 })

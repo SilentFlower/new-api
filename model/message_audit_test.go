@@ -188,6 +188,25 @@ func TestFinalizeMessageAuditRequestUpdatesNonEmptyModelName(t *testing.T) {
 	assert.Equal(t, "billing-model", request.ModelName)
 }
 
+func TestListRelatedMessageAuditRequestsReturnsOnlyLinkedAttempts(t *testing.T) {
+	truncateTables(t)
+	now := time.Now().Unix()
+	requests := []MessageAuditRequest{
+		{RequestID: "main-request", RequestKind: "client", CapturedAt: now, CapturedAtNano: 100, CreatedAt: now, UpdatedAt: now},
+		{RequestID: "vision-attempt-2", RequestKind: "vision_assist", RelatedRequestID: "main-request", ModelName: "vision-b", CapturedAt: now, CapturedAtNano: 300, CreatedAt: now, UpdatedAt: now},
+		{RequestID: "vision-attempt-1", RequestKind: "vision_assist", RelatedRequestID: "main-request", ModelName: "vision-a", CapturedAt: now, CapturedAtNano: 200, CreatedAt: now, UpdatedAt: now},
+		{RequestID: "unrelated-attempt", RequestKind: "vision_assist", RelatedRequestID: "other-request", CapturedAt: now, CapturedAtNano: 150, CreatedAt: now, UpdatedAt: now},
+	}
+	require.NoError(t, DB.Create(&requests).Error)
+
+	related, err := ListRelatedMessageAuditRequests("main-request")
+	require.NoError(t, err)
+	require.Len(t, related, 2)
+	assert.Equal(t, "vision-attempt-1", related[0].RequestID)
+	assert.Equal(t, "vision-attempt-2", related[1].RequestID)
+	assert.Equal(t, "main-request", related[0].RelatedRequestID)
+}
+
 func TestMessageAuditSessionInferenceAndGroupedList(t *testing.T) {
 	truncateTables(t)
 

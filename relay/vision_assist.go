@@ -88,7 +88,14 @@ func shouldSkipVisionAssistPreprocess(c *gin.Context, info *relaycommon.RelayInf
 	return info.RelayFormat != types.RelayFormatOpenAIResponses || info.RelayMode != relayconstant.RelayModeResponses
 }
 
-func callVisionAssistModel(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, images []service.VisionAssistImage) ([]service.VisionAssistResult, *types.NewAPIError) {
+func callVisionAssistModel(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, images []service.VisionAssistImage) (results []service.VisionAssistResult, apiErr *types.NewAPIError) {
+	return callVisionAssistModelWithAuditWriter(c, info, request, images, visionAssistMessageAuditWriter{
+		capture:  service.CaptureMessageAudit,
+		finalize: service.FinalizeMessageAudit,
+	})
+}
+
+func callVisionAssistModelWithAuditWriter(c *gin.Context, info *relaycommon.RelayInfo, request *dto.GeneralOpenAIRequest, images []service.VisionAssistImage, auditWriter visionAssistMessageAuditWriter) (results []service.VisionAssistResult, apiErr *types.NewAPIError) {
 	if c == nil || info == nil || request == nil {
 		return nil, nil
 	}
@@ -113,6 +120,10 @@ func callVisionAssistModel(c *gin.Context, info *relaycommon.RelayInfo, request 
 	}
 	assistInfo := prepared.info
 	common.SetContextKey(c, constant.ContextKeyVisionAssistEndpointMode, prepared.mode)
+	audit := captureVisionAssistMessageAuditWithWriter(c, info, assistInfo, prepared.req, auditWriter)
+	defer func() {
+		audit.finalize(apiErr)
+	}()
 
 	meta := prepared.req.GetTokenCountMeta()
 	tokens, err := service.EstimateRequestToken(c, meta, assistInfo)

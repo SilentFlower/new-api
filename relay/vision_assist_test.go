@@ -288,6 +288,7 @@ func TestCallVisionAssistModelRejectsConcurrencyBeforeUpstream(t *testing.T) {
 	common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
 	common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
 	parent := &relaycommon.RelayInfo{
+		RequestId:       "parent-concurrency-request",
 		UserId:          334,
 		UserQuota:       100000,
 		UsingGroup:      "default",
@@ -310,10 +311,26 @@ func TestCallVisionAssistModelRejectsConcurrencyBeforeUpstream(t *testing.T) {
 			Content: "描述图片",
 		}},
 	}
+	var captureInput service.MessageAuditCaptureInput
+	var finalizeInput service.MessageAuditFinalizeInput
+	auditWriter := visionAssistMessageAuditWriter{
+		capture: func(input service.MessageAuditCaptureInput) bool {
+			captureInput = input
+			return true
+		},
+		finalize: func(input service.MessageAuditFinalizeInput) {
+			finalizeInput = input
+		},
+	}
 
-	results, apiErr := callVisionAssistModel(c, parent, request, nil)
+	results, apiErr := callVisionAssistModelWithAuditWriter(c, parent, request, nil, auditWriter)
 
 	require.Nil(t, results)
 	require.NotNil(t, apiErr)
 	assert.Equal(t, types.ErrorCodeChannelUserConcurrencyExceeded, apiErr.GetErrorCode())
+	assert.Equal(t, service.MessageAuditRequestKindVisionAssist, captureInput.RequestKind)
+	assert.Equal(t, parent.RequestId, captureInput.RelatedRequestID)
+	assert.True(t, captureInput.Standalone)
+	assert.Equal(t, "failed", finalizeInput.Status)
+	assert.Equal(t, string(types.ErrorCodeChannelUserConcurrencyExceeded), finalizeInput.ErrorCode)
 }

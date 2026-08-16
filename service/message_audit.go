@@ -40,6 +40,13 @@ const (
 	messageAuditStorageStatsCacheTTL      = time.Minute
 )
 
+const (
+	// MessageAuditRequestKindClient 表示客户端直接发起的主请求。
+	MessageAuditRequestKindClient = "client"
+	// MessageAuditRequestKindVisionAssist 表示视觉辅助内部发起的独立请求。
+	MessageAuditRequestKindVisionAssist = "vision_assist"
+)
+
 var (
 	messageAuditManagerOnce sync.Once
 	messageAuditManagerInst *messageAuditManager
@@ -77,17 +84,20 @@ func (cache *messageAuditStorageStatsCache) clear() {
 
 // MessageAuditCaptureInput 是 controller 传给审计 service 的最小请求上下文。
 type MessageAuditCaptureInput struct {
-	RequestID   string
-	UserID      int
-	Username    string
-	TokenID     int
-	TokenName   string
-	ModelName   string
-	RequestPath string
-	Protocol    types.RelayFormat
-	IsStream    bool
-	CapturedAt  time.Time
-	Request     dto.Request
+	RequestID        string
+	RequestKind      string
+	RelatedRequestID string
+	UserID           int
+	Username         string
+	TokenID          int
+	TokenName        string
+	ModelName        string
+	RequestPath      string
+	Protocol         types.RelayFormat
+	IsStream         bool
+	Standalone       bool
+	CapturedAt       time.Time
+	Request          dto.Request
 }
 
 // MessageAuditFinalizeInput 是请求结束时提交的轻量审计状态。
@@ -133,8 +143,9 @@ type MessageAuditMessage struct {
 
 // MessageAuditDetail 是详情接口返回的请求元数据和有序消息。
 type MessageAuditDetail struct {
-	Request  *model.MessageAuditRequest `json:"request"`
-	Messages []MessageAuditMessage      `json:"messages"`
+	Request         *model.MessageAuditRequest  `json:"request"`
+	Messages        []MessageAuditMessage       `json:"messages"`
+	RelatedRequests []model.MessageAuditRequest `json:"related_requests,omitempty"`
 }
 
 type messageAuditPlaintext struct {
@@ -146,6 +157,7 @@ type messageAuditPlaintext struct {
 type messageAuditCaptureEvent struct {
 	request                        model.MessageAuditRequest
 	entries                        []messageAuditPlaintext
+	standalone                     bool
 	conversationPrefixFingerprints []string
 	sessionAnchorHMACs             []string
 	sequenceFingerprint            string
@@ -326,7 +338,7 @@ func CaptureMessageAudit(input MessageAuditCaptureInput) bool {
 	var conversationPrefixFingerprints []string
 	var sessionAnchorHMACs []string
 	sequenceFingerprint := ""
-	if !isMessageAuditStandaloneProtocol(input.Protocol) {
+	if !input.Standalone && !isMessageAuditStandaloneProtocol(input.Protocol) {
 		if input.Protocol == types.RelayFormatClaude {
 			conversationPrefixFingerprints, sessionAnchorHMACs, sequenceFingerprint = manager.buildClaudeMessageAuditSessionFingerprints(input.UserID, string(input.Protocol), fingerprintEntries, entries)
 		} else {
@@ -334,9 +346,15 @@ func CaptureMessageAudit(input MessageAuditCaptureInput) bool {
 		}
 	}
 	capturedPlaintextBytes := messageAuditPlaintextSize(entries)
+	requestKind := input.RequestKind
+	if requestKind == "" {
+		requestKind = MessageAuditRequestKindClient
+	}
 	capture := &messageAuditCaptureEvent{
 		request: model.MessageAuditRequest{
 			RequestID:              input.RequestID,
+			RequestKind:            requestKind,
+			RelatedRequestID:       input.RelatedRequestID,
 			UserID:                 input.UserID,
 			Username:               input.Username,
 			TokenID:                input.TokenID,
@@ -357,6 +375,7 @@ func CaptureMessageAudit(input MessageAuditCaptureInput) bool {
 			UpdatedAt:              now,
 		},
 		entries:                        entries,
+		standalone:                     input.Standalone,
 		conversationPrefixFingerprints: conversationPrefixFingerprints,
 		sessionAnchorHMACs:             sessionAnchorHMACs,
 		sequenceFingerprint:            sequenceFingerprint,
@@ -447,7 +466,11 @@ func GetMessageAuditDetail(requestID string) (*MessageAuditDetail, error) {
 			Content:     content.Content,
 		})
 	}
-	return &MessageAuditDetail{Request: request, Messages: messages}, nil
+	relatedRequests, err := model.ListRelatedMessageAuditRequests(requestID)
+	if err != nil {
+		return nil, err
+	}
+	return &MessageAuditDetail{Request: request, Messages: messages, RelatedRequests: relatedRequests}, nil
 }
 
 func messageAuditEnabled() bool {
@@ -805,7 +828,7 @@ func (manager *messageAuditManager) encryptCapture(capture *messageAuditCaptureE
 		Request: capture.request,
 		Blobs:   make([]model.MessageAuditStoredBlob, 0, len(capture.entries)),
 	}
-	standaloneProtocol := isMessageAuditStandaloneProtocol(types.RelayFormat(capture.request.Protocol))
+	standaloneProtocol := capture.standalone || isMessageAuditStandaloneProtocol(types.RelayFormat(capture.request.Protocol))
 	hasPrecomputedFingerprints := !standaloneProtocol && (capture.sequenceFingerprint != "" || len(capture.conversationPrefixFingerprints) > 0)
 	if hasPrecomputedFingerprints {
 		record.ConversationPrefixFingerprints = capture.conversationPrefixFingerprints

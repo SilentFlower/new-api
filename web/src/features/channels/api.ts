@@ -25,6 +25,8 @@ import type {
   BatchSetTagParams,
   Channel,
   ChannelBalanceResponse,
+  ChannelModelOption,
+  ChannelModelOptionsResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
   CopyChannelParams,
@@ -111,6 +113,21 @@ export async function getChannel(id: number): Promise<GetChannelResponse> {
 export async function getChannelOps(): Promise<ChannelOpsResponse> {
   const res = await api.get('/api/channel/ops', channelActionConfig())
   return res.data
+}
+
+/**
+ * 获取可用于管理端模型选择的启用渠道及模型。
+ *
+ * @returns 不包含渠道密钥的精简选项。
+ */
+export async function getChannelModelOptions(): Promise<ChannelModelOption[]> {
+  const res = await api.get<ChannelModelOptionsResponse>(
+    '/api/channel/model-options'
+  )
+  if (!res.data.success) {
+    throw new Error(res.data.message || 'Failed to load channel options')
+  }
+  return res.data.data ?? []
 }
 
 /**

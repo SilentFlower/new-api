@@ -98,6 +98,7 @@ import type {
   MessageAuditReview,
   MessageAuditRiskLevel,
 } from '../types'
+import { MessageAuditRelatedRequests } from './message-audit-related-requests'
 
 type MessageAuditDetailPanelProps = {
   requestId: string | null
@@ -850,6 +851,8 @@ function DetailBody(props: {
   }
   const hasActiveFilters =
     hiddenRoles.length > 0 || hiddenContentTypes.length > 0
+  const requestKind = detail.request.request_kind || 'client'
+  const relatedVisionRequests = detail.related_requests ?? []
   let messageContent: ReactNode
   if (detail.messages.length === 0) {
     messageContent = (
@@ -884,12 +887,56 @@ function DetailBody(props: {
         <dd>{detail.request.username || `#${detail.request.user_id}`}</dd>
         <dt className='text-muted-foreground'>{t('Token')}</dt>
         <dd>{detail.request.token_name || `#${detail.request.token_id}`}</dd>
+        <dt className='text-muted-foreground'>{t('Request type')}</dt>
+        <dd>
+          <Badge variant='outline'>
+            {requestKind === 'vision_assist'
+              ? t('Visual Assist')
+              : t('Client request')}
+          </Badge>
+        </dd>
         <dt className='text-muted-foreground'>{t('Model')}</dt>
         <dd className='break-all'>{detail.request.model_name}</dd>
         <dt className='text-muted-foreground'>{t('Request path')}</dt>
         <dd className='font-mono text-xs break-all'>
           {detail.request.request_path}
         </dd>
+        {requestKind === 'vision_assist' &&
+          detail.request.related_request_id && (
+            <>
+              <dt className='text-muted-foreground'>{t('Main request')}</dt>
+              <dd>
+                <Button
+                  type='button'
+                  variant='outline'
+                  size='sm'
+                  className='max-w-full font-mono text-xs'
+                  title={detail.request.related_request_id}
+                  onClick={() =>
+                    props.onSelectRequest(detail.request.related_request_id)
+                  }
+                >
+                  <span className='truncate'>
+                    {detail.request.related_request_id}
+                  </span>
+                </Button>
+              </dd>
+            </>
+          )}
+        {requestKind !== 'vision_assist' &&
+          relatedVisionRequests.length > 0 && (
+            <>
+              <dt className='text-muted-foreground'>
+                {t('Visual assist calls')}
+              </dt>
+              <dd className='min-w-0'>
+                <MessageAuditRelatedRequests
+                  requests={relatedVisionRequests}
+                  onSelectRequest={props.onSelectRequest}
+                />
+              </dd>
+            </>
+          )}
         <dt className='text-muted-foreground'>{t('Inferred session')}</dt>
         <dd className='min-w-0 font-mono text-xs break-all'>
           {detail.request.audit_session_id}

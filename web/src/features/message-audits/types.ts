@@ -21,6 +21,8 @@ import type { SystemTask } from '@/features/system-settings/types'
 export type MessageAuditRequest = {
   id: number
   request_id: string
+  request_kind: 'client' | 'vision_assist' | string
+  related_request_id: string
   audit_session_id: string
   parent_request_id: string
   session_match: 'new' | 'exact' | 'prefix' | 'compressed' | string
@@ -71,6 +73,7 @@ export type MessageAuditMessage = {
 export type MessageAuditDetail = {
   request: MessageAuditRequest
   messages: MessageAuditMessage[]
+  related_requests?: MessageAuditRequest[]
 }
 
 export type MessageAuditRiskLevel = 'none' | 'low' | 'medium' | 'high'

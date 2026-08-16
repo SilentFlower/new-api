@@ -46,6 +46,7 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 import type { ChannelFormValues } from '../../../lib'
 import { ResponsesCompactPassthroughField } from './responses-compact-passthrough-field'
+import { VisionAssistModelFields } from './vision-assist-model-fields'
 
 const UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT = 8
 
@@ -406,47 +407,7 @@ export function BuildChannelExtraSettingsFields() {
           )}
         />
 
-        <div className='grid gap-4 sm:grid-cols-2'>
-          <FormField
-            control={form.control}
-            name='vision_assist_channel_id'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{t('Assist channel ID')}</FormLabel>
-                <FormControl>
-                  <Input
-                    type='number'
-                    min={0}
-                    placeholder='0'
-                    value={field.value ?? 0}
-                    onChange={(e) => field.onChange(Number(e.target.value))}
-                  />
-                </FormControl>
-                <FormDescription>
-                  {t('Channel ID used to call the vision assist model')}
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-
-          <FormField
-            control={form.control}
-            name='vision_assist_model'
-            render={({ field }) => (
-              <FormItem>
-                <FormLabel>{t('Assist model')}</FormLabel>
-                <FormControl>
-                  <Input placeholder={t('e.g., gemini-2.5-flash')} {...field} />
-                </FormControl>
-                <FormDescription>
-                  {t('Model used to read image content')}
-                </FormDescription>
-                <FormMessage />
-              </FormItem>
-            )}
-          />
-        </div>
+        <VisionAssistModelFields />
 
         <FormField
           control={form.control}

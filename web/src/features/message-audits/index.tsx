@@ -249,7 +249,21 @@ export function MessageAudits() {
         cell: ({ row }) =>
           row.original.token_name || `#${row.original.token_id}`,
       },
-      { accessorKey: 'model_name', header: t('Model'), size: 170 },
+      {
+        accessorKey: 'model_name',
+        header: t('Model'),
+        size: 190,
+        cell: ({ row }) => (
+          <div className='flex min-w-0 flex-wrap items-center gap-1.5'>
+            <span className='truncate'>{row.original.model_name}</span>
+            {row.original.request_kind === 'vision_assist' && (
+              <Badge variant='outline' className='shrink-0'>
+                {t('Visual Assist')}
+              </Badge>
+            )}
+          </div>
+        ),
+      },
       { accessorKey: 'request_path', header: t('Request path'), size: 180 },
       {
         id: 'audit_session_id',

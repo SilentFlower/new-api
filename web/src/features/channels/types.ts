@@ -207,6 +207,20 @@ export interface GetChannelResponse {
   data?: Channel
 }
 
+/** 管理端模型选择使用的非敏感渠道摘要。 */
+export interface ChannelModelOption {
+  id: number
+  name: string
+  models: string[]
+}
+
+/** 渠道模型选项接口响应。 */
+export interface ChannelModelOptionsResponse {
+  success: boolean
+  message?: string
+  data?: ChannelModelOption[]
+}
+
 export interface ChannelOpsResponse {
   success: boolean
   message?: string

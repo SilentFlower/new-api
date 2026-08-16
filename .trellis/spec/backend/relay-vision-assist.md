@@ -550,3 +550,108 @@ for _, image := range images {
 	units[unitIndex].Images = append(units[unitIndex].Images, image)
 }
 ```
+
+## 场景：视觉辅助真实调用的独立消息审计生命周期
+
+### 1. Scope / Trigger
+
+- Trigger：修改视觉辅助请求准备顺序、重试、缓存、计费前置流程、上游调用或消息审计接入。
+- 适用范围：`relay/vision_assist.go`、`relay/vision_assist_audit.go`、`service/message_audit.go` 及对应测试。
+- 目标：只为实际构造并准备发送的视觉辅助调用创建独立审计记录，正文准确对应最终协议 DTO，且 capture 后所有退出路径都完成 finalize。
+
+### 2. Signatures
+
+```go
+func callVisionAssistModel(
+	c *gin.Context,
+	info *relaycommon.RelayInfo,
+	request *dto.GeneralOpenAIRequest,
+	images []service.VisionAssistImage,
+) ([]service.VisionAssistResult, *types.NewAPIError)
+
+func captureVisionAssistMessageAuditWithWriter(
+	c *gin.Context,
+	parent *relaycommon.RelayInfo,
+	assistInfo *relaycommon.RelayInfo,
+	request dto.Request,
+	writer visionAssistMessageAuditWriter,
+) visionAssistMessageAudit
+
+func (audit visionAssistMessageAudit) finalize(apiErr *types.NewAPIError)
+```
+
+### 3. Contracts
+
+- capture 必须发生在 `prepareVisionAssistRequest` 成功之后、token 估算之前；此时 `prepared.req` 已完成端点转换和模型映射。
+- 审计正文必须直接使用 `prepared.req`，支持 OpenAI Chat、OpenAI Responses、Claude Messages 和 Gemini Native 四种最终 DTO；不得捕获主请求或转换前的 `GeneralOpenAIRequest` 中间值。
+- 每次进入 `callVisionAssistModel` 的真实尝试使用 `assistInfo.RequestId` 作为独立审计请求 ID，并用父 `RelayInfo.RequestId` 建立关联。
+- 请求级、Redis 或内存缓存命中不会进入辅助 caller，因此不得伪造审计记录；内部重试每次进入 caller，必须各自生成记录。
+- capture 后必须立即注册统一 defer，并让命名返回值 `apiErr` 驱动 finalize；token、定价、并发、预扣费、上游调用和响应处理失败都不能绕过它。
+- finalize 成功写入 `status=succeeded`、HTTP 200、实际耗时和映射后的消费日志模型；失败写入 `status=failed`、稳定错误码和错误 HTTP 状态，状态缺失时回退 500。
+- `CaptureMessageAudit` 返回 false，或 writer 不完整时，finalize 必须是 no-op；审计不可用不得改变视觉辅助转发、重试、并发或计费行为。
+- 视觉辅助审计不得保存上游响应正文；图片正文仍由消息审计现有媒体摘要和内容缩减策略处理。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 辅助渠道读取、启用状态或请求准备失败 | 尚未 capture，不生成记录 |
+| 最终 DTO 准备成功 | capture 一条 `vision_assist` 独立记录，然后进入 token/计费流程 |
+| token 估算或定价失败 | defer finalize 为 failed，记录稳定错误码和 HTTP 状态 |
+| 渠道单用户并发拒绝 | 不调用上游，但已 capture 的记录 finalize 为 failed |
+| 预扣费、上游请求或响应解析失败 | 已 capture 的记录 finalize 为 failed |
+| 上游成功并完成结算 | finalize 为 succeeded，HTTP 200 |
+| capture 返回 false | 继续原视觉辅助调用，结束时不调用 finalize writer |
+| 缓存命中 | caller 不执行，不新增审计记录 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：Responses 辅助请求转换为 `/v1/responses` 的 `OpenAIResponsesRequest` 后开始 capture；随后并发限制失败，记录以 failed 结束而不是长期 pending。
+- Good：同一图片第一次调用上游并产生记录，第二次命中缓存直接复用结果，不新增虚假调用记录。
+- Good：内部重试两次时生成两个独立请求 ID，主请求详情可以看到两次尝试各自的状态。
+- Base：消息审计关闭时视觉辅助照常完成计费和上游调用。
+- Bad：在 `prepareVisionAssistRequest` 前捕获原始 OpenAI 中间请求，导致 Claude、Responses 或 Gemini 审计正文与真实上游协议不一致。
+- Bad：只在上游调用错误分支手工 finalize，遗漏 token、定价、并发和预扣费失败，使记录永久停留在 pending。
+
+### 6. Tests Required
+
+- `TestCaptureVisionAssistMessageAuditUsesPreparedProtocolRequest`：表格覆盖四种最终协议 DTO，断言正文对象、协议、路径、独立类型、关联 ID 和成功 finalize。
+- `TestVisionAssistMessageAuditFinalizesFailureAndSkipsUnavailableCapture`：断言失败状态、稳定错误码、HTTP 状态和 capture 不可用时的 no-op。
+- `TestCallVisionAssistModelRejectsConcurrencyBeforeUpstream`：断言并发拒绝发生在 capture 后，且 defer 将记录 finalize 为 failed。
+- Service 视觉辅助回归必须覆盖每次重试进入 caller、缓存命中不进入 caller以及既有计费/失败策略不变。
+- 回归命令：`go test ./relay ./service -run 'VisionAssist|RequestPreparationState' -count=1`，并在跨层改动后运行 `go test ./...` 与 `go vet ./...`。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+service.CaptureMessageAudit(service.MessageAuditCaptureInput{
+	RequestID: info.RequestId,
+	Request:   request,
+})
+prepared, apiErr := prepareVisionAssistRequest(c, info, request, channel)
+if apiErr != nil {
+	return nil, apiErr
+}
+```
+
+问题：捕获发生在协议转换前，正文不是实际发送 DTO；后续早退也可能没有统一 finalize。
+
+#### Correct
+
+```go
+prepared, apiErr := prepareVisionAssistRequest(c, info, request, channel)
+if apiErr != nil {
+	return nil, apiErr
+}
+
+audit := captureVisionAssistMessageAuditWithWriter(
+	c, info, prepared.info, prepared.req, auditWriter,
+)
+defer func() {
+	audit.finalize(apiErr)
+}()
+```
+
+要求：capture 时机与统一 defer 必须成对出现；新增任何 capture 后返回分支都自动经过同一 finalize。

@@ -39,8 +39,18 @@ interface ComboboxInputProps {
   id?: string
   allowCustomValue?: boolean
   openOnFocus?: boolean
+  disabled?: boolean
+  'aria-describedby'?: string
+  'aria-invalid'?: React.AriaAttributes['aria-invalid']
+  'data-form-root'?: string
 }
 
+/**
+ * 渲染支持搜索和可选自定义值的输入式下拉框。
+ *
+ * @param props 下拉选项、受控值以及传递给实际输入节点的表单属性。
+ * @returns 可通过键盘和指针操作的输入式下拉框。
+ */
 export function ComboboxInput({
   options,
   value = '',
@@ -51,6 +61,10 @@ export function ComboboxInput({
   id,
   allowCustomValue = false,
   openOnFocus = true,
+  disabled = false,
+  'aria-describedby': ariaDescribedBy,
+  'aria-invalid': ariaInvalid,
+  'data-form-root': dataFormRoot,
 }: ComboboxInputProps) {
   const { t } = useTranslation()
   const [open, setOpen] = React.useState(false)
@@ -154,18 +168,20 @@ export function ComboboxInput({
     item?.scrollIntoView({ block: 'nearest' })
   }, [highlightedIndex])
 
-  const showDropdown =
-    open &&
-    (filteredOptions.length > 0 || (allowCustomValue && searchValue.trim()))
+  const showDropdown = !disabled && open
 
   return (
     <div ref={containerRef} className='relative'>
       <Input
         ref={inputRef}
         id={id}
+        disabled={disabled}
+        aria-describedby={ariaDescribedBy}
+        aria-invalid={ariaInvalid}
+        data-form-root={dataFormRoot}
         type='text'
         role='combobox'
-        aria-expanded={open}
+        aria-expanded={!disabled && open}
         aria-haspopup='listbox'
         aria-autocomplete='list'
         autoComplete='off'

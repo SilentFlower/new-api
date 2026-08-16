@@ -27,6 +27,8 @@ const (
 type MessageAuditRequest struct {
 	ID                     int64  `json:"id" gorm:"primaryKey"`
 	RequestID              string `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`
+	RequestKind            string `json:"request_kind" gorm:"type:varchar(32);index"`
+	RelatedRequestID       string `json:"related_request_id" gorm:"type:varchar(64);index"`
 	AuditSessionID         string `json:"audit_session_id" gorm:"type:varchar(64);index"`
 	ParentRequestID        string `json:"parent_request_id" gorm:"type:varchar(64);index"`
 	SessionMatch           string `json:"session_match" gorm:"type:varchar(16);index"`
@@ -596,7 +598,7 @@ func FinalizeMessageAuditRequest(record MessageAuditFinalizeRecord) error {
 // 返回值不包含消息密文或正文。
 func ListMessageAudits(filter MessageAuditListFilter) ([]MessageAuditRequest, int64, error) {
 	query := messageAuditFilteredQuery(DB.Model(&MessageAuditRequest{}), filter)
-	selectColumns := "id, request_id, audit_session_id, parent_request_id, session_match, user_id, username, token_id, token_name, model_name, request_path, protocol, status, audit_status, error_code, finish_reason, http_status, is_stream, message_count, tool_count, plaintext_bytes, captured_plaintext_bytes, stored_payload_bytes, dedup_saved_bytes, duration_ms, captured_at, finalized_at, created_at, updated_at"
+	selectColumns := "id, request_id, request_kind, related_request_id, audit_session_id, parent_request_id, session_match, user_id, username, token_id, token_name, model_name, request_path, protocol, status, audit_status, error_code, finish_reason, http_status, is_stream, message_count, tool_count, plaintext_bytes, captured_plaintext_bytes, stored_payload_bytes, dedup_saved_bytes, duration_ms, captured_at, finalized_at, created_at, updated_at"
 	if filter.AuditSessionID != "" {
 		var total int64
 		if err := query.Where("audit_session_id = ?", filter.AuditSessionID).Count(&total).Error; err != nil {
@@ -778,6 +780,23 @@ func GetMessageAuditEncryptedDetail(requestID string) (*MessageAuditRequest, []M
 		return nil, nil, err
 	}
 	return &request, items, nil
+}
+
+// ListRelatedMessageAuditRequests 返回关联到指定主请求的独立审计记录。
+//
+// @param requestID 主请求 ID。
+// @return 不含正文和密文的关联请求列表，以及数据库查询错误。
+func ListRelatedMessageAuditRequests(requestID string) ([]MessageAuditRequest, error) {
+	if requestID == "" {
+		return []MessageAuditRequest{}, nil
+	}
+	var requests []MessageAuditRequest
+	err := DB.Model(&MessageAuditRequest{}).
+		Select("id, request_id, request_kind, related_request_id, audit_session_id, parent_request_id, session_match, user_id, username, token_id, token_name, model_name, request_path, protocol, status, audit_status, error_code, finish_reason, http_status, is_stream, message_count, tool_count, plaintext_bytes, captured_plaintext_bytes, stored_payload_bytes, dedup_saved_bytes, duration_ms, captured_at, finalized_at, created_at, updated_at").
+		Where("related_request_id = ?", requestID).
+		Order("captured_at_nano asc, id asc").
+		Find(&requests).Error
+	return requests, err
 }
 
 // AdvanceMessageAuditPurgeBefore 单调推进清理水位。

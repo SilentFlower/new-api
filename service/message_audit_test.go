@@ -276,6 +276,55 @@ func TestMessageAuditImageRequestSkipsSessionFingerprints(t *testing.T) {
 	assert.Empty(t, record.SessionAnchorHMACs)
 }
 
+func TestCaptureMessageAuditPreservesStandaloneRequestRelation(t *testing.T) {
+	manager := newMessageAuditTestManager(t)
+	previousManager := messageAuditManagerInst
+	messageAuditManagerInst = manager
+	common.OptionMapRWMutex.Lock()
+	previousOptionMap := common.OptionMap
+	if common.OptionMap == nil {
+		common.OptionMap = make(map[string]string)
+	}
+	previousEnabled, existed := common.OptionMap["MessageAuditEnabled"]
+	common.OptionMap["MessageAuditEnabled"] = "true"
+	common.OptionMapRWMutex.Unlock()
+	t.Cleanup(func() {
+		messageAuditManagerInst = previousManager
+		common.OptionMapRWMutex.Lock()
+		if previousOptionMap == nil {
+			common.OptionMap = nil
+		} else if existed {
+			common.OptionMap["MessageAuditEnabled"] = previousEnabled
+		} else {
+			delete(common.OptionMap, "MessageAuditEnabled")
+		}
+		common.OptionMapRWMutex.Unlock()
+	})
+
+	captured := CaptureMessageAudit(MessageAuditCaptureInput{
+		RequestID:        "vision-audit-request",
+		RequestKind:      MessageAuditRequestKindVisionAssist,
+		RelatedRequestID: "main-audit-request",
+		UserID:           92,
+		Protocol:         types.RelayFormatOpenAI,
+		Standalone:       true,
+		Request: &dto.GeneralOpenAIRequest{
+			Model: "vision-model",
+			Messages: []dto.Message{{
+				Role:    "user",
+				Content: "describe image",
+			}},
+		},
+	})
+	require.True(t, captured)
+	event := <-manager.queue
+	require.NotNil(t, event.capture)
+	assert.Equal(t, MessageAuditRequestKindVisionAssist, event.capture.request.RequestKind)
+	assert.Equal(t, "main-audit-request", event.capture.request.RelatedRequestID)
+	assert.True(t, event.capture.standalone)
+	assert.Empty(t, event.capture.conversationPrefixFingerprints)
+}
+
 func TestStartMessageAuditCleanupTaskPreservesNanosecondCutoff(t *testing.T) {
 	truncate(t)
 
@@ -525,6 +574,78 @@ func TestGetMessageAuditDetailUsesSemanticToolRolesAcrossProtocols(t *testing.T)
 			}
 		})
 	}
+}
+
+func TestGetMessageAuditDetailIncludesRelatedVisionAttempts(t *testing.T) {
+	truncate(t)
+	manager := newMessageAuditTestManager(t)
+	previousManager := messageAuditManagerInst
+	messageAuditManagerInst = manager
+	t.Cleanup(func() {
+		messageAuditManagerInst = previousManager
+	})
+	now := time.Now().Unix()
+	require.NoError(t, model.DB.Create(&model.MessageAuditRequest{
+		RequestID:   "detail-main-request",
+		RequestKind: MessageAuditRequestKindClient,
+		UserID:      93,
+		Protocol:    string(types.RelayFormatOpenAI),
+		Status:      "succeeded",
+		AuditStatus: "captured",
+		CapturedAt:  now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}).Error)
+	require.NoError(t, model.DB.Create(&model.MessageAuditRequest{
+		RequestID:        "detail-vision-request",
+		RequestKind:      MessageAuditRequestKindVisionAssist,
+		RelatedRequestID: "detail-main-request",
+		UserID:           93,
+		ModelName:        "vision-model",
+		Protocol:         string(types.RelayFormatOpenAIResponses),
+		Status:           "succeeded",
+		AuditStatus:      "captured",
+		CapturedAt:       now,
+		CapturedAtNano:   time.Unix(now, 0).Add(time.Millisecond).UnixNano(),
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}).Error)
+
+	detail, err := GetMessageAuditDetail("detail-main-request")
+	require.NoError(t, err)
+	require.Len(t, detail.RelatedRequests, 1)
+	assert.Equal(t, "detail-vision-request", detail.RelatedRequests[0].RequestID)
+	assert.Equal(t, MessageAuditRequestKindVisionAssist, detail.RelatedRequests[0].RequestKind)
+}
+
+func TestEncryptCaptureStandaloneSkipsConversationFingerprints(t *testing.T) {
+	manager := newMessageAuditTestManager(t)
+	now := time.Now().Unix()
+	event := &messageAuditCaptureEvent{
+		request: model.MessageAuditRequest{
+			RequestID:   "standalone-openai-request",
+			UserID:      91,
+			Protocol:    string(types.RelayFormatOpenAI),
+			Status:      "pending",
+			AuditStatus: "captured",
+			CapturedAt:  now,
+			CreatedAt:   now,
+			UpdatedAt:   now,
+		},
+		entries: []messageAuditPlaintext{{
+			Role:        "user",
+			ContentType: "message",
+			Content:     map[string]any{"role": "user", "content": "describe image"},
+		}},
+		standalone: true,
+	}
+
+	record, err := manager.encryptCapture(event)
+	require.NoError(t, err)
+	assert.Empty(t, record.ConversationPrefixFingerprints)
+	assert.Empty(t, record.SessionAnchorHMACs)
+	assert.Empty(t, record.Request.SequenceFingerprint)
+	assert.Zero(t, record.Request.ConversationItemCount)
 }
 
 func TestMessageAuditManagerDrainsCaptureBeforeFinalize(t *testing.T) {

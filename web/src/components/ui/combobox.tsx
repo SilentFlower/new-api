@@ -49,6 +49,10 @@ type LegacyComboboxProps = {
   className?: string
   id?: string
   openOnFocus?: boolean
+  disabled?: boolean
+  'aria-describedby'?: string
+  'aria-invalid'?: React.AriaAttributes['aria-invalid']
+  'data-form-root'?: string
 }
 
 function Combobox(props: LegacyComboboxProps): React.ReactElement
@@ -72,6 +76,10 @@ function Combobox(
         className={props.className}
         allowCustomValue={props.allowCustomValue}
         openOnFocus={props.openOnFocus}
+        disabled={props.disabled}
+        aria-describedby={props['aria-describedby']}
+        aria-invalid={props['aria-invalid']}
+        data-form-root={props['data-form-root']}
       />
     )
   }

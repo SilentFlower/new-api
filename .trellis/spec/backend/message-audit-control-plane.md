@@ -182,3 +182,113 @@ if response.ToolFallbackRequired {
 ```
 
 要求：请求准备和 Tool 循环都由 service 完成；`prepareMessageAuditReviewModelRequest` 只构造真实文本协议；后续 `read_file` 仍由 service 执行并校验冻结范围。上游真实上下文错误不得触发该降级分支。
+
+## 场景：视觉辅助独立审计记录与主请求关联
+
+### 1. Scope / Trigger
+
+- Trigger：修改消息审计请求类型、关联请求、独立会话捕获、详情关联列表，或让新的内部 Relay 调用进入消息审计。
+- 适用范围：`model/message_audit.go`、`service/message_audit.go`、消息审计列表/详情及对应测试。
+- 目标：每次真实视觉辅助尝试作为独立记录审计，并能与主请求双向查看，同时不污染普通推断会话和 AI 重审资料集。
+
+### 2. Signatures
+
+```go
+type MessageAuditRequest struct {
+	RequestID        string `json:"request_id" gorm:"type:varchar(64);uniqueIndex"`
+	RequestKind      string `json:"request_kind" gorm:"type:varchar(32);index"`
+	RelatedRequestID string `json:"related_request_id" gorm:"type:varchar(64);index"`
+}
+
+type MessageAuditCaptureInput struct {
+	RequestID        string
+	RequestKind      string
+	RelatedRequestID string
+	Standalone       bool
+	Request          dto.Request
+}
+
+type MessageAuditDetail struct {
+	Request         *model.MessageAuditRequest  `json:"request"`
+	Messages        []MessageAuditMessage       `json:"messages"`
+	RelatedRequests []model.MessageAuditRequest `json:"related_requests,omitempty"`
+}
+
+func ListRelatedMessageAuditRequests(requestID string) ([]MessageAuditRequest, error)
+```
+
+稳定类型值：
+
+```text
+client
+vision_assist
+```
+
+### 3. Contracts
+
+- `RequestKind` 为空时 service 必须归一化为 `client`，保证历史记录和旧调用方按普通客户端请求展示。
+- 视觉辅助使用 `request_kind=vision_assist`，并把主请求 ID 写入 `related_request_id`；不得复用 `parent_request_id`，后者只表示普通推断会话链。
+- `Standalone=true` 必须跳过会话前缀、会话锚点和序列指纹，使每条视觉辅助记录获得独立 `audit_session_id`。
+- `request_kind` 和 `related_request_id` 只建立普通索引，不建立数据库外键；主记录被保留策略清理后，辅助记录仍可保留关联 ID。
+- 列表、详情和关联查询的显式选择列必须包含两个新字段；历史数据库中的空值不得触发回填迁移或数据库默认值。
+- 主请求详情按 `related_request_id = request_id` 查询关联记录，按 `captured_at_nano asc, id asc` 排序；关联列表只返回元数据，不能返回密文、Blob 或解密正文。
+- 视觉辅助详情展示主请求 ID；主请求详情展示关联尝试的时间、模型、状态和请求 ID，并允许打开独立详情。
+- 视觉辅助记录可以按自己的独立会话执行 AI 重审，但不得进入主请求会话的来源集合。
+- 独立记录继续复用现有正文规范化、媒体摘要、大小限制、加密、队列、保留和清空策略。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 旧记录的 `request_kind` 为空 | API 保留空值，前端按 `client` 展示 |
+| `Standalone=true` | 不生成会话指纹或锚点，由 Model 创建独立审计会话 |
+| `related_request_id` 为空 | 普通请求不返回关联跳转 |
+| 主请求没有关联辅助记录 | `related_requests` 为空或省略，详情正常返回 |
+| 主请求已删除但辅助记录仍存在 | 保留关联 ID；打开缺失目标沿用现有详情错误处理 |
+| 关联查询失败 | 整个详情请求返回错误，不返回不完整的伪成功详情 |
+| 审计未启用、密钥未配置或队列拒绝 capture | `CaptureMessageAudit` 返回 false，内部调用继续执行 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：主请求 `req-main` 触发两次视觉辅助重试，生成两个独立 `vision_assist` 记录，二者都关联 `req-main` 且拥有不同审计会话。
+- Good：保留策略删除主记录后，辅助详情仍显示原主请求 ID，但跳转失败不会影响当前记录查看。
+- Base：历史普通记录没有新增字段；列表和详情继续按客户端请求展示。
+- Bad：把视觉辅助正文追加进主请求审计，导致一次请求无法分辨真实上游尝试和各次失败状态。
+- Bad：把 `related_request_id` 写进 `parent_request_id`，使辅助记录被普通会话归并和 AI 重审来源扫描吸收。
+
+### 6. Tests Required
+
+- Model：断言 `ListRelatedMessageAuditRequests` 只返回目标主请求的关联记录，并按捕获时间排序。
+- Service capture：断言 `vision_assist` 类型和关联 ID 被保留，`Standalone=true` 时会话指纹、锚点和序列指纹为空。
+- Service detail：断言主请求详情包含关联视觉辅助元数据，且不需要读取关联记录正文。
+- 历史兼容：断言空 `request_kind` 的旧记录按普通请求展示，且普通会话归并行为不变。
+- Frontend：断言视觉辅助 Badge、主请求跳转、关联尝试时间/模型/状态/请求 ID 和详情打开行为。
+- 回归命令：`go test ./model ./service`，`cd web && bun test src/features/message-audits`，以及 `go test ./...`。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+request := model.MessageAuditRequest{
+	RequestID:       assistRequestID,
+	RequestKind:     "vision_assist",
+	ParentRequestID: mainRequestID,
+}
+```
+
+问题：`ParentRequestID` 具有推断会话链语义，复用后会把内部辅助尝试并入主会话。
+
+#### Correct
+
+```go
+capture := MessageAuditCaptureInput{
+	RequestID:        assistRequestID,
+	RequestKind:      MessageAuditRequestKindVisionAssist,
+	RelatedRequestID: mainRequestID,
+	Standalone:       true,
+	Request:          preparedRequest,
+}
+```
+
+要求：关联和会话归并是两套独立语义；只通过 `related_request_id` 建立可导航关系。
