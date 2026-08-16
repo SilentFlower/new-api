@@ -1097,3 +1097,25 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 33: 完成视觉辅助选择、审计与有界分批
+
+**Date**: 2026-08-16
+**Task**: 完成视觉辅助选择、审计与有界分批
+**Branch**: `build-bak`
+
+### Summary
+
+完成视觉辅助渠道与模型联动选择、独立消息审计、Combined 默认 5 张有界分批、完整请求体 8 MiB 切割和稳定缓存复用；全量检查、规范同步与推送均已完成。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `c211ca70f` | (see git log) |
+| `a68002a5f` | (see git log) |
+
+### Status
+
+[OK] **Completed**
