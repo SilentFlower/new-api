@@ -437,8 +437,8 @@ vision_assist_combined_max_images: number
 
 - 用户意图解析：
   - `extractVisionAssistUserMessage` 保留“返回最新非空用户文本”的兼容语义；`ApplyVisionAssist` 必须通过 `resolveVisionAssistUserMessages` 为每个最终识图批次解析自己的用户问题。
-  - 图片默认只绑定同一 `MessageIndex` 的非空用户文本，不能继承更早消息的问题；新一轮只发图片时应使用通用识图规则。
-  - 仅当最新用户文本位于全部图片之后，也就是纯文本追问没有携带新图片时，才把该文本绑定到最近一组历史图片并重新识图。
+  - 图片只绑定同一 `MessageIndex` 的非空用户文本，不能继承更早或更晚消息的问题；新一轮只发图片时应使用通用识图规则。
+  - 最新用户消息只有文本、没有新图片时，不得把该文本覆盖到历史图片或改变历史图片缓存键。目标模型必须基于首次注入的识图结果回答追问，辅助模型不重复调用、审计或计费。
   - 最新用户消息携带新图片时，最新问题只能绑定该消息的图片；历史图片继续使用各自原始问题和缓存键，不能被最新问题触发重复识别。
   - OpenAI Chat 使用 `Message.ParseContent()`，Claude 兼容字符串内容和 `type=text` 内容块，Responses 兼容字符串 `input` 和普通 `role=user` 消息。
   - `function_call_output`、`custom_tool_call_output`、system、assistant、tool 内容不得成为用户问题。
@@ -461,6 +461,7 @@ vision_assist_combined_max_images: number
 - 缓存：
   - 缓存键按最终识图批次生成，并包含辅助渠道、辅助模型、识图规则哈希、该批次用户文本哈希、规范化多图模式，以及批次内按顺序排列的图片源哈希、detail 和 MIME。
   - 缓存键不得包含请求 ID、会话 ID、消息索引、批次序号、并发数或 worker 完成顺序；这些请求级状态会阻止新一轮对话复用等价批次。
+  - 后续纯文本追问不属于图片批次输入，不得进入历史图片缓存键；只有图片所属消息的原始文本、图片内容/顺序或其他既有识图配置变化时才形成新的识图缓存条目。
   - `combined_max_images` 不直接进入缓存键；配置变化导致批次图片组合变化时自然隔离，最终批次组合不变时必须继续复用原缓存。
   - 缓存值只保存识图文本；日志不得新增用户原文、请求正文或图片内容。
 - 普通执行日志必须记录 `vision_assist_combined_max_images`、`vision_assist_batch_count`、`vision_assist_batch_image_counts`、`vision_assist_split_applied` 和 `vision_assist_split_reason`。切割原因只使用 `image_count`、`payload_size` 或 `image_count_and_payload_size`。
@@ -472,7 +473,7 @@ vision_assist_combined_max_images: number
 | --- | --- |
 | 用户发送图片并提问 | 每个相关辅助批次同时包含识图规则、用户问题和图片，且只有一条 user 消息 |
 | 新一轮用户消息只有图片 | 不继承旧问题，使用通用识图规则处理新图片 |
-| 最新用户消息只有文本，图片均来自历史消息 | 把最新文本视为对最近一组历史图片的追问，仅该图片组使用新问题重新识图 |
+| 最新用户消息只有文本，图片均来自历史消息 | 历史图片继续使用首次识图缓存，辅助 caller 调用次数不增加；最新文本原样保留给目标模型 |
 | 最新用户消息同时包含文本和新图片 | 新问题只绑定新图片；历史图片按原问题命中缓存，不重复调用辅助模型 |
 | Responses 工具输出含文本和图片 | 图片可以触发视觉辅助，工具输出文本不得成为用户问题 |
 | `multi_image_mode=combined` 且同消息有 39 张图片、上限为 `5` | 稳定分成 `5+5+5+5+5+5+5+4`，不同消息仍各自分批 |
@@ -489,6 +490,7 @@ vision_assist_combined_max_images: number
 
 - Good: 用户在同一消息上传 39 张图片，配置 `combined_max_images=5`；辅助请求按 `5+5+5+5+5+5+5+4` 发送，结果仍按全局图片编号写回。
 - Good: `[A,B],[C]` 已缓存后把上限从 `2` 改为 `1`；新组合 `[A]`、`[B]` 重新识别，未变化的 `[C]` 复用缓存，后续等价请求三批全部命中。
+- Good: 首次提交两张图片并完成联合识图，后续连续询问“第二张图最后一句是什么”和“第一张提示是什么”；两次请求都复用首次批次缓存，不产生新的视觉辅助调用或独立审计记录。
 - Good: 两张图片字段本身合计小于 `8 MiB`，但加上长 prompt、用户问题和 JSON 包装后完整请求超限；规划器提前拆成两个批次。
 - Base: 单图请求在 `combined` 模式下仍只有一个识图单元，写回使用普通图片编号语义。
 - Base: 历史渠道没有 `combined_max_images`；前后端都按默认值 `5` 执行。
@@ -498,7 +500,7 @@ vision_assist_combined_max_images: number
 
 ### 6. Tests Required
 
-- 用户意图测试：`TestExtractVisionAssistUserMessage`、`TestResolveVisionAssistUserMessagesKeepsHistoricalIntent`、`TestResolveVisionAssistUserMessagesDoesNotReuseOlderQuestionForNewImage`、`TestBuildVisionAssistRequestIncludesUserMessage`。
+- 用户意图测试：`TestExtractVisionAssistUserMessage`、`TestResolveVisionAssistUserMessagesKeepsHistoricalIntent`、`TestResolveVisionAssistUserMessagesDoesNotReuseOlderQuestionForNewImage`、`TestResolveVisionAssistUserMessagesKeepsOriginalQuestionOnTextOnlyFollowUp`、`TestBuildVisionAssistRequestIncludesUserMessage`。
 - 基础多图测试：`TestApplyVisionAssistCombinesImagesFromSameMessage`、`TestBuildVisionAssistUnitsDoesNotCombineAcrossMessages`、`TestApplyVisionAssistCombinedFailureCountsAllImages`、`TestNormalizedVisionAssistMultiImageModeRejectsInvalidValues`。
 - 分批边界测试：
   - `TestBuildVisionAssistUnitPlanSplitsCombinedImagesByConfiguredLimit` 断言 `39 -> 5+5+5+5+5+5+5+4`。
@@ -506,7 +508,7 @@ vision_assist_combined_max_images: number
   - `TestBuildVisionAssistUnitPlanKeepsOversizedSingleImageInOwnBatch` 断言单图超限仍独立成批。
   - `TestEstimateVisionAssistRequestEnvelopeMatchesSerializedPayload` 断言估算值精确等于实际序列化长度。
   - `TestNormalizedVisionAssistCombinedMaxImages` 断言默认值和 `1-64` 边界。
-- 缓存和原图测试：`TestApplyVisionAssistReusesCombinedBatchCacheAcrossRequests`、`TestApplyVisionAssistCombinedCacheSeparatesChangedBatchCompositions`、`TestApplyVisionAssistCombinedBatchingKeepsOriginalImagesWhenConfigured`。
+- 缓存和原图测试：`TestApplyVisionAssistReusesInitialImageCacheForTextOnlyFollowUps`、`TestApplyVisionAssistReusesCombinedBatchCacheAcrossRequests`、`TestApplyVisionAssistCombinedCacheSeparatesChangedBatchCompositions`、`TestApplyVisionAssistCombinedBatchingKeepsOriginalImagesWhenConfigured`。
 - 渠道表单 round-trip 测试必须覆盖新建默认 `5`、历史缺失/越界/小数回退、整数 schema 拒绝小数以及保存后的 `combined_max_images`。
 - 多图模式组件测试必须断言 Combined 输入只在对应模式显示，并带有 `min=1`、`max=64`、`step=1`。
 - 回归命令：

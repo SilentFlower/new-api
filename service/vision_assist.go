@@ -784,25 +784,13 @@ func resolveVisionAssistUserMessages(request dto.Request, images []VisionAssistI
 	for _, userText := range userTexts {
 		userTextByMessage[userText.MessageIndex] = userText.Text
 	}
-	latestImageMessageIndex := images[0].MessageIndex
 	for _, image := range images {
-		if image.MessageIndex > latestImageMessageIndex {
-			latestImageMessageIndex = image.MessageIndex
-		}
 		if _, ok := userMessages[image.MessageIndex]; ok {
 			continue
 		}
 		if userText := userTextByMessage[image.MessageIndex]; userText != "" {
 			userMessages[image.MessageIndex] = userText
 		}
-	}
-	if len(userTexts) == 0 {
-		return userMessages
-	}
-	latestUserText := userTexts[len(userTexts)-1]
-	if latestUserText.MessageIndex > latestImageMessageIndex {
-		// 只有最新用户消息没有图片时，才把它视为对最近一组历史图片的追问。
-		userMessages[latestImageMessageIndex] = latestUserText.Text
 	}
 	return userMessages
 }
