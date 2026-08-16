@@ -1119,3 +1119,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 34: 修复视觉辅助纯文本追问重复识图
+
+**Date**: 2026-08-16
+**Task**: 修复视觉辅助纯文本追问重复识图
+**Branch**: `build-bak`
+
+### Summary
+
+修复纯文本追问重复绑定历史图片的问题，使后续追问复用首次视觉缓存，不重复调用辅助模型、生成审计或计费；补充回归测试与视觉辅助缓存契约。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `5fcfa8e18` | (see git log) |
+
+### Status
+
+[OK] **Completed**

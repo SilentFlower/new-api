@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 33
+- **Total Sessions**: 34
 - **Last Active**: 2026-08-16
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1121 | Active |
+| `journal-1.md` | ~1142 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 34 | 2026-08-16 | 修复视觉辅助纯文本追问重复识图 | `5fcfa8e18` | `build-bak` |
 | 33 | 2026-08-16 | 完成视觉辅助选择、审计与有界分批 | `c211ca70f`, `a68002a5f` | `build-bak` |
 | 32 | 2026-08-14 | 完成视觉辅助用户意图与多图合并识别 | `5bbb44688` | `build-bak` |
 | 31 | 2026-08-14 | 完成 Chat Completions WebSearch 模拟 | `cd81f1075` | `build-bak` |
