@@ -42,7 +42,20 @@
   - 关联目标缺失时保留 ID，并沿用现有加载错误处理。
   - 增加 UI 逻辑和交互测试，覆盖普通历史记录、视觉辅助标识、双向跳转和空关联。
 
-- [ ] 6. 完成规范、兼容性和全量验证
+- [x] 6. 实现 Combined 模式有界分批
+  - 在 `relaykit/dto.ChannelVisionAssistSettings` 增加 `combined_max_images`，后端归一化默认值 `5` 和范围 `1-64`。
+  - 调整视觉辅助单元构造：按用户消息、图片原始顺序、单批图片数和固定 `8 MiB` 请求体安全上限稳定分批。
+  - 保持 `separate` 模式、全局图片索引、缓存、重试、并发、计费和失败策略语义不变。
+  - 保持现有 `strip_image` 契约：关闭移除时原始媒体块内容和顺序不变，开启移除时仍只保留识图文字；不实现持久图片句柄。
+  - 保持分批和缓存键确定性，不引入请求 ID、会话 ID、消息索引、批次序号或 worker 顺序；相同有序批次跨新请求继续命中现有 HybridCache。
+  - 在普通日志中记录批次数、各批图片数、是否切割、切割原因和生效图片上限。
+  - 扩展渠道表单 schema、默认值、旧配置解析和保存逻辑，仅在 `combined` 模式显示范围 `1-64` 的数字输入，默认 `5`。
+  - 使用 `i18n-translate` 工作流同步七语言文案。
+  - 增加后端表驱动测试和前端表单/UI 测试，覆盖 `39 -> 5+5+5+5+5+5+5+4`、跨消息隔离、字节上限提前切割、单张超限、旧配置默认值和 separate 不回归。
+  - 增加跨独立请求缓存回归：首次分批写缓存，第二个请求 ID/会话/消息位置不同但输入等价时 caller 零调用；批次组合变化不误命中，组合不变仍可复用。
+  - 执行 `cd relaykit && GOWORK=off go build ./...`，验证独立模块仍可构建。
+
+- [x] 7. 完成规范、兼容性和全量验证
   - 核对新增字段由 GORM AutoMigrate 在 SQLite、MySQL、PostgreSQL 上安全添加，不引入数据库专用 SQL。
   - 核对消息审计密文、媒体摘要、保留清理、整库清空和 AI 重审边界未变化。
   - 核对视觉辅助缓存、重试、计费、并发和失败策略未变化。
@@ -55,6 +68,9 @@
 go test ./model ./service ./relay ./controller ./router
 go test ./...
 go vet ./...
+
+cd relaykit
+GOWORK=off go build ./...
 
 cd web
 bun test src/features/channels src/features/message-audits

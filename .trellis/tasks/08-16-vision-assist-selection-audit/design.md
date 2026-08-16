@@ -161,11 +161,47 @@ Capture 字段：
 ## 兼容性
 
 - 新字段由现有 GORM `AutoMigrate` 添加，字段类型和索引兼容 SQLite、MySQL、PostgreSQL。
-- 不改变 `relaykit/`，视觉辅助渠道设置 JSON 和外部 Relay API 不变。
+- `relaykit` 仅增加向后兼容的可选 `combined_max_images` JSON 字段，不依赖根模块，并继续保持独立可构建。
 - 历史审计记录的空类型按普通请求处理。
 - 不修改消息审计加密格式或 Blob schema；新字段只属于明文元数据。
 - 不改变缓存键、视觉辅助重试次数、并发、计费和失败策略。
 - 消息审计不可用时 `CaptureMessageAudit` 返回 false，视觉辅助继续执行。
+
+## Combined 模式有界分批
+
+`ChannelVisionAssistSettings` 增加可选整数 `CombinedMaxImages`，JSON 字段为 `combined_max_images`。后端统一归一化为 `1-64`，缺失、`0` 或越界均使用默认值 `5`。该字段位于 `relaykit/dto`，因此变更后必须使用 `GOWORK=off go build ./...` 验证独立模块。
+
+`buildVisionAssistUnitPlan` 在 `combined` 模式下按用户消息分别构造批次，并按原始图片顺序贪心装箱：
+
+1. 当前批次达到 `combined_max_images` 时结束该批次。
+2. 当前批次加入下一张内联图片后预计超过固定 `8 MiB` 请求体安全上限时，提前结束该批次。
+3. 单张图片自身超过安全上限时独立成批，不在本层拒绝，由现有辅助调用和失败策略处理。
+4. `separate` 模式继续保持一图一单元，不读取该上限改变分组结果。
+
+分批只改变识图单元边界，不改变图片对象的全局 `Index` 和 `MessageIndex`。因此识别结果仍可按全局索引排序并注入目标模型，跨批次综合由目标模型基于全部文字结果完成。
+
+缓存键继续包含当前识图单元的图片序列。配置上限变化会自然形成不同批次和缓存键，不复用边界不同的旧组合缓存。现有 `max_concurrency`、单元级重试、预扣费和结算逻辑无需另建执行通道。
+
+自动分批必须使用纯输入决定边界，不能依赖请求 ID、消息索引、批次序号、goroutine 完成顺序或审计元数据。现有缓存键继续由辅助渠道、辅助模型、提示词、用户问题、多图模式和批次内有序图片内容哈希组成；不把 `combined_max_images` 直接写入缓存键。这样：
+
+- 新一轮对话重复提交相同问题和相同有序图片时，只要确定性分批结果相同，就能在 Redis 或进程内 HybridCache 中逐批命中。
+- 调整上限但未改变某个实际批次的图片组合时，该批次结果仍可安全复用。
+- 调整上限导致联合图片组合变化时，图片序列哈希自然不同，不会错误复用旧组合的联合分析结果。
+- 批次在执行完成后仍按现有 TTL 写入缓存；缓存命中不进入辅助 caller，因此不产生辅助审计、预扣费或上游请求。
+
+回归测试使用两个独立 `gin.Context` 和不同请求 ID 模拟新会话：第一次完成所有分批并写缓存，第二次提交等价输入，断言 caller 零调用、结果顺序一致且缓存命中图片数覆盖全部输入。另覆盖消息索引变化、并发完成顺序变化和分批上限变化的安全命中边界。
+
+渠道编辑页在选择 `combined` 后显示数字输入框“单批最大图片数”，范围 `1-64`，默认 `5`。表单解析旧配置时回填 `5`，保存时写入 `vision_assist.combined_max_images`；切换到 `separate` 不删除已配置值，便于再次切回。
+
+普通请求日志增加以下诊断字段：
+
+- `vision_assist_combined_max_images`
+- `vision_assist_batch_count`
+- `vision_assist_batch_image_counts`
+- `vision_assist_split_applied`
+- `vision_assist_split_reason`
+
+`split_reason` 仅取稳定枚举值 `image_count`、`payload_size` 或 `image_count_and_payload_size`，未切割时省略。
 
 ## 文件与上游冲突面
 
@@ -184,7 +220,10 @@ Capture 字段：
 - `model/message_audit.go`：增加审计元数据字段和查询列。
 - `service/message_audit.go`：扩展 capture 输入、standalone 会话边界和详情关联结果。
 - `relay/vision_assist.go`：在最终 DTO 准备后启动审计，并通过统一 defer finalize。
+- `relaykit/dto/channel_settings.go`：增加 `combined_max_images` 可选配置字段，保持模块独立。
+- `service/vision_assist.go`：按图片数与固定请求体安全上限切割 combined 单元，并输出分批诊断字段。
 - `web/src/features/channels/components/drawers/sections/build-channel-settings.tsx`：用新组件替换原有两个手填字段。
+- `web/src/features/channels/lib/build-channel-settings.ts`：解析、校验并保存单批最大图片数。
 - `web/src/features/channels/api.ts`、`types.ts`：增加渠道模型选项 API 契约。
 - `web/src/features/message-audits/types.ts`、列表和详情组件：展示类型及双向关联。
 - `web/src/i18n/locales/*.json`：通过项目 i18n 脚本同步新增文案。
@@ -197,5 +236,10 @@ Capture 字段：
 - 风险：主请求 capture 与辅助 capture 都是异步非阻塞写入，极端队列压力下可能只保存一侧。关联不设外键，单侧缺失不会阻塞另一侧。
 - 风险：受控 Combobox 若遗漏历史值合成选项会导致显示或键盘异常，必须有交互回归。
 - 风险：capture 后错误分支未 finalize 会产生 pending 记录，必须通过统一 defer 和失败测试保护。
+- 风险：分批边界变化会改变 combined 缓存键；这是避免错误复用旧组合结果所必需的预期行为。
+- 风险：联合识别结果取决于同批图片组合和顺序，因此不能拆成单图缓存后跨任意批次拼接；本设计只复用完全相同的有序批次。
+- 风险：远程图片 URL 无法在调用前获知真实媒体大小，请求体安全上限只能精确约束内联 data URL；图片数量上限仍对所有来源生效。
+- 延后风险：`strip_image=true` 会阻断需要原始像素的图片操作 Agent；`strip_image=false` 可能让目标模型重复识图，且不支持视觉的上游可能拒绝请求。当前没有可供 Agent 跨请求访问的稳定本地图片路径。该问题涉及模型能力判断、对象存储权限与图片工具协议，不在本轮解决。
+- 分批实现必须保持现有原图转发语义：`strip_image=false` 时不修改原始媒体块的内容、顺序或出现次数，`strip_image=true` 时维持现有移除行为。
 - 回滚时删除新增组件、选项 API 和审计生命周期接入，并撤销新元数据字段的代码读取即可；数据库新增空闲列可保留，不需要破坏性回退迁移。
 - 上游同步后重点复核渠道编辑 Drawer、`controller/relay.go` 的审计入口、`relay/vision_assist.go` 的准备顺序和消息审计列表查询列。

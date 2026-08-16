@@ -80,16 +80,18 @@
     }
   },
   "progress": {
-    "updatedAt": "2026-08-16T07:46:31Z",
     "completedSteps": [
       "完成渠道与模型联动选择器及只读选项 API",
       "完成视觉辅助独立消息审计与主请求关联",
       "完成消息审计列表与详情展示及七语言文案",
-      "完成 Full Check-All 与回归验证",
-      "完成可执行规范更新和业务提交推送"
+      "完成 Combined 模式有界分批、完整请求体大小限制和缓存边界回归",
+      "完成 Full Check-All 修复与全量验证",
+      "完成视觉辅助可执行规范更新",
+      "完成视觉辅助有界分批业务提交与推送"
     ],
     "partialStep": null,
-    "nextStep": "任务完成，等待显式 finish-work",
-    "notes": ""
+    "nextStep": "等待显式 finish-work",
+    "notes": "已记录 strip_image 与图片操作 Agent 的延后风险",
+    "updatedAt": "2026-08-16T11:26:06Z"
   }
 }
