@@ -1,0 +1,12 @@
+{"file":".trellis/spec/backend/relay-vision-assist.md","reason":"约束视觉辅助缓存、重试、最终端点 DTO、计费与主请求改写边界。"}
+{"file":".trellis/spec/backend/message-audit-control-plane.md","reason":"约束消息审计加密、会话归并、AI 重审隔离、保留清理和内部调用边界。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"新增消息审计元数据列和索引必须兼容 SQLite、MySQL、PostgreSQL。"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"新增渠道模型选项管理 API 必须遵循跨层契约和响应规范。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"约束 JSON 封装、测试断言、公共 API 注释和全量验证。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"约束新 Model、Controller、Relay 文件职责和分层依赖。"}
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"要求 build 分支使用独立实现和最薄上游接入点。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查选项 API、表单、视觉辅助调用、审计持久化和详情展示的完整数据流。"}
+{"file":".trellis/spec/frontend/base-ui-composition.md","reason":"约束 Drawer 内受控选择器当前值、组合上下文、焦点和键盘行为。"}
+{"file":".trellis/spec/frontend/i18n-merge-guidelines.md","reason":"新增选择器和审计文案必须使用脚本同步七语言并执行源码缺键扫描。"}
+{"file":"web/AGENTS.md","reason":"约束 React Hook Form、React Query、TypeScript、测试、lint 和生产构建。"}
+{"file":".trellis/tasks/08-16-vision-assist-selection-audit/research/current-flow.md","reason":"记录现有手填配置、审计捕获点、视觉辅助重试和会话字段的代码事实。"}

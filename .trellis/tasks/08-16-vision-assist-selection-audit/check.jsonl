@@ -1,0 +1,11 @@
+{"file":".trellis/spec/backend/relay-vision-assist.md","reason":"反向核对缓存命中、每次重试、最终 DTO、计费和改写行为未回归。"}
+{"file":".trellis/spec/backend/message-audit-control-plane.md","reason":"核对独立记录未污染主会话、AI 重审、加密、清理和内部调用隔离。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"核对新增列、索引和查询在三种数据库上的兼容性。"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"核对渠道模型选项 API 的权限、响应和前后端类型一致性。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"核对测试质量、JSON 使用、Javadoc 和完整验证证据。"}
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"审查原有上游文件是否只有必要薄接入且无无关重构。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"从 UI 选择到 API、数据库、Relay、审计详情做正向和反向数据流检查。"}
+{"file":".trellis/spec/frontend/base-ui-composition.md","reason":"核对历史值合成选项、键盘焦点、Drawer 和受控值行为。"}
+{"file":".trellis/spec/frontend/i18n-merge-guidelines.md","reason":"核对七语言、源码缺键、键集合和未翻译值门禁。"}
+{"file":"web/AGENTS.md","reason":"核对前端组件职责、类型、交互测试、lint、格式和构建。"}
+{"file":".trellis/tasks/08-16-vision-assist-selection-audit/research/current-flow.md","reason":"以调研事实校验实现没有误用 ParentRequestID 或错误捕获中间 DTO。"}

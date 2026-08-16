@@ -1,0 +1,95 @@
+{
+  "id": "vision-assist-selection-audit",
+  "name": "vision-assist-selection-audit",
+  "title": "优化视觉辅助模型选择与消息审计",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-08-16",
+  "completedAt": "2026-08-16",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-08-16T05:55:49Z",
+      "contextKey": "codex_01a0091e-51e8-7550-af51-6303b0700a3c",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "181a937178a1ab90676342791575a957e89c4768",
+        "status": [
+          {
+            "status": "??",
+            "path": ".trellis/spec/frontend/i18n-merge-guidelines.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/spec/frontend/index.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/spec/guides/build-upstream-friendly-customization.md"
+          }
+        ],
+        "repositories": [
+          {
+            "root": ".",
+            "head": "181a937178a1ab90676342791575a957e89c4768",
+            "status": [
+              {
+                "status": "??",
+                "path": ".trellis/spec/frontend/i18n-merge-guidelines.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/spec/frontend/index.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/spec/guides/build-upstream-friendly-customization.md"
+              }
+            ],
+            "worktreeDiffSha256": "ae138092cd8a33e5f833a19735b4ad4df7b83986440048d5f70a8c1f608e2252",
+            "indexDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "untracked": [
+              {
+                "path": ".trellis/spec/frontend/i18n-merge-guidelines.md",
+                "sha256": "09936db530aa3f85f06a9d2ed874791cf4fb7c69e5297e514efaaae0cc87c910"
+              }
+            ],
+            "conflicts": [],
+            "integration": [],
+            "fingerprint": "95d1c36c57481a152a5a66a93025565210c1258b1a95ffe5123652879550c157"
+          }
+        ],
+        "fingerprint": "c4b6f1c219e2f317c879b69d480416f8a9cc4f6530d6f7ab0a3aa32e21b50ddb"
+      }
+    }
+  },
+  "progress": {
+    "updatedAt": "2026-08-16T07:46:31Z",
+    "completedSteps": [
+      "完成渠道与模型联动选择器及只读选项 API",
+      "完成视觉辅助独立消息审计与主请求关联",
+      "完成消息审计列表与详情展示及七语言文案",
+      "完成 Full Check-All 与回归验证",
+      "完成可执行规范更新和业务提交推送"
+    ],
+    "partialStep": null,
+    "nextStep": "任务完成，等待显式 finish-work",
+    "notes": ""
+  }
+}
