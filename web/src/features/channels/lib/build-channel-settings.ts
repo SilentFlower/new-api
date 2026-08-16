@@ -37,6 +37,9 @@ export const visionAssistMultiImageModes = ['separate', 'combined'] as const
 export type VisionAssistMultiImageMode =
   (typeof visionAssistMultiImageModes)[number]
 
+export const VISION_ASSIST_COMBINED_MAX_IMAGES_DEFAULT = 5
+export const VISION_ASSIST_COMBINED_MAX_IMAGES_MAX = 64
+
 export const webSearchProviders = ['tavily', 'anysearch'] as const
 export type WebSearchProvider = (typeof webSearchProviders)[number]
 
@@ -66,6 +69,12 @@ export const buildChannelSettingFormSchema = {
   vision_assist_endpoint_mode: z.enum(visionAssistEndpointModes).optional(),
   vision_assist_multi_image_mode: z
     .enum(visionAssistMultiImageModes)
+    .optional(),
+  vision_assist_combined_max_images: z
+    .number()
+    .int()
+    .min(1)
+    .max(VISION_ASSIST_COMBINED_MAX_IMAGES_MAX)
     .optional(),
   vision_assist_max_concurrency: z.number().min(1).max(8).optional(),
   vision_assist_retry_count: z.number().min(0).max(5).optional(),
@@ -100,6 +109,7 @@ export const BUILD_CHANNEL_SETTING_DEFAULTS = {
   vision_assist_strip_image: true,
   vision_assist_endpoint_mode: 'auto' as const,
   vision_assist_multi_image_mode: 'separate' as const,
+  vision_assist_combined_max_images: VISION_ASSIST_COMBINED_MAX_IMAGES_DEFAULT,
   vision_assist_max_concurrency: 2,
   vision_assist_retry_count: 1,
   vision_assist_retry_backoff_ms: 500,
@@ -133,6 +143,7 @@ export const BUILD_CHANNEL_SETTING_FORM_FIELDS = [
   'vision_assist_strip_image',
   'vision_assist_endpoint_mode',
   'vision_assist_multi_image_mode',
+  'vision_assist_combined_max_images',
   'vision_assist_max_concurrency',
   'vision_assist_retry_count',
   'vision_assist_retry_backoff_ms',
@@ -187,6 +198,20 @@ function minNumberOrDefault(
 ): number {
   const numberValue = numberOrDefault(value, defaultValue)
   return numberValue >= minValue ? numberValue : defaultValue
+}
+
+function boundedNumberOrDefault(
+  value: unknown,
+  minValue: number,
+  maxValue: number,
+  defaultValue: number
+): number {
+  const numberValue = numberOrDefault(value, defaultValue)
+  return Number.isInteger(numberValue) &&
+    numberValue >= minValue &&
+    numberValue <= maxValue
+    ? numberValue
+    : defaultValue
 }
 
 export function normalizeVisionAssistEndpointMode(
@@ -280,6 +305,12 @@ export function parseBuildChannelSettingDefaults(
     vision_assist_multi_image_mode: normalizeVisionAssistMultiImageMode(
       visionAssist.multi_image_mode
     ),
+    vision_assist_combined_max_images: boundedNumberOrDefault(
+      visionAssist.combined_max_images,
+      1,
+      VISION_ASSIST_COMBINED_MAX_IMAGES_MAX,
+      VISION_ASSIST_COMBINED_MAX_IMAGES_DEFAULT
+    ),
     vision_assist_max_concurrency: minNumberOrDefault(
       visionAssist.max_concurrency,
       1,
@@ -371,6 +402,12 @@ export function buildChannelSettingFields(
       ),
       multi_image_mode: normalizeVisionAssistMultiImageMode(
         formData.vision_assist_multi_image_mode
+      ),
+      combined_max_images: boundedNumberOrDefault(
+        formData.vision_assist_combined_max_images,
+        1,
+        VISION_ASSIST_COMBINED_MAX_IMAGES_MAX,
+        VISION_ASSIST_COMBINED_MAX_IMAGES_DEFAULT
       ),
       max_concurrency: minNumberOrDefault(
         formData.vision_assist_max_concurrency,

@@ -164,6 +164,7 @@ test('Build 渠道设置保持未知字段和 WebSearch API Key 状态', () => {
   assert.equal(defaults.vision_assist_channel_id, 12)
   assert.equal(defaults.vision_assist_target_models, 'gpt-4o')
   assert.equal(defaults.vision_assist_multi_image_mode, 'combined')
+  assert.equal(defaults.vision_assist_combined_max_images, 5)
 
   const payload = transformFormDataToUpdatePayload(defaults, channel.id)
   const setting = JSON.parse(payload.setting || '{}') as Record<string, unknown>
@@ -176,6 +177,7 @@ test('Build 渠道设置保持未知字段和 WebSearch API Key 状态', () => {
   assert.equal(webSearch.clear_api_key, false)
   assert.equal(visionAssist.future_vision_flag, 'keep')
   assert.equal(visionAssist.multi_image_mode, 'combined')
+  assert.equal(visionAssist.combined_max_images, 5)
 })
 
 test('新建渠道默认使用合并识别', () => {
@@ -199,6 +201,41 @@ test('视觉辅助多图模式缺失或非法时保持逐张识别', () => {
   assert.equal(empty.vision_assist_multi_image_mode, 'separate')
   assert.equal(historical.vision_assist_multi_image_mode, 'separate')
   assert.equal(invalid.vision_assist_multi_image_mode, 'separate')
+})
+
+test('视觉辅助合并单批图片数默认值、边界和往返保持一致', () => {
+  const empty = transformChannelToFormDefaults(createChannel(''))
+  const invalid = transformChannelToFormDefaults(
+    createChannel(
+      '{"vision_assist":{"multi_image_mode":"combined","combined_max_images":65}}'
+    )
+  )
+  const fractional = transformChannelToFormDefaults(
+    createChannel(
+      '{"vision_assist":{"multi_image_mode":"combined","combined_max_images":2.5}}'
+    )
+  )
+  const configured = transformChannelToFormDefaults(
+    createChannel(
+      '{"vision_assist":{"multi_image_mode":"combined","combined_max_images":12}}'
+    )
+  )
+
+  assert.equal(empty.vision_assist_combined_max_images, 5)
+  assert.equal(invalid.vision_assist_combined_max_images, 5)
+  assert.equal(fractional.vision_assist_combined_max_images, 5)
+  assert.equal(configured.vision_assist_combined_max_images, 12)
+
+  const payload = transformFormDataToUpdatePayload(configured, 1)
+  const setting = JSON.parse(payload.setting || '{}') as Record<string, unknown>
+  const visionAssist = setting.vision_assist as Record<string, unknown>
+  assert.equal(visionAssist.combined_max_images, 12)
+
+  const invalidSchemaResult = channelFormSchema.safeParse({
+    ...configured,
+    vision_assist_combined_max_images: 2.5,
+  })
+  assert.equal(invalidSchemaResult.success, false)
 })
 
 test('Build WebSearch 支持清空旧 Key 或替换为新 Key', () => {

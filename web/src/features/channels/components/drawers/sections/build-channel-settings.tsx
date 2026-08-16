@@ -45,6 +45,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group'
 
 import type { ChannelFormValues } from '../../../lib'
+import {
+  VISION_ASSIST_COMBINED_MAX_IMAGES_DEFAULT,
+  VISION_ASSIST_COMBINED_MAX_IMAGES_MAX,
+} from '../../../lib/build-channel-settings'
 import { ResponsesCompactPassthroughField } from './responses-compact-passthrough-field'
 import { VisionAssistModelFields } from './vision-assist-model-fields'
 
@@ -121,6 +125,9 @@ function parseSettingsRecord(
 export function BuildChannelExtraSettingsFields() {
   const { t } = useTranslation()
   const form = useFormContext<ChannelFormValues>()
+  const visionAssistMultiImageMode = form.watch(
+    'vision_assist_multi_image_mode'
+  )
   const webSearchProvider = form.watch('web_search_provider')
   const webSearchApiKeyConfigured = form.watch('web_search_api_key_configured')
   let webSearchApiKeyPlaceholder = t('Enter provider API Key')
@@ -492,7 +499,7 @@ export function BuildChannelExtraSettingsFields() {
                 </FormControl>
                 <FormDescription>
                   {t(
-                    'Separate sends one assist request per image; combined sends images from the same message in one request'
+                    'Separate sends one assist request per image; combined sends images from the same message in ordered batches'
                   )}
                 </FormDescription>
                 <FormMessage />
@@ -500,6 +507,39 @@ export function BuildChannelExtraSettingsFields() {
             )
           }}
         />
+
+        {visionAssistMultiImageMode === 'combined' ? (
+          <FormField
+            control={form.control}
+            name='vision_assist_combined_max_images'
+            render={({ field }) => (
+              <FormItem className='max-w-sm'>
+                <FormLabel>{t('Images per combined batch')}</FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    min={1}
+                    max={VISION_ASSIST_COMBINED_MAX_IMAGES_MAX}
+                    step={1}
+                    aria-label={t('Images per combined batch')}
+                    value={
+                      field.value ?? VISION_ASSIST_COMBINED_MAX_IMAGES_DEFAULT
+                    }
+                    onChange={(event) =>
+                      field.onChange(Number(event.target.value))
+                    }
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t(
+                    'Combined mode splits images into ordered batches at this limit'
+                  )}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+        ) : null}
 
         <div className='grid gap-4 sm:grid-cols-2'>
           <FormField

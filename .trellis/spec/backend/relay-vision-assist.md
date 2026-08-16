@@ -375,21 +375,28 @@ rewrittenItems = append(rewrittenItems, map[string]any{
 })
 ```
 
-## 场景：用户意图驱动与渠道级多图识别
+## 场景：用户意图驱动与渠道级有界多图识别
 
 ### 1. Scope / Trigger
 
-- Trigger: 修改视觉辅助用户文本解析、默认提示词、识图单元划分、`multi_image_mode`、缓存键、识图结果写回或渠道表单。
+- Trigger: 修改视觉辅助用户文本解析、默认提示词、识图单元划分、`multi_image_mode`、`combined_max_images`、完整请求体大小限制、缓存键、识图结果写回、执行日志或渠道表单。
 - 适用范围: OpenAI Chat、Claude Messages、OpenAI Responses 主请求，以及 OpenAI Chat、OpenAI Responses、Anthropic Messages、Gemini Native 辅助端点。
-- 风险背景: 用户问题缺失会让辅助模型只生成通用图片描述；多图分组、历史配置回退或缓存隔离错误会造成跨消息合并、错误复用或重复写回。
+- 风险背景: 用户问题缺失会让辅助模型只生成通用图片描述；无界合并可能超过上游请求体限制；分批边界不稳定或缓存键混入请求级状态会造成错误复用或在新一轮对话中重复识别。
 
 ### 2. Signatures
 
-- 渠道配置与识图结果：
+- 渠道配置、规划结果与识图结果：
 
 ```go
 type ChannelVisionAssistSettings struct {
-	MultiImageMode string `json:"multi_image_mode,omitempty"`
+	MultiImageMode    string `json:"multi_image_mode,omitempty"`
+	CombinedMaxImages int    `json:"combined_max_images,omitempty"`
+}
+
+type visionAssistUnitPlan struct {
+	Units              []visionAssistUnit
+	SplitByImageCount  bool
+	SplitByPayloadSize bool
 }
 
 type VisionAssistResult struct {
@@ -402,14 +409,17 @@ type VisionAssistResult struct {
 }
 ```
 
-- Service 层用户意图、识图单元、请求和缓存入口：
+- Service 层用户意图、识图单元、请求大小和缓存入口：
 
 ```go
 func extractVisionAssistUserMessage(request dto.Request) string
 func extractVisionAssistUserTexts(request dto.Request) []visionAssistUserText
 func resolveVisionAssistUserMessages(request dto.Request, images []VisionAssistImage) map[int]string
 func normalizedVisionAssistMultiImageMode(setting dto.ChannelVisionAssistSettings) string
-func buildVisionAssistUnits(images []VisionAssistImage, multiImageMode string) []visionAssistUnit
+func normalizedVisionAssistCombinedMaxImages(setting dto.ChannelVisionAssistSettings) int
+func buildVisionAssistUnitPlan(setting dto.ChannelVisionAssistSettings, prompt string, userMessages map[int]string, images []VisionAssistImage, multiImageMode string, combinedMaxImages int) visionAssistUnitPlan
+func estimateVisionAssistImageURLPayloadBytes(image VisionAssistImage) (int, bool)
+func estimateVisionAssistRequestEnvelopeBytes(setting dto.ChannelVisionAssistSettings, prompt string, userMessage string, images []VisionAssistImage) (int, bool)
 func buildVisionAssistRequest(setting dto.ChannelVisionAssistSettings, prompt string, userMessage string, images []VisionAssistImage) *dto.GeneralOpenAIRequest
 func buildVisionAssistCacheKey(setting dto.ChannelVisionAssistSettings, prompt string, userMessage string, multiImageMode string, images []VisionAssistImage) string
 ```
@@ -420,12 +430,13 @@ func buildVisionAssistCacheKey(setting dto.ChannelVisionAssistSettings, prompt s
 type VisionAssistMultiImageMode = 'separate' | 'combined'
 
 vision_assist_multi_image_mode: VisionAssistMultiImageMode
+vision_assist_combined_max_images: number
 ```
 
 ### 3. Contracts
 
 - 用户意图解析：
-  - `extractVisionAssistUserMessage` 保留“返回最新非空用户文本”的兼容语义；`ApplyVisionAssist` 必须通过 `resolveVisionAssistUserMessages` 为每个识图单元解析自己的用户问题。
+  - `extractVisionAssistUserMessage` 保留“返回最新非空用户文本”的兼容语义；`ApplyVisionAssist` 必须通过 `resolveVisionAssistUserMessages` 为每个最终识图批次解析自己的用户问题。
   - 图片默认只绑定同一 `MessageIndex` 的非空用户文本，不能继承更早消息的问题；新一轮只发图片时应使用通用识图规则。
   - 仅当最新用户文本位于全部图片之后，也就是纯文本追问没有携带新图片时，才把该文本绑定到最近一组历史图片并重新识图。
   - 最新用户消息携带新图片时，最新问题只能绑定该消息的图片；历史图片继续使用各自原始问题和缓存键，不能被最新问题触发重复识别。
@@ -434,121 +445,119 @@ vision_assist_multi_image_mode: VisionAssistMultiImageMode
   - 完全没有用户文本时返回空字符串，辅助请求退化为“识图规则 + 图片”。
 - 辅助请求继续只有一条 `role=user` 多模态消息，内容顺序固定为：识图规则、可选用户问题、可选多图说明、按原顺序排列的图片编号和图片。
 - 用户问题只决定识图重点，不能覆盖渠道识图规则；默认提示词必须把图片文字视为待分析内容而不是可执行指令，并保留人物身份等结论的不确定性。
-- 多图模式：
+- 多图模式与分批：
   - 后端只接受精确值 `combined`；空值、大小写变体、前后空格和未知值一律归一化为 `separate`。
-  - `separate` 每张图片生成一个识图单元；`combined` 只按 `VisionAssistImage.MessageIndex` 合并同一原始消息的图片，不跨消息合并。
-  - 合并调用失败时遵循现有重试和失败策略，不隐式降级为逐张识别。
-  - 合并结果只写回一次“多图综合信息”；图片数、缓存命中数和失败数仍按实际图片数量统计。
-- 前端新建渠道默认 `combined`；编辑历史渠道时，缺失或非法 `multi_image_mode` 必须显示为 `separate`。读取、切换和保存都使用同一组 `separate | combined` 值。
-- 缓存键必须按识图单元生成，并包含辅助渠道、辅助模型、识图规则哈希、该单元用户文本哈希、规范化多图模式，以及当前识图单元内按顺序排列的图片源哈希、detail 和 MIME；不得用请求级最新问题统一生成全部历史图片的缓存键。
-- 缓存值只保存识图文本；日志不得新增用户原文、请求正文或图片内容。
-- 写回主请求时必须保留原始用户文本和非图片内容顺序，使用中性的“图片相关信息”说明，并要求目标模型保留识图结果中的不确定性。
+  - `combined_max_images` 的合法范围是整数 `1-64`；缺失、`0`、负数或超过 `64` 时后端统一使用默认值 `5`。
+  - `separate` 每张图片生成一个识图单元，不受合并数量和请求体上限改变分组结果。
+  - `combined` 先按 `VisionAssistImage.MessageIndex` 隔离消息，再按原始图片顺序贪心分批；每批最多 `combined_max_images` 张图片，不能跨消息合并。
+  - 每批完整序列化辅助请求必须不超过固定 `8 MiB` 安全上限。大小计算必须覆盖模型、规则、用户问题、多图说明、图片编号、detail、MIME、JSON 结构和转义后的图片 URL，不能只累加原始图片字段长度。
+  - 大型 Base64 不得在每次候选分批时重复复制；允许序列化空 URL 请求骨架后叠加每个 URL 的 JSON 编码长度，但估算结果必须与 `common.Marshal(buildVisionAssistRequest(...))` 的实际长度一致。
+  - 大小估算失败时必须保守切割；单张图片自身超过上限时仍独立成批，由既有辅助调用与失败策略处理，不在规划层拒绝。
+  - 分批不能改变图片的全局 `Index`、`MessageIndex` 或写回位置。合并调用失败仍遵循既有重试和失败策略，不隐式降级为逐张识别。
+  - 每个成功批次只写回一次结果；图片数、缓存命中数和失败数仍按实际图片数量统计。
+- 前端配置：
+  - 新建渠道默认 `multi_image_mode=combined`、`combined_max_images=5`；编辑历史渠道时，缺失或非法 `multi_image_mode` 显示为 `separate`。
+  - 历史 `combined_max_images` 缺失、非整数、非有限数或超出 `1-64` 时回退 `5`；表单 schema 必须使用整数约束，数字输入使用 `min=1`、`max=64`、`step=1`，并且只在 `combined` 模式显示。
+- 缓存：
+  - 缓存键按最终识图批次生成，并包含辅助渠道、辅助模型、识图规则哈希、该批次用户文本哈希、规范化多图模式，以及批次内按顺序排列的图片源哈希、detail 和 MIME。
+  - 缓存键不得包含请求 ID、会话 ID、消息索引、批次序号、并发数或 worker 完成顺序；这些请求级状态会阻止新一轮对话复用等价批次。
+  - `combined_max_images` 不直接进入缓存键；配置变化导致批次图片组合变化时自然隔离，最终批次组合不变时必须继续复用原缓存。
+  - 缓存值只保存识图文本；日志不得新增用户原文、请求正文或图片内容。
+- 普通执行日志必须记录 `vision_assist_combined_max_images`、`vision_assist_batch_count`、`vision_assist_batch_image_counts`、`vision_assist_split_applied` 和 `vision_assist_split_reason`。切割原因只使用 `image_count`、`payload_size` 或 `image_count_and_payload_size`。
+- 写回主请求时必须保留原始用户文本和非图片内容顺序；`strip_image=false` 时还必须保留原图片内容和顺序，不能因为分批重复或删除图片。
 
 ### 4. Validation & Error Matrix
 
 | 条件 | 行为 |
 | --- | --- |
-| 用户发送图片并提问 | 辅助请求同时包含识图规则、用户问题和图片，且只有一条 user 消息 |
+| 用户发送图片并提问 | 每个相关辅助批次同时包含识图规则、用户问题和图片，且只有一条 user 消息 |
 | 新一轮用户消息只有图片 | 不继承旧问题，使用通用识图规则处理新图片 |
 | 最新用户消息只有文本，图片均来自历史消息 | 把最新文本视为对最近一组历史图片的追问，仅该图片组使用新问题重新识图 |
 | 最新用户消息同时包含文本和新图片 | 新问题只绑定新图片；历史图片按原问题命中缓存，不重复调用辅助模型 |
-| 请求完全没有用户文本 | 不生成用户问题区块，继续执行通用识图 |
 | Responses 工具输出含文本和图片 | 图片可以触发视觉辅助，工具输出文本不得成为用户问题 |
-| `multi_image_mode=combined` | 同一消息多图一次调用，不同消息分别调用 |
-| `multi_image_mode` 缺失、非法、`COMBINED` 或 ` combined ` | 后端与历史渠道表单都回退 `separate` |
-| 新建渠道打开表单 | 默认选中 `combined` |
-| 合并识图失败且策略为 `skip` | 不写入空结果，失败图片数按该单元实际图片数累计 |
-| 用户问题、模式、图片顺序或图片内容变化 | 不命中原缓存结果 |
-| 合并结果成功 | 只注入一段“多图综合信息”，日志图片数仍为实际图片数 |
+| `multi_image_mode=combined` 且同消息有 39 张图片、上限为 `5` | 稳定分成 `5+5+5+5+5+5+5+4`，不同消息仍各自分批 |
+| 候选批次完整请求体超过 `8 MiB` | 在加入下一张图片前切割，并记录 `payload_size` |
+| 单张图片自身超过 `8 MiB` | 单独成批，不在规划层返回配置或校验错误 |
+| `multi_image_mode=separate` | 始终一图一批，不读取 `combined_max_images` 改变分组 |
+| `combined_max_images` 缺失、`0`、负数或大于 `64` | 后端和历史表单回退默认值 `5` |
+| 前端输入 `2.5` | schema 拒绝；读取历史值时回退默认值 `5` |
+| 上限变化导致批次从 `[A,B],[C]` 变为 `[A],[B],[C]` | `[A]`、`[B]` 不误命中旧组合；未变化的 `[C]` 可以命中 |
+| 新请求 ID、会话或消息位置不同，但最终有序批次相同 | 命中已有 HybridCache，不再次调用辅助模型 |
+| 合并识图失败且策略为 `skip` | 不写入空结果，失败图片数按当前批次实际图片数累计 |
 
 ### 5. Good/Base/Bad Cases
 
-- Good: 用户在同一消息上传两张图片并询问差异，渠道配置 `combined`；辅助模型一次看到问题和两张图片，下游只收到一段综合结果。
-- Good: 第二轮发送“这个呢？”和一张新图片；历史图片命中第一轮缓存，只调用辅助模型识别新图片，`separate` 与 `combined` 都不得跨消息重复识别。
-- Good: 历史渠道没有 `multi_image_mode`；编辑表单显示逐张识别，后端也继续逐张调用。
+- Good: 用户在同一消息上传 39 张图片，配置 `combined_max_images=5`；辅助请求按 `5+5+5+5+5+5+5+4` 发送，结果仍按全局图片编号写回。
+- Good: `[A,B],[C]` 已缓存后把上限从 `2` 改为 `1`；新组合 `[A]`、`[B]` 重新识别，未变化的 `[C]` 复用缓存，后续等价请求三批全部命中。
+- Good: 两张图片字段本身合计小于 `8 MiB`，但加上长 prompt、用户问题和 JSON 包装后完整请求超限；规划器提前拆成两个批次。
 - Base: 单图请求在 `combined` 模式下仍只有一个识图单元，写回使用普通图片编号语义。
-- Base: 纯文本追问历史图片时，最近图片组使用新问题重新识图；其他历史图片仍按原问题复用缓存。
-- Bad: 对配置先执行 `strings.ToLower(strings.TrimSpace(value))`，会把本应非法回退的 `COMBINED` 或带空格值错误放行为合并识别。
-- Bad: 把请求中的全部图片合成一个单元，会跨原始消息合并不相关图片并破坏写回定位。
-- Bad: 把请求级最新用户问题传给全部识图单元，会改变历史图片缓存键，导致每轮对话重复调用辅助模型。
-- Bad: 缓存键只包含图片，不包含用户问题和多图模式，会把通用描述或逐张结果复用到不同问题和合并请求。
+- Base: 历史渠道没有 `combined_max_images`；前后端都按默认值 `5` 执行。
+- Bad: 只累加未编码的图片 URL 字节，忽略 JSON 转义、模型、prompt 和消息包装，导致实际请求体超过安全上限。
+- Bad: 把 `combined_max_images`、请求 ID 或批次序号直接加入缓存键，导致最终图片组合未变化时仍重复请求。
+- Bad: 把请求中的全部图片合成一个单元，跨原始消息合并不相关图片并破坏写回定位。
 
 ### 6. Tests Required
 
-- `TestExtractVisionAssistUserMessage`: 覆盖 Chat、Claude、Responses、回溯、空文本和工具输出排除。
-- `TestResolveVisionAssistUserMessagesKeepsHistoricalIntent`: 断言 Chat 与 Responses 中每组图片保留所属消息的问题。
-- `TestResolveVisionAssistUserMessagesDoesNotReuseOlderQuestionForNewImage`: 断言新一轮图片消息无文本时不继承旧问题。
-- `TestApplyVisionAssistDoesNotReidentifyHistoricalClaudeImage`: 断言第二轮携带新图片时历史图片命中缓存、辅助调用总数只增加一次，并覆盖 `combined` 模式。
-- `TestBuildVisionAssistRequestIncludesUserMessage`: 断言单 user 消息以及规则、问题、图片的内容顺序。
-- `TestApplyVisionAssistUsesDescriptionForMultipleImagesSeparatelyByDefault`: 断言缺省配置保持逐张调用。
-- `TestApplyVisionAssistCombinesImagesFromSameMessage`: 断言同消息多图只调用一次、只写回一次并按实际图片数记日志。
-- `TestBuildVisionAssistUnitsDoesNotCombineAcrossMessages`: 断言 `combined` 不跨 `MessageIndex` 合并。
-- `TestApplyVisionAssistCombinedFailureCountsAllImages`: 断言合并失败按实际图片数累计。
-- `TestVisionAssistCombinedCacheKeyUsesImageOrder` 与用户问题缓存测试: 断言问题、模式和图片顺序参与缓存隔离。
-- `TestNormalizedVisionAssistMultiImageModeRejectsInvalidValues`: 断言大小写、空格和未知值回退 `separate`。
-- 渠道表单 round-trip 测试必须覆盖新建默认 `combined`、历史/非法值回退 `separate` 及保存后的 JSON 字段。
-- 多图模式组件交互测试必须断言默认选中、双向切换和当前选项不可被点击取消。
+- 用户意图测试：`TestExtractVisionAssistUserMessage`、`TestResolveVisionAssistUserMessagesKeepsHistoricalIntent`、`TestResolveVisionAssistUserMessagesDoesNotReuseOlderQuestionForNewImage`、`TestBuildVisionAssistRequestIncludesUserMessage`。
+- 基础多图测试：`TestApplyVisionAssistCombinesImagesFromSameMessage`、`TestBuildVisionAssistUnitsDoesNotCombineAcrossMessages`、`TestApplyVisionAssistCombinedFailureCountsAllImages`、`TestNormalizedVisionAssistMultiImageModeRejectsInvalidValues`。
+- 分批边界测试：
+  - `TestBuildVisionAssistUnitPlanSplitsCombinedImagesByConfiguredLimit` 断言 `39 -> 5+5+5+5+5+5+5+4`。
+  - `TestBuildVisionAssistUnitPlanSplitsCombinedImagesByFullRequestPayloadSize` 断言完整请求体而不是原始图片字段触发切割。
+  - `TestBuildVisionAssistUnitPlanKeepsOversizedSingleImageInOwnBatch` 断言单图超限仍独立成批。
+  - `TestEstimateVisionAssistRequestEnvelopeMatchesSerializedPayload` 断言估算值精确等于实际序列化长度。
+  - `TestNormalizedVisionAssistCombinedMaxImages` 断言默认值和 `1-64` 边界。
+- 缓存和原图测试：`TestApplyVisionAssistReusesCombinedBatchCacheAcrossRequests`、`TestApplyVisionAssistCombinedCacheSeparatesChangedBatchCompositions`、`TestApplyVisionAssistCombinedBatchingKeepsOriginalImagesWhenConfigured`。
+- 渠道表单 round-trip 测试必须覆盖新建默认 `5`、历史缺失/越界/小数回退、整数 schema 拒绝小数以及保存后的 `combined_max_images`。
+- 多图模式组件测试必须断言 Combined 输入只在对应模式显示，并带有 `min=1`、`max=64`、`step=1`。
 - 回归命令：
-  - `go test ./service ./relay -count=1`
-  - `go test -race ./controller ./relay ./service -run 'VisionAssist|RelayErrorLog|RequestPreparationState' -count=1`
+  - `go test ./service -run 'VisionAssist' -count=1`
+  - `go test -race ./service -run 'VisionAssist' -count=1`
   - `cd relaykit && GOWORK=off go build ./...`
   - `cd web && bun test src/features/channels/lib/channel-form.test.ts src/features/channels/components/drawers/sections/__tests__/vision-assist-multi-image-mode.test.tsx`
-  - `cd web && bun run typecheck && bun run build`
-  - `go test ./... -count=1`
+  - `cd web && bun run typecheck && bun run lint && bun run format:check && bun run build`
+  - `go test ./... -count=1 && go vet ./...`
+  - `git diff --check`
 
 ### 7. Wrong vs Correct
 
 #### Wrong
 
 ```go
-mode := strings.ToLower(strings.TrimSpace(setting.MultiImageMode))
-if mode == VisionAssistMultiImageModeCombined {
-	return mode
+payloadBytes := 0
+for _, image := range images {
+	payloadBytes += len(visionAssistImageURL(image))
 }
 ```
 
-问题：配置契约要求任何非精确合法值都回退逐张识别；宽松规范化会静默改变历史或手工配置的执行方式。
+问题：图片字段长度不等于最终 JSON 请求体长度，会遗漏 prompt、用户问题、多图说明、模型字段、图片元数据和 JSON 转义开销。
 
 #### Correct
 
 ```go
-func normalizedVisionAssistMultiImageMode(setting dto.ChannelVisionAssistSettings) string {
-	if setting.MultiImageMode == VisionAssistMultiImageModeCombined {
-		return VisionAssistMultiImageModeCombined
-	}
-	return VisionAssistMultiImageModeSeparate
-}
+envelopeBytes, envelopeBytesOK := estimateVisionAssistRequestEnvelopeBytes(
+	setting,
+	prompt,
+	userMessage,
+	images,
+)
 ```
 
-用户问题也不能按请求统一复用：
+要求：空 URL 请求骨架加各 URL 的 JSON 编码长度必须与 `common.Marshal(buildVisionAssistRequest(...))` 一致；估算失败时保守切割。
+
+缓存边界也必须由最终图片组合决定：
 
 ```go
-// Wrong: 最新问题会污染全部历史图片的缓存键。
-userMessage := extractVisionAssistUserMessage(request)
-for _, unit := range units {
-	cacheKey := buildVisionAssistCacheKey(setting, prompt, userMessage, multiImageMode, unit.Images)
-}
+// Wrong: 请求级状态让等价批次无法跨对话复用。
+parts = append(parts, "request_id:"+info.RequestId)
 
-// Correct: 每个识图单元使用所属消息的问题。
-userMessages := resolveVisionAssistUserMessages(request, images)
-for i := range units {
-	units[i].UserMessage = userMessages[units[i].Images[0].MessageIndex]
-}
-```
-
-合并单元必须按原始消息索引建立，不能直接返回包含全部图片的单个切片：
-
-```go
-unitIndexByMessage := make(map[int]int)
-for _, image := range images {
-	unitIndex, ok := unitIndexByMessage[image.MessageIndex]
-	if !ok {
-		unitIndex = len(units)
-		unitIndexByMessage[image.MessageIndex] = unitIndex
-		units = append(units, visionAssistUnit{})
-	}
-	units[unitIndex].Images = append(units[unitIndex].Images, image)
-}
+// Correct: 最终有序图片组合及其用户问题决定缓存键。
+cacheKey := buildVisionAssistCacheKey(
+	setting,
+	prompt,
+	unit.UserMessage,
+	multiImageMode,
+	unit.Images,
+)
 ```
 
 ## 场景：视觉辅助真实调用的独立消息审计生命周期

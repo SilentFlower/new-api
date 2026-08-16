@@ -520,7 +520,8 @@ func TestBuildVisionAssistUnitsDoesNotCombineAcrossMessages(t *testing.T) {
 		{Index: 3, MessageIndex: 1},
 	}
 
-	units := buildVisionAssistUnits(images, VisionAssistMultiImageModeCombined)
+	plan := buildVisionAssistUnitPlan(dto.ChannelVisionAssistSettings{}, "", nil, images, VisionAssistMultiImageModeCombined, defaultVisionAssistCombinedMaxImages)
+	units := plan.Units
 
 	require.Len(t, units, 2)
 	require.Len(t, units[0].Images, 1)

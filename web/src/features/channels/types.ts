@@ -107,6 +107,7 @@ export interface ChannelSettings {
       | 'anthropic_messages'
       | 'gemini_native'
     multi_image_mode?: 'separate' | 'combined'
+    combined_max_images?: number
     max_concurrency?: number
     retry_count?: number
     retry_backoff_ms?: number

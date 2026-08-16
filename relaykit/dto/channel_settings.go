@@ -28,19 +28,20 @@ type ChannelSettings struct {
 
 // ChannelVisionAssistSettings 描述目标渠道的视觉辅助识别配置。
 type ChannelVisionAssistSettings struct {
-	Enabled         bool     `json:"enabled,omitempty"`
-	AssistChannelId int      `json:"assist_channel_id,omitempty"`
-	AssistModel     string   `json:"assist_model,omitempty"`
-	TargetModels    []string `json:"target_models,omitempty"`
-	Prompt          string   `json:"prompt,omitempty"`
-	CacheTTLSeconds int      `json:"cache_ttl_seconds,omitempty"`
-	FailurePolicy   string   `json:"failure_policy,omitempty"`
-	StripImage      *bool    `json:"strip_image,omitempty"`
-	EndpointMode    string   `json:"endpoint_mode,omitempty"`
-	MaxConcurrency  int      `json:"max_concurrency,omitempty"`
-	RetryCount      int      `json:"retry_count,omitempty"`
-	RetryBackoffMs  int      `json:"retry_backoff_ms,omitempty"`
-	MultiImageMode  string   `json:"multi_image_mode,omitempty"`
+	Enabled           bool     `json:"enabled,omitempty"`
+	AssistChannelId   int      `json:"assist_channel_id,omitempty"`
+	AssistModel       string   `json:"assist_model,omitempty"`
+	TargetModels      []string `json:"target_models,omitempty"`
+	Prompt            string   `json:"prompt,omitempty"`
+	CacheTTLSeconds   int      `json:"cache_ttl_seconds,omitempty"`
+	FailurePolicy     string   `json:"failure_policy,omitempty"`
+	StripImage        *bool    `json:"strip_image,omitempty"`
+	EndpointMode      string   `json:"endpoint_mode,omitempty"`
+	MaxConcurrency    int      `json:"max_concurrency,omitempty"`
+	RetryCount        int      `json:"retry_count,omitempty"`
+	RetryBackoffMs    int      `json:"retry_backoff_ms,omitempty"`
+	MultiImageMode    string   `json:"multi_image_mode,omitempty"`
+	CombinedMaxImages int      `json:"combined_max_images,omitempty"`
 }
 
 const (
