@@ -1,0 +1,35 @@
+{
+  "id": "vision-assist-workbuddy-context-cache",
+  "name": "vision-assist-workbuddy-context-cache",
+  "title": "视觉辅助过滤 WorkBuddy 上下文并兼容缓存",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "service/vision-assist",
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-08-17",
+  "completedAt": "2026-08-17",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-08-17T14:25:54+08:00",
+    "completedSteps": [
+      "完成 WorkBuddy 系统上下文黑名单过滤、primary/legacy 缓存迁移、行为测试与视觉辅助规范更新"
+    ],
+    "partialStep": null,
+    "nextStep": "按需运行 trellis-finish-work 归档任务",
+    "notes": ""
+  }
+}
