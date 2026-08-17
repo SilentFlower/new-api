@@ -1140,3 +1140,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 35: 视觉辅助过滤 WorkBuddy 上下文并兼容缓存
+
+**Date**: 2026-08-17
+**Task**: 视觉辅助过滤 WorkBuddy 上下文并兼容缓存
+**Branch**: `build-bak`
+
+### Summary
+
+视觉辅助仅过滤完整 WorkBuddy user-context 系统提醒，保留用户查询与本地路径，并通过 primary/legacy 缓存迁移避免重复识图。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `e11ba8ce4` | (see git log) |
+
+### Status
+
+[OK] **Completed**
