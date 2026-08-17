@@ -461,7 +461,7 @@ vision_assist_combined_max_images: number
 - 缓存：
   - 缓存键按最终识图批次生成，并包含辅助渠道、辅助模型、识图规则哈希、该批次用户文本哈希、规范化多图模式，以及批次内按顺序排列的图片源哈希、detail 和 MIME。
   - 缓存键不得包含请求 ID、会话 ID、消息索引、批次序号、并发数或 worker 完成顺序；这些请求级状态会阻止新一轮对话复用等价批次。
-  - 后续纯文本追问不属于图片批次输入，不得进入历史图片缓存键；只有图片所属消息的原始文本、图片内容/顺序或其他既有识图配置变化时才形成新的识图缓存条目。
+  - 后续纯文本追问不属于图片批次输入，不得进入历史图片缓存键；只有图片所属消息实际发送给辅助模型的派生用户文本、图片内容/顺序或其他既有识图配置变化时才形成新的识图缓存条目。
   - `combined_max_images` 不直接进入缓存键；配置变化导致批次图片组合变化时自然隔离，最终批次组合不变时必须继续复用原缓存。
   - 缓存值只保存识图文本；日志不得新增用户原文、请求正文或图片内容。
 - 普通执行日志必须记录 `vision_assist_combined_max_images`、`vision_assist_batch_count`、`vision_assist_batch_image_counts`、`vision_assist_split_applied` 和 `vision_assist_split_reason`。切割原因只使用 `image_count`、`payload_size` 或 `image_count_and_payload_size`。
@@ -560,6 +560,92 @@ cacheKey := buildVisionAssistCacheKey(
 	multiImageMode,
 	unit.Images,
 )
+```
+
+## 场景：WorkBuddy 系统上下文过滤与缓存键迁移
+
+### 1. Scope / Trigger
+
+- Trigger：修改视觉辅助派生用户文本的 WorkBuddy 过滤规则、缓存键文本来源、旧缓存兼容查询或请求内去重。
+- 适用范围：`service/vision_assist.go`、`service/vision_assist_workbuddy.go` 及对应测试；主请求消息改写、公开 Relay DTO 和 `vision_assist:v1` 缓存值结构不在此契约内。
+- 目标：只从视觉辅助派生文本中删除边界可靠的已知系统上下文，同时让部署前旧缓存可迁移复用，避免重复识图、审计和计费。
+
+### 2. Signatures
+
+```go
+func filterWorkBuddyVisionAssistUserMessage(raw string) (effective string, changed bool)
+
+type visionAssistUnit struct {
+	Images            []VisionAssistImage
+	UserMessage       string
+	LegacyUserMessage string
+}
+
+func buildVisionAssistCacheKey(setting dto.ChannelVisionAssistSettings, prompt string, userMessage string, multiImageMode string, images []VisionAssistImage) string
+```
+
+### 3. Contracts
+
+- 黑名单首项只包含完整的顶层 `<system-reminder ... data-role=user-context ...>...</system-reminder>`；标签名、属性名和值按 ASCII 大小写不敏感匹配，并把 `_` 与 `-` 视为等价。
+- 开始标签允许属性重排、附加属性、常规空白、单双引号和无引号简单属性值。未闭合、畸形、嵌套、自闭合、非 `user-context` 或未知标签必须保留原文，不得猜测性删除。
+- `user_query`、`image_local_path` / `image-local-path`、本地路径、图片引用标记和其他未知正文保持原顺序。只裁剪删除边界产生的空白，并用稳定换行连接剩余片段；没有匹配块时必须返回 `raw, false`。
+- `UserMessage` 保存过滤后的 effective 文本，用于批次规划、请求体大小估算、辅助请求和 primary cache key；`LegacyUserMessage` 保存 raw 文本，只用于 legacy cache key 兼容查询。主请求始终保留 raw 文本。
+- 缓存顺序固定为 primary -> legacy -> caller。只有 primary 正常未命中且两键不同时才查询 legacy；primary 读取错误不得继续访问同一异常缓存后端的 legacy key。
+- Legacy 命中按普通缓存命中处理，并使用当前渠道 TTL 回填 primary；回填失败只告警，不能转为 caller。新上游非空结果只写 primary，禁止长期双写 legacy。
+- 请求内去重只认 primary key。若较早单元已登记 primary miss，较晚等价单元通过不同 legacy key 命中，必须同时解析较早 pending 单元，不能再调用 caller。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 完整且等价的 `data-role=user-context` 顶层块 | 删除整块，`changed=true` |
+| 未闭合、畸形、嵌套、自闭合或其他 role | 原文保留，不能越界删除 |
+| 没有黑名单块 | 返回 `raw, false`，primary 与 legacy 键相同且不查询 legacy |
+| 过滤后没有正文 | `UserMessage=""`，辅助请求退化为通用识图规则 |
+| Primary 命中非空结果 | 直接复用，不查询 legacy，不进入 caller |
+| Primary 正常未命中、legacy 命中非空结果 | 复用结果、按当前 TTL 回填 primary，不进入 caller |
+| Primary 读取错误 | 记录现有风格告警，跳过 legacy 并进入 caller |
+| Legacy 读取错误或缓存值为空 | 记录告警或视为未命中，进入 caller |
+| Legacy 命中但 primary 回填失败 | 保持缓存命中结果，只记录告警 |
+| 仅本地路径变化 | Primary key 变化，不能复用原路径缓存 |
+
+### 5. Good/Base/Bad Cases
+
+- Good：图片、查询和本地路径相同，只改变系统提醒中的身份文件或连接器状态；两次请求使用同一 primary key，第二次不调用辅助模型。
+- Good：部署前 raw key 已缓存；部署后 primary miss、legacy hit，直接返回旧结果并回填 primary。
+- Base：普通用户消息没有 WorkBuddy 标记；effective 与 raw 完全一致，维持原缓存行为。
+- Bad：只提取 `<user_query>`，导致 `image_local_path`、未知标签或普通正文丢失。
+- Bad：删除未闭合块直到消息末尾，误删真实用户问题。
+- Bad：把请求 ID 加入 primary key，或新结果永久双写 primary/legacy，造成重复识别或高基数缓存。
+
+### 6. Tests Required
+
+- `TestFilterWorkBuddyVisionAssistUserMessage`：表格断言线上结构、大小写/属性/引号变体、多个块、空结果、非目标 role、未闭合、畸形和嵌套输入的精确输出与 `changed`。
+- `TestApplyVisionAssistUsesSystemReminderFilteredCacheKey`：断言系统提醒变化复用 primary、本地路径变化 miss、caller 只看到保留正文且主请求仍含完整上下文。
+- `TestApplyVisionAssistReusesLegacyWorkBuddyCacheAndBackfillsPrimary`：预置 legacy，断言 caller 为 0、primary 完成回填且缓存命中数正确。
+- `TestApplyVisionAssistLegacyHitResolvesEarlierDuplicatePrimaryMiss`：断言较晚 legacy hit 同时解析较早等价 primary miss，caller 为 0 且两张图片均计为命中。
+- 回归命令：`go test ./service -run 'VisionAssist' -count=1`、`go test -race ./service -run 'VisionAssist' -count=1`、`go test ./relay -run 'VisionAssist|RequestPreparationState' -count=1`、`go test ./... -count=1`、`go vet ./...`、`git diff --check`。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```go
+// 只用动态原文生成唯一缓存键，会让系统上下文变化反复触发识图。
+cacheKey := buildVisionAssistCacheKey(setting, prompt, rawUserMessage, multiImageMode, images)
+```
+
+#### Correct
+
+```go
+effectiveUserMessage, _ := filterWorkBuddyVisionAssistUserMessage(rawUserMessage)
+primaryKey := buildVisionAssistCacheKey(setting, prompt, effectiveUserMessage, multiImageMode, images)
+
+_, primaryFound, primaryErr := getVisionAssistCache().Get(primaryKey)
+if primaryErr == nil && !primaryFound && effectiveUserMessage != rawUserMessage {
+	legacyKey := buildVisionAssistCacheKey(setting, prompt, rawUserMessage, multiImageMode, images)
+	// legacy 命中后复用结果并按当前 TTL 回填 primary；新结果只写 primary。
+}
 ```
 
 ## 场景：视觉辅助真实调用的独立消息审计生命周期

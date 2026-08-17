@@ -69,8 +69,9 @@ type VisionAssistResult struct {
 }
 
 type visionAssistUnit struct {
-	Images      []VisionAssistImage
-	UserMessage string
+	Images            []VisionAssistImage
+	UserMessage       string
+	LegacyUserMessage string
 }
 
 type visionAssistUserText struct {
@@ -138,8 +139,20 @@ func ApplyVisionAssist(c *gin.Context, info *relaycommon.RelayInfo, caller Visio
 	ttl := normalizedVisionAssistTTL(setting)
 	multiImageMode := normalizedVisionAssistMultiImageMode(setting)
 	combinedMaxImages := normalizedVisionAssistCombinedMaxImages(setting)
-	userMessages := resolveVisionAssistUserMessages(request, images)
+	legacyUserMessages := resolveVisionAssistUserMessages(request, images)
+	userMessages := make(map[int]string, len(legacyUserMessages))
+	for messageIndex, userMessage := range legacyUserMessages {
+		filteredUserMessage, _ := filterWorkBuddyVisionAssistUserMessage(userMessage)
+		userMessages[messageIndex] = filteredUserMessage
+	}
 	unitPlan := buildVisionAssistUnitPlan(setting, prompt, userMessages, images, multiImageMode, combinedMaxImages)
+	for index := range unitPlan.Units {
+		if len(unitPlan.Units[index].Images) == 0 {
+			continue
+		}
+		messageIndex := unitPlan.Units[index].Images[0].MessageIndex
+		unitPlan.Units[index].LegacyUserMessage = legacyUserMessages[messageIndex]
+	}
 	stats := visionAssistExecutionStats{
 		EndpointMode:      normalizedVisionAssistEndpointMode(setting),
 		MultiImageMode:    multiImageMode,
@@ -165,19 +178,47 @@ func ApplyVisionAssist(c *gin.Context, info *relaycommon.RelayInfo, caller Visio
 	missing := make([]visionAssistUnit, 0, len(units))
 	requestCache := map[string]string{}
 	missingByCacheKey := map[string][]visionAssistUnit{}
+	resolvedMissingByCacheKey := map[string]string{}
 
 	for _, unit := range units {
 		cacheKey := buildVisionAssistCacheKey(setting, prompt, unit.UserMessage, multiImageMode, unit.Images)
 		if text, ok := requestCache[cacheKey]; ok {
+			if _, pending := missingByCacheKey[cacheKey]; pending {
+				resolvedMissingByCacheKey[cacheKey] = text
+			}
 			results = append(results, newVisionAssistResult(unit, text, true, false))
 			continue
 		}
-		if cached, found, err := getVisionAssistCache().Get(cacheKey); err == nil && found && strings.TrimSpace(cached.Text) != "" {
+		cached, found, cacheErr := getVisionAssistCache().Get(cacheKey)
+		if cacheErr == nil && found && strings.TrimSpace(cached.Text) != "" {
 			requestCache[cacheKey] = cached.Text
+			if _, pending := missingByCacheKey[cacheKey]; pending {
+				resolvedMissingByCacheKey[cacheKey] = cached.Text
+			}
 			results = append(results, newVisionAssistResult(unit, cached.Text, true, false))
 			continue
-		} else if err != nil {
-			logger.LogWarn(c, "读取视觉辅助缓存失败: "+err.Error())
+		}
+		if cacheErr != nil {
+			logger.LogWarn(c, "读取视觉辅助缓存失败: "+cacheErr.Error())
+		} else if unit.LegacyUserMessage != unit.UserMessage {
+			legacyCacheKey := buildVisionAssistCacheKey(setting, prompt, unit.LegacyUserMessage, multiImageMode, unit.Images)
+			if legacyCacheKey != cacheKey {
+				legacyCached, legacyFound, legacyErr := getVisionAssistCache().Get(legacyCacheKey)
+				switch {
+				case legacyErr != nil:
+					logger.LogWarn(c, "读取视觉辅助旧缓存失败: "+legacyErr.Error())
+				case legacyFound && strings.TrimSpace(legacyCached.Text) != "":
+					requestCache[cacheKey] = legacyCached.Text
+					if _, pending := missingByCacheKey[cacheKey]; pending {
+						resolvedMissingByCacheKey[cacheKey] = legacyCached.Text
+					}
+					results = append(results, newVisionAssistResult(unit, legacyCached.Text, true, false))
+					if err := getVisionAssistCache().SetWithTTL(cacheKey, legacyCached, ttl); err != nil {
+						logger.LogWarn(c, "回填视觉辅助缓存失败: "+err.Error())
+					}
+					continue
+				}
+			}
 		}
 		if duplicatedMissing, ok := missingByCacheKey[cacheKey]; ok {
 			missingByCacheKey[cacheKey] = append(duplicatedMissing, unit)
@@ -185,6 +226,22 @@ func ApplyVisionAssist(c *gin.Context, info *relaycommon.RelayInfo, caller Visio
 		}
 		missingByCacheKey[cacheKey] = []visionAssistUnit{unit}
 		missing = append(missing, unit)
+	}
+	if len(resolvedMissingByCacheKey) > 0 {
+		unresolvedMissing := missing[:0]
+		for _, unit := range missing {
+			cacheKey := buildVisionAssistCacheKey(setting, prompt, unit.UserMessage, multiImageMode, unit.Images)
+			text, resolved := resolvedMissingByCacheKey[cacheKey]
+			if !resolved {
+				unresolvedMissing = append(unresolvedMissing, unit)
+				continue
+			}
+			for _, pendingUnit := range missingByCacheKey[cacheKey] {
+				results = append(results, newVisionAssistResult(pendingUnit, text, true, false))
+			}
+			delete(missingByCacheKey, cacheKey)
+		}
+		missing = unresolvedMissing
 	}
 
 	if len(missing) > 0 {
