@@ -414,6 +414,8 @@ const AUDIT_TEMPLATES: Record<string, string> = {
     'Copied channel (source ID: {{sourceId}}) to {{name}} (new ID: {{id}})',
   'channel.multi_key_manage':
     'Multi-key management {{action}} on channel (ID: {{id}})',
+  'channel.user_daily_quota_set':
+    'Set daily used quota for user {{user_id}} on channel {{channel_id}} to {{used_quota}}',
   'channel.upstream_apply':
     'Applied upstream model changes to channel (ID: {{id}})',
   'channel.upstream_apply_all':

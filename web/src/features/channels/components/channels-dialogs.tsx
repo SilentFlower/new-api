@@ -19,6 +19,7 @@ For commercial licensing, please contact support@quantumnous.com
 import { useChannels } from './channels-provider'
 import { BalanceQueryDialog } from './dialogs/balance-query-dialog'
 import { ChannelTestDialog } from './dialogs/channel-test-dialog'
+import { ChannelUserLimitsDialog } from './dialogs/channel-user-limits-dialog'
 import { CopyChannelDialog } from './dialogs/copy-channel-dialog'
 import { EditTagDialog } from './dialogs/edit-tag-dialog'
 import { FetchModelsDialog } from './dialogs/fetch-models-dialog'
@@ -68,6 +69,12 @@ export function ChannelsDialogs() {
       <CopyChannelDialog
         open={open === 'copy-channel'}
         onOpenChange={(v) => !v && setOpen(null)}
+      />
+
+      <ChannelUserLimitsDialog
+        open={open === 'user-limits'}
+        onOpenChange={(v) => !v && setOpen(null)}
+        channel={currentRow}
       />
 
       {/* Multi-Key Management Dialog */}

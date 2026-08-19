@@ -289,6 +289,7 @@ export const DEFAULT_CHANNEL_VALUES = {
   priority: 0,
   weight: 0,
   user_concurrency_limit: 0,
+  user_daily_quota_limit: 0,
   auto_ban: 1,
   remark: '',
 } as const
@@ -373,6 +374,8 @@ export const FIELD_DESCRIPTIONS = {
   WEIGHT: 'Used for load balancing. Higher weight = more requests',
   USER_CONCURRENCY_LIMIT:
     'Maximum concurrent requests per user on this channel. 0 means unlimited.',
+  USER_DAILY_QUOTA_LIMIT:
+    'Maximum daily usage per user on this channel. 0 means unlimited.',
   TEST_MODEL: 'Model to use when testing channel connectivity',
   AUTO_BAN: 'Automatically disable channel on repeated failures',
   STATUS_CODE_MAPPING: 'Map response status codes (JSON format)',

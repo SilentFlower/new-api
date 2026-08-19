@@ -72,3 +72,59 @@ func TestChannelUserConcurrencyLimitIsNonSensitive(t *testing.T) {
 		"user_concurrency_limit": 4,
 	}))
 }
+
+func TestValidateChannelUserDailyQuotaLimit(t *testing.T) {
+	tests := []struct {
+		name    string
+		limit   *int
+		wantErr bool
+	}{
+		{name: "历史空值"},
+		{name: "不限制", limit: common.GetPointer(0)},
+		{name: "正数限制", limit: common.GetPointer(1000)},
+		{name: "最大限制", limit: common.GetPointer(common.MaxQuota)},
+		{name: "负数", limit: common.GetPointer(-1), wantErr: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateChannelUserDailyQuotaLimit(test.limit)
+			if test.wantErr {
+				assert.Error(t, err)
+				return
+			}
+			assert.NoError(t, err)
+		})
+	}
+}
+
+func TestNormalizeChannelUserDailyQuotaLimitForUpdate(t *testing.T) {
+	t.Run("字段缺失时保留空值", func(t *testing.T) {
+		channel := &model.Channel{}
+		normalizeChannelUserDailyQuotaLimitForUpdate(channel, map[string]any{})
+		assert.Nil(t, channel.UserDailyQuotaLimit)
+	})
+
+	t.Run("显式空值归一化为零", func(t *testing.T) {
+		channel := &model.Channel{}
+		normalizeChannelUserDailyQuotaLimitForUpdate(channel, map[string]any{"user_daily_quota_limit": nil})
+		require.NotNil(t, channel.UserDailyQuotaLimit)
+		assert.Zero(t, *channel.UserDailyQuotaLimit)
+	})
+}
+
+func TestChannelUserDailyQuotaLimitRejectsDecimalJSON(t *testing.T) {
+	var channel PatchChannel
+	err := common.Unmarshal([]byte(`{"id":1,"user_daily_quota_limit":1.5}`), &channel)
+	assert.Error(t, err)
+}
+
+func TestChannelUserDailyQuotaLimitIsNonSensitive(t *testing.T) {
+	origin := &model.Channel{UserDailyQuotaLimit: common.GetPointer(0)}
+	updated := PatchChannel{Channel: *origin}
+	updated.UserDailyQuotaLimit = common.GetPointer(1000)
+
+	assert.False(t, channelHasSensitiveChanges(&updated, origin, map[string]any{
+		"user_daily_quota_limit": 1000,
+	}))
+}

@@ -421,6 +421,9 @@ func RelayMidjourney(c *gin.Context) {
 		if concurrencyStatus, ok := channelUserConcurrencyMidjourneyHTTPStatus(mjErr); ok {
 			recordChannelUserConcurrencyErrorCode(c, types.ErrorCode(mjErr.Description))
 			statusCode = concurrencyStatus
+		} else if dailyQuotaErr := channelUserDailyQuotaAPIErrorFromCode(types.ErrorCode(mjErr.Description)); dailyQuotaErr != nil {
+			recordChannelUserDailyQuotaErrorCode(c, dailyQuotaErr.GetErrorCode())
+			statusCode = dailyQuotaErr.StatusCode
 		} else if mjErr.Code == 30 {
 			mjErr.Result = "当前分组负载已饱和，请稍后再试，或升级账户以提升服务质量。"
 			statusCode = http.StatusTooManyRequests
@@ -615,6 +618,7 @@ func RelayTask(c *gin.Context) {
 // respondTaskError 统一输出 Task 错误响应（含 429 限流提示改写）
 func respondTaskError(c *gin.Context, taskErr *taskdto.TaskError) {
 	recordChannelUserConcurrencyErrorCode(c, types.ErrorCode(taskErr.Code))
+	recordChannelUserDailyQuotaErrorCode(c, types.ErrorCode(taskErr.Code))
 	if taskErr.StatusCode == http.StatusTooManyRequests {
 		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
 	}

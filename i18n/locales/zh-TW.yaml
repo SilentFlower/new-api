@@ -158,6 +158,7 @@ topup.invalid_quota: "無效的充值額度"
 # Channel messages
 channel.not_exists: "管道不存在"
 channel.id_format_error: "管道ID格式錯誤"
+channel.user_limit_status_unavailable: "使用者限制狀態暫時不可用，請稍後重試"
 channel.no_available_key: "沒有可用的管道密鑰"
 channel.get_list_failed: "獲取管道列表失敗，請稍後重試"
 channel.get_tags_failed: "獲取標籤失敗，請稍後重試"

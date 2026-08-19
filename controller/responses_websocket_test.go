@@ -313,22 +313,35 @@ func TestProxyResponsesWebSocketRetriesFirstBusinessErrorBeforeDownstreamWrite(t
 	gin.SetMode(gin.TestMode)
 	oldRetryTimes := common.RetryTimes
 	oldLogConsumeEnabled := common.LogConsumeEnabled
+	oldBatchUpdateEnabled := common.BatchUpdateEnabled
+	oldRedisEnabled := common.RedisEnabled
 	oldConnector := responsesWebSocketTurnConnector
 	common.RetryTimes = 1
 	common.LogConsumeEnabled = false
+	common.BatchUpdateEnabled = true
+	if oldRedisEnabled {
+		common.RedisEnabled = false
+	}
 	t.Cleanup(func() {
 		common.RetryTimes = oldRetryTimes
 		common.LogConsumeEnabled = oldLogConsumeEnabled
+		common.BatchUpdateEnabled = oldBatchUpdateEnabled
+		if oldRedisEnabled {
+			common.RedisEnabled = true
+		}
 		responsesWebSocketTurnConnector = oldConnector
 	})
 
+	const userID = 9203
+	const dailyLimit = 1000
 	primaryEvents := [][]byte{
 		[]byte(`{"type":"response.failed","response":{"error":{"type":"server_error","code":"server_is_overloaded","message":"retry later"}}}`),
 	}
 	primaryServer, primaryErrors := newResponsesWebSocketScriptServer(primaryEvents, websocket.CloseNormalClosure)
 	defer primaryServer.Close()
 	retryEvents := [][]byte{
-		[]byte(`{"type":"response.completed","response":{"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`),
+		[]byte(`{"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}`),
+		[]byte(`{"type":"response.completed","response":{"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}`),
 	}
 	retryServer, retryErrors := newResponsesWebSocketScriptServer(retryEvents, websocket.CloseNormalClosure)
 	defer retryServer.Close()
@@ -339,7 +352,17 @@ func TestProxyResponsesWebSocketRetriesFirstBusinessErrorBeforeDownstreamWrite(t
 	responsesWebSocketTurnConnector = func(c *gin.Context, turn *responsesWebSocketTurn, _ *model.Channel, startRetry int) (*websocket.Conn, *model.Channel, *types.NewAPIError) {
 		connectorCalls++
 		turn.retryIndex = startRetry
-		turn.info.ChannelMeta = &relaycommon.ChannelMeta{ChannelId: retryChannel.Id, ChannelType: retryChannel.Type, UpstreamModelName: turn.baseModel}
+		turn.info.UserId = userID
+		turn.info.UserQuota = dailyLimit
+		turn.info.PriceData.ModelRatio = 1
+		turn.info.PriceData.CompletionRatio = 1
+		turn.info.PriceData.GroupRatioInfo.GroupRatio = 1
+		turn.info.ChannelMeta = &relaycommon.ChannelMeta{
+			ChannelId:                  retryChannel.Id,
+			ChannelType:                retryChannel.Type,
+			UpstreamModelName:          turn.baseModel,
+			ChannelUserDailyQuotaLimit: dailyLimit,
+		}
 		common.SetContextKey(c, constant.ContextKeyChannelId, retryChannel.Id)
 		common.SetContextKey(c, constant.ContextKeyChannelName, retryChannel.Name)
 		common.SetContextKey(c, constant.ContextKeyChannelType, retryChannel.Type)
@@ -355,6 +378,8 @@ func TestProxyResponsesWebSocketRetriesFirstBusinessErrorBeforeDownstreamWrite(t
 	}
 
 	billing := &responsesWebSocketBillingStub{}
+	require.NoError(t, service.SetChannelUserDailyQuota(t.Context(), primaryChannel.Id, userID, 0))
+	require.NoError(t, service.SetChannelUserDailyQuota(t.Context(), retryChannel.Id, userID, 0))
 	proxyResults := make(chan error, 1)
 	proxyServer := newResponsesWebSocketProxyServer(responsesWebSocketServerURL(primaryServer), primaryChannel, billing, proxyResults)
 	defer proxyServer.Close()
@@ -367,12 +392,21 @@ func TestProxyResponsesWebSocketRetriesFirstBusinessErrorBeforeDownstreamWrite(t
 	_, payload, err := clientConn.ReadMessage()
 	require.NoError(t, err)
 	assert.Equal(t, "response.completed", gjson.GetBytes(payload, "type").String())
+	_, duplicatePayload, err := clientConn.ReadMessage()
+	require.NoError(t, err)
+	assert.Equal(t, "response.completed", gjson.GetBytes(duplicatePayload, "type").String())
 	_, _, closeErr := clientConn.ReadMessage()
 	require.True(t, websocket.IsCloseError(closeErr, websocket.CloseNormalClosure), "unexpected close error: %v", closeErr)
 	require.NoError(t, <-proxyResults)
 	assert.Equal(t, 1, connectorCalls)
-	assert.Equal(t, []int{0}, billing.settled)
+	assert.Equal(t, []int{15}, billing.settled)
 	assert.Zero(t, billing.refunds)
+	primaryUsed, err := service.CheckChannelUserDailyQuota(t.Context(), primaryChannel.Id, userID, dailyLimit)
+	require.NoError(t, err)
+	assert.Zero(t, primaryUsed)
+	retryUsed, err := service.CheckChannelUserDailyQuota(t.Context(), retryChannel.Id, userID, dailyLimit)
+	require.NoError(t, err)
+	assert.Equal(t, int64(15), retryUsed)
 	assertNoResponsesWebSocketServerError(t, primaryErrors)
 	assertNoResponsesWebSocketServerError(t, retryErrors)
 }

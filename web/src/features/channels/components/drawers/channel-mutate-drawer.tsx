@@ -122,6 +122,8 @@ import {
   parseChannelConnectionInfo,
   type ChannelConnectionInfo,
 } from '@/lib/channel-connection-info'
+import { getCurrencyLabel } from '@/lib/currency'
+import { getEditableQuotaStep } from '@/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
@@ -339,6 +341,7 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.priority ||
     values.weight ||
     values.user_concurrency_limit ||
+    values.user_daily_quota_limit ||
     values.proxy?.trim() ||
     values.system_prompt?.trim() ||
     values.force_format ||
@@ -717,6 +720,7 @@ export function ChannelMutateDrawer({
   const currentPriority = form.watch('priority')
   const currentWeight = form.watch('weight')
   const currentUserConcurrencyLimit = form.watch('user_concurrency_limit')
+  const currentUserDailyQuotaLimit = form.watch('user_daily_quota_limit')
   const currentTestModel = form.watch('test_model')
   const currentAutoBan = form.watch('auto_ban')
   const currentTag = form.watch('tag')
@@ -988,6 +992,7 @@ export function ChannelMutateDrawer({
     currentPriority ||
     currentWeight ||
     currentUserConcurrencyLimit ||
+    currentUserDailyQuotaLimit ||
     currentTestModel?.trim() ||
     (currentAutoBan ?? 1) !== 1
   )
@@ -3679,6 +3684,45 @@ export function ChannelMutateDrawer({
                                       <span className='block'>
                                         {t(
                                           'All tokens of the same user share this limit. WebSocket connections count until closed.'
+                                        )}
+                                      </span>
+                                    </FormDescription>
+                                    <FormMessage />
+                                  </FormItem>
+                                )}
+                              />
+
+                              <FormField
+                                control={form.control}
+                                name='user_daily_quota_limit'
+                                render={({ field }) => (
+                                  <FormItem>
+                                    <FormLabel>
+                                      {t('User daily quota limit ({{unit}})', {
+                                        unit: getCurrencyLabel(),
+                                      })}
+                                    </FormLabel>
+                                    <FormControl>
+                                      <Input
+                                        type='number'
+                                        min={0}
+                                        step={getEditableQuotaStep()}
+                                        placeholder='0'
+                                        {...field}
+                                        onChange={(e) =>
+                                          field.onChange(Number(e.target.value))
+                                        }
+                                      />
+                                    </FormControl>
+                                    <FormDescription>
+                                      <span className='block'>
+                                        {t(
+                                          FIELD_DESCRIPTIONS.USER_DAILY_QUOTA_LIMIT
+                                        )}
+                                      </span>
+                                      <span className='block'>
+                                        {t(
+                                          'This is a soft limit based on settled usage. Concurrent requests may exceed it slightly.'
                                         )}
                                       </span>
                                     </FormDescription>

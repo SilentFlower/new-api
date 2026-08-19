@@ -22,6 +22,12 @@ func TestChannelModelOptionsRouteUsesReadPermission(t *testing.T) {
 	assertChannelRoutePermission(t, http.MethodGet, "/model-options", authz.ChannelRead, controller.GetChannelModelOptions)
 }
 
+func TestChannelUserLimitRoutesUseExpectedPermissions(t *testing.T) {
+	assertChannelRoutePermission(t, http.MethodGet, "/:id/user-daily-quota", authz.ChannelRead, controller.GetChannelUserDailyQuota)
+	assertChannelRoutePermission(t, http.MethodPut, "/:id/user-daily-quota/:user_id", authz.ChannelOperate, controller.SetChannelUserDailyQuota)
+	assertChannelRoutePermission(t, http.MethodGet, "/:id/user-concurrency", authz.ChannelRead, controller.GetChannelUserConcurrency)
+}
+
 func TestChannelDeleteRoutesUseSensitiveWritePermission(t *testing.T) {
 	assertChannelRoutePermission(t, http.MethodDelete, "/:id", authz.ChannelSensitiveWrite, controller.DeleteChannel)
 	assertChannelRoutePermission(t, http.MethodPost, "/batch", authz.ChannelSensitiveWrite, controller.DeleteChannelBatch)

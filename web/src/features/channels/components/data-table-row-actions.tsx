@@ -33,6 +33,7 @@ import {
   Trash2,
   RefreshCw,
   Loader2,
+  UsersRound,
 } from 'lucide-react'
 import { useContext, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -141,6 +142,11 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
   const handleManageKeys = () => {
     setCurrentRow(channel)
     setOpen('multi-key-manage')
+  }
+
+  const handleUserLimits = () => {
+    setCurrentRow(channel)
+    setOpen('user-limits')
   }
 
   const handleToggleStatus = async (
@@ -333,6 +339,15 @@ export function DataTableRowActions({ row }: DataTableRowActionsProps) {
               </DropdownMenuShortcut>
             </DropdownMenuItem>
           )}
+
+          <DropdownMenuSeparator />
+
+          <DropdownMenuItem onClick={handleUserLimits}>
+            {t('User limit status')}
+            <DropdownMenuShortcut>
+              <UsersRound size={16} />
+            </DropdownMenuShortcut>
+          </DropdownMenuItem>
 
           <DropdownMenuSeparator />
 

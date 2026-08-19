@@ -32,6 +32,30 @@ func TestChannelGetUserConcurrencyLimit(t *testing.T) {
 	}
 }
 
+func TestChannelGetUserDailyQuotaLimit(t *testing.T) {
+	zero := 0
+	positive := 1000
+	negative := -1
+
+	tests := []struct {
+		name     string
+		channel  *Channel
+		expected int
+	}{
+		{name: "空渠道", channel: nil, expected: 0},
+		{name: "历史空值", channel: &Channel{}, expected: 0},
+		{name: "显式零值", channel: &Channel{UserDailyQuotaLimit: &zero}, expected: 0},
+		{name: "正数限制", channel: &Channel{UserDailyQuotaLimit: &positive}, expected: 1000},
+		{name: "异常负数", channel: &Channel{UserDailyQuotaLimit: &negative}, expected: 0},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.expected, test.channel.GetUserDailyQuotaLimit())
+		})
+	}
+}
+
 func TestChannelUserConcurrencyLimitPersistsNullPositiveAndZero(t *testing.T) {
 	truncateTables(t)
 	historical := &Channel{
@@ -61,4 +85,18 @@ func TestChannelUserConcurrencyLimitPersistsNullPositiveAndZero(t *testing.T) {
 	require.NoError(t, DB.First(&saved, historical.Id).Error)
 	require.NotNil(t, saved.UserConcurrencyLimit)
 	assert.Zero(t, *saved.UserConcurrencyLimit)
+
+	positiveDailyQuota := 1000
+	saved.UserDailyQuotaLimit = &positiveDailyQuota
+	require.NoError(t, saved.Update())
+	require.NoError(t, DB.First(&saved, historical.Id).Error)
+	require.NotNil(t, saved.UserDailyQuotaLimit)
+	assert.Equal(t, 1000, *saved.UserDailyQuotaLimit)
+
+	zeroDailyQuota := 0
+	saved.UserDailyQuotaLimit = &zeroDailyQuota
+	require.NoError(t, saved.Update())
+	require.NoError(t, DB.First(&saved, historical.Id).Error)
+	require.NotNil(t, saved.UserDailyQuotaLimit)
+	assert.Zero(t, *saved.UserDailyQuotaLimit)
 }

@@ -157,6 +157,7 @@ topup.invalid_quota: "Invalid top-up quota"
 # Channel messages
 channel.not_exists: "Channel does not exist"
 channel.id_format_error: "Channel ID format error"
+channel.user_limit_status_unavailable: "User limit status is temporarily unavailable, please try again later"
 channel.no_available_key: "No available channel keys"
 channel.get_list_failed: "Failed to get channel list, please try again later"
 channel.get_tags_failed: "Failed to get tags, please try again later"

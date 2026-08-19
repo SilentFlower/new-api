@@ -45,6 +45,7 @@ type DialogType =
   | 'tag-batch-edit'
   | 'edit-tag'
   | 'copy-channel'
+  | 'user-limits'
   | null
 
 type UpstreamUpdateState = ReturnType<typeof useChannelUpstreamUpdates>

@@ -19,6 +19,8 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
+import { quotaUnitsToDollars } from '@/lib/format'
+
 import type { Channel } from '../types'
 import {
   CHANNEL_FORM_DEFAULT_VALUES,
@@ -100,6 +102,38 @@ test('渠道单用户并发限制拒绝非法边界', () => {
     const result = channelFormSchema.safeParse({
       ...transformChannelToFormDefaults(createChannel('{}')),
       user_concurrency_limit: invalidValue,
+    })
+    assert.equal(result.success, false)
+  }
+})
+
+test('渠道单用户每日额度按显示金额与内部额度往返', () => {
+  const channel = createChannel('{}')
+  channel.user_daily_quota_limit = 500000
+
+  const defaults = transformChannelToFormDefaults(channel)
+  assert.equal(defaults.user_daily_quota_limit, quotaUnitsToDollars(500000))
+  assert.equal(
+    transformFormDataToUpdatePayload(defaults, channel.id)
+      .user_daily_quota_limit,
+    500000
+  )
+
+  channel.user_daily_quota_limit = null
+  const historicalDefaults = transformChannelToFormDefaults(channel)
+  assert.equal(historicalDefaults.user_daily_quota_limit, 0)
+  assert.equal(
+    transformFormDataToCreatePayload(historicalDefaults).channel
+      .user_daily_quota_limit,
+    0
+  )
+})
+
+test('渠道单用户每日额度拒绝负数和超出内部上限的金额', () => {
+  for (const invalidValue of [-1, quotaUnitsToDollars(2147483647 + 1000000)]) {
+    const result = channelFormSchema.safeParse({
+      ...transformChannelToFormDefaults(createChannel('{}')),
+      user_daily_quota_limit: invalidValue,
     })
     assert.equal(result.success, false)
   }

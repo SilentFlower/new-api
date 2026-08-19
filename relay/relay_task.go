@@ -99,11 +99,13 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, ch.GetBaseURL())
 		common.SetContextKey(c, constant.ContextKeyChannelId, originTask.ChannelId)
 		common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, ch.GetUserConcurrencyLimit())
+		common.SetContextKey(c, constant.ContextKeyChannelUserDailyQuotaLimit, ch.GetUserDailyQuotaLimit())
 
 		info.ChannelBaseUrl = ch.GetBaseURL()
 		info.ChannelId = originTask.ChannelId
 		info.ChannelType = ch.Type
 		info.ApiKey = key
+		info.ChannelUserDailyQuotaLimit = ch.GetUserDailyQuotaLimit()
 	}
 
 	// 提取 remix 参数（时长、分辨率 → OtherRatios）
@@ -200,6 +202,11 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		quota, clamp := common.QuotaFromFloatChecked(quotaWithRatios)
 		info.PriceData.Quota = quota
 		noteTaskQuotaClamp(info, clamp)
+	}
+	if !info.PriceData.FreeModel {
+		if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
+			return nil, service.TaskErrorFromAPIError(apiErr)
+		}
 	}
 
 	// 7. 预扣费（仅首次 — 重试时 info.Billing 已存在，跳过）
@@ -450,6 +457,7 @@ func tryRealtimeFetch(c *gin.Context, task *model.Task, isOpenAIVideoAPI bool) (
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelId, channelModel.Id)
 	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channelModel.GetUserConcurrencyLimit())
+	common.SetContextKey(c, constant.ContextKeyChannelUserDailyQuotaLimit, channelModel.GetUserDailyQuotaLimit())
 	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrency(c)
 	if concurrencyErr != nil {
 		taskErr := service.TaskErrorFromAPIError(concurrencyErr)

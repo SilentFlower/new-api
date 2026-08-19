@@ -29,6 +29,10 @@ import type {
   ChannelModelOptionsResponse,
   ChannelOpsResponse,
   ChannelTestResponse,
+  ChannelUserConcurrencyItem,
+  ChannelUserDailyQuotaItem,
+  ChannelUserLimitPage,
+  ChannelUserLimitResponse,
   CopyChannelParams,
   CopyChannelResponse,
   FetchModelsResponse,
@@ -113,6 +117,73 @@ export async function getChannel(id: number): Promise<GetChannelResponse> {
 export async function getChannelOps(): Promise<ChannelOpsResponse> {
   const res = await api.get('/api/channel/ops', channelActionConfig())
   return res.data
+}
+
+/**
+ * 获取指定渠道当日用户额度使用情况。
+ *
+ * @param channelId 渠道 ID。
+ * @param params 分页参数。
+ * @returns 当日额度分页数据。
+ */
+export async function getChannelUserDailyQuota(
+  channelId: number,
+  params: { p: number; page_size: number }
+): Promise<ChannelUserLimitPage<ChannelUserDailyQuotaItem>> {
+  const res = await api.get<
+    ChannelUserLimitResponse<ChannelUserDailyQuotaItem>
+  >(
+    `/api/channel/${channelId}/user-daily-quota`,
+    channelActionConfig({ params })
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to load daily quota usage')
+  }
+  return res.data.data
+}
+
+/**
+ * 设置指定用户当日已使用额度的目标值。
+ *
+ * @param channelId 渠道 ID。
+ * @param userId 用户 ID。
+ * @param usedQuota 调整后的内部额度整数。
+ * @returns 管理 API 操作结果。
+ */
+export async function setChannelUserDailyQuota(
+  channelId: number,
+  userId: number,
+  usedQuota: number
+): Promise<{ success: boolean; message?: string }> {
+  const res = await api.put(
+    `/api/channel/${channelId}/user-daily-quota/${userId}`,
+    { used_quota: usedQuota },
+    channelActionConfig()
+  )
+  return res.data
+}
+
+/**
+ * 获取指定渠道当前用户并发数量。
+ *
+ * @param channelId 渠道 ID。
+ * @param params 分页参数。
+ * @returns 当前并发分页数据。
+ */
+export async function getChannelUserConcurrency(
+  channelId: number,
+  params: { p: number; page_size: number }
+): Promise<ChannelUserLimitPage<ChannelUserConcurrencyItem>> {
+  const res = await api.get<
+    ChannelUserLimitResponse<ChannelUserConcurrencyItem>
+  >(
+    `/api/channel/${channelId}/user-concurrency`,
+    channelActionConfig({ params })
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to load current concurrency')
+  }
+  return res.data.data
 }
 
 /**

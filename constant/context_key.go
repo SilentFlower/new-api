@@ -40,6 +40,8 @@ const (
 	ContextKeyChannelKey               ContextKey = "channel_key"
 
 	ContextKeyChannelUserConcurrencyLimit ContextKey = "channel_user_concurrency_limit"
+	ContextKeyChannelUserDailyQuotaLimit  ContextKey = "channel_user_daily_quota_limit"
+	ContextKeyChannelUserDailyQuotaUsed   ContextKey = "channel_user_daily_quota_used"
 
 	ContextKeyAutoGroup           ContextKey = "auto_group"
 	ContextKeyAutoGroupIndex      ContextKey = "auto_group_index"

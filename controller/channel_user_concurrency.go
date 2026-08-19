@@ -18,6 +18,7 @@ import (
 
 const (
 	maxChannelUserConcurrencyLimit             = 1000
+	maxChannelUserDailyQuotaLimit              = common.MaxQuota
 	channelUserConcurrencyErrorLogRecordedKey  = "channel_user_concurrency_error_log_recorded"
 	channelUserConcurrencyErrorLogAdminInfoKey = "channel_user_concurrency"
 )
@@ -44,6 +45,22 @@ func normalizeChannelUserConcurrencyLimitForUpdate(channel *model.Channel, reque
 	}
 	if value, ok := requestData["user_concurrency_limit"]; ok && value == nil {
 		channel.UserConcurrencyLimit = common.GetPointer(0)
+	}
+}
+
+func validateChannelUserDailyQuotaLimit(limit *int) error {
+	if limit == nil || (*limit >= 0 && *limit <= maxChannelUserDailyQuotaLimit) {
+		return nil
+	}
+	return fmt.Errorf("单用户每日额度必须是 0 到 %d 之间的整数", maxChannelUserDailyQuotaLimit)
+}
+
+func normalizeChannelUserDailyQuotaLimitForUpdate(channel *model.Channel, requestData map[string]any) {
+	if channel == nil {
+		return
+	}
+	if value, ok := requestData["user_daily_quota_limit"]; ok && value == nil {
+		channel.UserDailyQuotaLimit = common.GetPointer(0)
 	}
 }
 

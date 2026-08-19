@@ -21,7 +21,12 @@ import { test } from 'node:test'
 
 import { api } from '@/lib/api'
 
-import { getChannelModelOptions } from './api'
+import {
+  getChannelModelOptions,
+  getChannelUserConcurrency,
+  getChannelUserDailyQuota,
+  setChannelUserDailyQuota,
+} from './api'
 
 test('渠道模型选项使用只读精简接口', async () => {
   const originalGet = api.get
@@ -45,5 +50,58 @@ test('渠道模型选项使用只读精简接口', async () => {
     ])
   } finally {
     api.get = originalGet
+  }
+})
+
+test('渠道用户限制接口使用指定渠道、分页和目标额度载荷', async () => {
+  const originalGet = api.get
+  const originalPut = api.put
+  const getRequests: Array<{ url: string; params: unknown }> = []
+  let putRequest: { url: string; data: unknown } | null = null
+
+  api.get = (async (url, config) => {
+    getRequests.push({ url, params: config?.params })
+    return {
+      data: {
+        success: true,
+        data: {
+          channel_id: 12,
+          limit: 100,
+          storage_mode: 'memory',
+          page: 2,
+          page_size: 20,
+          total: 0,
+          items: [],
+        },
+      },
+    }
+  }) as typeof api.get
+  api.put = (async (url, data) => {
+    putRequest = { url, data }
+    return { data: { success: true } }
+  }) as typeof api.put
+
+  try {
+    await getChannelUserDailyQuota(12, { p: 2, page_size: 20 })
+    await getChannelUserConcurrency(12, { p: 3, page_size: 20 })
+    await setChannelUserDailyQuota(12, 34, 500000)
+
+    assert.deepEqual(getRequests, [
+      {
+        url: '/api/channel/12/user-daily-quota',
+        params: { p: 2, page_size: 20 },
+      },
+      {
+        url: '/api/channel/12/user-concurrency',
+        params: { p: 3, page_size: 20 },
+      },
+    ])
+    assert.deepEqual(putRequest, {
+      url: '/api/channel/12/user-daily-quota/34',
+      data: { used_quota: 500000 },
+    })
+  } finally {
+    api.get = originalGet
+    api.put = originalPut
   }
 })

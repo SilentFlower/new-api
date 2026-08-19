@@ -42,6 +42,9 @@ func prepareAlphaSearchBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo)
 		}
 		return nil
 	}
+	if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
+		return apiErr
+	}
 	if relayInfo.Billing != nil {
 		if err := relayInfo.Billing.Reserve(result.TotalQuota); err != nil {
 			return types.NewError(err, types.ErrorCodePreConsumeTokenQuotaFailed, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())

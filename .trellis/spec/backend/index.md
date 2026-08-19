@@ -24,6 +24,7 @@
 | [Relay 计费模型快照契约](./relay-billing-model.md) | 模型映射后的计费模型选择、冻结、重试清理、任务历史兼容和日志一致性 | 已完成 |
 | [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) | JSON 空白心跳、响应提交、重试、错误体、响应头和并发 writer 生命周期 | 已完成 |
 | [渠道单用户并发限制契约](./channel-user-concurrency.md) | 渠道配置、Redis/内存租约、HTTP/WebSocket/任务生命周期、429/503 错误与取消传播 | 已完成 |
+| [渠道单用户每日额度契约](./channel-user-daily-quota.md) | 渠道每日软上限、自然日 Redis/内存状态、正向记账、管理 API、个人目标值调整与可视化 | 已完成 |
 | [消息审计控制面契约](./message-audit-control-plane.md) | 消息审计跨数据库快速清空、保留水位、AI 重审 Tool 降级与上游上下文边界 | 已完成 |
 | [GitHub 用户 Key 公开泄露扫描契约](./token-leak-scan.md) | 用户 Key 的公开代码搜索、精确确认、任务互斥、通知幂等、敏感信息边界和处置流程 | 已完成 |
 | [错误处理](./error-handling.md) | 错误类型、传播流程、API 响应格式 | 已完成 |
@@ -79,6 +80,10 @@
 ### 涉及渠道单用户并发、Redis 租约或 Relay 取消传播
 
 - [渠道单用户并发限制契约](./channel-user-concurrency.md) — 配置边界、租约存储、各协议生命周期、本地错误隔离和实际网络请求 context 传播
+
+### 涉及渠道单用户每日额度、正向渠道用量或用户限制状态管理
+
+- [渠道单用户每日额度契约](./channel-user-daily-quota.md) — 软上限、自然日状态、最终渠道快照、正向累计、个人目标值调整和渠道 Dialog 契约
 
 ### 涉及消息审计清空、AI 重审或审计 Tool
 

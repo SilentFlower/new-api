@@ -58,6 +58,7 @@ export const channelSchema = z.object({
   priority: z.number().nullish(),
   auto_ban: z.number().nullish(),
   user_concurrency_limit: z.number().nullish(),
+  user_daily_quota_limit: z.number().nullish(),
   other_info: z.string().default(''),
   tag: z.string().nullish(),
   setting: z.string().nullish(),
@@ -228,6 +229,44 @@ export interface ChannelOpsResponse {
   data?: {
     retry_times: number
   }
+}
+
+/** 渠道用户当日额度列表项。 */
+export interface ChannelUserDailyQuotaItem {
+  user_id: number
+  username: string
+  display_name: string
+  used_quota: number
+  limit: number
+  remaining_quota: number
+}
+
+/** 渠道用户当前并发列表项。 */
+export interface ChannelUserConcurrencyItem {
+  user_id: number
+  username: string
+  display_name: string
+  current_concurrency: number
+  limit: number
+}
+
+/** 渠道用户限制状态分页数据。 */
+export interface ChannelUserLimitPage<T> {
+  channel_id: number
+  limit: number
+  storage_mode: 'redis' | 'memory'
+  reset_at?: number
+  page: number
+  page_size: number
+  total: number
+  items: T[]
+}
+
+/** 渠道用户限制状态管理 API 响应。 */
+export interface ChannelUserLimitResponse<T> {
+  success: boolean
+  message?: string
+  data?: ChannelUserLimitPage<T>
 }
 
 export interface ChannelTestResponse {
@@ -402,6 +441,7 @@ export interface ChannelFormData {
   test_model?: string
   auto_ban?: number
   user_concurrency_limit?: number
+  user_daily_quota_limit?: number
   status: number
   status_code_mapping?: string
   tag?: string

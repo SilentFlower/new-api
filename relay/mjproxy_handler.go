@@ -228,6 +228,11 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	requestURL := getMjRequestPath(c.Request.URL.String())
 	baseURL := c.GetString("base_url")
 	fullRequestURL := fmt.Sprintf("%s%s", baseURL, requestURL)
+	if priceData.Quota > 0 {
+		if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
+			return channelUserDailyQuotaMidjourneyError(apiErr)
+		}
+	}
 	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrency(c)
 	if concurrencyErr != nil {
 		return channelUserConcurrencyMidjourneyError(concurrencyErr)
@@ -266,6 +271,7 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 			})
 			model.UpdateUserUsedQuotaAndRequestCount(info.UserId, priceData.Quota)
 			model.UpdateChannelUsedQuota(info.ChannelId, priceData.Quota)
+			service.RecordRelayChannelUserDailyQuota(c, info, priceData.Quota)
 		}
 	}()
 	midjResponse := &mjResp.Response
@@ -320,6 +326,7 @@ func RelayMidjourneyTaskImageSeed(c *gin.Context) *dto.MidjourneyResponse {
 	}
 	c.Set("channel_id", originTask.ChannelId)
 	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channel.GetUserConcurrencyLimit())
+	common.SetContextKey(c, constant.ContextKeyChannelUserDailyQuotaLimit, channel.GetUserDailyQuotaLimit())
 	c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
 
 	requestURL := getMjRequestPath(c.Request.URL.String())
@@ -505,10 +512,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			if channel.Status != common.ChannelStatusEnabled {
 				return service.MidjourneyErrorWrapper(constant.MjRequestError, "该任务所属渠道已被禁用")
 			}
-			c.Set("base_url", channel.GetBaseURL())
-			c.Set("channel_id", originTask.ChannelId)
-			common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channel.GetUserConcurrencyLimit())
-			c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
+			applyMidjourneyOriginChannel(c, relayInfo, channel)
 			logger.LogDebug(c, "Midjourney action uses origin channel: id=%s, base_url=%s", strconv.Itoa(originTask.ChannelId), channel.GetBaseURL())
 		}
 		midjRequest.Prompt = originTask.Prompt
@@ -558,6 +562,11 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			Description: "quota_not_enough",
 		}
 	}
+	if consumeQuota && priceData.Quota > 0 {
+		if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
+			return channelUserDailyQuotaMidjourneyError(apiErr)
+		}
+	}
 
 	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrency(c)
 	if concurrencyErr != nil {
@@ -598,6 +607,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			})
 			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, priceData.Quota)
 			model.UpdateChannelUsedQuota(relayInfo.ChannelId, priceData.Quota)
+			service.RecordRelayChannelUserDailyQuota(c, relayInfo, priceData.Quota)
 		}
 	}()
 

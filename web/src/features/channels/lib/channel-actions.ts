@@ -54,6 +54,20 @@ export const channelsQueryKeys = {
     [...channelsQueryKeys.lists(), params] as const,
   details: () => [...channelsQueryKeys.all, 'detail'] as const,
   detail: (id: number) => [...channelsQueryKeys.details(), id] as const,
+  userDailyQuota: (id: number, page: number, pageSize: number) =>
+    [
+      ...channelsQueryKeys.detail(id),
+      'user-daily-quota',
+      page,
+      pageSize,
+    ] as const,
+  userConcurrency: (id: number, page: number, pageSize: number) =>
+    [
+      ...channelsQueryKeys.detail(id),
+      'user-concurrency',
+      page,
+      pageSize,
+    ] as const,
 }
 
 function getChannelTestResponseTime(

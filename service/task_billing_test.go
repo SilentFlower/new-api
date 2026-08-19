@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,8 @@ import (
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relaykittypes "github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/setting/model_setting"
 	"github.com/QuantumNous/new-api/types"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
@@ -473,6 +476,97 @@ func TestRecalculate_PositiveDelta(t *testing.T) {
 	require.NotNil(t, log)
 	assert.Equal(t, model.LogTypeConsume, log.Type)
 	assert.Equal(t, actualQuota-preConsumed, log.Quota)
+}
+
+func TestRecalculateTaskQuotaTracksPositiveDeltaOnSettlementDay(t *testing.T) {
+	truncate(t)
+	now := time.Date(2026, time.August, 19, 23, 59, 0, 0, time.Local)
+	setupChannelUserDailyQuotaMemoryTest(t, &now)
+
+	const userID, channelID = 1010, 1011
+	const preConsumedQuota, actualQuota = 200, 350
+	seedUser(t, userID, 10_000)
+	seedChannel(t, channelID)
+	task := makeTask(userID, channelID, preConsumedQuota, 0, BillingSourceWallet, 0)
+	task.PrivateData.ChannelUserDailyQuotaTracked = true
+	require.NoError(t, model.DB.Create(task).Error)
+	require.NoError(t, RecordChannelUserDailyQuota(t.Context(), channelID, userID, preConsumedQuota))
+
+	usedBeforeReset, err := CheckChannelUserDailyQuota(t.Context(), channelID, userID, 10_000)
+	require.NoError(t, err)
+	assert.Equal(t, int64(preConsumedQuota), usedBeforeReset)
+
+	now = now.Add(2 * time.Minute)
+	RecalculateTaskQuota(t.Context(), task, actualQuota, "跨日差额结算")
+
+	usedAfterReset, err := CheckChannelUserDailyQuota(t.Context(), channelID, userID, 10_000)
+	require.NoError(t, err)
+	assert.Equal(t, int64(actualQuota-preConsumedQuota), usedAfterReset)
+}
+
+func TestRecalculateTaskQuotaDoesNotBackfillHistoricalTask(t *testing.T) {
+	truncate(t)
+	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.Local)
+	setupChannelUserDailyQuotaMemoryTest(t, &now)
+
+	const userID, channelID = 1020, 1021
+	seedUser(t, userID, 10_000)
+	seedChannel(t, channelID)
+	task := makeTask(userID, channelID, 200, 0, BillingSourceWallet, 0)
+	require.False(t, task.PrivateData.ChannelUserDailyQuotaTracked)
+	require.NoError(t, model.DB.Create(task).Error)
+
+	RecalculateTaskQuota(t.Context(), task, 350, "历史任务差额结算")
+
+	usedQuota, err := CheckChannelUserDailyQuota(t.Context(), channelID, userID, 10_000)
+	require.NoError(t, err)
+	assert.Zero(t, usedQuota)
+}
+
+func TestChargeViolationFeeRecordsChannelUserDailyQuota(t *testing.T) {
+	truncate(t)
+	now := time.Date(2026, time.August, 20, 14, 0, 0, 0, time.Local)
+	setupChannelUserDailyQuotaMemoryTest(t, &now)
+
+	const userID, channelID = 1030, 1031
+	seedUser(t, userID, 100_000)
+	seedChannel(t, channelID)
+	settings := model_setting.GetGrokSettings()
+	previousSettings := *settings
+	settings.ViolationDeductionEnabled = true
+	settings.ViolationDeductionAmount = 0.05
+	t.Cleanup(func() {
+		*settings = previousSettings
+	})
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	feeQuota := calcViolationFeeQuota(settings.ViolationDeductionAmount, 1)
+	relayInfo := &relaycommon.RelayInfo{
+		UserId:          userID,
+		IsPlayground:    true,
+		StartTime:       time.Now(),
+		OriginModelName: "grok-test",
+		PriceData: types.PriceData{
+			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
+		},
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:                  channelID,
+			ChannelUserDailyQuotaLimit: feeQuota * 2,
+		},
+	}
+	apiErr := relaykittypes.NewOpenAIError(
+		errors.New(CSAMViolationMarker),
+		relaykittypes.ErrorCodeViolationFeeGrokCSAM,
+		http.StatusBadRequest,
+	)
+
+	require.True(t, ChargeViolationFeeIfNeeded(c, relayInfo, apiErr))
+	usedQuota, err := CheckChannelUserDailyQuota(t.Context(), channelID, userID, feeQuota*2)
+	require.NoError(t, err)
+	assert.Equal(t, int64(feeQuota), usedQuota)
+	assert.Equal(t, 100_000-feeQuota, getUserQuota(t, userID))
 }
 
 func TestRecalculate_NegativeDelta(t *testing.T) {

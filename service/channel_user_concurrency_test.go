@@ -17,16 +17,20 @@ import (
 
 type channelUserConcurrencyLostStore struct{}
 
-func (channelUserConcurrencyLostStore) acquire(context.Context, string, string, int, time.Time, time.Time, time.Duration) (bool, error) {
+func (channelUserConcurrencyLostStore) acquire(context.Context, string, string, int, int, string, int, time.Time, time.Time, time.Duration) (bool, error) {
 	return true, nil
 }
 
-func (channelUserConcurrencyLostStore) renew(context.Context, string, string, time.Time, time.Duration) (bool, error) {
+func (channelUserConcurrencyLostStore) renew(context.Context, string, string, int, string, time.Time, time.Duration) (bool, error) {
 	return false, nil
 }
 
-func (channelUserConcurrencyLostStore) release(context.Context, string, string) error {
+func (channelUserConcurrencyLostStore) release(context.Context, string, string, int, int, string) error {
 	return nil
+}
+
+func (channelUserConcurrencyLostStore) list(context.Context, int, time.Time, time.Duration) (map[int]int, error) {
+	return map[int]int{}, nil
 }
 
 func useChannelUserConcurrencyMemoryStore(t *testing.T) {
@@ -125,13 +129,33 @@ func TestChannelUserConcurrencyLeaseRenewDetectsLostLease(t *testing.T) {
 func TestChannelUserConcurrencyMemoryStoreRemovesExpiredLeases(t *testing.T) {
 	store := newChannelUserConcurrencyMemoryStore()
 	now := time.Unix(100, 0)
-	allowed, err := store.acquire(context.Background(), "key", "expired", 1, now, now.Add(-time.Second), time.Minute)
+	allowed, err := store.acquire(context.Background(), "key", "index", 80, 33, "expired", 1, now, now.Add(-time.Second), time.Minute)
 	require.NoError(t, err)
 	require.True(t, allowed)
 
-	allowed, err = store.acquire(context.Background(), "key", "replacement", 1, now, now.Add(time.Minute), time.Minute)
+	allowed, err = store.acquire(context.Background(), "key", "index", 80, 33, "replacement", 1, now, now.Add(time.Minute), time.Minute)
 	require.NoError(t, err)
 	assert.True(t, allowed)
+}
+
+func TestListChannelUserConcurrencyMemoryCountsOnlyActiveLeases(t *testing.T) {
+	store := newChannelUserConcurrencyMemoryStore()
+	now := time.Unix(100, 0)
+	ctx := context.Background()
+
+	allowed, err := store.acquire(ctx, "key-33", "index", 80, 33, "active-a", 3, now, now.Add(time.Minute), time.Minute)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	allowed, err = store.acquire(ctx, "key-33", "index", 80, 33, "active-b", 3, now, now.Add(time.Minute), time.Minute)
+	require.NoError(t, err)
+	require.True(t, allowed)
+	allowed, err = store.acquire(ctx, "key-34", "index", 80, 34, "expired", 3, now, now.Add(-time.Second), time.Minute)
+	require.NoError(t, err)
+	require.True(t, allowed)
+
+	values, err := store.list(ctx, 80, now, time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, map[int]int{33: 2}, values)
 }
 
 func TestChannelUserConcurrencyRedisStoreScripts(t *testing.T) {
@@ -143,26 +167,27 @@ func TestChannelUserConcurrencyRedisStoreScripts(t *testing.T) {
 	store := &channelUserConcurrencyRedisStore{client: client}
 	ctx := context.Background()
 	key := "channel_user_concurrency:{80}:{33}"
+	indexKey := "channel_user_concurrency_users:{80}"
 	now := time.Unix(100, 0)
 
 	for i := 0; i < 4; i++ {
-		allowed, err := store.acquire(ctx, key, "lease-"+string(rune('a'+i)), 4, now, now.Add(time.Minute), time.Minute)
+		allowed, err := store.acquire(ctx, key, indexKey, 80, 33, "lease-"+string(rune('a'+i)), 4, now, now.Add(time.Minute), time.Minute)
 		require.NoError(t, err)
 		require.True(t, allowed)
 	}
-	allowed, err := store.acquire(ctx, key, "lease-e", 4, now, now.Add(time.Minute), time.Minute)
+	allowed, err := store.acquire(ctx, key, indexKey, 80, 33, "lease-e", 4, now, now.Add(time.Minute), time.Minute)
 	require.NoError(t, err)
 	assert.False(t, allowed)
 
-	renewed, err := store.renew(ctx, key, "lease-a", now.Add(2*time.Minute), time.Minute)
+	renewed, err := store.renew(ctx, key, indexKey, 33, "lease-a", now.Add(2*time.Minute), time.Minute)
 	require.NoError(t, err)
 	assert.True(t, renewed)
-	renewed, err = store.renew(ctx, key, "missing", now.Add(2*time.Minute), time.Minute)
+	renewed, err = store.renew(ctx, key, indexKey, 33, "missing", now.Add(2*time.Minute), time.Minute)
 	require.NoError(t, err)
 	assert.False(t, renewed)
 
-	require.NoError(t, store.release(ctx, key, "lease-a"))
-	allowed, err = store.acquire(ctx, key, "lease-e", 4, now, now.Add(time.Minute), time.Minute)
+	require.NoError(t, store.release(ctx, key, indexKey, 80, 33, "lease-a"))
+	allowed, err = store.acquire(ctx, key, indexKey, 80, 33, "lease-e", 4, now, now.Add(time.Minute), time.Minute)
 	require.NoError(t, err)
 	assert.True(t, allowed)
 
@@ -172,6 +197,12 @@ func TestChannelUserConcurrencyRedisStoreScripts(t *testing.T) {
 	ttl, err := client.PTTL(ctx, key).Result()
 	require.NoError(t, err)
 	assert.Positive(t, ttl)
+	members, err := client.SMembers(ctx, indexKey).Result()
+	require.NoError(t, err)
+	assert.Equal(t, []string{"33"}, members)
+	values, err := store.list(ctx, 80, now, time.Minute)
+	require.NoError(t, err)
+	assert.Equal(t, map[int]int{33: 4}, values)
 }
 
 func TestChannelUserConcurrencyRedisStoreConcurrentAcquireHonorsLimit(t *testing.T) {
@@ -183,6 +214,7 @@ func TestChannelUserConcurrencyRedisStoreConcurrentAcquireHonorsLimit(t *testing
 	store := &channelUserConcurrencyRedisStore{client: client}
 	ctx := context.Background()
 	key := "channel_user_concurrency:{80}:{33}"
+	indexKey := "channel_user_concurrency_users:{80}"
 	now := time.Unix(100, 0)
 	type acquireResult struct {
 		allowed bool
@@ -195,7 +227,7 @@ func TestChannelUserConcurrencyRedisStoreConcurrentAcquireHonorsLimit(t *testing
 		waitGroup.Add(1)
 		go func(index int) {
 			defer waitGroup.Done()
-			allowed, err := store.acquire(ctx, key, fmt.Sprintf("lease-%d", index), 4, now, now.Add(time.Minute), time.Minute)
+			allowed, err := store.acquire(ctx, key, indexKey, 80, 33, fmt.Sprintf("lease-%d", index), 4, now, now.Add(time.Minute), time.Minute)
 			results <- acquireResult{allowed: allowed, err: err}
 		}(i)
 	}

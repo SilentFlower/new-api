@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
+import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
+
 import {
   CHANNEL_TYPE_NEW_API,
   CHANNEL_STATUS,
@@ -229,6 +231,13 @@ export const channelFormSchema = z
         1000,
         'User concurrency limit must be an integer between 0 and 1000'
       ),
+    user_daily_quota_limit: z
+      .number()
+      .min(0, 'User daily quota limit must be between 0 and the maximum quota')
+      .refine(
+        (value) => parseQuotaFromDollars(value) <= 2147483647,
+        'User daily quota limit must be between 0 and the maximum quota'
+      ),
     test_model: z.string().optional(),
     auto_ban: z.number().optional(),
     status: z.number(),
@@ -428,6 +437,7 @@ export const CHANNEL_FORM_DEFAULT_VALUES: ChannelFormValues = {
   priority: 0,
   weight: 0,
   user_concurrency_limit: 0,
+  user_daily_quota_limit: 0,
   test_model: '',
   auto_ban: 1,
   status: CHANNEL_STATUS.ENABLED,
@@ -581,6 +591,9 @@ export function transformChannelToFormDefaults(
     priority: channel.priority || 0,
     weight: channel.weight || 0,
     user_concurrency_limit: channel.user_concurrency_limit ?? 0,
+    user_daily_quota_limit: quotaUnitsToDollars(
+      channel.user_daily_quota_limit ?? 0
+    ),
     test_model: channel.test_model || '',
     auto_ban: channel.auto_ban ?? 1,
     status: channel.status,
@@ -795,6 +808,9 @@ export function transformFormDataToCreatePayload(formData: ChannelFormValues): {
     priority: formData.priority || null,
     weight: formData.weight || null,
     user_concurrency_limit: formData.user_concurrency_limit ?? 0,
+    user_daily_quota_limit: parseQuotaFromDollars(
+      formData.user_daily_quota_limit ?? 0
+    ),
     test_model: formData.test_model || null,
     auto_ban: formData.auto_ban ?? 1,
     status: formData.status,
@@ -844,6 +860,9 @@ export function transformFormDataToUpdatePayload(
     priority: formData.priority ?? 0,
     weight: formData.weight ?? 0,
     user_concurrency_limit: formData.user_concurrency_limit ?? 0,
+    user_daily_quota_limit: parseQuotaFromDollars(
+      formData.user_daily_quota_limit ?? 0
+    ),
     test_model: formData.test_model || null,
     auto_ban: formData.auto_ban ?? 1,
     status_code_mapping: formData.status_code_mapping || null,

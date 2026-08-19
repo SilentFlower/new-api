@@ -136,6 +136,9 @@ func prepareMainRelayBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo) *
 		}
 		return nil
 	}
+	if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
+		return apiErr
+	}
 	if relayInfo.Billing != nil {
 		if err := relayInfo.Billing.Reserve(priceData.QuotaToPreConsume); err != nil {
 			return types.NewError(err, types.ErrorCodePreConsumeTokenQuotaFailed, types.ErrOptionWithSkipRetry(), types.ErrOptionWithNoRecordErrorLog())

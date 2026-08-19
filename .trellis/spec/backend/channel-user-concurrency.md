@@ -6,7 +6,7 @@
 
 ### 1. Scope / Trigger
 
-- Trigger：修改渠道 `user_concurrency_limit` 字段、渠道缓存上下文、并发租约存储、Relay 重试、流式/非流式 HTTP、Realtime/Responses WebSocket、异步任务实时查询、Midjourney、Claude `count_tokens`、视觉辅助上游调用或管理端错误日志记录。
+- Trigger：修改渠道 `user_concurrency_limit` 字段、渠道缓存上下文、并发租约存储、当前并发管理查询、Relay 重试、流式/非流式 HTTP、Realtime/Responses WebSocket、异步任务实时查询、Midjourney、Claude `count_tokens`、视觉辅助上游调用或管理端错误日志记录。
 - 统计维度固定为 `channel_id + user_id`；同一用户的多个 API Token 共享限制，不同用户或不同渠道互不影响。
 - 限制只覆盖实际上游调用。管理端渠道测试、纯数据库任务查询和异步任务在上游响应结束后的后台运行时间不占名额。
 - 定制逻辑必须保持薄层：Redis、内存、续租和释放归属 `service/channel_user_concurrency.go`；协议错误与 Gin 生命周期归属独立 Controller/Relay 领域文件；既有热点只保留获取、持有、取消和释放调用。
@@ -42,7 +42,26 @@ func AcquireChannelUserConcurrency(
 func (lease *ChannelUserConcurrencyLease) IsLost() bool
 func (lease *ChannelUserConcurrencyLease) LostSignal() <-chan struct{}
 func (lease *ChannelUserConcurrencyLease) Release(ctx context.Context) error
+
+type ChannelUserConcurrencyUsage struct {
+	UserID      int `json:"user_id"`
+	Concurrency int `json:"concurrency"`
+}
+
+func ListChannelUserConcurrency(
+	ctx context.Context,
+	channelID int,
+) ([]ChannelUserConcurrencyUsage, string, error)
 ```
+
+管理查询：
+
+```text
+GET /api/channel/:id/user-concurrency
+  permission: ChannelRead
+```
+
+响应 `data` 包含 `channel_id`、`limit`、`storage_mode`、`page`、`page_size`、`total`，以及仅含 `user_id/username/display_name/current_concurrency/limit` 的 `items`。
 
 任务查询的可选上下文能力：
 
@@ -110,6 +129,16 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 - `Release` 必须幂等，并用 `context.WithoutCancel` 派生释放上下文；释放失败只记录告警并依赖 TTL 回收，不能改写已经完成的成功响应。
 - 续租失败或 member 丢失时只触发一次 `onLost`、关闭 `LostSignal()` 并将租约标记为 lost。
 
+#### 可枚举索引与管理查询
+
+- 原租约 key 保持 `channel_user_concurrency:{channel_id}:{user_id}`；新增渠道级 Set 索引 `channel_user_concurrency_users:{channel_id}`，两个 key 的 Redis hash tag 都是渠道 ID。
+- 获取和续租成功时在同一 Lua 往返中 `SADD user_id` 并刷新索引 TTL；释放最后一个租约时在同一 Lua 往返中 `SREM user_id`，不得增加 Relay 热路径 Redis 往返次数。
+- 管理查询先读取渠道索引，再通过 pipeline 对每个用户执行过期 member 清理和 `ZCARD`；空用户、非法成员和崩溃残留必须从索引移除，不得使用 `KEYS` 或 `SCAN`。
+- 内存模式维护渠道到用户租约 key 的索引，并在同一互斥锁临界区清理过期租约和计算数量。
+- `ListChannelUserConcurrency` 只返回有效数量并按用户 ID 排序；`storage_mode=memory` 表示仅当前实例，`redis` 表示共享 Redis 状态。
+- 管理 API 只通过 Model 层批量读取 `id/username/display_name`，不得返回 lease ID、Redis key、渠道 Key 或其他用户敏感字段。
+- 前端只在渠道用户限制 Dialog 打开且“当前并发” Tab 激活时每 5 秒轮询；关闭或切换 Tab 后停止，列表收缩时回退到最后有效页。
+
 #### Relay 生命周期
 
 - 获取时机固定为：渠道已选定且请求准备完成之后，预扣费和实际上游调用之前。
@@ -147,6 +176,8 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 | Redis 已启用但不可用 | `503 channel_user_concurrency_unavailable` | 失败关闭，不回退内存、不预扣、不访问上游、不重试、不自动禁用 |
 | 运行中租约续租失败或丢失 | `503 channel_user_concurrency_unavailable`，若响应已提交则终止连接 | 取消实际上游请求或关闭 WebSocket，记录运行时告警和数据库错误日志 |
 | 释放 Redis member 失败 | 保留当前业务结果 | 记录脱敏告警，依赖 TTL 回收 |
+| 当前并发查询发现过期或空租约 | 管理 API 成功 | 清理残留索引，只返回有效并发大于零的用户 |
+| 当前并发查询的 Redis 操作失败 | 本地化通用管理错误 | 服务端记录脱敏诊断，不向客户端暴露 Redis 地址或底层错误 |
 | Task/Midjourney 本地并发错误 | 保留各自协议错误体，并映射 `429/503` | 必须标记本地错误，不能按普通 `429/5xx` 重试 |
 | `ERROR_LOG_ENABLED=true` | 保持原 `429/503` 响应 | 每个请求写入一条 `LogTypeError`，附带管理员审计信息 |
 | `ERROR_LOG_ENABLED=false` | 保持原 `429/503` 响应 | 不写数据库错误日志，仍记录运行时告警 |
@@ -161,6 +192,8 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 - Good：Responses WebSocket 完成普通、Compact、普通三轮请求，整个客户端连接只获取一次租约。
 - Good：Redis 续租失败后取消 Vertex OAuth/任务查询或关闭 WebSocket，而不是只修改 Gin context 中未被上游请求使用的值。
 - Good：渠道 `80` 的第 5 个同用户并发请求被拒绝后，管理端错误日志只出现一条记录，并能在管理员信息中看到渠道、用户、限制和稳定错误码。
+- Good：渠道 `80` 的两个有效租约显示当前并发 `2`；最后一个租约释放或过期后，该用户从管理列表消失。
+- Good：Redis 中遗留无效用户索引时，管理查询使用 pipeline 清理并返回其他有效用户，不扫描全库。
 - Base：历史渠道缺少新字段，所有 Relay 路径保持原行为。
 - Base：异步任务提交成功后立即释放；任务在上游继续运行不占并发名额。
 - Base：关闭 `ERROR_LOG_ENABLED` 后不产生数据库错误日志，但运行时日志仍能定位并发拒绝。
@@ -176,6 +209,8 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 - Middleware：断言每次选渠将归一化限制写入 Gin context。
 - Service 内存模式：断言同用户同渠道上限、用户/渠道隔离、过期清理、幂等释放和不限流时跳过 Redis。
 - Service Redis 模式：断言 Lua 获取原子性、并发竞争不突破上限、续租、释放、member 丢失和 Redis 不可用时失败关闭。
+- Service 统计：断言获取加入索引、续租刷新索引、最后租约释放移除用户、过期/非法残留清理、用户隔离、按用户 ID 排序和内存模式有效数量。
+- 管理 API：断言 `ChannelRead` 权限、分页、最小用户摘要字段、`storage_mode`、存储错误脱敏和空列表。
 - Controller/Relay：断言 `429/503` 的稳定错误码、`skipRetry`、不自动禁用、不预扣和不上游。
 - 错误日志：使用真实测试日志库断言 `429/503` 均持久化稳定错误码、用户/渠道/request ID 与管理员审计信息；重复调用统一入口仍只产生一条记录。
 - 日志开关：断言 `ERROR_LOG_ENABLED=false` 时不写数据库，且不改变并发拒绝响应。
@@ -183,6 +218,7 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 - Responses WebSocket：断言首轮重试释放旧租约，多轮连接只获取一次，断开后释放。
 - 视觉辅助：断言并发拒绝发生在辅助上游和预扣之前。
 - 前端：断言 API/表单 `4 -> 4`、历史 `null -> 0`、创建/更新保留 `0`，非法边界拒绝；运行 i18n 同步、类型检查和构建。
+- 前端可视化：断言并发 Tab 激活时每 5 秒轮询、关闭后停止、内存模式提示、分页收缩回退和查询错误 i18n。
 - 跨层修改完成后运行相关 race 测试、`go test ./...`、定向 `go vet` 和 `git diff --check`。
 
 ### 7. Wrong vs Correct
@@ -258,3 +294,20 @@ if apiErr != nil {
 ```
 
 统一入口必须继续检查 `ERROR_LOG_ENABLED`，并把审计字段嵌套在 `other.admin_info.channel_user_concurrency`，不能复制一套独立的数据库写入逻辑。
+
+#### Wrong：管理查询扫描全部租约 key
+
+```go
+keys, err := redisClient.Scan(ctx, 0, "channel_user_concurrency:*", 0).Result()
+```
+
+问题：管理端打开一个渠道 Dialog 会触发全库扫描，数据量增长后影响 Redis 和 Relay 热路径。
+
+#### Correct：获取租约时维护渠道级用户索引，查询只访问该渠道
+
+```go
+members, err := redisClient.SMembers(ctx, channelUserConcurrencyUserIndexKey(channelID)).Result()
+// 对 members 对应的租约 key 使用 pipeline 清理过期 member 并读取 ZCARD。
+```
+
+索引维护必须合并进现有获取、续租和释放 Lua，不为每个 Relay 请求增加额外 Redis 往返。
