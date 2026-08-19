@@ -1,0 +1,93 @@
+{
+  "id": "channel-user-daily-quota",
+  "name": "channel-user-daily-quota",
+  "title": "渠道级用户每日额度限制与用量可视化",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-08-19",
+  "completedAt": "2026-08-19",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-08-19T15:38:03Z",
+      "contextKey": "codex_01a01aa8-7766-7023-ba07-c775c61c4b9e",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "ff82a4c5b2f67e9baa400e4d4cc95f040dee9739",
+        "status": [
+          {
+            "status": "??",
+            "path": ".trellis/spec/frontend/i18n-merge-guidelines.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/spec/frontend/index.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/spec/guides/build-upstream-friendly-customization.md"
+          }
+        ],
+        "repositories": [
+          {
+            "root": ".",
+            "head": "ff82a4c5b2f67e9baa400e4d4cc95f040dee9739",
+            "status": [
+              {
+                "status": "??",
+                "path": ".trellis/spec/frontend/i18n-merge-guidelines.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/spec/frontend/index.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/spec/guides/build-upstream-friendly-customization.md"
+              }
+            ],
+            "worktreeDiffSha256": "ae138092cd8a33e5f833a19735b4ad4df7b83986440048d5f70a8c1f608e2252",
+            "indexDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "untracked": [
+              {
+                "path": ".trellis/spec/frontend/i18n-merge-guidelines.md",
+                "sha256": "09936db530aa3f85f06a9d2ed874791cf4fb7c69e5297e514efaaae0cc87c910"
+              }
+            ],
+            "conflicts": [],
+            "integration": [],
+            "fingerprint": "e8ecd6b8afb0ff3d42918166149e80e18b0279de90418ebdfe72d553b5064997"
+          }
+        ],
+        "fingerprint": "bb2497afc57b89dc4d7e0648311dd93c524a51d4f4226991395ef6724536c9b6"
+      }
+    }
+  },
+  "progress": {
+    "updatedAt": "2026-08-19T18:29:29Z",
+    "completedSteps": [
+      "实现",
+      "验证",
+      "规范更新"
+    ],
+    "partialStep": null,
+    "nextStep": "发布验证或任务收尾",
+    "notes": ""
+  }
+}

@@ -1,0 +1,12 @@
+{"file":".trellis/spec/backend/index.md","reason":"检查后端分层、数据库、API、错误、日志和测试规范覆盖"}
+{"file":".trellis/spec/backend/channel-user-concurrency.md","reason":"检查并发可视化没有破坏原租约、错误、取消和日志契约"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"检查渠道配置迁移的三数据库兼容性"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"检查管理 API 参数、分页、权限和响应契约"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查每日额度 429/503 不重试、不禁用、不扣费行为"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"检查敏感字段与管理员审计信息边界"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查 Go 测试质量、JSON 包装、relaykit 构建和全仓验证"}
+{"file":".trellis/spec/frontend/index.md","reason":"检查前端交互、测试、类型和构建要求"}
+{"file":".trellis/spec/frontend/base-ui-composition.md","reason":"检查 Dialog/Tabs/确认组件上下文和交互状态"}
+{"file":".trellis/spec/frontend/i18n-merge-guidelines.md","reason":"检查七语言、源码缺键和语言键并集"}
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"检查新增领域文件和旧热点最薄接入，无无关重构"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查配置到 Relay、计费、状态 API 和 UI 的完整数据流"}
