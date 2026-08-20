@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 35
-- **Last Active**: 2026-08-17
+- **Total Sessions**: 36
+- **Last Active**: 2026-08-20
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1163 | Active |
+| `journal-1.md` | ~1185 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 36 | 2026-08-20 | 渠道用户每日额度限制返工与归档 | `116993edd`, `201474a89` | `build-bak` |
 | 35 | 2026-08-17 | 视觉辅助过滤 WorkBuddy 上下文并兼容缓存 | `e11ba8ce4` | `build-bak` |
 | 34 | 2026-08-16 | 修复视觉辅助纯文本追问重复识图 | `5fcfa8e18` | `build-bak` |
 | 33 | 2026-08-16 | 完成视觉辅助选择、审计与有界分批 | `c211ca70f`, `a68002a5f` | `build-bak` |

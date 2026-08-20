@@ -1161,3 +1161,25 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 36: 渠道用户每日额度限制返工与归档
+
+**Date**: 2026-08-20
+**Task**: 渠道用户每日额度限制返工与归档
+**Branch**: `build-bak`
+
+### Summary
+
+完成渠道级用户每日额度限制返工：限额为 0 时持续记录正向额度，修复金额输入与个人调整回填，完成 Check-All、规范同步、推送和归档。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `116993edd` | (see git log) |
+| `201474a89` | (see git log) |
+
+### Status
+
+[OK] **Completed**
