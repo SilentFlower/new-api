@@ -19,7 +19,11 @@ For commercial licensing, please contact support@quantumnous.com
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { quotaUnitsToDollars } from '@/lib/format'
+import {
+  getEditableQuotaStep,
+  quotaUnitsToDollars,
+  quotaUnitsToEditableAmount,
+} from '@/lib/format'
 
 import type { Channel } from '../types'
 import {
@@ -112,7 +116,10 @@ test('渠道单用户每日额度按显示金额与内部额度往返', () => {
   channel.user_daily_quota_limit = 500000
 
   const defaults = transformChannelToFormDefaults(channel)
-  assert.equal(defaults.user_daily_quota_limit, quotaUnitsToDollars(500000))
+  assert.equal(
+    defaults.user_daily_quota_limit,
+    quotaUnitsToEditableAmount(500000)
+  )
   assert.equal(
     transformFormDataToUpdatePayload(defaults, channel.id)
       .user_daily_quota_limit,
@@ -127,6 +134,25 @@ test('渠道单用户每日额度按显示金额与内部额度往返', () => {
       .user_daily_quota_limit,
     0
   )
+})
+
+test('渠道单用户每日额度使用稳定编辑精度并允许空值提交为零', () => {
+  const channel = createChannel('{}')
+  channel.user_daily_quota_limit = 299999950
+  assert.notEqual(quotaUnitsToDollars(299999950), 600)
+
+  const defaults = transformChannelToFormDefaults(channel)
+  assert.equal(defaults.user_daily_quota_limit, 600)
+  assert.equal(String(getEditableQuotaStep()), '0.0001')
+
+  const result = channelFormSchema.safeParse({
+    ...defaults,
+    user_daily_quota_limit: '',
+  })
+  assert.equal(result.success, true)
+  if (result.success) {
+    assert.equal(result.data.user_daily_quota_limit, 0)
+  }
 })
 
 test('渠道单用户每日额度拒绝负数和超出内部上限的金额', () => {

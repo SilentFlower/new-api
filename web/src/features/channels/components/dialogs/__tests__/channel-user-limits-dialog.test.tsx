@@ -63,6 +63,8 @@ const domGlobals = [
   'requestAnimationFrame',
   'cancelAnimationFrame',
   'getComputedStyle',
+  'localStorage',
+  'sessionStorage',
 ] as const
 
 for (const key of domGlobals) {
@@ -85,6 +87,8 @@ const { I18nextProvider, initReactI18next } = await import('react-i18next')
 const { api } = await import('@/lib/api')
 const { formatQuota } = await import('@/lib/format')
 const { useAuthStore } = await import('@/stores/auth-store')
+const { DEFAULT_CURRENCY_CONFIG, useSystemConfigStore } =
+  await import('@/stores/system-config-store')
 const { ChannelUserLimitsDialog } =
   await import('../channel-user-limits-dialog')
 
@@ -274,6 +278,9 @@ afterEach(async () => {
     renderedDialog = null
   }
   useAuthStore.getState().auth.reset()
+  useSystemConfigStore.getState().setConfig({
+    currency: { ...DEFAULT_CURRENCY_CONFIG },
+  })
   document.body.replaceChildren()
 })
 
@@ -342,6 +349,57 @@ test('调整确认展示用户和调整前后金额，并提交目标额度', as
   assert.deepEqual(putCalls[0], {
     url: '/api/channel/77/user-daily-quota/81',
     data: { used_quota: 0 },
+  })
+})
+
+test('个人调整在人民币显示下回填无浮点尾数并保持额度往返', async () => {
+  setOperator(true)
+  useSystemConfigStore.getState().setConfig({
+    currency: {
+      ...DEFAULT_CURRENCY_CONFIG,
+      quotaDisplayType: 'CNY',
+      usdExchangeRate: 7.2,
+    },
+  })
+  const putCalls: Array<{ url: string; data: unknown }> = []
+  apiClient.get = async () => ({
+    data: {
+      success: true,
+      data: dailyPage([
+        {
+          user_id: 85,
+          username: 'currency-user',
+          display_name: 'Currency User',
+          used_quota: 50_000,
+          limit: 500_000,
+          remaining_quota: 450_000,
+        },
+      ]),
+    },
+  })
+  apiClient.put = async (url, data) => {
+    putCalls.push({ url, data })
+    return { data: { success: true } }
+  }
+
+  await renderChannelUserLimitsDialog()
+  await waitForCondition(
+    () => document.body.textContent?.includes('Set usage') === true,
+    '每日额度列表未加载'
+  )
+  await act(async () => findButton('Set usage').click())
+
+  const input = document.querySelector<HTMLInputElement>(
+    '#channel-user-daily-quota-amount'
+  )
+  assert.ok(input)
+  assert.equal(input.value, '0.72')
+
+  await act(async () => findButton('Confirm').click())
+  await waitForCondition(() => putCalls.length === 1, '调整请求未提交')
+  assert.deepEqual(putCalls[0], {
+    url: '/api/channel/77/user-daily-quota/85',
+    data: { used_quota: 50_000 },
   })
 })
 

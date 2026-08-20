@@ -488,7 +488,6 @@ func TestRecalculateTaskQuotaTracksPositiveDeltaOnSettlementDay(t *testing.T) {
 	seedUser(t, userID, 10_000)
 	seedChannel(t, channelID)
 	task := makeTask(userID, channelID, preConsumedQuota, 0, BillingSourceWallet, 0)
-	task.PrivateData.ChannelUserDailyQuotaTracked = true
 	require.NoError(t, model.DB.Create(task).Error)
 	require.NoError(t, RecordChannelUserDailyQuota(t.Context(), channelID, userID, preConsumedQuota))
 
@@ -504,7 +503,7 @@ func TestRecalculateTaskQuotaTracksPositiveDeltaOnSettlementDay(t *testing.T) {
 	assert.Equal(t, int64(actualQuota-preConsumedQuota), usedAfterReset)
 }
 
-func TestRecalculateTaskQuotaDoesNotBackfillHistoricalTask(t *testing.T) {
+func TestRecalculateTaskQuotaTracksFuturePositiveDeltaForHistoricalTask(t *testing.T) {
 	truncate(t)
 	now := time.Date(2026, time.August, 20, 12, 0, 0, 0, time.Local)
 	setupChannelUserDailyQuotaMemoryTest(t, &now)
@@ -513,14 +512,13 @@ func TestRecalculateTaskQuotaDoesNotBackfillHistoricalTask(t *testing.T) {
 	seedUser(t, userID, 10_000)
 	seedChannel(t, channelID)
 	task := makeTask(userID, channelID, 200, 0, BillingSourceWallet, 0)
-	require.False(t, task.PrivateData.ChannelUserDailyQuotaTracked)
 	require.NoError(t, model.DB.Create(task).Error)
 
 	RecalculateTaskQuota(t.Context(), task, 350, "历史任务差额结算")
 
 	usedQuota, err := CheckChannelUserDailyQuota(t.Context(), channelID, userID, 10_000)
 	require.NoError(t, err)
-	assert.Zero(t, usedQuota)
+	assert.Equal(t, int64(150), usedQuota)
 }
 
 func TestChargeViolationFeeRecordsChannelUserDailyQuota(t *testing.T) {

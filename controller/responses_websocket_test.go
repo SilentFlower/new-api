@@ -262,9 +262,10 @@ func TestHandleResponsesWebSocketUpstreamEventSettlesSuccessTerminal(t *testing.
 			billing := &responsesWebSocketBillingStub{}
 			turn := &responsesWebSocketTurn{
 				info: &relaycommon.RelayInfo{
-					Billing:         billing,
-					ChannelMeta:     &relaycommon.ChannelMeta{ChannelId: 1},
-					OriginModelName: "test-model",
+					Billing:     billing,
+					ChannelMeta: &relaycommon.ChannelMeta{ChannelId: 1},
+					// 该用例只验证成功终态结算，不启动跨用例存活的异步性能指标任务。
+					OriginModelName: "",
 					StartTime:       time.Now(),
 					ResponsesUsageInfo: &relaycommon.ResponsesUsageInfo{
 						BuiltInTools: map[string]*relaycommon.BuildInToolInfo{},
@@ -353,7 +354,10 @@ func TestProxyResponsesWebSocketRetriesFirstBusinessErrorBeforeDownstreamWrite(t
 		connectorCalls++
 		turn.retryIndex = startRetry
 		turn.info.UserId = userID
-		turn.info.UserQuota = dailyLimit
+		turn.info.UserQuota = dailyLimit + common.QuotaRemindThreshold + 1
+		// 该用例聚焦重试后的渠道额度归属，跳过无关的异步性能指标采样，
+		// 同时让剩余额度高于提醒阈值，避免后台指标或通知任务跨用例访问 Redis。
+		turn.info.OriginModelName = ""
 		turn.info.PriceData.ModelRatio = 1
 		turn.info.PriceData.CompletionRatio = 1
 		turn.info.PriceData.GroupRatioInfo.GroupRatio = 1

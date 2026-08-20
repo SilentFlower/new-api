@@ -121,8 +121,10 @@ function quotaUnitsToDisplayAmount(
 }
 
 /**
- * Convert quota units to a plain number suitable for an editable input.
- * Uses the same precision as quota list formatting without symbols or suffixes.
+ * 将内部额度转换为适合输入框编辑的显示金额。
+ *
+ * @param units 内部额度单位。
+ * @returns 按当前货币显示精度归一化后的数值。
  */
 export function quotaUnitsToEditableAmount(units: number): number {
   const { config, meta } = getCurrencyDisplay()
@@ -135,14 +137,19 @@ export function quotaUnitsToEditableAmount(units: number): number {
   return Number(amount.toFixed(getCurrencyFractionDigits(amount)))
 }
 
-/** Return the input step matching the configured editable quota precision. */
+/**
+ * 返回与当前可编辑额度精度一致的稳定十进制步长。
+ *
+ * @returns 可直接传给 number input 的步长。
+ */
 export function getEditableQuotaStep(): number {
   const { meta } = getCurrencyDisplay()
   if (meta.kind === 'tokens') {
     return 1
   }
 
-  return 10 ** -getCurrencyFractionDigits(0)
+  const digits = getCurrencyFractionDigits(0)
+  return Number((10 ** -digits).toFixed(digits))
 }
 
 // ============================================================================

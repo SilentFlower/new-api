@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/go-redis/redis/v8"
 	"github.com/stretchr/testify/assert"
@@ -101,6 +102,29 @@ func TestChannelUserDailyQuotaDisabledSkipsUnavailableRedis(t *testing.T) {
 	assert.Zero(t, usedQuota)
 	_, err = CheckChannelUserDailyQuota(context.Background(), 80, 123, 100)
 	assert.True(t, errors.Is(err, ErrChannelUserDailyQuotaUnavailable))
+}
+
+func TestRecordRelayChannelUserDailyQuotaTracksWhenLimitDisabled(t *testing.T) {
+	now := time.Date(2026, 8, 20, 10, 0, 0, 0, time.Local)
+	setupChannelUserDailyQuotaMemoryTest(t, &now)
+	ctx := context.Background()
+	relayInfo := &relaycommon.RelayInfo{
+		UserId: 123,
+		ChannelMeta: &relaycommon.ChannelMeta{
+			ChannelId:                  80,
+			ChannelUserDailyQuotaLimit: 0,
+		},
+	}
+
+	RecordRelayChannelUserDailyQuota(ctx, relayInfo, 60)
+
+	items, _, _, err := ListChannelUserDailyQuota(ctx, 80)
+	require.NoError(t, err)
+	assert.Equal(t, []ChannelUserDailyQuotaUsage{{UserID: 123, UsedQuota: 60}}, items)
+
+	usedQuota, err := CheckChannelUserDailyQuota(ctx, 80, 123, 50)
+	assert.ErrorIs(t, err, ErrChannelUserDailyQuotaExceeded)
+	assert.Equal(t, int64(60), usedQuota)
 }
 
 func TestSetChannelUserDailyQuotaRejectsInvalidTarget(t *testing.T) {

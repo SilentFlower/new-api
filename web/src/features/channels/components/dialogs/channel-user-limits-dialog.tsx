@@ -69,7 +69,7 @@ import {
   formatTimestampToDate,
   getEditableQuotaStep,
   parseQuotaFromDollars,
-  quotaUnitsToDollars,
+  quotaUnitsToEditableAmount,
 } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth-store'
 
@@ -339,7 +339,7 @@ export function ChannelUserLimitsDialog({
 
   const openAdjustment = (item: ChannelUserDailyQuotaItem) => {
     setAdjustingUser(item)
-    setAdjustedAmount(String(quotaUnitsToDollars(item.used_quota)))
+    setAdjustedAmount(String(quotaUnitsToEditableAmount(item.used_quota)))
   }
 
   const confirmAdjustment = () => {

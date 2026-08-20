@@ -51,7 +51,11 @@ import {
   useCallback,
   useRef,
 } from 'react'
-import { type SubmitErrorHandler, useForm } from 'react-hook-form'
+import {
+  type Resolver,
+  type SubmitErrorHandler,
+  useForm,
+} from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
@@ -122,8 +126,6 @@ import {
   parseChannelConnectionInfo,
   type ChannelConnectionInfo,
 } from '@/lib/channel-connection-info'
-import { getCurrencyLabel } from '@/lib/currency'
-import { getEditableQuotaStep } from '@/lib/format'
 import { getLobeIcon } from '@/lib/lobe-icon'
 import { ROLE } from '@/lib/roles'
 import { cn } from '@/lib/utils'
@@ -194,6 +196,7 @@ import {
   BuildChannelUpstreamModelDetectionSection,
   ChannelEditorLoadingState,
   ChannelModelsSection,
+  ChannelUserDailyQuotaLimitField,
 } from './sections'
 
 type ChannelMutateDrawerProps = {
@@ -694,7 +697,7 @@ export function ChannelMutateDrawer({
 
   // Form setup
   const form = useForm<ChannelFormValues>({
-    resolver: zodResolver(channelFormSchema),
+    resolver: zodResolver(channelFormSchema) as Resolver<ChannelFormValues>,
     defaultValues: CHANNEL_FORM_DEFAULT_VALUES,
   })
 
@@ -3692,44 +3695,7 @@ export function ChannelMutateDrawer({
                                 )}
                               />
 
-                              <FormField
-                                control={form.control}
-                                name='user_daily_quota_limit'
-                                render={({ field }) => (
-                                  <FormItem>
-                                    <FormLabel>
-                                      {t('User daily quota limit ({{unit}})', {
-                                        unit: getCurrencyLabel(),
-                                      })}
-                                    </FormLabel>
-                                    <FormControl>
-                                      <Input
-                                        type='number'
-                                        min={0}
-                                        step={getEditableQuotaStep()}
-                                        placeholder='0'
-                                        {...field}
-                                        onChange={(e) =>
-                                          field.onChange(Number(e.target.value))
-                                        }
-                                      />
-                                    </FormControl>
-                                    <FormDescription>
-                                      <span className='block'>
-                                        {t(
-                                          FIELD_DESCRIPTIONS.USER_DAILY_QUOTA_LIMIT
-                                        )}
-                                      </span>
-                                      <span className='block'>
-                                        {t(
-                                          'This is a soft limit based on settled usage. Concurrent requests may exceed it slightly.'
-                                        )}
-                                      </span>
-                                    </FormDescription>
-                                    <FormMessage />
-                                  </FormItem>
-                                )}
-                              />
+                              <ChannelUserDailyQuotaLimitField />
                             </div>
 
                             <FormField

@@ -6,7 +6,7 @@
 
 ### 1. Scope / Trigger
 
-- Trigger：修改 `user_daily_quota_limit`、渠道选取上下文、Relay 预扣前检查、渠道正向 `used_quota` 记账、异步任务差额结算、Midjourney 历史渠道切换、额度管理 API 或渠道用户限制 Dialog。
+- Trigger：修改 `user_daily_quota_limit`、渠道选取上下文、Relay 预扣前检查、渠道正向 `used_quota` 记账、异步任务差额结算、Midjourney 历史渠道切换、额度管理 API、额度金额输入或渠道用户限制 Dialog。
 - 统计维度固定为 `channel_id + user_id + 服务端自然日`；同一用户的多个 API Token 共享额度，不同用户、渠道和自然日互不影响。
 - 每日额度是软上限：请求前只检查已结算累计，不预占本次估算额度；检查通过的并发请求可以使最终累计略微超过上限。
 - 定制逻辑必须保持薄层：自然日、Redis/内存状态和目标值调整归属 `service/channel_user_daily_quota.go`；Relay 错误转换归属独立 Controller/Relay 文件；管理 API 归属 `controller/channel_user_limits.go`；既有热点只保留 context、检查或正向累计调用。
@@ -27,10 +27,6 @@ const ContextKeyChannelUserDailyQuotaUsed ContextKey = "channel_user_daily_quota
 
 type ChannelMeta struct {
 	ChannelUserDailyQuotaLimit int
-}
-
-type TaskPrivateData struct {
-	ChannelUserDailyQuotaTracked bool `json:"channel_user_daily_quota_tracked,omitempty"`
 }
 ```
 
@@ -76,6 +72,14 @@ func SetChannelUserDailyQuota(
 	userID int,
 	usedQuota int,
 ) error
+```
+
+前端可编辑额度：
+
+```typescript
+function quotaUnitsToEditableAmount(units: number): number
+function getEditableQuotaStep(): number
+function parseQuotaFromDollars(amount: number): number
 ```
 
 管理 API：
@@ -158,7 +162,7 @@ ErrorCodeChannelUserDailyQuotaUnavailable = "channel_user_daily_quota_unavailabl
 - Redis key 的 TTL 必须覆盖当前自然日结束后至少 24 小时；正向累计使用 Lua 原子执行 `HINCRBY + EXPIRE`，目标值覆盖使用 Lua 原子执行 `HSET/HDEL + EXPIRE`。
 - Relay 热路径只做单 field 读取，不得使用数据库查询、`KEYS` 或 `SCAN`；管理列表可以对当前渠道当前日期执行 `HGETALL`。
 - 未配置 Redis 时使用互斥锁保护的进程内状态，API 返回 `storage_mode=memory`；已配置 Redis 但客户端或操作不可用时失败关闭，禁止降级到内存继续放行。
-- `limit <= 0` 的检查和 `quota <= 0` 的记录必须快速返回，不访问 Redis。渠道 ID、用户 ID、目标值和累计值必须在写入前完成正数、上限与溢出校验。
+- `limit <= 0` 只让请求前检查快速返回且不访问 Redis；正向记录不读取或判断限额，只有 `quota <= 0` 时快速返回。渠道 ID、用户 ID、目标值和累计值必须在写入前完成正数、上限与溢出校验。
 
 #### Relay 检查与正向累计
 
@@ -167,10 +171,10 @@ ErrorCodeChannelUserDailyQuotaUnavailable = "channel_user_daily_quota_unavailabl
 - `429/503` 均设置 `skipRetry`，不得进入 `processChannelError`、渠道自动禁用、换渠重试或预扣费。
 - 每次真实换渠重试都重新检查当前候选渠道；失败尝试没有正向结算，不增加旧渠道累计。
 - 普通文本、图片、音频、Realtime、Responses、Alpha Search、视觉辅助、异步任务和 Midjourney 必须在各自真实预扣与上游调用前走同一领域检查。
-- 正向累计与现有 `model.UpdateChannelUsedQuota` 调用点相邻，并使用最终 `RelayInfo.ChannelMeta.ChannelUserDailyQuotaLimit` 快照判断是否追踪；不得把累计塞入 `BillingSession.Settle` 或预扣逻辑。
+- 正向累计与现有 `model.UpdateChannelUsedQuota` 调用点相邻，并始终使用最终 `channel_id + user_id` 记录；`RelayInfo.ChannelMeta.ChannelUserDailyQuotaLimit` 快照只决定请求前是否检查，不得决定是否追踪，也不得把累计塞入 `BillingSession.Settle` 或预扣逻辑。
 - 同一业务结果必须复用现有一次性结算保护，重复终止事件、重试失败事件或重复回调不得重复累计。
 - 后续退款、负向差额和管理员退款不自动回退每日累计；每日累计与渠道 `used_quota` 一致，表示历史正向使用量。
-- 异步任务提交时冻结 `ChannelUserDailyQuotaTracked`。初始正向额度计入提交日，后续正向差额计入实际结算日；旧任务和限额关闭时提交的任务不得在之后启用限额时补记。
+- 异步任务初始正向额度计入提交日，后续正向差额计入实际结算日；不得持久化或读取 `ChannelUserDailyQuotaTracked` 门控记录。旧任务 JSON 中残留的该字段必须兼容忽略，旧任务在新版本上线后的正向差额从本次结算开始记录，但不扫描日志补记此前额度。
 - Midjourney 历史操作切回原任务渠道时，必须同时同步 Gin context 与 `RelayInfo.ChannelMeta` 的渠道 ID、类型、Key、Base URL、并发限制和每日额度限制，确保检查、上游和记账归属同一最终渠道。
 
 #### 管理 API 与前端
@@ -182,17 +186,20 @@ ErrorCodeChannelUserDailyQuotaUnavailable = "channel_user_daily_quota_unavailabl
 - 渠道管理使用独立 `ChannelUserLimitsDialog`；每日额度和当前并发分为两个 Tab，不在渠道主表持续轮询。
 - 当前并发仅在 Dialog 打开且并发 Tab 激活时每 5 秒刷新；关闭 Dialog 或切换 Tab 后停止。分页总数收缩时必须回退到最后有效页。
 - 调整确认必须展示用户、调整前金额和调整后金额；无 `ChannelOperate` 权限时操作保持禁用，并提供可聚焦的权限说明。
+- 渠道表单和个人调整回填必须使用 `quotaUnitsToEditableAmount`，提交使用 `parseQuotaFromDollars`；金额输入的 `onChange` 必须保留原始字符串，使 Backspace 可以产生临时空值，Schema 在提交时再把空字符串归一化为 `0`。
+- number input 的 `step` 必须来自 `getEditableQuotaStep()` 的稳定十进制值；不得直接使用未经十进制归一化的浮点幂结果，否则 `600` 等正常金额可能触发浏览器原生步长校验。
 - 查询错误兜底、空状态、内存模式提示和调整结果均必须通过 `t(...)`，七种前端 locale 保持同一 key 集合。
 
 ### 4. Validation & Error Matrix
 
 | 条件 | HTTP/错误码 | 行为 |
 | --- | --- | --- |
-| 配置缺失、`NULL` 或 `0` | 无错误 | 不检查、不记录、不访问 Redis |
+| 配置缺失、`NULL` 或 `0` | 无错误 | 不执行请求前检查；正向已结算额度仍写入当日状态并可在管理列表查看 |
 | 配置小于 `0`、含小数或大于 `common.MaxQuota` | 管理 API 参数错误 | 不保存配置 |
 | `used < limit` | 无错误 | 允许请求继续，可能因在途请求最终超额 |
 | `used >= limit` | `429 channel_user_daily_quota_exceeded` | 不预扣、不访问上游、不重试、不禁用渠道 |
-| Redis 已启用但不可用 | `503 channel_user_daily_quota_unavailable` | 失败关闭，不降级内存、不预扣、不访问上游 |
+| 正数限额检查时 Redis 已启用但不可用 | `503 channel_user_daily_quota_unavailable` | 失败关闭，不降级内存、不预扣、不访问上游 |
+| 限额为 `0` 且正向记录时 Redis 不可用 | 保留原业务结果 | 不执行前置检查；记录脱敏告警，不补算故障期间额度 |
 | 成功响应后的累计写入失败 | 保留原成功响应 | 记录带 request ID 的脱敏告警；后续检查在故障期间失败关闭 |
 | 个人调整目标为 `0` | 管理 API 成功 | 删除当前自然日 field，不影响其他业务数据 |
 | 个人调整目标超出 `0..common.MaxQuota` | 管理 API 参数错误 | 不修改状态 |
@@ -204,11 +211,12 @@ ErrorCodeChannelUserDailyQuotaUnavailable = "channel_user_daily_quota_unavailabl
 - Good：渠道上限为 `100`，当前累计为 `80`，两个并发请求都通过检查并分别结算 `30`；最终累计为 `140`，随后新请求收到 `429`。
 - Good：首个渠道真实失败后重试到第二个渠道，只检查并累计第二个最终成功渠道；首个渠道累计保持不变。
 - Good：管理员把用户累计从 `600` 设置为 `200`，一个已在途请求随后结算 `50`，最终累计为 `250`，日志和余额均不改变。
-- Good：跨日异步任务在提交日记录初始额度，在第二天只记录正向差额；旧任务没有追踪标记时不补记。
+- Good：渠道限额为 `0` 时用户结算 `60` 仍写入当日状态；当天改为限额 `50` 后，下一次请求立即按已有累计返回 `429`。
+- Good：跨日异步任务在提交日记录初始额度，在第二天只记录正向差额；历史任务即使没有追踪标记，也从新版本上线后的本次正向差额开始记录，不回补此前额度。
 - Base：历史渠道字段为 `NULL`，Relay、任务和管理页面保持不限行为。
 - Base：未配置 Redis 时单实例内存状态正常工作，并在 UI 明确提示数据范围。
 - Bad：请求检查时把预估额度原子预占，会把软上限错误实现成严格限额并增加退款、超时和重试复杂度。
-- Bad：按当前数据库中的渠道配置决定结算追踪，会让限额关闭时发起的旧请求在中途启用后被错误补记。
+- Bad：按当前配置或 `ChannelMeta.ChannelUserDailyQuotaLimit` 快照决定是否记录，会导致不限额期间的真实正向用量不可见，也无法在当天启用限制后使用已有累计。
 - Bad：个人调整同时修改用户余额或消费日志，会把限额控制状态误当成财务退款。
 - Bad：通过 `SCAN channel_user_daily_quota:*` 构造管理列表，会把渠道级管理查询变成全库热扫描。
 
@@ -216,14 +224,14 @@ ErrorCodeChannelUserDailyQuotaUnavailable = "channel_user_daily_quota_unavailabl
 
 - Model/Controller：覆盖历史 `NULL`、正数、显式 `0/null`、负数、小数、超过 `common.MaxQuota`、非敏感字段分类和表单/API 往返。
 - Service 内存模式：断言用户/渠道/日期隔离、软上限、超额后阻止、自然日切换、目标值覆盖、`0` 删除、正向累计和溢出保护。
-- Service Redis 模式：断言 Hash field、原子累计/覆盖、TTL、列表、Redis 不可用时失败关闭，以及不限状态不访问 Redis。
+- Service Redis 模式：断言 Hash field、原子累计/覆盖、TTL、列表、正数限额检查在 Redis 不可用时失败关闭，以及限额为 `0` 时跳过检查但正向记录仍访问状态存储。
 - Controller/Relay：断言 `429/503` 稳定错误码、`skipRetry`、不上游、不预扣、不自动禁用和错误日志请求级去重。
 - 最终渠道：断言 Relay 重试和 Midjourney 历史操作只累计最终实际渠道，失败渠道为零。
 - 一次性记账：使用重复终止事件或重复回调断言只结算、只累计一次。
-- 异步任务：覆盖跨日正向差额、负向退款不回退、旧任务和关闭限额时提交的任务不补记。
+- 异步任务：覆盖跨日正向差额、负向退款不回退、历史 JSON 追踪字段兼容忽略，以及旧任务和关闭限额时提交的任务从新版本上线后的正向差额开始记录且不回补历史。
 - 独立正向路径：至少覆盖普通 Relay、WebSocket、任务、Midjourney、工具调用和违规费用的实际累计。
 - 管理 API：断言权限、分页、用户摘要最小字段、目标值调整、存储错误脱敏和结构化审计模板。
-- 前端：断言表单金额换算、确认前后值、权限说明、内存提示、分页回退、并发轮询启停和错误兜底 i18n。
+- 前端：使用真实组件输入事件断言 Backspace 可清空、空值提交为 `0`、可重新输入 `600`、稳定 `step` 不触发原生校验；断言不同货币下可编辑金额无浮点尾数且提交后内部额度往返不变，并覆盖确认前后值、权限说明、内存提示、分页回退、并发轮询启停和错误兜底 i18n。
 - 完成后运行相关 race 测试、`go test ./...`、`go vet ./...`、`relaykit` 独立 build/vet、前端定向测试、typecheck、build、lint、i18n sync 和 `git diff --check`。
 
 ### 7. Wrong vs Correct
@@ -250,25 +258,24 @@ if !priceData.FreeModel {
 return relayInfo.Billing.Reserve(priceData.QuotaToPreConsume)
 ```
 
-#### Wrong：从实时渠道配置决定是否记录旧请求
+#### Wrong：使用限额快照决定是否记录正向额度
 
 ```go
-channel, _ := model.GetChannelById(relayInfo.ChannelId, true)
-if channel.GetUserDailyQuotaLimit() > 0 {
+if relayInfo.ChannelUserDailyQuotaLimit > 0 {
 	RecordChannelUserDailyQuota(ctx, relayInfo.ChannelId, relayInfo.UserId, quota)
 }
 ```
 
-问题：请求进行期间启用限额会回溯记录旧请求；重试或历史渠道切换也可能把额度记到错误渠道。
+问题：限额为 `0` 时真实正向用量不会进入管理视图，当天启用正数限制后也无法使用此前已结算累计。
 
-#### Correct：使用最终尝试冻结的 Relay 快照
+#### Correct：最终渠道的正向结算始终记录
 
 ```go
 model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
 service.RecordRelayChannelUserDailyQuota(ctx, relayInfo, quota)
 ```
 
-累计调用与正向渠道使用量相邻，内部根据 `ChannelMeta.ChannelUserDailyQuotaLimit` 快照快速决定是否追踪。
+累计调用与正向渠道使用量相邻，只使用最终渠道和用户归属；限额快照仅用于请求前检查。
 
 #### Wrong：个人“重置”同时退款
 

@@ -18,7 +18,7 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
-import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
+import { parseQuotaFromDollars, quotaUnitsToEditableAmount } from '@/lib/format'
 
 import {
   CHANNEL_TYPE_NEW_API,
@@ -231,7 +231,7 @@ export const channelFormSchema = z
         1000,
         'User concurrency limit must be an integer between 0 and 1000'
       ),
-    user_daily_quota_limit: z
+    user_daily_quota_limit: z.coerce
       .number()
       .min(0, 'User daily quota limit must be between 0 and the maximum quota')
       .refine(
@@ -591,7 +591,7 @@ export function transformChannelToFormDefaults(
     priority: channel.priority || 0,
     weight: channel.weight || 0,
     user_concurrency_limit: channel.user_concurrency_limit ?? 0,
-    user_daily_quota_limit: quotaUnitsToDollars(
+    user_daily_quota_limit: quotaUnitsToEditableAmount(
       channel.user_daily_quota_limit ?? 0
     ),
     test_model: channel.test_model || '',

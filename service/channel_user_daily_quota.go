@@ -150,11 +150,11 @@ func RecordChannelUserDailyQuota(ctx context.Context, channelID int, userID int,
 // RecordRelayChannelUserDailyQuota 记录 Relay 已完成的渠道正向额度，失败时只写安全告警。
 //
 // @param ctx 请求上下文。
-// @param relayInfo 包含最终渠道、用户和每日额度配置快照的 Relay 信息。
+// @param relayInfo 包含最终渠道和用户的 Relay 信息。
 // @param quota 本次新增的正向额度。
 // @return 无。
 func RecordRelayChannelUserDailyQuota(ctx context.Context, relayInfo *relaycommon.RelayInfo, quota int) {
-	if relayInfo == nil || relayInfo.ChannelMeta == nil || relayInfo.ChannelUserDailyQuotaLimit <= 0 || quota <= 0 {
+	if relayInfo == nil || relayInfo.ChannelMeta == nil || quota <= 0 {
 		return
 	}
 	if err := RecordChannelUserDailyQuota(ctx, relayInfo.ChannelId, relayInfo.UserId, quota); err != nil {
