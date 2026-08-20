@@ -2,7 +2,7 @@
 
 ## 1. 开发前门禁
 
-- [ ] 展示并确认最终 `brief.md` 后运行 `task.py start`，planning 状态不修改产品代码。
+- [ ] 任务通过 `task_progress.py reopen` 重开后，展示并确认更新后的 `brief.md`；确认前不修改产品代码，确认后进入实现路由。
 - [ ] 进入 Phase 2 后通过 `trellis-route(target=implement)` 选择执行方式。
 - [ ] 实现前加载 `trellis-before-dev`、后端相关规范、`web/AGENTS.md`、`shadcn-ui`、`i18n-translate` 和 React 性能规范。
 - [ ] 读取所有涉及的 Channel、RelayInfo、BillingSession、Task、前端 Channel schema/form 类型定义，不猜测字段或签名。
@@ -23,7 +23,7 @@
 - [ ] 新建 `service/channel_user_daily_quota.go`，实现自然日周期、Redis Hash、内存 fallback、检查、正向累计、列表和单用户目标值调整。
 - [ ] 所有导出类型和方法添加中文 GoDoc，参数和返回值显式写 `@param`、`@return`。
 - [ ] Redis key 使用 `channel_user_daily_quota:{channel_id}:YYYY-MM-DD`；累计与 TTL 刷新原子执行。
-- [ ] `limit <= 0` 和 `quota <= 0` 快速返回，不访问 Redis；拒绝非法渠道、用户、负数和溢出输入。
+- [ ] `limit <= 0` 仅在请求前检查中快速返回且不读取 Redis；`quota <= 0` 才在正向记录中快速返回，所有正向已结算额度无论当前限额是否为 `0` 都写入状态。
 - [ ] Redis 已配置但不可用时检查返回不可用错误，不回退内存；结算写失败只告警，不改写成功响应。
 - [ ] 内存模式使用短临界区，并按自然日清理旧 bucket。
 - [ ] 增加确定性 service 测试，覆盖用户/渠道/日期隔离、软上限、超额后阻止、自然日切换、累计、目标值覆盖、`0` 删除、Redis 故障和内存模式。
@@ -42,9 +42,9 @@
 ## 5. 正向额度累计
 
 - [ ] 逐项核对现有 `model.UpdateChannelUsedQuota` 正向调用点，仅在资金结算成功、即将记录正向渠道使用量的位置调用同一每日额度累计服务，保持两个统计口径一致。
-- [ ] 普通 Relay 从最终 `RelayInfo.ChannelMeta.ChannelUserDailyQuotaLimit` 判断是否追踪；限额快照为 `0` 或额度非正数时快速返回，不访问 Redis。
+- [ ] 普通 Relay 始终按最终 `channel_id + user_id` 记录正向已结算额度；`RelayInfo.ChannelMeta.ChannelUserDailyQuotaLimit` 只决定请求前是否检查，不再决定是否追踪。
 - [ ] 不把每日额度累计放进 `BillingSession.Settle`，避免资金/Token 结算与后续渠道消费记账的成功边界不一致。
-- [ ] 在 `TaskPrivateData` 增加向后兼容的 `ChannelUserDailyQuotaTracked bool`；提交时冻结是否追踪，初始正向扣费按提交日累计，后续正向差额按实际记账日累计，旧任务和关闭限额时提交的任务不补记。
+- [ ] 异步任务初始正向扣费和后续正向差额都按实际记账日累计；移除 `ChannelUserDailyQuotaTracked` 对记录行为的门控，兼容旧任务 JSON，并允许旧任务在新版本上线后的正向差额从本次结算开始记录。
 - [ ] 文本、图片、音频、Realtime、视觉辅助、工具调用、普通任务、Midjourney、违规费用和异步任务差额等正向记账点各调用一次；不把预扣额度、普通失败或负向退款写入每日累计。
 - [ ] 增加重试最终渠道、现有一次性记账保护、跨日任务差额、旧任务兼容、Midjourney 和违规费用测试，防止重复累计、错误回溯或漏计。
 
@@ -68,7 +68,9 @@
 ## 8. 前端实现
 
 - [ ] 在 `web/src/features/channels/types.ts`、`constants.ts`、`lib/channel-form.ts` 和错误映射中增加每日额度字段。
-- [ ] 表单使用现有额度转换函数处理显示单位，验证 `0..common.MaxQuota` 对应范围并保留显式 `0`。
+- [ ] 表单回填改用 `quotaUnitsToEditableAmount`，提交继续使用 `parseQuotaFromDollars`，验证 `0..common.MaxQuota` 对应范围并保留显式 `0`。
+- [ ] 每日额度输入保留空字符串临时编辑态，允许 Backspace 清空并重新输入；提交时把空值归一化为 `0`，不得在 `onChange` 中使用 `Number('')` 让输入立即回弹。
+- [ ] 修正 `getEditableQuotaStep`，输出稳定的十进制步长，避免 `10 ** -4` 被序列化为带浮点尾数的 DOM 属性。
 - [ ] 在现有用户并发配置附近增加每日额度输入和说明，不改变无关表单布局。
 - [ ] 扩展 `api.ts`、类型和 query keys，增加额度列表、个人目标值调整和并发列表请求。
 - [ ] 新建 `ChannelUserLimitsDialog`，使用 Tabs 展示“每日额度”和“当前并发”；实现分页、刷新、自动轮询、空/错/加载状态、“调整后的已使用额度”输入及调整确认。
@@ -76,6 +78,7 @@
 - [ ] 当前并发 Tab 仅在 Dialog 打开且选中时轮询；关闭后停止，避免渠道主表额外请求。
 - [ ] 按 `i18n-translate` 规范补齐 `en/zh/zh-TW/fr/ja/ru/vi`，运行源码缺键扫描与 `bun run i18n:sync`。
 - [ ] 在模块 `__tests__/` 中增加表单 round-trip、Dialog 状态、目标金额校验与确认、轮询启停和 memory 模式提示测试。
+- [ ] 增加前端回归测试，覆盖 `600` 回填不出现浮点尾数、`600` 通过原生步长约束、Backspace 可清空并重新输入、空值提交为 `0`。
 
 ## 9. 验证计划
 
@@ -124,7 +127,8 @@ git diff --stat
 - [ ] 在渠道 Dialog 验证每日额度、个人目标金额调整、当前并发自动刷新和 Redis/内存模式提示。
 - [ ] 个人调整时保留一个在途请求，确认请求不被取消且完成后实际额度继续累加。
 - [ ] 临时使 Redis 不可用，确认启用每日限额的请求返回 `503`，恢复后检查和展示恢复。
-- [ ] 紧急回滚优先把渠道 `user_daily_quota_limit` 改为 `0`；额度 Hash 和并发索引依赖 TTL 清理，无需全库扫描删除。
+- [ ] 将每日限额设为 `0` 后确认请求不做前置检查，但正向额度仍持续出现在管理列表；再切回正数后立即按当天已有累计执行限制。
+- [ ] 紧急回滚优先把渠道 `user_daily_quota_limit` 改为 `0` 关闭检查；若需停止记录则回滚正向累计窄接入，额度 Hash 和并发索引依赖 TTL 清理，无需全库扫描删除。
 
 ## 11. 完成标准
 
@@ -134,3 +138,10 @@ git diff --stat
 - [ ] 当前并发可视化不改变现有租约限制行为。
 - [ ] `trellis-check-all` 通过；修复后重新运行受影响验证。
 - [ ] 使用 `trellis-update-spec` 更新渠道用户并发/每日额度运行状态契约，再进入提交阶段。
+
+## 12. 返工变更（2026-08-20）
+
+- [ ] 修复每日额度编辑值的浮点尾数和原生 `step` 校验错误。
+- [ ] 修复数值输入在空字符串被 `Number('')` 转为 `0` 后无法使用 Backspace 清空的问题。
+- [ ] 将 `0` 的语义从“关闭检查和记录”调整为“只关闭检查，持续记录正向已结算额度”。
+- [ ] 更新普通 Relay、任务差额及其他正向记账路径测试，证明限额为 `0` 时仍记录、启用正数后立即读取当天已有累计且不扫描历史日志。

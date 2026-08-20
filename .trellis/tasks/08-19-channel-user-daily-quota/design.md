@@ -11,7 +11,7 @@
 - 当日累计表示渠道正向使用量，与现有 `Channel.UsedQuota` 语义一致；后续退款不自动回退历史使用量。
 - 每日额度和当前并发只在指定渠道的管理 Dialog 中查询，不在渠道主表持续轮询。
 - Redis 已配置但不可用时检查失败关闭；未配置 Redis 时使用与现有并发限制一致的单实例内存模式。
-- 每日额度配置为 `0` 时完全跳过检查和记录，使关闭状态保持零额外热路径开销；当天中途启用后从启用时开始累计，不回溯当天早先用量。
+- 每日额度配置为 `0` 时只跳过请求前检查，正向已结算额度仍持续记录；当天中途启用正数限制后立即使用当天已有累计，不扫描数据库或消费日志补算历史数据。
 
 ## 2. 薄层架构边界
 
@@ -39,9 +39,10 @@ UserDailyQuotaLimit *int `json:"user_daily_quota_limit"`
 - `nil`、历史 `NULL`、显式 `0` 和异常负值均按不限处理。
 - 正数范围为 `1..common.MaxQuota`，使用现有 `AutoMigrate`，不写数据库方言专属 SQL。
 - getter 返回归一化后的 `int`，并通过新的 context key 传到每次实际选渠尝试。
-- `relay/common.ChannelMeta` 增加 `ChannelUserDailyQuotaLimit int`，`RelayInfo.InitChannelMeta` 从当前选渠 context 读取，使检查和后续记账都使用最终实际尝试的配置快照；重试换渠时随 `ChannelMeta` 一起刷新。
+- `relay/common.ChannelMeta` 增加 `ChannelUserDailyQuotaLimit int`，`RelayInfo.InitChannelMeta` 从当前选渠 context 读取，使检查使用最终实际尝试的配置快照；正向记账始终绑定最终 `channel_id + user_id`，不再用限额快照决定是否记录。
 - 创建、更新和复制渠道必须保留显式零值；字段归类为非敏感渠道运营配置。
-- 前端表单按当前额度显示模式输入，通过 `quotaUnitsToDollars` 和 `parseQuotaFromDollars` 在显示值与内部额度单位之间转换。
+- 前端表单按当前额度显示模式输入，回填使用 `quotaUnitsToEditableAmount` 归一化可编辑精度，提交使用 `parseQuotaFromDollars` 转回内部额度单位。
+- number input 允许空字符串作为编辑中的临时状态，提交时归一化为 `0`；步长使用稳定十进制字符串或等价规范化值，不直接把 `10 ** -digits` 的二进制浮点结果写入 DOM。
 
 ## 4. 每日额度状态服务
 
@@ -68,7 +69,7 @@ used < limit -> 通过
 used >= limit -> 返回超限
 ```
 
-结算累计使用 Lua 或事务管道原子执行正向 `HINCRBY` 和过期时间刷新。累计前验证 `quota > 0`、渠道 ID 和用户 ID，使用安全整数边界，禁止负数和溢出写入。
+结算累计不受 `limit` 是否为 `0` 影响，使用 Lua 或事务管道原子执行正向 `HINCRBY` 和过期时间刷新。累计前验证 `quota > 0`、渠道 ID 和用户 ID，使用安全整数边界，禁止负数和溢出写入。
 
 管理查询使用 `HGETALL` 读取当前渠道/日期的用户额度并排序分页；个人调整使用原子 `HSET` 写入目标值，目标值为 `0` 时使用 `HDEL` 删除 field。Relay 热路径不使用 `KEYS`、`SCAN` 或数据库聚合。
 
@@ -86,7 +87,7 @@ used >= limit -> 返回超限
 - Redis 已配置但不可用：HTTP `503`，稳定错误码 `channel_user_daily_quota_unavailable`。
 - 两类错误均 `skipRetry`，不得进入 `processChannelError`、渠道自动禁用或计费预扣。
 - 管理员审计信息放入 `other.admin_info.channel_user_daily_quota`，包含 channel ID、user ID、limit、used 和错误码。
-- 请求成功后的累计写入失败只记录带 request ID 的安全告警，不改写已经完成的上游响应；Redis 故障期间后续请求会在前置检查处失败关闭。
+- 请求成功后的累计写入失败只记录带 request ID 的安全告警，不改写已经完成的上游响应；Redis 故障期间只有正数限额请求会在前置检查处失败关闭，限额为 `0` 的请求仍可继续但记录可能暂时缺失。
 
 ## 5. Relay 与计费接入
 
@@ -111,10 +112,10 @@ used >= limit -> 返回超限
 ### 5.2 正向累计
 
 - 每日额度累计与现有 `model.UpdateChannelUsedQuota` 的正向记账点对齐；只有对应资金结算成功、即将写入正向渠道使用量时，才调用每日额度服务。
-- 普通 Relay 使用最终 `RelayInfo.ChannelMeta.ChannelUserDailyQuotaLimit` 作为追踪快照；快照为 `0` 时跳过，正数时按最终渠道、用户和实际正向额度累计。
+- 普通 Relay 按最终渠道、用户和实际正向额度累计，不再用 `RelayInfo.ChannelMeta.ChannelUserDailyQuotaLimit` 决定是否追踪；该配置快照只服务请求前检查。
 - 不把累计职责放进 `BillingSession.Settle`：该会话只负责资金与 Token 生命周期，而渠道 `used_quota` 由后续消费记账路径更新；保持两者相邻才能避免结算失败或日志路径差异造成口径漂移。
 - 文本、图片、音频、Realtime、视觉辅助、工具调用、普通任务、Midjourney 和违规费用等现有正向 `UpdateChannelUsedQuota` 调用点只增加一次窄累计调用，并复用各自已有的一次性结算/记账保护避免重复累计。
-- 异步任务提交时把 `ChannelUserDailyQuotaTracked bool` 写入 `TaskPrivateData`；初始正向扣费按提交日累计，后续正向差额按实际差额记账日累计，负向调整不回退。旧任务及限额关闭时提交的任务该字段为 `false`，之后启用限额也不补记。
+- 异步任务初始正向扣费按提交日累计，后续正向差额按实际差额记账日累计，负向调整不回退；`ChannelUserDailyQuotaTracked` 不再控制记录，旧任务在新版本上线后的正向差额从本次实际结算开始记录，但不补记此前已经完成的额度。
 
 ### 5.3 特殊入口检查
 
@@ -165,6 +166,8 @@ GET    /api/channel/:id/user-concurrency
 ## 8. 前端设计
 
 - 渠道编辑表单在现有用户并发配置附近增加“单用户每日额度上限”，`0` 表示不限。
+- 每日额度输入允许 Backspace 清空后继续输入；空值只在提交或失焦归一化为 `0`，输入过程中不自动回弹。
+- 每日额度回填使用可编辑金额精度，number input 的 `step` 使用稳定十进制值，避免显示 `599.999899999994` 或把 `600` 判定为无效步长。
 - 渠道行操作菜单增加“用户限制状态”，打开独立 `ChannelUserLimitsDialog`。
 - Dialog 使用两个 Tabs：
   - “每日额度”：用户、当日使用、上限、剩余、个人调整操作。
@@ -178,10 +181,12 @@ GET    /api/channel/:id/user-concurrency
 
 | 风险 | 处理 |
 | --- | --- |
-| Relay 热路径延迟 | 仅在启用且非免费请求上增加一次 Redis `HGET` 等价检查；无数据库查询，无 key 扫描。 |
+| Relay 热路径延迟 | 仅在正数限额且非免费请求上增加一次 Redis `HGET` 等价检查；所有正向结算增加一次状态写入，无数据库查询，无 key 扫描。 |
 | 并发请求超额 | 属于已确认软上限语义；达到或超过上限后阻止后续请求，并配合已有用户并发限制控制峰值。 |
 | Redis 故障绕过限制 | Redis 已配置时失败关闭，不降级到本地内存。 |
 | 结算后 Redis 写失败 | 记录安全告警；后续检查在 Redis 未恢复前返回 503，恢复后不伪造丢失用量。 |
+| 限额为 0 时 Redis 写失败 | 请求不做前置检查且成功响应不改写；记录安全告警，恢复后继续记录，不补算故障期间历史用量。 |
+| 前端浮点与清空交互 | 回填使用可编辑金额归一化，步长输出稳定十进制值，空字符串作为临时编辑状态并在提交时归一化为 `0`。 |
 | 多实例时区不一致 | 使用服务端本地时区并在部署说明中要求所有实例时区一致。 |
 | 并发索引残留 | 查询时清理过期租约和空用户，索引自身带 TTL。 |
 | 个人调整与在途请求竞态 | 调整覆盖当前已记录值；在途请求完成后继续按实际额度累加。 |
@@ -189,6 +194,6 @@ GET    /api/channel/:id/user-concurrency
 
 ## 10. 回滚
 
-- 将 `user_daily_quota_limit` 配置为 `0` 可立即关闭额度检查，状态 key 等待 TTL 自动清理。
+- 将 `user_daily_quota_limit` 配置为 `0` 可立即关闭额度检查，但仍保留正向用量记录和管理视图；完整关闭记录能力需要回滚每日额度累计窄接入。
 - 当前并发统计异常时可撤销用户索引扩展，不影响原租约 key 和限制行为。
 - 删除新增管理 Dialog、API 和领域文件并撤销窄接入即可回滚；数据库新增列可保留，不影响旧版本。
