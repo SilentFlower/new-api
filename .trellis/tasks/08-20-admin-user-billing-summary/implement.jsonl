@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/directory-structure.md","reason":"约束 Router、Controller、Service、Model 的文件放置与薄层职责边界。"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"约束管理 API 参数、响应格式、跨层传递与回归测试。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"约束批量 GORM 查询和 SQLite、MySQL、PostgreSQL 兼容性。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"约束公开 API 注释、测试风格、JSON 使用和代码质量。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"约束管理 API 错误响应及分层错误传播。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"约束数据库失败日志的请求关联与敏感信息保护。"}

@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/api-contracts.md","reason":"检查统一排序字段、批量边界、远端状态角色、响应契约和权限行为。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"检查固定次数批量查询和三数据库兼容性。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查注释、测试、JSON 规则和无关改动。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"检查全局失败与单用户局部错误的响应边界。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"检查错误日志不泄露敏感字段。"}

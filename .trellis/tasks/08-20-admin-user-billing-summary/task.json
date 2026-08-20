@@ -1,0 +1,36 @@
+{
+  "id": "admin-user-billing-summary",
+  "name": "admin-user-billing-summary",
+  "title": "管理员用户账务批量摘要接口",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-08-20",
+  "completedAt": "2026-08-20",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-08-20T11:01:53+08:00",
+    "completedSteps": [
+      "完成管理员用户账务批量摘要接口实现",
+      "完成 CHK-001 修复、全量验证与规范沉淀"
+    ],
+    "partialStep": null,
+    "nextStep": "等待显式执行 trellis-finish-work",
+    "notes": ""
+  }
+}
