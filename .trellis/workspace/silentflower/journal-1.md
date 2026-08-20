@@ -1183,3 +1183,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 37: 管理员用户账务批量摘要接口
+
+**Date**: 2026-08-20
+**Task**: 管理员用户账务批量摘要接口
+**Branch**: `build-bak`
+
+### Summary
+
+新增管理员批量账务摘要接口，支持统一排序、远端状态角色、共享订阅周期投影及溢出安全修复，并完成全量验证与上线顺序审计。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `977cf6dd4` | (see git log) |
+
+### Status
+
+[OK] **Completed**
