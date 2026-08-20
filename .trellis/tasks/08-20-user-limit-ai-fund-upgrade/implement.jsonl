@@ -1,0 +1,13 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"约束 build 分支定制逻辑独立、现有热点薄接入和上游同步冲突面。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"本任务跨数据库、Service、Relay、管理 API、React 与 Cloudflare Worker。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"确定新增 model/service/controller 与测试文件的归属。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"个人覆盖模型和迁移必须兼容 SQLite、MySQL 与 PostgreSQL。"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"约束管理 API 参数、分页、最小响应和跨层契约。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"约束 JSON、测试、Relay 和通用代码质量。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"新增周限 429/503 与管理错误需要遵循既有错误语义。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"覆盖写入、限额拒绝和缓存故障需要脱敏审计。"}
+{"file":".trellis/spec/backend/channel-user-concurrency.md","reason":"个人并发覆盖必须保持租约生命周期和失败关闭语义。"}
+{"file":".trellis/spec/backend/channel-user-daily-quota.md","reason":"周限镜像每日额度的周期状态、软上限、记账和管理契约。"}
+{"file":".trellis/spec/frontend/base-ui-composition.md","reason":"限制 Dialog、Tabs、Combobox 和确认弹窗必须保持 Base UI 上下文正确。"}
+{"file":".trellis/spec/frontend/i18n-merge-guidelines.md","reason":"新增限制文案必须完整写入七语言并通过缺键门禁。"}
+{"file":".trellis/tasks/08-20-user-limit-ai-fund-upgrade/research/current-limit-and-ai-fund-boundaries.md","reason":"提供 NewAPI 与 ai-fund 现状、已确认产品决策和跨仓边界。"}

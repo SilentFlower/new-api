@@ -1,0 +1,12 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"检查原有上游文件是否只有必要薄接入且没有无关重构。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查默认值、覆盖值、有效值、周期状态和页面展示的完整数据流。"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"检查模型、索引和迁移的三数据库兼容性。"}
+{"file":".trellis/spec/backend/api-contracts.md","reason":"检查权限、分页、最小字段和向后兼容响应。"}
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"执行后端质量、测试和 relaykit 独立性检查。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"核对 429/503、skipRetry、管理错误和协议映射。"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"核对管理员审计和缓存/状态故障日志不泄密。"}
+{"file":".trellis/spec/backend/channel-user-concurrency.md","reason":"回归并发租约、续租、释放和在途请求行为。"}
+{"file":".trellis/spec/backend/channel-user-daily-quota.md","reason":"按每日合同检查周限的软上限、正向记账和管理调整。"}
+{"file":".trellis/spec/frontend/base-ui-composition.md","reason":"检查 React Dialog、Tabs、Combobox 生命周期和移动布局。"}
+{"file":".trellis/spec/frontend/i18n-merge-guidelines.md","reason":"检查七语言键集合、翻译和同步报告。"}
+{"file":".trellis/tasks/08-20-user-limit-ai-fund-upgrade/research/current-limit-and-ai-fund-boundaries.md","reason":"核对跨仓事实源、页面职责和已确认产品决策未漂移。"}

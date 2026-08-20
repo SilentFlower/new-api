@@ -1,0 +1,94 @@
+{
+  "id": "user-limit-ai-fund-upgrade",
+  "name": "user-limit-ai-fund-upgrade",
+  "title": "用户限额与 ai-fund 升级",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-08-20",
+  "completedAt": "2026-08-20",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-08-20T09:50:51Z",
+      "contextKey": "codex_01a01e91-1ae0-75f3-9b17-27b4e07841d5",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "e80c824e588384c65cc5e39f06263656fed959f3",
+        "status": [
+          {
+            "status": "??",
+            "path": ".trellis/spec/frontend/i18n-merge-guidelines.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/spec/frontend/index.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/spec/guides/build-upstream-friendly-customization.md"
+          }
+        ],
+        "repositories": [
+          {
+            "root": ".",
+            "head": "e80c824e588384c65cc5e39f06263656fed959f3",
+            "status": [
+              {
+                "status": "??",
+                "path": ".trellis/spec/frontend/i18n-merge-guidelines.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/spec/frontend/index.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/spec/guides/build-upstream-friendly-customization.md"
+              }
+            ],
+            "worktreeDiffSha256": "ae138092cd8a33e5f833a19735b4ad4df7b83986440048d5f70a8c1f608e2252",
+            "indexDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "untracked": [
+              {
+                "path": ".trellis/spec/frontend/i18n-merge-guidelines.md",
+                "sha256": "09936db530aa3f85f06a9d2ed874791cf4fb7c69e5297e514efaaae0cc87c910"
+              }
+            ],
+            "conflicts": [],
+            "integration": [],
+            "fingerprint": "41d98242ca84bf3fe387d64afd0a2203e7c35a17e71ebfa2bce12f57935d70c4"
+          }
+        ],
+        "fingerprint": "e613bce7c9af6eb3c4700c9dbbdd10e00f06fc4bcd22bd266e1a2788dbb4f3e6"
+      }
+    }
+  },
+  "progress": {
+    "updatedAt": "2026-08-20T14:18:46Z",
+    "completedSteps": [
+      "实现渠道每周额度、个人限额覆盖与统一管理 API",
+      "完成 Relay 日周统一记账、错误映射及管理端四页签交互",
+      "完成后端全量测试、relaykit 独立构建、前端测试构建和严格 Check-All",
+      "更新渠道周限与个人覆盖可执行规范"
+    ],
+    "partialStep": null,
+    "nextStep": "按上线顺序先发布 NewAPI，再发布 ai-fund",
+    "notes": "两仓业务变更已提交并推送；ai-fund 依赖本次 NewAPI 新接口。"
+  }
+}
