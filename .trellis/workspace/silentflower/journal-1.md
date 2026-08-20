@@ -1204,3 +1204,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 38: 完成用户限额与 ai-fund 升级
+
+**Date**: 2026-08-20
+**Task**: 完成用户限额与 ai-fund 升级
+**Branch**: `build-bak`
+
+### Summary
+
+完成渠道周限、个人限额覆盖、统一管理 API 与管理端交互，验证通过并完成部署衔接。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `b9af4ba00` | (see git log) |
+
+### Status
+
+[OK] **Completed**

@@ -8,7 +8,7 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 37
+- **Total Sessions**: 38
 - **Last Active**: 2026-08-20
 <!-- @@@/auto:current-status -->
 
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1206 | Active |
+| `journal-1.md` | ~1227 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 38 | 2026-08-20 | 完成用户限额与 ai-fund 升级 | `b9af4ba00` | `build-bak` |
 | 37 | 2026-08-20 | 管理员用户账务批量摘要接口 | `977cf6dd4` | `build-bak` |
 | 36 | 2026-08-20 | 渠道用户每日额度限制返工与归档 | `116993edd`, `201474a89` | `build-bak` |
 | 35 | 2026-08-17 | 视觉辅助过滤 WorkBuddy 上下文并兼容缓存 | `e11ba8ce4` | `build-bak` |
