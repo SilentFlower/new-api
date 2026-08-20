@@ -605,3 +605,125 @@ test('查询失败时使用国际化后的兜底文案', async () => {
     '并发查询失败文案未经过国际化'
   )
 })
+
+test('无请求记录的用户可通过搜索提前配置个人覆盖', async () => {
+  setOperator(true)
+  const putCalls: Array<{ url: string; data: unknown }> = []
+  apiClient.get = async (url) => {
+    if (url.includes('/user-limit-overrides')) {
+      return {
+        data: {
+          success: true,
+          data: {
+            channel_id: 77,
+            page: 1,
+            page_size: 20,
+            total: 0,
+            items: [],
+          },
+        },
+      }
+    }
+    if (url.includes('/user-limit-users')) {
+      return {
+        data: {
+          success: true,
+          data: {
+            page: 1,
+            page_size: 10,
+            total: 1,
+            items: [
+              {
+                id: 91,
+                username: 'future-user',
+                display_name: 'Future User',
+              },
+            ],
+          },
+        },
+      }
+    }
+    if (url.includes('/user-limit-status/91')) {
+      return {
+        data: {
+          success: true,
+          data: {
+            channel_id: 77,
+            user: {
+              id: 91,
+              username: 'future-user',
+              display_name: 'Future User',
+            },
+            concurrency: {
+              base_limit: 0,
+              effective_limit: 0,
+              current: 0,
+              remaining: 0,
+              storage_mode: 'memory',
+            },
+            daily_quota: {
+              base_limit: 500_000,
+              effective_limit: 500_000,
+              current: 0,
+              remaining: 500_000,
+              reset_at: 1_787_241_600,
+              storage_mode: 'memory',
+            },
+            weekly_quota: {
+              base_limit: 0,
+              effective_limit: 0,
+              current: 0,
+              remaining: 0,
+              reset_at: 1_787_760_000,
+              storage_mode: 'memory',
+            },
+            override_active: false,
+            override_expires_at: 0,
+          },
+        },
+      }
+    }
+    throw new Error(`unexpected GET ${url}`)
+  }
+  apiClient.put = async (url, data) => {
+    putCalls.push({ url, data })
+    return {
+      data: {
+        success: true,
+        data: {},
+      },
+    }
+  }
+
+  await renderChannelUserLimitsDialog()
+  await act(async () => findButton('Personal overrides').click())
+  const searchInput = document.querySelector<HTMLInputElement>(
+    'input[aria-label="Search users"]'
+  )
+  assert.ok(searchInput)
+  await changeInput(searchInput, 'future-user')
+  await act(async () => findButton('Search').click())
+  await waitForCondition(
+    () => document.body.textContent?.includes('Future User') === true,
+    '用户搜索结果未出现'
+  )
+  await act(async () => findButton('Temporarily increase').click())
+  await waitForCondition(
+    () => document.querySelector('#personal-daily') !== null,
+    '个人覆盖编辑器未打开'
+  )
+  const dailyInput = document.querySelector<HTMLInputElement>('#personal-daily')
+  assert.ok(dailyInput)
+  await changeInput(dailyInput, '2')
+  await act(async () => findButton('Save override').click())
+  await waitForCondition(() => putCalls.length === 1, '个人覆盖请求未提交')
+  assert.deepEqual(putCalls[0], {
+    url: '/api/channel/77/user-limit-overrides/91',
+    data: {
+      user_concurrency_limit: null,
+      user_daily_quota_limit: 1_000_000,
+      user_weekly_quota_limit: null,
+      expires_at: 0,
+    },
+  })
+})

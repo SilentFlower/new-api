@@ -165,6 +165,39 @@ test('渠道单用户每日额度拒绝负数和超出内部上限的金额', ()
   }
 })
 
+test('渠道单用户每周额度按显示金额与内部额度往返并校验边界', () => {
+  const channel = createChannel('{}')
+  channel.user_weekly_quota_limit = 2_500_000
+
+  const defaults = transformChannelToFormDefaults(channel)
+  assert.equal(
+    defaults.user_weekly_quota_limit,
+    quotaUnitsToEditableAmount(2_500_000)
+  )
+  assert.equal(
+    transformFormDataToUpdatePayload(defaults, channel.id)
+      .user_weekly_quota_limit,
+    2_500_000
+  )
+
+  const emptyResult = channelFormSchema.safeParse({
+    ...defaults,
+    user_weekly_quota_limit: '',
+  })
+  assert.equal(emptyResult.success, true)
+  if (emptyResult.success) {
+    assert.equal(emptyResult.data.user_weekly_quota_limit, 0)
+  }
+
+  for (const invalidValue of [-1, quotaUnitsToDollars(2147483647 + 1000000)]) {
+    const result = channelFormSchema.safeParse({
+      ...defaults,
+      user_weekly_quota_limit: invalidValue,
+    })
+    assert.equal(result.success, false)
+  }
+})
+
 test('Responses Compact 透传开关保持 setting JSON 往返兼容', () => {
   const channel = createChannel('{"future_flag":"keep"}')
   const defaults = transformChannelToFormDefaults(channel)

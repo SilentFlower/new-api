@@ -26,6 +26,7 @@
 | [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) | JSON 空白心跳、响应提交、重试、错误体、响应头和并发 writer 生命周期 | 已完成 |
 | [渠道单用户并发限制契约](./channel-user-concurrency.md) | 渠道配置、Redis/内存租约、HTTP/WebSocket/任务生命周期、429/503 错误与取消传播 | 已完成 |
 | [渠道单用户每日额度契约](./channel-user-daily-quota.md) | 渠道每日软上限、自然日 Redis/内存状态、正向记账、管理 API、个人目标值调整与可视化 | 已完成 |
+| [渠道单用户每周额度与个人覆盖契约](./channel-user-weekly-quota-and-overrides.md) | 自然周软上限、日周统一记账、并发/日限/周限个人提额、统一管理 API、缓存与 ai-fund BFF 边界 | 已完成 |
 | [消息审计控制面契约](./message-audit-control-plane.md) | 消息审计跨数据库快速清空、保留水位、AI 重审 Tool 降级与上游上下文边界 | 已完成 |
 | [GitHub 用户 Key 公开泄露扫描契约](./token-leak-scan.md) | 用户 Key 的公开代码搜索、精确确认、任务互斥、通知幂等、敏感信息边界和处置流程 | 已完成 |
 | [错误处理](./error-handling.md) | 错误类型、传播流程、API 响应格式 | 已完成 |
@@ -86,6 +87,10 @@
 ### 涉及渠道单用户每日额度、正向渠道用量或用户限制状态管理
 
 - [渠道单用户每日额度契约](./channel-user-daily-quota.md) — 软上限、自然日状态、最终渠道快照、正向累计、个人目标值调整和渠道 Dialog 契约
+
+### 涉及渠道单用户每周额度、个人覆盖或外部限制管理
+
+- [渠道单用户每周额度与个人覆盖契约](./channel-user-weekly-quota-and-overrides.md) — 自然周刷新、日周统一记账、临时/永久提额、有效限制缓存、统一管理 API 和 ai-fund BFF 权威边界
 
 ### 涉及消息审计清空、AI 重审或审计 Tool
 

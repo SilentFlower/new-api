@@ -98,14 +98,14 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		common.SetContextKey(c, constant.ContextKeyChannelType, ch.Type)
 		common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, ch.GetBaseURL())
 		common.SetContextKey(c, constant.ContextKeyChannelId, originTask.ChannelId)
-		common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, ch.GetUserConcurrencyLimit())
-		common.SetContextKey(c, constant.ContextKeyChannelUserDailyQuotaLimit, ch.GetUserDailyQuotaLimit())
+		limits := service.ApplyChannelUserEffectiveLimits(c, ch)
 
 		info.ChannelBaseUrl = ch.GetBaseURL()
 		info.ChannelId = originTask.ChannelId
 		info.ChannelType = ch.Type
 		info.ApiKey = key
-		info.ChannelUserDailyQuotaLimit = ch.GetUserDailyQuotaLimit()
+		info.ChannelUserDailyQuotaLimit = limits.EffectiveDailyQuota
+		info.ChannelUserWeeklyQuotaLimit = limits.EffectiveWeeklyQuota
 	}
 
 	// 提取 remix 参数（时长、分辨率 → OtherRatios）
@@ -204,7 +204,7 @@ func RelayTaskSubmit(c *gin.Context, info *relaycommon.RelayInfo) (*TaskSubmitRe
 		noteTaskQuotaClamp(info, clamp)
 	}
 	if !info.PriceData.FreeModel {
-		if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
+		if apiErr := checkChannelUserQuotaLimits(c); apiErr != nil {
 			return nil, service.TaskErrorFromAPIError(apiErr)
 		}
 	}
@@ -456,8 +456,7 @@ func tryRealtimeFetch(c *gin.Context, task *model.Task, isOpenAIVideoAPI bool) (
 		return nil, nil
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelId, channelModel.Id)
-	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channelModel.GetUserConcurrencyLimit())
-	common.SetContextKey(c, constant.ContextKeyChannelUserDailyQuotaLimit, channelModel.GetUserDailyQuotaLimit())
+	service.ApplyChannelUserEffectiveLimits(c, channelModel)
 	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrency(c)
 	if concurrencyErr != nil {
 		taskErr := service.TaskErrorFromAPIError(concurrencyErr)

@@ -229,8 +229,8 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 	baseURL := c.GetString("base_url")
 	fullRequestURL := fmt.Sprintf("%s%s", baseURL, requestURL)
 	if priceData.Quota > 0 {
-		if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
-			return channelUserDailyQuotaMidjourneyError(apiErr)
+		if apiErr := checkChannelUserQuotaLimits(c); apiErr != nil {
+			return channelUserQuotaLimitMidjourneyError(apiErr)
 		}
 	}
 	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrency(c)
@@ -271,7 +271,7 @@ func RelaySwapFace(c *gin.Context, info *relaycommon.RelayInfo) *dto.MidjourneyR
 			})
 			model.UpdateUserUsedQuotaAndRequestCount(info.UserId, priceData.Quota)
 			model.UpdateChannelUsedQuota(info.ChannelId, priceData.Quota)
-			service.RecordRelayChannelUserDailyQuota(c, info, priceData.Quota)
+			service.RecordRelayChannelUserQuotaUsage(c, info, priceData.Quota)
 		}
 	}()
 	midjResponse := &mjResp.Response
@@ -325,8 +325,7 @@ func RelayMidjourneyTaskImageSeed(c *gin.Context) *dto.MidjourneyResponse {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "该任务所属渠道已被禁用")
 	}
 	c.Set("channel_id", originTask.ChannelId)
-	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channel.GetUserConcurrencyLimit())
-	common.SetContextKey(c, constant.ContextKeyChannelUserDailyQuotaLimit, channel.GetUserDailyQuotaLimit())
+	service.ApplyChannelUserEffectiveLimits(c, channel)
 	c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
 
 	requestURL := getMjRequestPath(c.Request.URL.String())
@@ -563,8 +562,8 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 		}
 	}
 	if consumeQuota && priceData.Quota > 0 {
-		if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
-			return channelUserDailyQuotaMidjourneyError(apiErr)
+		if apiErr := checkChannelUserQuotaLimits(c); apiErr != nil {
+			return channelUserQuotaLimitMidjourneyError(apiErr)
 		}
 	}
 
@@ -607,7 +606,7 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			})
 			model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, priceData.Quota)
 			model.UpdateChannelUsedQuota(relayInfo.ChannelId, priceData.Quota)
-			service.RecordRelayChannelUserDailyQuota(c, relayInfo, priceData.Quota)
+			service.RecordRelayChannelUserQuotaUsage(c, relayInfo, priceData.Quota)
 		}
 	}()
 

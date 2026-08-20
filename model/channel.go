@@ -53,6 +53,7 @@ type Channel struct {
 
 	UserConcurrencyLimit *int `json:"user_concurrency_limit"`
 	UserDailyQuotaLimit  *int `json:"user_daily_quota_limit"`
+	UserWeeklyQuotaLimit *int `json:"user_weekly_quota_limit"`
 	// add after v0.8.5
 	ChannelInfo ChannelInfo `json:"channel_info" gorm:"type:json"`
 
@@ -80,6 +81,16 @@ func (channel *Channel) GetUserDailyQuotaLimit() int {
 		return 0
 	}
 	return *channel.UserDailyQuotaLimit
+}
+
+// GetUserWeeklyQuotaLimit 返回渠道按用户限制的每周额度。
+//
+// @return int 归一化后的每周额度上限，零表示不限制。
+func (channel *Channel) GetUserWeeklyQuotaLimit() int {
+	if channel == nil || channel.UserWeeklyQuotaLimit == nil || *channel.UserWeeklyQuotaLimit <= 0 {
+		return 0
+	}
+	return *channel.UserWeeklyQuotaLimit
 }
 
 type ChannelInfo struct {

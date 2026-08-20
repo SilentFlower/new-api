@@ -15,12 +15,15 @@ import (
 )
 
 type channelUserDailyQuotaItem struct {
-	UserID         int    `json:"user_id"`
-	Username       string `json:"username"`
-	DisplayName    string `json:"display_name"`
-	UsedQuota      int64  `json:"used_quota"`
-	Limit          int    `json:"limit"`
-	RemainingQuota int64  `json:"remaining_quota"`
+	UserID            int    `json:"user_id"`
+	Username          string `json:"username"`
+	DisplayName       string `json:"display_name"`
+	UsedQuota         int64  `json:"used_quota"`
+	BaseLimit         int    `json:"base_limit"`
+	OverrideLimit     *int   `json:"override_limit,omitempty"`
+	OverrideExpiresAt int64  `json:"override_expires_at"`
+	Limit             int    `json:"limit"`
+	RemainingQuota    int64  `json:"remaining_quota"`
 }
 
 type channelUserConcurrencyItem struct {
@@ -28,6 +31,9 @@ type channelUserConcurrencyItem struct {
 	Username           string `json:"username"`
 	DisplayName        string `json:"display_name"`
 	CurrentConcurrency int    `json:"current_concurrency"`
+	BaseLimit          int    `json:"base_limit"`
+	OverrideLimit      *int   `json:"override_limit,omitempty"`
+	OverrideExpiresAt  int64  `json:"override_expires_at"`
 	Limit              int    `json:"limit"`
 }
 
@@ -87,18 +93,26 @@ func GetChannelUserDailyQuota(c *gin.Context) {
 	limit := channel.GetUserDailyQuotaLimit()
 	items := make([]channelUserDailyQuotaItem, 0, len(pageUsage))
 	for _, item := range pageUsage {
-		remaining := int64(limit) - item.UsedQuota
+		limits, err := service.ResolveChannelUserEffectiveLimits(c.Request.Context(), channel, item.UserID)
+		if err != nil {
+			respondChannelUserLimitServiceError(c, "resolve_daily_quota_override", err)
+			return
+		}
+		remaining := int64(limits.EffectiveDailyQuota) - item.UsedQuota
 		if remaining < 0 {
 			remaining = 0
 		}
 		user := userMap[item.UserID]
 		items = append(items, channelUserDailyQuotaItem{
-			UserID:         item.UserID,
-			Username:       user.Username,
-			DisplayName:    user.DisplayName,
-			UsedQuota:      item.UsedQuota,
-			Limit:          limit,
-			RemainingQuota: remaining,
+			UserID:            item.UserID,
+			Username:          user.Username,
+			DisplayName:       user.DisplayName,
+			UsedQuota:         item.UsedQuota,
+			BaseLimit:         limits.BaseDailyQuota,
+			OverrideLimit:     limits.OverrideDailyQuota,
+			OverrideExpiresAt: limits.ExpiresAt,
+			Limit:             limits.EffectiveDailyQuota,
+			RemainingQuota:    remaining,
 		})
 	}
 	common.ApiSuccess(c, channelUserLimitListResponse{
@@ -208,13 +222,21 @@ func GetChannelUserConcurrency(c *gin.Context) {
 	limit := channel.GetUserConcurrencyLimit()
 	items := make([]channelUserConcurrencyItem, 0, len(pageUsage))
 	for _, item := range pageUsage {
+		limits, err := service.ResolveChannelUserEffectiveLimits(c.Request.Context(), channel, item.UserID)
+		if err != nil {
+			respondChannelUserLimitServiceError(c, "resolve_concurrency_override", err)
+			return
+		}
 		user := userMap[item.UserID]
 		items = append(items, channelUserConcurrencyItem{
 			UserID:             item.UserID,
 			Username:           user.Username,
 			DisplayName:        user.DisplayName,
 			CurrentConcurrency: item.Concurrency,
-			Limit:              limit,
+			BaseLimit:          limits.BaseConcurrency,
+			OverrideLimit:      limits.OverrideConcurrency,
+			OverrideExpiresAt:  limits.ExpiresAt,
+			Limit:              limits.EffectiveConcurrency,
 		})
 	}
 	common.ApiSuccess(c, channelUserLimitListResponse{

@@ -137,7 +137,7 @@ func callVisionAssistModelWithAuditWriter(c *gin.Context, info *relaycommon.Rela
 		return nil, types.NewError(err, types.ErrorCodeModelPriceError, types.ErrOptionWithStatusCode(http.StatusBadRequest), types.ErrOptionWithSkipRetry())
 	}
 	if !priceData.FreeModel {
-		if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
+		if apiErr := checkChannelUserQuotaLimits(c); apiErr != nil {
 			return nil, apiErr
 		}
 	}
@@ -668,6 +668,7 @@ func switchContextToVisionAssistChannel(c *gin.Context, channelModel *model.Chan
 		constant.ContextKeyChannelAutoBan,
 		constant.ContextKeyChannelUserConcurrencyLimit,
 		constant.ContextKeyChannelUserDailyQuotaLimit,
+		constant.ContextKeyChannelUserWeeklyQuotaLimit,
 		constant.ContextKeyChannelModelMapping,
 		constant.ContextKeyChannelStatusCodeMapping,
 		constant.ContextKeyChannelIsMultiKey,

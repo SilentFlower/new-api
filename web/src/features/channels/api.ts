@@ -31,8 +31,13 @@ import type {
   ChannelTestResponse,
   ChannelUserConcurrencyItem,
   ChannelUserDailyQuotaItem,
+  ChannelUserLimitOverrideInput,
+  ChannelUserLimitOverridePage,
   ChannelUserLimitPage,
   ChannelUserLimitResponse,
+  ChannelUserLimitStatus,
+  ChannelUserLimitUserPage,
+  ChannelUserWeeklyQuotaItem,
   CopyChannelParams,
   CopyChannelResponse,
   FetchModelsResponse,
@@ -164,6 +169,50 @@ export async function setChannelUserDailyQuota(
 }
 
 /**
+ * 获取指定渠道本周用户额度使用情况。
+ *
+ * @param channelId 渠道 ID。
+ * @param params 分页参数。
+ * @returns 本周额度分页数据。
+ */
+export async function getChannelUserWeeklyQuota(
+  channelId: number,
+  params: { p: number; page_size: number }
+): Promise<ChannelUserLimitPage<ChannelUserWeeklyQuotaItem>> {
+  const res = await api.get<
+    ChannelUserLimitResponse<ChannelUserWeeklyQuotaItem>
+  >(
+    `/api/channel/${channelId}/user-weekly-quota`,
+    channelActionConfig({ params })
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to load weekly quota usage')
+  }
+  return res.data.data
+}
+
+/**
+ * 设置指定用户本周已使用额度的目标值。
+ *
+ * @param channelId 渠道 ID。
+ * @param userId 用户 ID。
+ * @param usedQuota 调整后的内部额度整数。
+ * @returns 管理 API 操作结果。
+ */
+export async function setChannelUserWeeklyQuota(
+  channelId: number,
+  userId: number,
+  usedQuota: number
+): Promise<{ success: boolean; message?: string }> {
+  const res = await api.put(
+    `/api/channel/${channelId}/user-weekly-quota/${userId}`,
+    { used_quota: usedQuota },
+    channelActionConfig()
+  )
+  return res.data
+}
+
+/**
  * 获取指定渠道当前用户并发数量。
  *
  * @param channelId 渠道 ID。
@@ -184,6 +233,127 @@ export async function getChannelUserConcurrency(
     throw new Error(res.data.message || 'Failed to load current concurrency')
   }
   return res.data.data
+}
+
+/**
+ * 搜索可提前配置个人覆盖的用户。
+ *
+ * @param channelId 渠道 ID。
+ * @param params 搜索与分页参数。
+ * @returns 最小用户摘要分页数据。
+ */
+export async function searchChannelUserLimitUsers(
+  channelId: number,
+  params: { keyword: string; p: number; page_size: number }
+): Promise<ChannelUserLimitUserPage> {
+  const res = await api.get<{
+    success: boolean
+    message?: string
+    data?: ChannelUserLimitUserPage
+  }>(
+    `/api/channel/${channelId}/user-limit-users`,
+    channelActionConfig({ params })
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to search users')
+  }
+  return res.data.data
+}
+
+/**
+ * 获取指定用户的统一限制状态。
+ *
+ * @param channelId 渠道 ID。
+ * @param userId 用户 ID。
+ * @returns 默认、覆盖、有效值和当前使用量。
+ */
+export async function getChannelUserLimitStatus(
+  channelId: number,
+  userId: number
+): Promise<ChannelUserLimitStatus> {
+  const res = await api.get<{
+    success: boolean
+    message?: string
+    data?: ChannelUserLimitStatus
+  }>(
+    `/api/channel/${channelId}/user-limit-status/${userId}`,
+    channelActionConfig()
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to load user limit status')
+  }
+  return res.data.data
+}
+
+/**
+ * 获取当前有效的个人覆盖列表。
+ *
+ * @param channelId 渠道 ID。
+ * @param params 分页参数。
+ * @returns 个人覆盖分页数据。
+ */
+export async function getChannelUserLimitOverrides(
+  channelId: number,
+  params: { p: number; page_size: number }
+): Promise<ChannelUserLimitOverridePage> {
+  const res = await api.get<{
+    success: boolean
+    message?: string
+    data?: ChannelUserLimitOverridePage
+  }>(
+    `/api/channel/${channelId}/user-limit-overrides`,
+    channelActionConfig({ params })
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to load personal overrides')
+  }
+  return res.data.data
+}
+
+/**
+ * 整条替换指定用户的个人覆盖。
+ *
+ * @param channelId 渠道 ID。
+ * @param userId 用户 ID。
+ * @param input 三个可选覆盖与共享到期时间。
+ * @returns 更新后的统一限制状态。
+ */
+export async function setChannelUserLimitOverride(
+  channelId: number,
+  userId: number,
+  input: ChannelUserLimitOverrideInput
+): Promise<ChannelUserLimitStatus> {
+  const res = await api.put<{
+    success: boolean
+    message?: string
+    data?: ChannelUserLimitStatus
+  }>(
+    `/api/channel/${channelId}/user-limit-overrides/${userId}`,
+    input,
+    channelActionConfig()
+  )
+  if (!res.data.success || !res.data.data) {
+    throw new Error(res.data.message || 'Failed to update personal override')
+  }
+  return res.data.data
+}
+
+/**
+ * 撤销指定用户的个人覆盖。
+ *
+ * @param channelId 渠道 ID。
+ * @param userId 用户 ID。
+ * @returns 管理 API 操作结果。
+ */
+export async function deleteChannelUserLimitOverride(
+  channelId: number,
+  userId: number
+): Promise<{ success: boolean; message?: string }> {
+  const res = await api.delete(
+    `/api/channel/${channelId}/user-limit-overrides/${userId}`,
+    channelActionConfig()
+  )
+  return res.data
 }
 
 /**

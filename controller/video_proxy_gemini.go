@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-gonic/gin"
 )
@@ -39,7 +40,7 @@ func getGeminiVideoURL(c *gin.Context, channel *model.Channel, task *model.Task,
 	}
 
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
-	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channel.GetUserConcurrencyLimit())
+	service.ApplyChannelUserEffectiveLimits(c, channel)
 	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrencyGuard(c)
 	if concurrencyErr != nil {
 		return "", concurrencyErr
@@ -190,7 +191,7 @@ func getVertexVideoURL(c *gin.Context, channel *model.Channel, task *model.Task)
 	}
 
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
-	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channel.GetUserConcurrencyLimit())
+	service.ApplyChannelUserEffectiveLimits(c, channel)
 	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrencyGuard(c)
 	if concurrencyErr != nil {
 		return "", concurrencyErr

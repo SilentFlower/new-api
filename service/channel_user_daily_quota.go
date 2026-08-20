@@ -225,6 +225,33 @@ func SetChannelUserDailyQuota(ctx context.Context, channelID int, userID int, us
 	return nil
 }
 
+// GetChannelUserDailyQuotaUsage 返回指定用户当前自然日的已用额度和刷新时间。
+//
+// @param ctx 请求上下文。
+// @param channelID 渠道 ID。
+// @param userID 用户 ID。
+// @return int64 当前自然日已用额度。
+// @return int64 下次刷新时间的 Unix 秒。
+// @return string 状态存储模式。
+// @return error 状态读取失败时返回错误。
+func GetChannelUserDailyQuotaUsage(ctx context.Context, channelID int, userID int) (int64, int64, string, error) {
+	if channelID <= 0 || userID <= 0 {
+		return 0, 0, "", fmt.Errorf("%w: channel_id 和 user_id 必须为正数", ErrChannelUserDailyQuotaUnavailable)
+	}
+	store, err := currentChannelUserDailyQuotaStore()
+	if err != nil {
+		return 0, 0, "", err
+	}
+	period := currentChannelUserDailyQuotaPeriod(channelID)
+	opCtx, cancel := channelUserDailyQuotaOperationContext(ctx)
+	defer cancel()
+	usedQuota, err := store.get(opCtx, period, userID)
+	if err != nil {
+		return 0, 0, "", fmt.Errorf("%w: %v", ErrChannelUserDailyQuotaUnavailable, err)
+	}
+	return usedQuota, period.resetAt.Unix(), channelUserDailyQuotaStorageMode(), nil
+}
+
 func currentChannelUserDailyQuotaStore() (channelUserDailyQuotaStore, error) {
 	if !common.RedisEnabled {
 		return channelUserDailyQuotaMemory, nil

@@ -475,6 +475,9 @@ func validateChannel(channel *model.Channel, isAdd bool) error {
 	if err := validateChannelUserDailyQuotaLimit(channel.UserDailyQuotaLimit); err != nil {
 		return err
 	}
+	if err := validateChannelUserWeeklyQuotaLimit(channel.UserWeeklyQuotaLimit); err != nil {
+		return err
+	}
 	// 校验 channel settings
 	if err := channel.ValidateSettings(); err != nil {
 		return fmt.Errorf("渠道额外设置[channel setting] 格式错误：%s", err.Error())
@@ -970,6 +973,7 @@ func UpdateChannel(c *gin.Context) {
 	}
 	normalizeChannelUserConcurrencyLimitForUpdate(&channel.Channel, requestData)
 	normalizeChannelUserDailyQuotaLimitForUpdate(&channel.Channel, requestData)
+	normalizeChannelUserWeeklyQuotaLimitForUpdate(&channel.Channel, requestData)
 	clearChannelReadOnlyFields(&channel, requestData)
 
 	// 使用统一的校验函数
@@ -1129,6 +1133,9 @@ func UpdateChannel(c *gin.Context) {
 	}
 	if channel.GetUserDailyQuotaLimit() != originChannel.GetUserDailyQuotaLimit() {
 		changedFields = append(changedFields, "user_daily_quota_limit")
+	}
+	if channel.GetUserWeeklyQuotaLimit() != originChannel.GetUserWeeklyQuotaLimit() {
+		changedFields = append(changedFields, "user_weekly_quota_limit")
 	}
 	recordManageAudit(c, "channel.update", map[string]interface{}{
 		"id":             channel.Id,

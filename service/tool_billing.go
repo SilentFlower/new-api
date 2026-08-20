@@ -119,7 +119,7 @@ func PostToolCallConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 
 	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, result.TotalQuota)
 	model.UpdateChannelUsedQuota(relayInfo.ChannelId, result.TotalQuota)
-	RecordRelayChannelUserDailyQuota(ctx, relayInfo, result.TotalQuota)
+	RecordRelayChannelUserQuotaUsage(ctx, relayInfo, result.TotalQuota)
 	if err := SettleBilling(ctx, relayInfo, result.TotalQuota); err != nil {
 		logger.LogError(ctx, "工具调用计费结算失败: "+err.Error())
 	}

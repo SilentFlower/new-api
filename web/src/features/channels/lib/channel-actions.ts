@@ -61,6 +61,13 @@ export const channelsQueryKeys = {
       page,
       pageSize,
     ] as const,
+  userWeeklyQuota: (id: number, page: number, pageSize: number) =>
+    [
+      ...channelsQueryKeys.detail(id),
+      'user-weekly-quota',
+      page,
+      pageSize,
+    ] as const,
   userConcurrency: (id: number, page: number, pageSize: number) =>
     [
       ...channelsQueryKeys.detail(id),
@@ -68,6 +75,17 @@ export const channelsQueryKeys = {
       page,
       pageSize,
     ] as const,
+  userLimitOverrides: (id: number, page: number, pageSize: number) =>
+    [
+      ...channelsQueryKeys.detail(id),
+      'user-limit-overrides',
+      page,
+      pageSize,
+    ] as const,
+  userLimitSearch: (id: number, keyword: string) =>
+    [...channelsQueryKeys.detail(id), 'user-limit-users', keyword] as const,
+  userLimitStatus: (id: number, userId: number) =>
+    [...channelsQueryKeys.detail(id), 'user-limit-status', userId] as const,
 }
 
 function getChannelTestResponseTime(

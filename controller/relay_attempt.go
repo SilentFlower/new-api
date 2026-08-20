@@ -136,7 +136,7 @@ func prepareMainRelayBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo) *
 		}
 		return nil
 	}
-	if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
+	if apiErr := checkChannelUserQuotaLimits(c); apiErr != nil {
 		return apiErr
 	}
 	if relayInfo.Billing != nil {

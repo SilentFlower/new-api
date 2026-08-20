@@ -284,6 +284,31 @@ func ListChannelUserConcurrency(ctx context.Context, channelID int) ([]ChannelUs
 	return items, channelUserConcurrencyStorageMode(), nil
 }
 
+// GetChannelUserConcurrencyUsage 返回指定用户当前持有的有效并发数量。
+//
+// @param ctx 请求上下文。
+// @param channelID 渠道 ID。
+// @param userID 用户 ID。
+// @return int 当前有效并发数量。
+// @return string 状态存储模式。
+// @return error 状态读取失败时返回错误。
+func GetChannelUserConcurrencyUsage(ctx context.Context, channelID int, userID int) (int, string, error) {
+	if channelID <= 0 || userID <= 0 {
+		return 0, "", fmt.Errorf("%w: channel_id 和 user_id 必须为正数", ErrChannelUserConcurrencyUnavailable)
+	}
+	store, err := currentChannelUserConcurrencyStore()
+	if err != nil {
+		return 0, "", err
+	}
+	opCtx, cancel := channelUserConcurrencyOperationContext(ctx)
+	defer cancel()
+	values, err := store.list(opCtx, channelID, time.Now(), channelUserConcurrencyLeaseTTL)
+	if err != nil {
+		return 0, "", fmt.Errorf("%w: %v", ErrChannelUserConcurrencyUnavailable, err)
+	}
+	return values[userID], channelUserConcurrencyStorageMode(), nil
+}
+
 func currentChannelUserConcurrencyStore() (channelUserConcurrencyStore, error) {
 	if !common.RedisEnabled {
 		return channelUserConcurrencyMemory, nil

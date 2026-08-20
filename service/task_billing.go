@@ -69,7 +69,7 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
-	RecordRelayChannelUserDailyQuota(c, info, info.PriceData.Quota)
+	RecordRelayChannelUserQuotaUsage(c, info, info.PriceData.Quota)
 }
 
 // ---------------------------------------------------------------------------
@@ -265,8 +265,8 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		logQuota = quotaDelta
 		model.UpdateUserUsedQuotaAndRequestCount(task.UserId, quotaDelta)
 		model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
-		if err := RecordChannelUserDailyQuota(ctx, task.ChannelId, task.UserId, quotaDelta); err != nil {
-			logger.LogWarn(ctx, fmt.Sprintf("记录异步任务渠道单用户每日额度失败 (task=%s, delta=%d): %s", task.TaskID, quotaDelta, common.LocalLogPreview(err.Error())))
+		if err := RecordChannelUserQuotaUsage(ctx, task.ChannelId, task.UserId, quotaDelta); err != nil {
+			logger.LogWarn(ctx, fmt.Sprintf("记录异步任务渠道单用户周期额度失败 (task=%s, delta=%d): %s", task.TaskID, quotaDelta, common.LocalLogPreview(err.Error())))
 		}
 	} else {
 		logType = model.LogTypeRefund

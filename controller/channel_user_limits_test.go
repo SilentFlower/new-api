@@ -55,7 +55,7 @@ func setupChannelUserLimitsTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
 	model.DB, model.LOG_DB = db, db
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.User{}, &model.Log{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelUserLimitOverride{}, &model.User{}, &model.Log{}))
 
 	t.Cleanup(func() {
 		model.DB, model.LOG_DB = previousDB, previousLogDB
@@ -170,6 +170,112 @@ func TestSetChannelUserDailyQuotaUsesTargetValueIncludingZero(t *testing.T) {
 	SetChannelUserDailyQuota(clearContext)
 	assert.Contains(t, clearRecorder.Body.String(), `"success":true`)
 	usedQuota, err = service.CheckChannelUserDailyQuota(t.Context(), channel.Id, user.Id, dailyLimit)
+	require.NoError(t, err)
+	assert.Zero(t, usedQuota)
+}
+
+func TestChannelUserLimitOverrideSupportsUserWithoutUsageHistory(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupChannelUserLimitsTestDB(t)
+	concurrencyLimit := 2
+	dailyLimit := 500_000
+	weeklyLimit := 2_000_000
+	channel := model.Channel{
+		Id: 9551, Name: "提前提额渠道", Models: "test-model", Group: "default",
+		Status: common.ChannelStatusEnabled, UserConcurrencyLimit: &concurrencyLimit,
+		UserDailyQuotaLimit: &dailyLimit, UserWeeklyQuotaLimit: &weeklyLimit,
+	}
+	user := model.User{Id: 9552, Username: "future-user", DisplayName: "Future User", Password: "password"}
+	require.NoError(t, db.Create(&channel).Error)
+	require.NoError(t, db.Create(&user).Error)
+
+	setContext, setRecorder := newChannelUserLimitTestContext(
+		http.MethodPut,
+		"/api/channel/9551/user-limit-overrides/9552",
+		`{"user_concurrency_limit":4,"user_daily_quota_limit":1000000,"user_weekly_quota_limit":4000000,"expires_at":0}`,
+		gin.Params{{Key: "id", Value: "9551"}, {Key: "user_id", Value: "9552"}},
+	)
+	SetChannelUserLimitOverride(setContext)
+	assert.Contains(t, setRecorder.Body.String(), `"success":true`)
+
+	statusContext, statusRecorder := newChannelUserLimitTestContext(
+		http.MethodGet,
+		"/api/channel/9551/user-limit-status/9552",
+		"",
+		gin.Params{{Key: "id", Value: "9551"}, {Key: "user_id", Value: "9552"}},
+	)
+	GetChannelUserLimitStatus(statusContext)
+	var response struct {
+		Success bool `json:"success"`
+		Data    struct {
+			OverrideActive bool `json:"override_active"`
+			Concurrency    struct {
+				EffectiveLimit int   `json:"effective_limit"`
+				Current        int64 `json:"current"`
+			} `json:"concurrency"`
+			DailyQuota struct {
+				EffectiveLimit int   `json:"effective_limit"`
+				Current        int64 `json:"current"`
+			} `json:"daily_quota"`
+			WeeklyQuota struct {
+				EffectiveLimit int   `json:"effective_limit"`
+				Current        int64 `json:"current"`
+			} `json:"weekly_quota"`
+		} `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(statusRecorder.Body.Bytes(), &response))
+	require.True(t, response.Success)
+	assert.True(t, response.Data.OverrideActive)
+	assert.Equal(t, 4, response.Data.Concurrency.EffectiveLimit)
+	assert.Zero(t, response.Data.Concurrency.Current)
+	assert.Equal(t, 1_000_000, response.Data.DailyQuota.EffectiveLimit)
+	assert.Zero(t, response.Data.DailyQuota.Current)
+	assert.Equal(t, 4_000_000, response.Data.WeeklyQuota.EffectiveLimit)
+	assert.Zero(t, response.Data.WeeklyQuota.Current)
+
+	searchContext, searchRecorder := newChannelUserLimitTestContext(
+		http.MethodGet,
+		"/api/channel/9551/user-limit-users?keyword=future&p=1&page_size=20",
+		"",
+		gin.Params{{Key: "id", Value: "9551"}},
+	)
+	SearchChannelUserLimitUsers(searchContext)
+	assert.Contains(t, searchRecorder.Body.String(), `"username":"future-user"`)
+}
+
+func TestSetChannelUserWeeklyQuotaUsesTargetValueIncludingZero(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupChannelUserLimitsTestDB(t)
+	weeklyLimit := 2_000
+	channel := model.Channel{
+		Id: 9561, Name: "每周额度调整渠道", Models: "test-model", Group: "default",
+		Status: common.ChannelStatusEnabled, UserWeeklyQuotaLimit: &weeklyLimit,
+	}
+	user := model.User{Id: 9562, Username: "weekly-user", Password: "password"}
+	require.NoError(t, db.Create(&channel).Error)
+	require.NoError(t, db.Create(&user).Error)
+
+	setContext, setRecorder := newChannelUserLimitTestContext(
+		http.MethodPut,
+		"/api/channel/9561/user-weekly-quota/9562",
+		`{"used_quota":300}`,
+		gin.Params{{Key: "id", Value: "9561"}, {Key: "user_id", Value: "9562"}},
+	)
+	SetChannelUserWeeklyQuota(setContext)
+	assert.Contains(t, setRecorder.Body.String(), `"success":true`)
+	usedQuota, _, _, err := service.GetChannelUserWeeklyQuotaUsage(t.Context(), channel.Id, user.Id)
+	require.NoError(t, err)
+	assert.Equal(t, int64(300), usedQuota)
+
+	clearContext, clearRecorder := newChannelUserLimitTestContext(
+		http.MethodPut,
+		"/api/channel/9561/user-weekly-quota/9562",
+		`{"used_quota":0}`,
+		gin.Params{{Key: "id", Value: "9561"}, {Key: "user_id", Value: "9562"}},
+	)
+	SetChannelUserWeeklyQuota(clearContext)
+	assert.Contains(t, clearRecorder.Body.String(), `"success":true`)
+	usedQuota, _, _, err = service.GetChannelUserWeeklyQuotaUsage(t.Context(), channel.Id, user.Id)
 	require.NoError(t, err)
 	assert.Zero(t, usedQuota)
 }

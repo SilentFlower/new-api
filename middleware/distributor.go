@@ -472,8 +472,7 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 		common.SetContextKey(c, constant.ContextKeyChannelOrganization, *channel.OpenAIOrganization)
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelAutoBan, channel.GetAutoBan())
-	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, channel.GetUserConcurrencyLimit())
-	common.SetContextKey(c, constant.ContextKeyChannelUserDailyQuotaLimit, channel.GetUserDailyQuotaLimit())
+	service.ApplyChannelUserEffectiveLimits(c, channel)
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 

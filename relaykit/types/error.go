@@ -46,6 +46,8 @@ const (
 	ErrorCodeChannelUserConcurrencyUnavailable ErrorCode = "channel_user_concurrency_unavailable"
 	ErrorCodeChannelUserDailyQuotaExceeded     ErrorCode = "channel_user_daily_quota_exceeded"
 	ErrorCodeChannelUserDailyQuotaUnavailable  ErrorCode = "channel_user_daily_quota_unavailable"
+	ErrorCodeChannelUserWeeklyQuotaExceeded    ErrorCode = "channel_user_weekly_quota_exceeded"
+	ErrorCodeChannelUserWeeklyQuotaUnavailable ErrorCode = "channel_user_weekly_quota_unavailable"
 
 	// new api error
 	ErrorCodeCountTokenFailed   ErrorCode = "count_token_failed"

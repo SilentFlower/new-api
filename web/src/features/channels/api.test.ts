@@ -25,7 +25,11 @@ import {
   getChannelModelOptions,
   getChannelUserConcurrency,
   getChannelUserDailyQuota,
+  getChannelUserLimitStatus,
+  getChannelUserWeeklyQuota,
+  setChannelUserLimitOverride,
   setChannelUserDailyQuota,
+  setChannelUserWeeklyQuota,
 } from './api'
 
 test('渠道模型选项使用只读精简接口', async () => {
@@ -83,8 +87,10 @@ test('渠道用户限制接口使用指定渠道、分页和目标额度载荷',
 
   try {
     await getChannelUserDailyQuota(12, { p: 2, page_size: 20 })
+    await getChannelUserWeeklyQuota(12, { p: 4, page_size: 20 })
     await getChannelUserConcurrency(12, { p: 3, page_size: 20 })
     await setChannelUserDailyQuota(12, 34, 500000)
+    await setChannelUserWeeklyQuota(12, 34, 800000)
 
     assert.deepEqual(getRequests, [
       {
@@ -92,14 +98,88 @@ test('渠道用户限制接口使用指定渠道、分页和目标额度载荷',
         params: { p: 2, page_size: 20 },
       },
       {
+        url: '/api/channel/12/user-weekly-quota',
+        params: { p: 4, page_size: 20 },
+      },
+      {
         url: '/api/channel/12/user-concurrency',
         params: { p: 3, page_size: 20 },
       },
     ])
     assert.deepEqual(putRequest, {
-      url: '/api/channel/12/user-daily-quota/34',
-      data: { used_quota: 500000 },
+      url: '/api/channel/12/user-weekly-quota/34',
+      data: { used_quota: 800000 },
     })
+  } finally {
+    api.get = originalGet
+    api.put = originalPut
+  }
+})
+
+test('个人覆盖接口只提交白名单字段并读取指定用户状态', async () => {
+  const originalGet = api.get
+  const originalPut = api.put
+  const calls: Array<{ method: string; url: string; data?: unknown }> = []
+  const status = {
+    channel_id: 12,
+    user: { id: 34, username: 'alice', display_name: 'Alice' },
+    concurrency: {
+      base_limit: 2,
+      effective_limit: 4,
+      current: 0,
+      remaining: 4,
+      storage_mode: 'memory' as const,
+    },
+    daily_quota: {
+      base_limit: 100,
+      effective_limit: 200,
+      current: 0,
+      remaining: 200,
+      storage_mode: 'memory' as const,
+    },
+    weekly_quota: {
+      base_limit: 500,
+      effective_limit: 900,
+      current: 0,
+      remaining: 900,
+      storage_mode: 'memory' as const,
+    },
+    override_active: true,
+    override_expires_at: 0,
+  }
+  api.get = (async (url) => {
+    calls.push({ method: 'GET', url })
+    return { data: { success: true, data: status } }
+  }) as typeof api.get
+  api.put = (async (url, data) => {
+    calls.push({ method: 'PUT', url, data })
+    return { data: { success: true, data: status } }
+  }) as typeof api.put
+
+  try {
+    await getChannelUserLimitStatus(12, 34)
+    await setChannelUserLimitOverride(12, 34, {
+      user_concurrency_limit: 4,
+      user_daily_quota_limit: 200,
+      user_weekly_quota_limit: 900,
+      expires_at: 0,
+    })
+    assert.deepEqual(calls, [
+      {
+        method: 'GET',
+        url: '/api/channel/12/user-limit-status/34',
+      },
+      {
+        method: 'PUT',
+        url: '/api/channel/12/user-limit-overrides/34',
+        data: {
+          user_concurrency_limit: 4,
+          user_daily_quota_limit: 200,
+          user_weekly_quota_limit: 900,
+          expires_at: 0,
+        },
+      },
+    ])
   } finally {
     api.get = originalGet
     api.put = originalPut
