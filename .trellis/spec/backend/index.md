@@ -18,6 +18,7 @@
 | [目录结构](./directory-structure.md) | 模块组织、文件布局和命名规范 | 已完成 |
 | [数据库规范](./database-guidelines.md) | GORM 用法、查询模式、迁移、多数据库兼容性 | 已完成 |
 | [API 契约规范](./api-contracts.md) | 管理 API 查询参数、跨层契约和边界行为 | 已完成 |
+| [管理员用户账务批量摘要契约](./admin-user-billing-summary.md) | 用户钱包、订阅剩余额度、远端状态角色、统一排序与周期投影边界 | 已完成 |
 | [Relay 视觉辅助契约](./relay-vision-assist.md) | 视觉辅助请求构造、端点模式、Gemini Native 边界行为 | 已完成 |
 | [Relay Alpha Search 与 Responses Compact 契约](./relay-alpha-search-compact.md) | standalone Search 透明转发，以及 Compact 基础模型选渠、原始透传、Responses WebSocket、管理端渠道测试、计费与日志隔离 | 已完成 |
 | [Relay WebSearch 模拟契约](./relay-websearch-emulation.md) | Claude Messages 与 Chat Completions 纯 WebSearch 渠道级模拟、provider、密钥脱敏、请求体稳定性和单次计费 | 已完成 |
@@ -50,6 +51,7 @@
 ### 涉及 API 端点
 
 - [API 契约规范](./api-contracts.md) — 查询参数、跨层传递和兼容行为
+- [管理员用户账务批量摘要契约](./admin-user-billing-summary.md) — 批量边界、统一排序、远端事实字段和共享订阅周期投影
 - [错误处理](./error-handling.md) — 管理 API vs 转发 API 的响应格式差异
 - [日志规范](./logging-guidelines.md) — 日志级别选择和敏感数据保护
 
