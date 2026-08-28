@@ -1225,3 +1225,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 39: 完成 Relay 流式保活任务归档
+
+**Date**: 2026-08-28
+**Task**: 完成 Relay 流式保活任务归档
+**Branch**: `build-bak`
+
+### Summary
+
+完成 Relay 流式两阶段 SSE 保活、请求体读取失败分类、流正文 idle timeout 解耦、定向与扩大验证、Check-All、规格更新、业务提交推送和 [build] 触发提交；release audit 为 no-op，开始归档收尾。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `1bec63851` | (see git log) |
+
+### Status
+
+[OK] **Completed**
