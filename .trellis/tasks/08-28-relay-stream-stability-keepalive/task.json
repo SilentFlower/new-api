@@ -1,0 +1,39 @@
+{
+  "id": "relay-stream-stability-keepalive",
+  "name": "relay-stream-stability-keepalive",
+  "title": "增强 Relay 流式稳定性与保活策略",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-08-28",
+  "completedAt": "2026-08-28",
+  "branch": null,
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-08-28T07:58:16Z",
+    "completedSteps": [
+      "流式保活实现",
+      "测试验证",
+      "Check-All",
+      "spec 更新",
+      "业务提交与推送"
+    ],
+    "partialStep": null,
+    "nextStep": "任务记录提交与推送",
+    "notes": "业务提交已推送到 origin/build-bak；保留计划外 dirty 不变。"
+  }
+}
