@@ -430,9 +430,9 @@ func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) (context.Can
 		defer func() {
 			// 增加panic恢复处理
 			if r := recover(); r != nil {
-				logger.LogDebug(c, "SSE ping goroutine panic recovered: %v", r)
+				logger.LogDebug(c, "SSE upstream TTFB ping goroutine panic recovered: %v", r)
 			}
-			logger.LogDebug(c, "SSE ping goroutine stopped")
+			logger.LogDebug(c, "SSE upstream TTFB ping goroutine stopped")
 		}()
 
 		if pingInterval <= 0 {
@@ -443,11 +443,11 @@ func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) (context.Can
 		// 确保在任何情况下都清理ticker
 		defer func() {
 			ticker.Stop()
-			logger.LogDebug(c, "SSE ping ticker stopped")
+			logger.LogDebug(c, "SSE upstream TTFB ping ticker stopped")
 		}()
 
 		var pingMutex sync.Mutex
-		logger.LogDebug(c, "SSE ping goroutine started")
+		logger.LogDebug(c, "SSE upstream TTFB ping goroutine started")
 
 		// 增加超时控制，防止goroutine长时间运行
 		maxPingDuration := 120 * time.Minute // 最大ping持续时间
@@ -459,7 +459,7 @@ func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) (context.Can
 			// 发送 ping 数据
 			case <-ticker.C:
 				if err := sendPingData(c, &pingMutex); err != nil {
-					logger.LogDebug(c, "SSE ping error, stopping goroutine: %s", err.Error())
+					logger.LogDebug(c, "SSE upstream TTFB ping error, stopping goroutine: %s", err.Error())
 					return
 				}
 			// 收到退出信号
@@ -470,7 +470,7 @@ func startPingKeepAlive(c *gin.Context, pingInterval time.Duration) (context.Can
 				return
 			// 超时保护，防止goroutine无限运行
 			case <-pingTimeout.C:
-				logger.LogDebug(c, "SSE ping goroutine timeout, stopping")
+				logger.LogDebug(c, "SSE upstream TTFB ping goroutine timeout, stopping")
 				return
 			}
 		}
@@ -492,7 +492,7 @@ func sendPingData(c *gin.Context, mutex *sync.Mutex) error {
 		return err
 	}
 
-	logger.LogDebug(c, "SSE ping data sent")
+	logger.LogDebug(c, "SSE upstream TTFB ping data sent")
 	return nil
 }
 
@@ -562,7 +562,11 @@ func doRequest(c *gin.Context, req *http.Request, info *common.RelayInfo, logReq
 	resp, err := relayClient.Do(req)
 	if err != nil {
 		if logRequestError {
-			logger.LogError(c, "do request failed: "+err.Error())
+			message := "do request failed: " + common2.MaskSensitiveInfo(common2.LocalLogPreview(err.Error()))
+			if info != nil && info.UsesUpstreamStream() {
+				message = "stream upstream request failed before response headers: " + common2.MaskSensitiveInfo(common2.LocalLogPreview(err.Error()))
+			}
+			logger.LogError(c, message)
 		}
 		return nil, types.NewError(err, types.ErrorCodeDoRequestFailed, types.ErrOptionWithHideErrMsg("upstream error: do request failed"))
 	}

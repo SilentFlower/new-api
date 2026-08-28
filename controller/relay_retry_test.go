@@ -2,6 +2,7 @@ package controller
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -76,6 +77,24 @@ func TestShouldRetryAfterKeepAliveCommittedResponse(t *testing.T) {
 	relayErr := types.NewError(errors.New("channel unavailable"), types.ErrorCodeChannelNoAvailableKey)
 
 	assert.True(t, shouldRetry(c, relayErr, 1))
+}
+
+func TestInitialRelayRequestErrorClassifiesUnexpectedEOF(t *testing.T) {
+	apiErr := initialRelayRequestError(fmt.Errorf("client upload failed: %w", io.ErrUnexpectedEOF))
+
+	require.NotNil(t, apiErr)
+	assert.Equal(t, types.ErrorCodeReadRequestBodyFailed, apiErr.GetErrorCode())
+	assert.Equal(t, http.StatusBadRequest, apiErr.StatusCode)
+	assert.True(t, types.IsSkipRetryError(apiErr))
+}
+
+func TestInitialRelayRequestErrorClassifiesOversizedBody(t *testing.T) {
+	apiErr := initialRelayRequestError(common.ErrRequestBodyTooLarge)
+
+	require.NotNil(t, apiErr)
+	assert.Equal(t, types.ErrorCodeReadRequestBodyFailed, apiErr.GetErrorCode())
+	assert.Equal(t, http.StatusRequestEntityTooLarge, apiErr.StatusCode)
+	assert.True(t, types.IsSkipRetryError(apiErr))
 }
 
 func TestShouldRetryAlphaSearchUpstreamError(t *testing.T) {

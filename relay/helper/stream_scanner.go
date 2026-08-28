@@ -247,7 +247,6 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 			default:
 			}
 
-			ticker.Reset(streamingTimeout)
 			data := scanner.Text()
 			if info != nil && info.IsResponsesCompactV2() {
 				logger.LogDebug(c, "Responses Compact V2 stream event received, bytes=%d", len(data))
@@ -255,10 +254,12 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				logger.LogDebug(c, "stream scanner data: %s", data)
 			}
 
-			if len(data) < 6 {
-				continue
+			if strings.HasPrefix(data, "[DONE]") {
+				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
+				logger.LogDebug(c, "received raw [DONE], stopping scanner")
+				return
 			}
-			if data[:5] != "data:" && data[:6] != "[DONE]" {
+			if !strings.HasPrefix(data, "data:") {
 				continue
 			}
 			data = data[5:]
@@ -267,6 +268,8 @@ func StreamScannerHandler(c *gin.Context, resp *http.Response, info *relaycommon
 				continue
 			}
 			if !strings.HasPrefix(data, "[DONE]") {
+				// 只用真实上游业务数据刷新 idle timeout；空行、comment 或本地 ping 只能保活下游连接。
+				ticker.Reset(streamingTimeout)
 				info.SetFirstResponseTime()
 				info.ReceivedResponseCount++
 

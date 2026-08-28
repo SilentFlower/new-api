@@ -121,11 +121,9 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 	request, err := helper.GetAndValidateRequest(c, relayFormat)
 	if err != nil {
-		// Map "request body too large" to 413 so clients can handle it correctly
-		if common.IsRequestBodyTooLargeError(err) || errors.Is(err, common.ErrRequestBodyTooLarge) {
-			newAPIError = types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
-		} else {
-			newAPIError = types.NewError(err, types.ErrorCodeInvalidRequest)
+		newAPIError = initialRelayRequestError(err)
+		if newAPIError.GetErrorCode() == types.ErrorCodeReadRequestBodyFailed {
+			logger.LogError(c, "relay request body read failed before response keep-alive stage: "+newAPIError.MaskSensitiveError())
 		}
 		return
 	}
@@ -297,6 +295,16 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			perfmetrics.RecordRelaySample(relayInfo, false, 0)
 		})
 	}
+}
+
+func initialRelayRequestError(err error) *types.NewAPIError {
+	if common.IsRequestBodyTooLargeError(err) || errors.Is(err, common.ErrRequestBodyTooLarge) {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusRequestEntityTooLarge, types.ErrOptionWithSkipRetry())
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	}
+	return types.NewError(err, types.ErrorCodeInvalidRequest)
 }
 
 var upgrader = websocket.Upgrader{

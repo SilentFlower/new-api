@@ -24,6 +24,7 @@
 | [Relay WebSearch 模拟契约](./relay-websearch-emulation.md) | Claude Messages 与 Chat Completions 纯 WebSearch 渠道级模拟、provider、密钥脱敏、请求体稳定性和单次计费 | 已完成 |
 | [Relay 计费模型快照契约](./relay-billing-model.md) | 模型映射后的计费模型选择、冻结、重试清理、任务历史兼容和日志一致性 | 已完成 |
 | [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) | JSON 空白心跳、响应提交、重试、错误体、响应头和并发 writer 生命周期 | 已完成 |
+| [Relay 流式 SSE 响应保活契约](./relay-stream-keepalive.md) | 流式响应头等待、正文扫描、SSE comment 保活、idle timeout 和请求体读取边界 | 已完成 |
 | [渠道单用户并发限制契约](./channel-user-concurrency.md) | 渠道配置、Redis/内存租约、HTTP/WebSocket/任务生命周期、429/503 错误与取消传播 | 已完成 |
 | [渠道单用户每日额度契约](./channel-user-daily-quota.md) | 渠道每日软上限、自然日 Redis/内存状态、正向记账、管理 API、个人目标值调整与可视化 | 已完成 |
 | [渠道单用户每周额度与个人覆盖契约](./channel-user-weekly-quota-and-overrides.md) | 自然周软上限、日周统一记账、并发/日限/周限个人提额、统一管理 API、缓存与 ai-fund BFF 边界 | 已完成 |
@@ -79,6 +80,10 @@
 ### 涉及 Relay 非流式响应保活
 
 - [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) — JSON 允许列表、Flush、状态码提交、渠道重试、响应头和 writer 并发清理
+
+### 涉及 Relay 流式响应保活、SSE Ping 或流正文 idle timeout
+
+- [Relay 流式 SSE 响应保活契约](./relay-stream-keepalive.md) — 上游响应头等待、流正文扫描、SSE comment、有效数据 timeout 和请求体读取边界
 
 ### 涉及渠道单用户并发、Redis 租约或 Relay 取消传播
 

@@ -379,6 +379,123 @@ func TestStreamScannerHandler_PingDisabledByRelayInfo(t *testing.T) {
 	assert.Equal(t, 0, pingCount, "pings should be disabled when DisablePing=true")
 }
 
+func TestStreamScannerHandler_UpstreamCommentsDoNotResetIdleTimeout(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 1
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	setting := operation_setting.GetGeneralSetting()
+	oldEnabled := setting.PingIntervalEnabled
+	oldSeconds := setting.PingIntervalSeconds
+	setting.PingIntervalEnabled = false
+	setting.PingIntervalSeconds = 1
+	t.Cleanup(func() {
+		setting.PingIntervalEnabled = oldEnabled
+		setting.PingIntervalSeconds = oldSeconds
+	})
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		if _, err := fmt.Fprint(pw, "data: first\n"); err != nil {
+			return
+		}
+		ticker := time.NewTicker(200 * time.Millisecond)
+		defer ticker.Stop()
+		deadline := time.After(1500 * time.Millisecond)
+		for {
+			select {
+			case <-ticker.C:
+				if _, err := fmt.Fprint(pw, ": upstream-comment\n"); err != nil {
+					return
+				}
+			case <-deadline:
+				_, _ = fmt.Fprint(pw, "data: second\n")
+				return
+			}
+		}
+	}()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	resp := &http.Response{Body: pr}
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	var count atomic.Int64
+	done := make(chan struct{})
+	go func() {
+		StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+			count.Add(1)
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(4 * time.Second):
+		t.Fatal("timed out waiting for stream timeout")
+	}
+
+	assert.Equal(t, int64(1), count.Load())
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonTimeout, info.StreamStatus.EndReason)
+}
+
+func TestStreamScannerHandler_PingDoesNotResetIdleTimeout(t *testing.T) {
+	oldTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 2
+	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
+
+	setting := operation_setting.GetGeneralSetting()
+	oldEnabled := setting.PingIntervalEnabled
+	oldSeconds := setting.PingIntervalSeconds
+	setting.PingIntervalEnabled = true
+	setting.PingIntervalSeconds = 1
+	t.Cleanup(func() {
+		setting.PingIntervalEnabled = oldEnabled
+		setting.PingIntervalSeconds = oldSeconds
+	})
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		if _, err := fmt.Fprint(pw, "data: first\n"); err != nil {
+			return
+		}
+		time.Sleep(3 * time.Second)
+		_, _ = fmt.Fprint(pw, "data: second\n")
+	}()
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+
+	resp := &http.Response{Body: pr}
+	info := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{}}
+
+	var count atomic.Int64
+	done := make(chan struct{})
+	go func() {
+		StreamScannerHandler(c, resp, info, func(data string, sr *StreamResult) {
+			count.Add(1)
+		})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for stream timeout")
+	}
+
+	assert.Equal(t, int64(1), count.Load())
+	assert.Contains(t, recorder.Body.String(), ": PING")
+	require.NotNil(t, info.StreamStatus)
+	assert.Equal(t, relaycommon.StreamEndReasonTimeout, info.StreamStatus.EndReason)
+}
+
 // ---------- StreamStatus integration ----------
 
 func TestStreamScannerHandler_StreamStatus_DoneReason(t *testing.T) {
