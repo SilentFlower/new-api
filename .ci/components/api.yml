@@ -1,0 +1,9 @@
+component:
+  name: api
+  type: go-service
+  image_name: new-api
+  build:
+    context: .
+    dockerfile: Dockerfile
+  deploy:
+    app_port: 3000

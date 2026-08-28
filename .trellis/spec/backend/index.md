@@ -16,6 +16,7 @@
 | 规范 | 描述 | 状态 |
 |------|------|------|
 | [目录结构](./directory-structure.md) | 模块组织、文件布局和命名规范 | 已完成 |
+| [部署与 CI 契约](./deployment-ci.md) | GitLab V3、Dockerfile 服务、ACK 发布、运行时环境变量和 K8s Secret 注入 | 已完成 |
 | [数据库规范](./database-guidelines.md) | GORM 用法、查询模式、迁移、多数据库兼容性 | 已完成 |
 | [API 契约规范](./api-contracts.md) | 管理 API 查询参数、跨层契约和边界行为 | 已完成 |
 | [管理员用户账务批量摘要契约](./admin-user-billing-summary.md) | 用户钱包、订阅剩余额度、远端状态角色、统一排序与周期投影边界 | 已完成 |
@@ -44,6 +45,10 @@
 
 - [代码质量标准](./quality-guidelines.md) — 禁止模式和必需模式
 - [目录结构](./directory-structure.md) — 文件放置规则
+
+### 涉及部署、CI、K8s 或运行时环境变量
+
+- [部署与 CI 契约](./deployment-ci.md) — GitLab V3、Dockerfile 服务、ACK、RDS/Redis Secret 注入、探针和验证要求
 
 ### 涉及数据库操作
 
@@ -118,6 +123,7 @@
 | 4 | 新渠道检查 StreamOptions 支持 | [质量标准](./quality-guidelines.md) |
 | 5 | 受保护项目信息禁止修改 | [质量标准](./quality-guidelines.md) |
 | 6 | 转发 DTO 可选字段用指针类型 | [质量标准](./quality-guidelines.md) |
+| 7 | ACK 生产发布配置必须通过 GitLab V3 `.ci` 声明和 K8s Secret 注入敏感运行时变量 | [部署与 CI 契约](./deployment-ci.md) |
 
 ---
 

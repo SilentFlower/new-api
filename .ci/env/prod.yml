@@ -1,0 +1,25 @@
+components:
+  api:
+    deploy:
+      replicas: 1
+      resources:
+        cpu_request: "100m"
+        cpu_limit: "1000m"
+        mem_request: "512Mi"
+        mem_limit: "1Gi"
+      env:
+        APP_ENV_PORT: "3000"
+        APP_ENV_TZ: "Asia/Shanghai"
+        APP_ENV_ERROR_LOG_ENABLED: "true"
+        APP_ENV_BATCH_UPDATE_ENABLED: "true"
+        APP_ENV_STREAMING_TIMEOUT: "1800"
+        APP_ENV_SQL_MAX_OPEN_CONNS: "50"
+        APP_ENV_SQL_MAX_IDLE_CONNS: "10"
+        APP_ENV_SYNC_FREQUENCY: "60"
+        APP_ENV_SESSION_COOKIE_SECURE: "true"
+      secret_env:
+        APP_SECRET_SQL_DSN: "new-api-secret:sql-dsn"
+        APP_SECRET_REDIS_CONN_STRING: "new-api-secret:redis-conn-string"
+        APP_SECRET_SESSION_SECRET: "new-api-secret:session-secret"
+        APP_SECRET_CRYPTO_SECRET: "new-api-secret:crypto-secret"
+        APP_SECRET_SESSION_COOKIE_TRUSTED_URL: "new-api-secret:session-cookie-trusted-url"

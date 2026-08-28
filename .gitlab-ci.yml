@@ -1,0 +1,3 @@
+include:
+  - project: 'digital-rd-infra/devops-infra'
+    file: '/templates/projects/application.yml'

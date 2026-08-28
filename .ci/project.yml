@@ -1,0 +1,20 @@
+project:
+  schema_version: v3alpha1
+  name: new-api
+  env_map:
+    prod:
+      - main
+      - master
+      - prod
+  registry:
+    prod:
+      provider: acr
+  kubernetes:
+    prod:
+      provider: ack
+      namespace: xhgj-new-api-prod
+      release_gateway:
+        function_name: aliyun-ack-releaser
+        alias: prod
+  deploy_policy:
+    prod: manual
