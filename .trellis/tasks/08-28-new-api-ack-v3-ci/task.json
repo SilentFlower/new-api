@@ -1,0 +1,91 @@
+{
+  "id": "new-api-ack-v3-ci",
+  "name": "new-api-ack-v3-ci",
+  "title": "new-api 接入 devops-infra V3 ACK 发布链路",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "new-api 业务仓接入 devops-infra V3：新增 GitLab CI 入口、.ci project/component/prod overlay，生产走 ACK + 阿里云 RDS/Tair，测试线与 compose 依赖不纳入",
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-08-28",
+  "completedAt": "2026-08-28",
+  "branch": "feat/ack-deployment",
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-08-28T03:23:50Z",
+      "contextKey": "codex_01a03864-0196-7062-90e1-4ba2c4f47bf4",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "7a6c01a406b9a2b511425d5745d6185503a114d9",
+        "status": [
+          {
+            "status": "??",
+            "path": ".trellis/spec/frontend/i18n-merge-guidelines.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/spec/frontend/index.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/spec/guides/build-upstream-friendly-customization.md"
+          }
+        ],
+        "repositories": [
+          {
+            "root": ".",
+            "head": "7a6c01a406b9a2b511425d5745d6185503a114d9",
+            "status": [
+              {
+                "status": "??",
+                "path": ".trellis/spec/frontend/i18n-merge-guidelines.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/spec/frontend/index.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/spec/guides/build-upstream-friendly-customization.md"
+              }
+            ],
+            "worktreeDiffSha256": "ae138092cd8a33e5f833a19735b4ad4df7b83986440048d5f70a8c1f608e2252",
+            "indexDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "untracked": [
+              {
+                "path": ".trellis/spec/frontend/i18n-merge-guidelines.md",
+                "sha256": "09936db530aa3f85f06a9d2ed874791cf4fb7c69e5297e514efaaae0cc87c910"
+              }
+            ],
+            "conflicts": [],
+            "integration": [],
+            "fingerprint": "43133aa6b456401637d2eb937014a4b09e5d7858ae627895252abbe81114b125"
+          }
+        ],
+        "fingerprint": "b64b656a429aca175cd97fcbb2c4ca5c40d60268bf00c8b14f1fc22fe223755c"
+      }
+    }
+  },
+  "progress": {
+    "updatedAt": "2026-08-28T11:51:10+08:00",
+    "completedSteps": [
+      "新增 new-api GitLab V3 ACK CI 配置并通过 planner/Check-All 校验"
+    ],
+    "partialStep": null,
+    "nextStep": "等待 devops-infra MR !430 合入，并准备内部 GitLab/ACK/RDS/Tair 资源后做真实流水线验证",
+    "notes": "业务配置 commit 03ce1986f 已推送到 origin/feat/ack-deployment；真实 GitLab/ACK 发布依赖后续外部资源准备。"
+  }
+}
