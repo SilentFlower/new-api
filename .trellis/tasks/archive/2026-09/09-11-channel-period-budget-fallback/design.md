@@ -100,7 +100,9 @@ Redis 同渠道的一次正向记账用一个协调脚本更新个人日周、�
 
 ### 4.2 能力与状态限制
 
-目标支持判断以现有适配器和 Advanced Custom 路由能力为基础；客户端接口不改变，已有协议转换可复用，不新增转换器。工具、图片和原始透传字段必须可保留，无法保留时明确失败，禁止静默删掉请求能力。当前保守边界：实际适配器转换结果必须逐字段包含客户端 JSON（只允许顶层 model 改名与省略 false 的 stream），最终发送前再次检查。需要改变字段结构的跨协议转换、会删除字段的目标设置和 ParamOverride 不自动降级。厂商不同但原协议透传一致的目标可以使用。
+目标支持判断以现有适配器和 Advanced Custom 路由能力为基础；客户端接口不改变，已有协议转换可复用，不新增转换器。降级请求走目标渠道的常规出站管道，字段裁剪、参数覆盖与跨协议转换的行为和直连该渠道完全一致，不再逐字段比对客户端原始 JSON。只拦截目标适配器根本无法构造上游请求的情况（例如 Claude 渠道尚未实现 Responses 转换）。
+
+历史说明：首版曾要求转换结果逐字段包含客户端 JSON 并在出站前二次核对，但 DTO 的 omitempty 归一化与渠道默认过滤（service_tier、stream_options.include_obfuscation 等）在直连时同样丢字段，该比对对 Codex 等 Responses 客户端产生系统性误拒（400 `fallback target cannot preserve this request interface`），已于 2026-09-11 移除。
 
 含 `previous_response_id`、不透明上游会话／文件引用，或无法证明能在目标重建会话状态的请求不自动切换。HTTP `/v1/responses/compact` 原始透传及 WebSocket 不等同于获准的普通 HTTP Responses，本轮仅继承限额。
 

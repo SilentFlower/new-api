@@ -84,9 +84,6 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		} else {
 			logger.LogDebug(c, "requestBody: %s", jsonData)
 		}
-		if apiErr := checkChannelLimitFallbackOutbound(c, info, jsonData); apiErr != nil {
-			return apiErr
-		}
 		body, closer, err := relaycommon.NewOutboundJSONBody(jsonData)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())

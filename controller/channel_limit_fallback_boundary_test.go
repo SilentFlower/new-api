@@ -46,7 +46,7 @@ func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
 		{"retry_zero", 200, 1, 0}, {"target_upstream_error_no_third_hop", 500, 1, 0},
 		{"source_recovery", 200, 0, 1}, {"target_exhausted", 429, 0, 0},
 		{"pinned", 429, 0, 0}, {"token_model_denied", 403, 0, 0}, {"group_denied", 403, 0, 0},
-		{"target_disabled", 403, 0, 0}, {"unknown_field_not_dropped", 400, 0, 0},
+		{"target_disabled", 403, 0, 0}, {"unknown_field_still_falls_back", 200, 1, 0},
 		{"compact_no_fallback", 429, 0, 0},
 		{"disabled_fallback", 429, 0, 0}, {"upstream_started", 429, 0, 0},
 		{"opaque_state", 429, 0, 0}, {"tiered_preflight", 429, 0, 0},
@@ -140,7 +140,7 @@ func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
 			}
 			path := "/v1/chat/completions"
 			format := types.RelayFormatOpenAI
-			if scenario.name == "unknown_field_not_dropped" {
+			if scenario.name == "unknown_field_still_falls_back" {
 				body = strings.TrimSuffix(body, "}") + `,"unknown_capability":true}`
 			}
 			if scenario.name == "compact_no_fallback" {
@@ -219,14 +219,5 @@ func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
 				assert.Zero(t, count)
 			}
 		})
-	}
-}
-
-func TestChannelLimitFallbackPreservesToolsAndImages(t *testing.T) {
-	original := []byte(`{"model":"original","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.test/image.png"}}]}],"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}],"temperature":0,"max_tokens":10}`)
-	assert.True(t, service.ChannelLimitFallbackPreservesRequest(original, []byte(strings.ReplaceAll(string(original), "original", "target"))))
-	for _, removed := range []string{`,"temperature":0`, `,"max_tokens":10`, `"tools":[{"type":"function","function":{"name":"lookup","parameters":{"type":"object"}}}],`} {
-		changed := strings.Replace(string(original), removed, "", 1)
-		assert.False(t, service.ChannelLimitFallbackPreservesRequest(original, []byte(changed)))
 	}
 }

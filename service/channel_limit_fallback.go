@@ -3,7 +3,6 @@ package service
 import (
 	"errors"
 	"net/http"
-	"reflect"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -95,51 +94,4 @@ func channelLimitFallbackValuePortable(value any) bool {
 		}
 	}
 	return true
-}
-
-// ChannelLimitFallbackPreservesRequest 验证实际转换结果保留所有客户端能力字段。
-// @param original 客户端原始 JSON。
-// @param converted 目标适配器转换后的 JSON。
-// @return 无法证明语义保留时拒绝降级。
-func ChannelLimitFallbackPreservesRequest(original, converted []byte) bool {
-	var source, target map[string]any
-	if common.Unmarshal(original, &source) != nil || common.Unmarshal(converted, &target) != nil || source == nil || target == nil {
-		return false
-	}
-	delete(source, "model")
-	// 显式非流式和省略 stream 的语义一致，允许 DTO 的 omitempty 正常工作。
-	if source["stream"] == false && target["stream"] == nil {
-		delete(source, "stream")
-	}
-	return channelLimitFallbackFieldsPreserved(source, target)
-}
-
-func channelLimitFallbackFieldsPreserved(source, target any) bool {
-	switch input := source.(type) {
-	case map[string]any:
-		output, ok := target.(map[string]any)
-		if !ok {
-			return false
-		}
-		for key, child := range input {
-			other, exists := output[key]
-			if !exists || !channelLimitFallbackFieldsPreserved(child, other) {
-				return false
-			}
-		}
-		return true
-	case []any:
-		output, ok := target.([]any)
-		if !ok || len(input) != len(output) {
-			return false
-		}
-		for i, child := range input {
-			if !channelLimitFallbackFieldsPreserved(child, output[i]) {
-				return false
-			}
-		}
-		return true
-	default:
-		return reflect.DeepEqual(source, target)
-	}
 }

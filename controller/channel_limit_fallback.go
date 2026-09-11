@@ -183,19 +183,10 @@ func validateChannelLimitFallbackConversion(c *gin.Context, info *relaycommon.Re
 	default:
 		err = errors.New("fallback request interface unsupported")
 	}
-	// 不接受会在转换中丢弃工具、图片、长度参数或未知字段的目标。
-	// 参数覆盖还会在转换后修改请求，无法在此证明完整保留，故不自动降级到这类渠道。
-	storage, storageErr := common.GetBodyStorage(c)
-	var original []byte
-	if storageErr == nil {
-		original, storageErr = storage.Bytes()
-	}
-	encoded, encodeErr := common.Marshal(converted)
-	if encodeErr == nil {
-		encoded, encodeErr = relaycommon.RemoveDisabledFields(encoded, probe.ChannelOtherSettings, probe.ChannelSetting.PassThroughBodyEnabled)
-	}
-	if err != nil || converted == nil || storageErr != nil || encodeErr != nil || len(probe.ParamOverride) > 0 || !service.ChannelLimitFallbackPreservesRequest(original, encoded) {
-		return types.NewOpenAIError(errors.New("fallback target cannot preserve this request interface"), types.ErrorCodeChannelLimitFallbackUnavailable, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
+	// 降级请求走目标渠道的常规出站管道，字段裁剪与直连该渠道完全一致，不再逐字段比对客户端原始 JSON。
+	// 只拦截目标适配器根本无法构造上游请求的情况，例如 Claude 渠道尚未实现 Responses 转换。
+	if err != nil || converted == nil {
+		return types.NewOpenAIError(errors.New("fallback target does not support this request interface"), types.ErrorCodeChannelLimitFallbackUnavailable, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
 	}
 	c.Set("channel_limit_fallback_upstream_model", probe.UpstreamModelName)
 	return nil
