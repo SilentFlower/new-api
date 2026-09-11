@@ -363,7 +363,7 @@ func (a *Adaptor) resolve(c *gin.Context, info *relaycommon.RelayInfo) error {
 	}
 
 	incomingPath := incomingRequestPath(c, info)
-	route, ok := config.MatchPathForModel(incomingPath, info.OriginModelName)
+	route, ok := config.MatchPathForModel(incomingPath, info.RoutingModel())
 	if ok {
 		route.Converter = strings.TrimSpace(route.Converter)
 		if route.Converter == "" {
@@ -374,7 +374,7 @@ func (a *Adaptor) resolve(c *gin.Context, info *relaycommon.RelayInfo) error {
 		a.resolved = true
 		return nil
 	}
-	return fmt.Errorf("advanced custom channel does not support request path %s for model %s", incomingPath, info.OriginModelName)
+	return fmt.Errorf("advanced custom channel does not support request path %s for model %s", incomingPath, info.RoutingModel())
 }
 
 func incomingRequestPath(c *gin.Context, info *relaycommon.RelayInfo) string {

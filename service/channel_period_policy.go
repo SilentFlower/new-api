@@ -24,6 +24,7 @@ var channelPeriodPolicyCache = struct {
 
 type channelPeriodPolicyCacheEntry struct {
 	data      []byte
+	revision  int
 	expiresAt time.Time
 }
 
@@ -50,8 +51,6 @@ func GetChannelPeriodPolicy(ctx context.Context, channelID int) (dto.ChannelPeri
 	}
 	key := fmt.Sprintf("channel_period_policy:{%d}", channelID)
 	localKey := fmt.Sprintf("%p:%s", model.DB, key)
-	channelPeriodPolicyCache.Lock()
-	defer channelPeriodPolicyCache.Unlock()
 	var cached []byte
 	if common.RedisEnabled {
 		if common.RDB == nil {
@@ -62,8 +61,12 @@ func GetChannelPeriodPolicy(ctx context.Context, channelID int) (dto.ChannelPeri
 		if err != nil && !errors.Is(err, redis.Nil) {
 			return view, err
 		}
-	} else if entry, ok := channelPeriodPolicyCache.values[localKey]; ok && time.Now().Before(entry.expiresAt) {
-		cached = entry.data
+	} else {
+		channelPeriodPolicyCache.Lock()
+		if entry, ok := channelPeriodPolicyCache.values[localKey]; ok && time.Now().Before(entry.expiresAt) {
+			cached = entry.data
+		}
+		channelPeriodPolicyCache.Unlock()
 	}
 	if len(cached) > 0 {
 		if err := common.Unmarshal(cached, &view); err != nil {
@@ -97,20 +100,26 @@ func GetChannelPeriodPolicy(ctx context.Context, channelID int) (dto.ChannelPeri
 		var published string
 		published, err = channelPeriodPolicyPublishScript.Run(ctx, common.RDB, []string{key}, data, view.Revision).Text()
 		cached = []byte(published)
-		if err == nil {
-			err = common.Unmarshal(cached, &view)
-			if err == nil {
-				err = validateChannelPeriodStoredPolicy(view)
-			}
-			view.Now, view.Timezone = time.Now().Unix(), time.Local.String()
-		}
 	} else {
-		cacheChannelPeriodPolicy(localKey, data)
+		cached = cacheChannelPeriodPolicy(localKey, data, view.Revision)
+	}
+	if err == nil {
+		err = common.Unmarshal(cached, &view)
+		if err == nil {
+			err = validateChannelPeriodStoredPolicy(view)
+		}
+		view.Now, view.Timezone = time.Now().Unix(), time.Local.String()
 	}
 	return view, err
 }
 
-func cacheChannelPeriodPolicy(key string, data []byte) {
+func cacheChannelPeriodPolicy(key string, data []byte, revision int) []byte {
+	channelPeriodPolicyCache.Lock()
+	defer channelPeriodPolicyCache.Unlock()
+	// 数据库查询在锁外执行，迟到的读取和保存都不能把本地缓存降回旧版本。
+	if current, ok := channelPeriodPolicyCache.values[key]; ok && current.revision > revision {
+		return current.data
+	}
 	now := time.Now()
 	for k, entry := range channelPeriodPolicyCache.values {
 		if !now.Before(entry.expiresAt) {
@@ -123,7 +132,8 @@ func cacheChannelPeriodPolicy(key string, data []byte) {
 			break
 		}
 	}
-	channelPeriodPolicyCache.values[key] = channelPeriodPolicyCacheEntry{data: data, expiresAt: now.Add(5 * time.Second)}
+	channelPeriodPolicyCache.values[key] = channelPeriodPolicyCacheEntry{data: data, revision: revision, expiresAt: now.Add(5 * time.Second)}
+	return data
 }
 
 // SaveChannelPeriodPolicy 校验并按版本保存策略，返回保存后的权威视图。
@@ -158,8 +168,6 @@ func SaveChannelPeriodPolicy(ctx context.Context, channelID int, input dto.Chann
 	if err != nil {
 		return result, err
 	}
-	channelPeriodPolicyCache.Lock()
-	defer channelPeriodPolicyCache.Unlock()
 	item := &model.ChannelPeriodPolicy{ChannelId: channelID, Revision: input.ExpectedRevision, Config: string(data), UpdatedBy: updatedBy}
 	if err = model.ReplaceChannelPeriodPolicy(ctx, item); err != nil {
 		return result, err
@@ -176,7 +184,7 @@ func SaveChannelPeriodPolicy(ctx context.Context, channelID int, input dto.Chann
 		}
 		err = channelPeriodPolicyPublishScript.Run(ctx, common.RDB, []string{key}, data, result.Revision).Err()
 	} else {
-		cacheChannelPeriodPolicy(fmt.Sprintf("%p:%s", model.DB, key), data)
+		cacheChannelPeriodPolicy(fmt.Sprintf("%p:%s", model.DB, key), data, result.Revision)
 	}
 	return result, err
 }

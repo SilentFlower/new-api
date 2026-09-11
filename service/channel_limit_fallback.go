@@ -67,6 +67,10 @@ func channelLimitFallbackValuePortable(value any) bool {
 	switch item := value.(type) {
 	case map[string]any:
 		for key, child := range item {
+			// Claude 工具调用的 input 是业务参数；顶层 Responses input 则承载协议内容。
+			if key == "input" && (item["type"] == "tool_use" || item["type"] == "server_tool_use") {
+				continue
+			}
 			switch key {
 			case "previous_response_id", "conversation", "container", "file_id", "file_ids", "vector_store_ids", "encrypted_content", "prompt":
 				if child != nil && child != "" {
@@ -76,9 +80,11 @@ func channelLimitFallbackValuePortable(value any) bool {
 				if child == "item_reference" || child == "compaction" || child == "redacted_thinking" {
 					return false
 				}
-			}
-			if !channelLimitFallbackValuePortable(child) {
-				return false
+			case "messages", "input", "system", "content", "output", "source", "file", "attachments", "tools", "tool_resources", "code_interpreter", "file_search", "results":
+				// 只进入协议内容和工具资源；Schema、metadata、函数参数中的同名业务字段不是上游引用。
+				if !channelLimitFallbackValuePortable(child) {
+					return false
+				}
 			}
 		}
 	case []any:

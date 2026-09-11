@@ -74,7 +74,9 @@ func cloneRelayRequest(request dto.Request) (dto.Request, error) {
 		}
 		return &cloned, nil
 	case *dto.OpenAIResponsesRequest:
-		data, err := common.Marshal(req)
+		// 克隆早于模型映射，不能触发出站 MarshalJSON 按模型过滤 thinking_budget。
+		type responsesRequest dto.OpenAIResponsesRequest
+		data, err := common.Marshal((*responsesRequest)(req))
 		if err != nil {
 			return nil, err
 		}

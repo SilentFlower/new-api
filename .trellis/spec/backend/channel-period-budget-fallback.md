@@ -16,6 +16,8 @@
 - `model/channel_quota_tracking.go`：渠道最近一次计数缺口时间，无金额副本。三表同时加入普通和快速迁移。
 - `GetChannelPeriodStatus(ctx, channel, userID)` 返回权威指标；`CheckSelectedChannelPeriodLimits(c)` 由 Controller 与 Relay 旧统一检查点调用。
 - `RecordChannelUserQuotaUsage(ctx, channelID, userID, quota)` 原子累计限额计数。
+- `GetChannelPeriodPolicy(ctx, channelID)` / `SaveChannelPeriodPolicy(ctx, channelID, input, updatedBy)` 读取或按版本保存策略；本地缓存发布由 `cacheChannelPeriodPolicy(key, data, revision) []byte` 返回选定版本。
+- `controller/relay_attempt.go` 的 `cloneRelayRequest(request dto.Request)` 隔离每次尝试；`service.ChannelLimitFallbackRequestPortable(body []byte) bool` 检查实际协议引用。
 - GET/PUT `/api/channel/:id/period-policy`，POST `/period-policy/preview`，GET `/period-policy/targets`；GET/preview 为 ChannelRead，PUT 为 ChannelOperate。
 - PUT/DELETE `/api/channel/:id/period-rules/:rule_id/user-overrides/:user_id`，ChannelOperate。
 
@@ -29,12 +31,15 @@
 - Redis key 保留旧个人日/周结构，新增池子日/周与规则 occurrence Hash 使用相同渠道 hash tag。Lua 预检所有类型与 int64 溢出后 HINCRBY；内存锁顺序固定为新增计数→个人日→个人周。Redis 故障不得改走内存。
 - 请求仅检查 `used >= limit`，不预占。正向消费按资金结算成功时刻进入所有当时区间；零额、退款、负差额忽略。文本/音频/工具/任务/MJ 的调用必须在资金成功分支。人工修改个人 used 不改变池子/整段、账单或其他人。
 - 配置缓存 5 秒，本地最多 4096 项；Redis 发布比较 revision，迟到的旧实例不能覆盖新版本。缓存保存失败返回 committed=true；TTL 期间仍可能存在旧配置，不宣称跨存储强一致。
+- 策略缓存的进程级锁只保护本地 map 读取和发布，不跨 Redis GET/Lua 或数据库查询、保存。锁外查询可能迟到，本地发布也必须比较 revision；缓存仍持有更高版本时返回该版本，不覆盖为旧值。数据库保存继续以 revision CAS 防止并发编辑覆盖。
 - 统一状态新增 `period_limits`：schema/revision/timezone/storage_mode/next_change_at/fallback_enabled/blocked/metrics。指标含 scope、period、limit、used、remaining（不限为 null）、reset_at、tracking_since、coverage、enforced、source。
 - 新计数始终说明 `since_tracking_start`；已知失败周期为 incomplete，不回填历史。Redis+DB 同时故障且进程丢失时未落盘缺口无法恢复；这不是财务对账或分布式事务。内存仅当前进程有效。
 - 每来源只配置一个目标渠道+模型，默认关闭，仅精确 HTTP Chat/Messages/Responses 三入口可降级一次，与 RetryTimes 无关。目标重新检查 Token 模型、固定渠道、有效组 Ability、启用、端点、六类额度、资金和并发。
 - 路由预检早于视觉辅助/预扣/源并发租约；已有普通尝试租约先收口。任何上游副作用、输出、资金会话或已降级状态禁止再切。目标失败不走第三渠道；正常恢复后的新请求使用原选渠。
+- 原始请求和每次尝试的 Responses 克隆不得调用其带业务过滤的 `MarshalJSON`：模型映射前的别名不能决定是否删除 `thinking_budget`。克隆使用无该方法的局部定义类型后进行 JSON 深复制；最终出站仍按映射后模型过滤。显式零值和切片、指针的尝试隔离必须保留，包括未配置降级的普通请求。
 - 适配器转换和最终出站 JSON 都必须保留全部客户端字段，例外仅顶层 model 和 false stream 省略。原生结构不一致、参数覆盖、上游会话/文件引用时保守拒绝。不靠厂商或模型名猜测兼容性。
-- OriginModelName 保持原始审计值，RoutingModelName 表示目标，价格仍经 Resolve/FreezeBillingModelName；目标映射计费开关生效。阶梯表达式留到真实输入估算阶段，纯预检只判断分组免费语义。
+- 引用检查只递归进入消息、输入、内容、附件及工具资源等协议位置；工具 Schema、结构化输出 Schema、metadata 和函数业务参数中的 `prompt` / `file_id` / `conversation` 等同名字段不构成上游引用。Claude `tool_use` / `server_tool_use` 的 `input` 是业务参数，顶层 Responses `input` 是协议内容；真实会话、文件、容器、提示模板引用与压缩密文仍拒绝迁移。
+- OriginModelName 保持原始审计值，RoutingModelName 表示目标，价格仍经 Resolve/FreezeBillingModelName；目标映射计费开关生效。Advanced Custom 的预检转换和实际发送都使用 `info.RoutingModel()` 匹配模型路由，不能重新按来源模型匹配。阶梯表达式留到真实输入估算阶段，纯预检只判断分组免费语义。
 - WebSocket/任务/MJ/Compact 等执行同一额度检查，不自动降级。成功日志 `other.admin_info.channel_limit_fallback` 保留来源、目标与原因；亲和性不把备用误记成原路由成功。
 - 降级预检必须先用 `relay.ShouldHandleResponsesCompactPassthrough(info)` 排除全部 Compact 模式，再查询策略或执行模型映射/查价。历史 body bridge 与 V2 HTTP 也使用 `/v1/responses`，只按 URL 排除 `/v1/responses/compact` 会误查旧的 `*-openai-compact` 价格；这些请求继续由独立 Compact 准备和 `prepareMainRelayBilling` 执行基础模型计费、能力及额度门禁。
 
@@ -50,6 +55,9 @@
 | 策略/计数不可读 | 503 channel_period_quota_unavailable，不降级、不当作不限 |
 | 目标无权/停用 | 403 channel_limit_fallback_unavailable，上游调用 0 |
 | 无法保留目标请求字段 | 400 channel_limit_fallback_unavailable，上游调用 0 |
+| 仅工具 Schema 或业务参数含引用同名字段 | 不得仅凭字段名拒绝降级，继续目标权限、接口及字段保留校验 |
+| 请求含真实上游会话、文件或加密引用 | 保留来源额度错误，不调用备用渠道 |
+| 锁外旧查询恢复时缓存已有更高版本 | 返回缓存选定的新版本，不发布旧策略覆盖新策略 |
 | 财务成功、计数失败 | 保留业务响应、记录缺口和安全告警，不重试不重复扣费 |
 
 ### 5. Scenarios and Examples
@@ -59,12 +67,18 @@
 - 个人：假期日限 5、个人明确 20，实际为 20；池子已耗尽仍拒绝。到期回落当前规则。
 - 错误：从人工可修改的个人日用量求和作为池子总量；正确：每次实际正向结算独立增加池子计数。
 - 错误：改 OriginModelName 或删除 skipRetry 实现降级；正确：副作用前一次协调，保留原始模型并重新冻结目标价格。
+- 错误：别名 `alias-model` 的 Responses 请求先调用原 DTO 的序列化方法克隆，导致映射到 `qwen3-32b` 前丢失 `thinking_budget:0`；正确：克隆保留该值，最终发送时按映射后模型处理。
+- 正常：来源 `gpt-4o-mini` 超限后，按目标 `gpt-4o` 匹配 Advanced Custom 路由，唯一账单归目标；工具参数名为 `prompt` 或 `file_id` 时也可在全部校验通过后降级。
 
 ### 6. Tests Required
 
 - `service/channel_period_policy_test.go`：两种存储、假期/跨周/到期/遮盖/停用、140 软超额、人工调整隔离、整数原子性、缺口、缓存损坏/迟到发布、结算失败不累计。
+- `service/channel_period_policy_concurrency_test.go`：用显式屏障暂停存储访问，验证不同渠道 Redis 读取不互相阻塞；内存/Redis 均验证旧数据库快照恢复后返回新版且不覆盖新版缓存，并执行 race 检查。
+- `service/channel_limit_fallback_portability_test.go`：三协议工具 Schema、结构化输出、metadata、Claude 工具调用参数可迁移；真实会话、文件、附件、工具资源和密文引用仍不可迁移。
 - `model/channel_period_policy_database_test.go`：sqlite + 专用 MYSQL/POSTGRES DSN，重入迁移、CAS、upsert、缺口单调。不得用生产 DSN。
 - `controller/channel_limit_fallback_test.go`：三协议 × 流/非流实际模拟上游、目标价格、唯一日志/钱包扣费、原始 DTO 不污染。
+- `controller/channel_limit_fallback_preflight_test.go`：完整 Relay 覆盖 Responses 别名的预算正值/零值/缺省及已配置但未触发降级；自定义目标直接访问与降级访问的实际路径、模型、唯一账单、钱包扣费，以及工具同名参数完整保留。
+- `controller/relay_attempt_responses_test.go`：先向非 Qwen 模型转换，再从原请求向 Qwen 重试，验证出站过滤仍生效且显式零值、原始输入和指针/切片未被前次尝试污染。
 - `controller/channel_limit_fallback_compact_test.go`：只配置基础模型价格，完整 Relay 覆盖 V1 path、历史 body bridge、V2 HTTP 的正常透传、额度耗尽和能力关闭；断言原始请求/响应、唯一基础模型账单和钱包扣款，拒绝时零上游/消费且不调用备用渠道。
 - `controller/channel_limit_fallback_boundary_test.go`：完整 Relay 的 retry=0、一次/禁用/恢复/目标限制与权限/不可迁移/Compact、并发释放、阶梯预检；WebSocket 回合准备、任务和 Midjourney 在启用降级时仍因池子耗尽拒绝，上游调用和扣款均为零。
 - `controller/channel_period_policy_test.go`：实际管理响应合同与 400/409；ai-fund fixture 来自该响应。

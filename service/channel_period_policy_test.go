@@ -53,6 +53,10 @@ func setupChannelPeriodTest(t *testing.T, now *time.Time, useRedis bool) *model.
 	oldOverrides := channelUserLimitOverrideMemoryCache.values
 	channelUserLimitOverrideMemoryCache.values = make(map[string]channelUserLimitOverrideCacheEntry)
 	channelUserLimitOverrideMemoryCache.Unlock()
+	channelPeriodPolicyCache.Lock()
+	oldPolicies := channelPeriodPolicyCache.values
+	channelPeriodPolicyCache.values = make(map[string]channelPeriodPolicyCacheEntry)
+	channelPeriodPolicyCache.Unlock()
 	t.Cleanup(func() {
 		model.DB, common.RDB, common.RedisEnabled, channelPeriodNow = oldDB, oldRDB, oldEnabled, oldNow
 		channelUserDailyQuotaMemory, channelUserWeeklyQuotaMemory, channelUserDailyQuotaNow, channelUserWeeklyQuotaNow = oldDaily, oldWeekly, oldDailyNow, oldWeeklyNow
@@ -62,6 +66,9 @@ func setupChannelPeriodTest(t *testing.T, now *time.Time, useRedis bool) *model.
 		channelUserLimitOverrideMemoryCache.Lock()
 		channelUserLimitOverrideMemoryCache.values = oldOverrides
 		channelUserLimitOverrideMemoryCache.Unlock()
+		channelPeriodPolicyCache.Lock()
+		channelPeriodPolicyCache.values = oldPolicies
+		channelPeriodPolicyCache.Unlock()
 		_ = sqlDB.Close()
 	})
 	daily, weekly := 100, 500
