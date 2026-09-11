@@ -34,6 +34,7 @@ NON_ROUTING_BODY_HEADINGS = {
     "validation matrix",
     "good/base/bad cases",
     "wrong vs correct",
+    "scenarios and examples",
 }
 WEAK_TOKENS = {
     "action",

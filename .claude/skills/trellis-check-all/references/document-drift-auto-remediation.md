@@ -34,6 +34,8 @@
 - 不改操作步骤、责任边界、安全提示、协议字段或对外承诺，且可由重读或静态检查验证；
 - 用户没有明确要求本轮绝对只读。
 
+任务状态同步只更新已有文档中的过期事实；不得借 `task-status`、`check-record` 或 `mechanical-link` 新建检查报告并追加引用。报告落盘条件见 `references/reporting-and-disposition.md`。
+
 典型例子：
 
 - `brief.md` 漏掉 diff 已证明的实现范围，或 `implement.md` 状态机械过期；

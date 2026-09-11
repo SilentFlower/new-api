@@ -1,12 +1,12 @@
 ---
 name: trellis-create-command
-description: "Create a new trellis entry as command or skill; writes agents copy and optionally skill-garden."
+description: "Create a new trellis entry as command or skill for the target platform, optionally distributing through skill-garden."
 ---
 # Create New Trellis Entry
 
-创建一个新的 trellis 入口。支持两种形态：斜杠命令（command）或 Claude skill。
+创建一个新的 trellis 入口。支持两种形态：斜杠命令（command）或 skill，具体目录与格式遵循目标平台约定。
 
-> **0.6 取舍提示**：skill-garden 0.6 包默认全部 skill 化，不再维护 `.claude/commands/` 目录。形态选 command 时，**只在目标项目落 2 份**，不分发到 skill-garden 0.6 包（强制分发时需手动维护，不建议）。新建入口推荐选 skill 形态。
+> **0.6 取舍提示**：skill-garden 0.6 包默认全部 skill 化，不再维护 `.claude/commands/` 目录。形态选 command 时，**只按目标平台在项目内创建**，不分发到 skill-garden 0.6 包。新建入口推荐选 skill 形态。
 
 ---
 
@@ -54,6 +54,8 @@ description: "Create a new trellis entry as command or skill; writes agents copy
 - 若用户明确要在其他项目创建，改用其指定的绝对路径；本 skill 不主动 `cd`，只记住该路径用于后续写入
 - 若目标项目就是 skill-garden 本身（在 skill-garden 仓库里 `create-command`），`<target>` 与 `<skill-garden>` 指同一路径，**避免重复写入**（只写一次）
 
+**目标平台**：按 `trellis-meta` 的 `references/platform-files/platform-map.md`，结合用户指定的平台和目标项目实际配置，确定本次入口目录；未指定时推断当前平台，多平台需求才扩展到对应目录。
+
 **`<skill-garden>`（分发源，scope 含 skill-garden 时必需）**：默认 `/root/project/skill-garden`。
 
 - 路径不存在或与用户期望不符 → 询问用户确认
@@ -73,8 +75,8 @@ description: "Create a new trellis entry as command or skill; writes agents copy
 
 | 形态 | 何时选 | 触发方式 |
 |------|--------|---------|
-| **command** | 显式动作、高风险、需确认点（如 finish-work、continue） | `/trellis:<name>` |
-| **skill** | 自然语可触发、查询 / 分析 / 检查、低破坏性（如 check-all、extract-prd、visualize） | Claude 自动路由 + `/trellis-<name>` |
+| **command** | 显式动作、高风险、需确认点（如 finish-work、continue） | 按目标平台的显式入口语法 |
+| **skill** | 自然语可触发、查询 / 分析 / 检查、低破坏性（如 check-all、extract-prd、visualize） | 自动匹配或显式调用，以目标平台能力为准 |
 
 决定不了时**推荐 skill**：自然语路由更灵活，显式斜杠仍可用。反过来，后悔做成 skill 想改 command 比较费事。
 
@@ -87,7 +89,7 @@ description: "Create a new trellis entry as command or skill; writes agents copy
 **简单 skill / command**（< 50 行）：
 
 ```markdown
-<frontmatter 仅 skill 有>
+<frontmatter 按 Step 4 与目标平台格式>
 # <标题>
 
 <1-2 行简介>
@@ -152,51 +154,24 @@ description: "<what> <when> <exclusion>"
 - 选 **Auto-routing** 当 skill 需要在对话中被自然语触发（如 `trellis-extract-prd`、`trellis-verify-task`、`trellis-check-all`）
 - 选 **Manual-only** 当 skill 用法明确、频率低、不希望占用每次对话 skill 列表 token（如 `trellis-create-command` 自身、`trellis-plan-version`）
 
-**agents 版 frontmatter**：正文 + frontmatter 与 skill 版完全一致（包括 `name: trellis-<name>`），只是落在 `.agents/skills/trellis-<name>/` 目录。
+**Skill-Garden 分发源码**：`.claude` 与 `.agents` 两份 skill 的正文 + frontmatter 完全一致（包括 `name: trellis-<name>`）。
 
-```yaml
----
-name: trellis-<name>
-description: "<与 skill 版一致>"
----
-```
-
-**command 版**：无 frontmatter，纯 markdown。
+**command 版**：格式与 frontmatter 参考 `trellis-meta` 及目标平台已有同类入口，不统一套用 Claude 格式。
 
 ### Step 5: 写入副本
 
-**不变量（必须遵守）**：每个 trellis 入口都成对存在 —— `.claude/<commands 或 skills>/...` 主副本 + `.agents/skills/trellis-<name>/SKILL.md` 镜像副本。漏写任一份会破坏 skill-garden install.sh 的对称分发。scope 含 skill-garden 时，skill 形态需要在 `<skill-garden>/.trellis/0.6/` 下各写一份（共 4 份）；command 形态在 0.6 中不再分发到 skill-garden（见下表注）。
+**项目内入口**：按 Step 0 确定的平台，使用 `trellis-meta` 的 `references/customize-local/change-skills-or-commands.md` 中对应目录与格式创建。多平台时同步所需入口；支持共享 `.agents/skills/` 的平台可复用同一份，不按消费者重复写入。不要求每个项目同时创建 `.claude` 和 `.agents` 副本，也不为 command 自动补同名 skill。
 
-按形态决定落盘位置：
-
-**形态 = skill**（2 份 / scope 为 skill-garden 时 4 份）：
+**Skill-Garden 分发源码**（仅 skill 形态且 scope 含 skill-garden）：双副本约定只适用于以下两个源码位置，正文、frontmatter 及配套文件保持一致。
 
 | 位置 | frontmatter name |
 |------|------------------|
-| `<target>/.claude/skills/trellis-<name>/SKILL.md` | `trellis-<name>`（主副本） |
-| `<target>/.agents/skills/trellis-<name>/SKILL.md` | `trellis-<name>`（镜像，body + frontmatter 完全同主副本） |
 | `<skill-garden>/.trellis/0.6/.claude/skills/trellis-<name>/SKILL.md` | `trellis-<name>` |
 | `<skill-garden>/.trellis/0.6/.agents/skills/trellis-<name>/SKILL.md` | `trellis-<name>` |
 
-**形态 = command**（仅 target 2 份；scope = skill-garden 也不分发到 0.6 包）：
-
-| 位置 | 格式 |
-|------|------|
-| `<target>/.claude/commands/trellis/<name>.md` | 无 frontmatter（主副本） |
-| `<target>/.agents/skills/trellis-<name>/SKILL.md` | 带 frontmatter，`name: trellis-<name>`（镜像） |
-
 > **0.6 不分发 command 到 skill-garden**：0.6 包目录树没有 `.claude/commands/`，install.sh 也不会处理。如果你确实希望 command 形态分发给其他项目使用，请：(a) 改用 skill 形态，或 (b) 把该 command 同时放到 0.5 包（向下兼容用户），或 (c) 在 skill-garden 包外用其他机制分发。
 
-**同步技巧**：写完主版（`.claude/skills/trellis-<X>/SKILL.md` 或 `.claude/commands/trellis/<X>.md`）后，用 `cp` 派生其他副本：
-
-```bash
-# 主副本写完后，副本内容完全一致，直接 cp 即可
-cp <target>/.claude/skills/trellis-<X>/SKILL.md <target>/.agents/skills/trellis-<X>/SKILL.md
-
-# 对 skill-garden 同步（仅 skill 形态、scope 为 skill-garden 时）
-cp -r <target>/.claude/skills/trellis-<X> <skill-garden>/.trellis/0.6/.claude/skills/
-cp -r <target>/.agents/skills/trellis-<X> <skill-garden>/.trellis/0.6/.agents/skills/
-```
+**同步技巧**：需要完全一致的副本时，用 `cp` 从已写好的 skill 目录派生，包含 `references/`、`scripts/` 等配套文件；目标路径取自本步确定的项目目录或分发源码目录。
 
 ### Step 6: 更新 skill-garden README（scope = skill-garden 时）
 
@@ -211,10 +186,10 @@ cp -r <target>/.agents/skills/trellis-<X> <skill-garden>/.trellis/0.6/.agents/sk
 
 | 检查项 | 方法 |
 |-------|------|
-| 新 skill 出现在 Claude skill list | 读 `<available-skills>` 区，确认 `trellis-<X>` 存在且 description 完整 |
-| 新 command 出现在 slash 列表 | 下拉 `/trellis:` 能看到 `<name>` |
+| 新 skill 出现在目标平台技能列表 | 使用目标平台的技能发现方式，确认 `trellis-<X>` 存在且 description 完整 |
+| 新 command 可被目标平台发现 | 按该平台的显式入口语法确认新命令可见 |
 | scope=skill-garden：install 端到端 | `rm -rf /tmp/sg-test && mkdir -p /tmp/sg-test/.trellis && echo "0.6.0-beta.8" > /tmp/sg-test/.trellis/.version && bash <skill-garden>/scripts/install.sh /tmp/sg-test <X>` |
-| 副本内容一致 | `wc -l` 行数一致；关键段落 `diff` 确认 |
+| 需要一致的副本内容一致 | 用 `diff` 比较正文、frontmatter 及配套文件 |
 
 ### Step 8: 输出确认
 
@@ -226,18 +201,17 @@ cp -r <target>/.agents/skills/trellis-<X> <skill-garden>/.trellis/0.6/.agents/sk
 
 ### 副本
 
-- `<target>/.claude/<path>`
-- `<target>/.agents/skills/trellis-<X>/SKILL.md`
-- `<skill-garden>/.trellis/0.6/` 同步位置 × 2（仅 skill 形态时显示）
+- `<target>/<实际创建的入口路径>`（多平台时逐项列出，共享路径只列一次）
+- `<skill-garden>/.trellis/0.6/` 下的两个实际源码路径（仅 skill 形态且 scope 含 skill-garden 时显示）
 
 ### 触发方式
 
 - **自然语**：<触发词例子>
-- **显式**：<`/trellis:<X>` 或 `/trellis-<X>`>
+- **显式**：<目标平台支持的调用方式>
 
 ### 下一步建议
 
-- 在当前对话试一次触发，观察 Claude 是否正确路由
+- 在目标平台试一次触发，观察是否正确路由
 - 触发失败时调整 description（精准化 when/exclusion）
 - 内容有遗漏时补充 Step 或 checklist
 ```
@@ -266,7 +240,7 @@ cp -r <target>/.agents/skills/trellis-<X> <skill-garden>/.trellis/0.6/.agents/sk
 
 - ❌ 不用 kebab-case（不要 `reviewPr` / `review_pr`）
 - ❌ 名字过于笼统（`tool` / `helper` / `util`）
-- ❌ 与现有命令冲突（先 `ls .claude/commands/trellis` 和 `.claude/skills/` 确认）
+- ❌ 与现有入口重名（先检查 Step 0 确定的目标平台入口目录）
 - ❌ skill 写文件时漏 `trellis-` 前缀（影响自动路由分组）
 - ❌ "严格提取"语义的入口用 `create-` 前缀（应该用 `extract-`，避免 AI 误判为生成型）
 
@@ -279,15 +253,15 @@ cp -r <target>/.agents/skills/trellis-<X> <skill-garden>/.trellis/0.6/.agents/sk
 - 输出格式必须用 markdown 模板明示
 - 反模式清单必写（帮 Claude 避免常见误用）
 - 中文注释 + 英文 description（description 中的触发词可中英混合）
-- 引用文件路径用反引号 `.claude/...`，不写裸路径
+- 引用文件路径用反引号包裹实际路径，不写裸路径
 
 ---
 
 ## 反模式（避免）
 
-- ❌ 写 `.cursor/commands/`（已废弃，统一 `.claude/commands/`）
+- ❌ 忽略 Meta 的平台目录规则，把入口写入未选平台的目录
 - ❌ 同时创建 command 和 skill 同名入口（触发歧义，不知选哪个）
-- ❌ 只写 `.claude/...`，漏了 `.agents/skills/trellis-<X>/`（skill-garden install 会不对称）
+- ❌ 分发到 skill-garden 时只写一份源码，漏掉 `.claude` / `.agents` 双副本中的另一份
 - ❌ 选 Auto-routing 策略但 description 过短（< 80 字），Claude 路由不稳；Manual-only 策略无此要求
 - ❌ description 用名词开头（"A skill for..."）而不是动词开头（"Analyzes..." / "Extract..." / "Create..."）
 - ❌ 不询问 scope 直接写 skill-garden（需要用户显式确认 skill-garden 路径）

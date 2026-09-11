@@ -14,7 +14,7 @@ Before moving files, record:
 - `baseline_synced=true` only when an upstream exists and the initial `HEAD` equals upstream HEAD.
 - File-level `git status --short --untracked-files=all -- <current-task-dir>` and commits in `@{u}..HEAD` that modify the current task when an upstream exists.
 - `python3 ./.trellis/scripts/auto_loop.py status --verbose` output needed to identify a healthy terminal `pending_archive.tasks_awaiting_archive` handoff for this exact task.
-- Existing staged paths outside this task so they can be verified after scoped commits.
+- Existing staged paths outside this task so they can be verified after the scoped commit.
 
 Unrelated planning tasks, old archives, and files from other windows remain untouched. They do not require classification and do not block finish-work. Stop when publication or the validated auto-loop handoff cannot be proven, when the current task has uncommitted files outside the exception below, or when Git is unsafe because of detached HEAD, conflicts, rebase, or another blocking state.
 
@@ -90,30 +90,27 @@ python3 ./.trellis/scripts/add_session.py --no-commit \
 
 Use the command result and scoped diff to determine the exact journal/index paths changed by this invocation.
 
-### 6. Exact Commits
+### 6. Exact Bookkeeping Commit
 
 When `session_auto_commit: false`, keep the archive and journal changes on disk without committing or pushing. Report the exact dirty paths.
 
-When `session_auto_commit: true`, create separate scoped commits:
+When `session_auto_commit: true`, combine this invocation's archive and journal changes into one scoped commit, using the configured session commit message:
 
 ```bash
-git add -- <actual archive destination> <changed child task.json files>
+git add -- <actual archive destination> <changed child task.json files> <exact journal/index paths>
 git rm -r --cached --ignore-unmatch -- <original task source>
-git commit --only -m "chore(task): archive <task-name>" -- \
-  <original task source> <actual archive destination> <changed child task.json files>
-
-git add -- <exact journal/index paths>
-git commit --only -m "<configured session commit message>" -- <exact journal/index paths>
+git commit --only -m "<configured session commit message>" -- \
+  <original task source> <actual archive destination> <changed child task.json files> <exact journal/index paths>
 ```
 
-Skip the second commit when the journal did not change. After each commit, use `git show --name-status -M --format=` to verify exact paths and renames, and confirm unrelated staged paths remain staged. The whole worktree does not need to be clean.
+Omit unchanged child or journal/index paths. After the commit, use `git show --name-status -M --format=` to verify exact paths and renames, and confirm unrelated staged paths remain staged. The whole worktree does not need to be clean.
 
 ### 7. Eligible Automatic Push
 
 Use only the Git baseline captured at the start:
 
-- If `baseline_synced=true`, verify branch/upstream are unchanged and all newly ahead commits are exactly this run's archive/journal commits, then push the current branch to its upstream.
-- If the branch was already ahead, behind, diverged, or lacked upstream at the start, keep the bookkeeping commits local.
+- If `baseline_synced=true`, verify branch/upstream are unchanged and the only newly ahead commit is this run's bookkeeping commit, then push the current branch to its upstream.
+- If the branch was already ahead, behind, diverged, or lacked upstream at the start, keep the bookkeeping commit local.
 - If a concurrent commit, branch/upstream change, or push rejection occurs, stop automatic push, preserve local results, and report the condition.
 
 Never force push. Push eligibility is independent of task progress fields and overall worktree cleanliness.
@@ -124,8 +121,8 @@ Report separately:
 
 - Decision audit status and reviewed decision IDs when present.
 - Release audit status and `release.md` path when present.
-- Archive destination and archive commit when present.
-- Journal paths and journal commit when present.
+- Archive destination and journal paths.
+- The combined bookkeeping commit when present, reported once for both archive and journal.
 - Push status: `pushed`, `local-only`, `skipped`, or `failed`, including the baseline reason.
 - Unrelated dirty or staged paths left untouched.
 <!-- END skill-garden patch trellis-finish-work-exact-bookkeeping v0.6 -->

@@ -47,6 +47,17 @@ def _repo_root() -> Path | None:
         current = current.parent
 
 
+def _load_common_modules(repo_root: Path) -> None:
+    """把 Trellis scripts 目录加入 import path。
+
+    Args:
+        repo_root: Trellis 项目根。
+    """
+    scripts_dir = repo_root / ".trellis/scripts"
+    if str(scripts_dir) not in sys.path:
+        sys.path.insert(0, str(scripts_dir))
+
+
 def _resolve_task_dir(repo_root: Path, task: str) -> Path:
     """把任务引用解析为活动任务目录。
 
@@ -60,21 +71,13 @@ def _resolve_task_dir(repo_root: Path, task: str) -> Path:
     Raises:
         DecisionLogError: 任务不存在或位于项目外。
     """
-    raw = task.strip()
-    candidate = Path(raw)
-    candidates = [candidate] if candidate.is_absolute() else [
-        repo_root / raw,
-        repo_root / ".trellis/tasks" / raw,
-    ]
-    for path in candidates:
-        try:
-            resolved = path.resolve()
-            resolved.relative_to((repo_root / ".trellis/tasks").resolve())
-        except (OSError, ValueError):
-            continue
-        if resolved.is_dir():
-            return resolved
-    raise DecisionLogError(f"任务不存在或不在活动任务目录:{task}")
+    _load_common_modules(repo_root)
+    from common.task_utils import resolve_task_reference  # type: ignore[import-not-found]
+
+    try:
+        return resolve_task_reference(task, repo_root)
+    except ValueError as exc:
+        raise DecisionLogError(str(exc)) from exc
 
 
 def _validate_event(event: Any, line_number: int) -> dict[str, Any]:
@@ -457,19 +460,21 @@ def build_parser() -> argparse.ArgumentParser:
     Returns:
         已配置的参数解析器。
     """
-    parser = argparse.ArgumentParser(description="Trellis AI decision log.")
+    parser = argparse.ArgumentParser(description="读取和审查 Trellis AI 决策日志。")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    status = subparsers.add_parser("status")
-    status.add_argument("--task", required=True)
-    status.add_argument("--json", action="store_true")
+    task_help = "任务完整目录名、项目内路径、允许的绝对路径或唯一短名（例如 cli-invocation-contracts）"
+
+    status = subparsers.add_parser("status", help="读取任务决策审查状态")
+    status.add_argument("--task", required=True, help=task_help)
+    status.add_argument("--json", action="store_true", help="输出完整 JSON")
     status.set_defaults(func=cmd_status)
 
-    review = subparsers.add_parser("review")
-    review.add_argument("--task", required=True)
-    review.add_argument("--verdict", choices=sorted(VALID_VERDICTS), required=True)
-    review.add_argument("--decision-id", action="append", default=[])
-    review.add_argument("--notes")
+    review = subparsers.add_parser("review", help="记录人工审查结果")
+    review.add_argument("--task", required=True, help=task_help)
+    review.add_argument("--verdict", choices=sorted(VALID_VERDICTS), required=True, help="审查结论")
+    review.add_argument("--decision-id", action="append", default=[], help="需返工的决策 ID，可重复")
+    review.add_argument("--notes", help="人工审查备注")
     review.set_defaults(func=cmd_review)
     return parser
 

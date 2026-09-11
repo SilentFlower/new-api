@@ -4,3 +4,16 @@ transactions/
 *.tmp
 trellis-control.json
 trellis-detached/
+# BEGIN Flower shared records
+state.json
+cache/
+transactions/
+trellis-control.json
+trellis-detached/
+*.tmp
+settings.json
+*
+!.gitignore
+!plugins.json
+!plugin-lock.json
+# END Flower shared records

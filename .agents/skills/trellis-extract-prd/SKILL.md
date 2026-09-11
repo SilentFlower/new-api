@@ -114,9 +114,47 @@ description: "Extract a cohesive task PRD faithfully from a source requirements 
 - ✅ 属于本任务实现？
 - ❌ 不属于本任务？（由哪个 task / wave 实现，或 N/A）
 
-将发现记录到 PRD 的「关联需求」表，表头必须含「本任务实现」列。
+整理发现，待 Step 6 写入 PRD 的「关联需求」表，表头必须含「本任务实现」列。
 
-### Step 5: 生成 PRD
+### Step 5: 创建或定位任务
+
+更新已有任务时，先读取已明确定位的任务目录中的 `task.json` 和 `prd.md`，沿用该目录，不运行 `task.py create`。
+
+新建任务时，从前述提取结果确定标题、slug 和一句话目标，先调用框架脚本创建任务目录、`task.json` 和默认 `prd.md`：
+
+```bash
+python3 .trellis/scripts/task.py create "<任务标题>" \
+  --slug "<任务 slug，不含日期前缀>" \
+  --priority P2 \
+  --description "<本任务要改动的行为，一句话>"
+```
+
+创建成功后，以命令返回的任务目录为准；不要提前建目录或写入 PRD。创建失败则停止后续写入，不能把同名目录自动当作待更新任务。
+
+如果基于版本规划批量创建 task，按以下规则生成 slug：
+
+```text
+<version>-wNN-tNN-<task-slug>
+```
+
+- `wNN`：wave 顺序号，例如 `w01`、`w02`
+- `tNN`：全版本 task 创建顺序号，例如 `t01`、`t02`
+- `<task-slug>`：保留业务语义的短 slug
+
+示例：
+
+```bash
+python3 .trellis/scripts/task.py create "项目列表反馈投标状态" \
+  --slug "srm-iqs-v141-w01-t01-project-list-feedback-bid-status" \
+  --priority P2 \
+  --description "项目列表反馈投标状态"
+```
+
+不要把日期写入 `--slug`；`task.py create` 会自动添加 `MM-DD-` 前缀。批量创建时，必须按版本规划的「Task 创建顺序」逐个执行上述命令。
+
+### Step 6: 写入 PRD 并补充 task.json
+
+在 Step 5 返回或已定位的任务目录中写入 `prd.md`：新任务用提取结果替换默认模板；已有任务在读过现有内容后更新本次提取涉及的内容。
 
 PRD 的结构按下列顺序组织：
 
@@ -164,39 +202,7 @@ PRD 的结构按下列顺序组织：
 - 关键文件路径（用于 task.json `relatedFiles`）
 ```
 
-### Step 6: 创建 / 更新 task.json
-
-PRD 写入后，调用框架脚本创建 `task.json`，使任务目录完整可用：
-
-```bash
-python3 .trellis/scripts/task.py create "<PRD标题>" \
-  --slug "<任务目录名去掉日期前缀>" \
-  --priority P2 \
-  --description "<TL;DR「做什么」一句话>"
-```
-
-如果基于版本规划批量创建 task，按以下规则生成 slug：
-
-```text
-<version>-wNN-tNN-<task-slug>
-```
-
-- `wNN`：wave 顺序号，例如 `w01`、`w02`
-- `tNN`：全版本 task 创建顺序号，例如 `t01`、`t02`
-- `<task-slug>`：保留业务语义的短 slug
-
-示例：
-
-```bash
-python3 .trellis/scripts/task.py create "项目列表反馈投标状态" \
-  --slug "srm-iqs-v141-w01-t01-project-list-feedback-bid-status" \
-  --priority P2 \
-  --description "项目列表反馈投标状态"
-```
-
-不要把日期写入 `--slug`；`task.py create` 会自动添加 `MM-DD-` 前缀。批量创建时，必须按版本规划的「Task 创建顺序」逐个执行上述命令。
-
-创建完成后，根据 PRD 中的分析补充 `task.json` 中的字段：
+PRD 写入后，根据其中的分析补充该任务现有 `task.json` 中的字段：
 - `dev_type`：`frontend` / `backend` / `fullstack`
 - `relatedFiles`：PRD Technical Notes 中识别的关键文件路径
 - `meta.version_plan`：版本规划产物路径（如有）

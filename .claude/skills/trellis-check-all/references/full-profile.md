@@ -1,6 +1,6 @@
 # Full Profile
 
-Full 是完整验收映射和全影响面审查。只有 `check_profile.effective_depth=full` 时读取本文件。
+Full 是完整验收映射和全影响面审查。只有 `check_profile.effective_depth=full` 时读取本文件；共享验证规则见 `references/verification.md`。
 
 ---
 
@@ -12,9 +12,9 @@ untracked 上下文没有 task artifacts，本 Step 标记 `N/A`；不得把 sum
 
 - PRD Requirement / Acceptance Criteria：行为基线。
 - Design API、数据模型、数据流、关键决策和 rollback：技术基线。
-- Implement 有序步骤、review gate 和 rollback point：落地基线。
+- Implement 中未被前两者覆盖的产物、review gate 和 rollback point：补充基线。
 
-full 提取所有适用条目。每条记录来源位置，实际阅读对应代码后再判断。
+full 提取所有适用条目。同一行为在多份文档中重复出现时合并验收，保留全部来源位置；不同约束、边界场景或相互冲突的要求不得合并丢失。实际阅读对应代码后再判断。
 
 ### 1.2 必查类型
 
@@ -22,7 +22,7 @@ full 提取所有适用条目。每条记录来源位置，实际阅读对应代
 | --- | --- |
 | `prd.md` | AC、需求、业务规则、UI 文案、边界和异常场景 |
 | `design.md` | API 路径/方法/字段、数据模型、数据流、关键 tradeoff、rollout/rollback |
-| `implement.md` | 有序步骤是否落地、review gate 是否满足、rollback point 是否可用 |
+| `implement.md` | 补充产物是否落地、review gate 是否满足、rollback point 是否可用；不重复核对已覆盖的实现步骤 |
 
 `implement.md` 中的 validation command 在本步骤只做静态前提核对；真实运行归 Step 3。
 
@@ -41,6 +41,8 @@ full 提取所有适用条目。每条记录来源位置，实际阅读对应代
 
 文案要求逐字一致时，对照最终有效文案来源；不要强制要求文案必须直接写在组件字面量中。
 
+同一条调用链只追踪一次，记录实现位置和关键边界证据，供 Step 2 与 Step 3 复用。后续只补尚未覆盖的约束、调用方、异常分支或失效证据；不得因复用而跳过独立的验收判断。
+
 ### 1.4 记录结果
 
 发现偏差、缺失、部分实现或文案不一致时，写入统一问题集合并继续。不要在此步骤询问“先修还是继续检查”。
@@ -49,14 +51,14 @@ full 提取所有适用条目。每条记录来源位置，实际阅读对应代
 
 ## Step 2：实现假设验证
 
-根据实际变更选择适用 Dimension。每个适用 Dimension 都要确认源码或真实契约证据，不能凭记忆通过。
+根据实际变更选择适用 Dimension。每个适用 Dimension 都要确认源码或真实契约证据，不能凭记忆通过。先复用 Step 1 的追踪结果，再核对本维度新增的约束；验证命令需求统一交给 Step 3，不在各 Dimension 分别运行。
 
 ### Dimension A：API Contract
 
 **Trigger**：新增或修改已有 API 调用、请求参数或响应解析。
 
 - 读取 Controller/Handler 和 DTO/Schema，确认实际请求、响应结构。
-- 找到项目内同 API 或同模式调用作为参考。
+- 契约仍有歧义时，补查项目内同 API 或同模式调用。
 - 确认参数名、类型、默认值、分页字段和起始页码。
 - 覆盖正常、空值、零值和错误响应。
 
@@ -67,7 +69,7 @@ full 提取所有适用条目。每条记录来源位置，实际阅读对应代
 - 确认容器关闭或切换时是否销毁子组件。
 - 确认受控值、初始化值和外部状态绑定。
 - 确认状态保持/重置行为符合规划。
-- 对照项目内相同容器的既有用法。
+- 状态约定仍不明确时，补查项目内相同容器的既有用法。
 
 ### Dimension C：Data History
 
@@ -87,54 +89,13 @@ full 提取所有适用条目。每条记录来源位置，实际阅读对应代
 - 覆盖缺省、空值、零值、特殊字符和错误传播。
 - 分层代码分别正确不等于整条链路正确，必须连起来核对。
 
-### Dimension E：Verification Tests
-
-**Trigger**：Dimension A-D 任一适用。
-
-- 自动化测试优先；可重复的手动步骤、静态检查或定向命令也可作为验证证据。
-- 优先覆盖最脆弱的参数名、嵌套结构、历史数据和空值路径。
-- 测试存在时实际运行；未运行不能报告通过。
-- 仅缺少自动化测试文件不得生成 `CHK-*`；项目 spec、风险等级或回归概率明确要求自动化覆盖时，缺失测试仍记录问题。
-- 缺少完成当前结论所必需的充分证据时记录 `CHK-*`，等待用户确认修复范围后再补充验证或测试。
-
 发现假设错误时写入统一问题集合并继续其它可执行检查。只有该错误让后续检查前提失效时，才按“真正阻塞”规则暂停。
 
 ---
 
 ## Step 3：完整性、规范与项目验证
 
-读取 `.agents/skills/trellis-check/SKILL.md`（Claude-only 项目读取对应 `.claude` 副本），复用以下内容：
-
-- 适用 spec 的读取方法；
-- lint、typecheck、测试等项目验证命令；
-- 测试覆盖、跨层数据流、复用、依赖和同层一致性检查；
-- debug logging、warning suppression 和类型安全绕过检查。
-
-### Audit-Only 覆盖规则
-
-在 Check-All 内执行时，下列 `trellis-check` 指令一律失效：
-
-- “Fix any failures before proceeding”；
-- “fix them directly”；
-- “Report and Fix”；
-- 任何要求检查 agent 直接编辑、补测试或反复修到通过的语句。
-
-验证失败时记录命令、退出状态和关键错误到统一问题集合，继续其它独立验证。可能写业务数据或外部系统的验证不直接运行：当前结论所必需且提交前原则上可完成时标记阻断型 `部分验证` 或 `阻塞`；本质依赖部署后、生产环境或真实外部状态时登记 `[上线后验证]`，不得自动执行。
-
-### Maven Evidence 复用
-
-实际变更位于 Maven reactor 时，读取 `maven_verify.py` 的 evidence schema，并只读执行：
-
-```bash
-python3 ./.trellis/scripts/maven_verify.py check --latest --require-plan <final-plan.json>
-```
-
-- `reusable`：核对 lifecycle、模块、消费者、测试、附属制品和 skip 项后纳入验证证据。
-- `partial`：记录未覆盖的 module/consumer/test/artifact 或更高 lifecycle 要求。
-- `stale`：记录源码、测试、POM、外部父 POM、Git 或工具链失效原因。
-- `failed` / `blocked`：保留命令退出或证据损坏事实，不把未执行验证写成通过。
-
-Check-All 与 dedicated subagent 都是 audit-only：不得调用 `maven_verify.py plan/run`，不得运行任何会写 `target/`、本地仓库或缓存的 Maven goal。缺少可复用 evidence 时，输出由主会话或 implement 路径执行的精确重跑计划需求；不得默认 `clean package/install`、`-amd` 或全 reactor。
+执行 `references/verification.md` 的共享清单，汇总 Step 1/2 和项目 spec 的验证需求，复用有效证据并只执行未覆盖的必要命令。数据流沿用前两步证据，不重新完整追踪。
 
 所有发现候选按 `references/fallback-findings.md` 先判定 `CHK-*` / `FBK-*`，再分配严重度。严重度不得反向决定通道；不满足三项硬准入的泛化建议不报告，保护收益或验证环境不完整则保留 FBK 并标记报告缺口。
 

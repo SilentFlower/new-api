@@ -272,6 +272,7 @@ def cmd_finish(args: argparse.Namespace) -> int:
 # END skill-garden patch task-finish-clear-result v0.6
 
 
+# BEGIN skill-garden patch task-current-query-contract v0.6
 def cmd_current(args: argparse.Namespace) -> int:
     """Show active task."""
     repo_root = get_repo_root()
@@ -296,20 +297,22 @@ def cmd_current(args: argparse.Namespace) -> int:
             "source": active.source,
             "stale": active.stale,
         }, ensure_ascii=False))
-        return 0 if active.task_path else 1
+        return 0
 
     if args.source:
         print(f"Current task: {active.task_path or '(none)'}")
         print(f"Source: {active.source}")
         if active.stale:
             print("State: stale")
-        return 0 if active.task_path else 1
+        return 0
 
     if active.task_path:
         print(active.task_path)
         return 0
 
-    return 1
+    print(colored("No current task set", Colors.YELLOW))
+    return 0
+# END skill-garden patch task-current-query-contract v0.6
 
 
 # =============================================================================

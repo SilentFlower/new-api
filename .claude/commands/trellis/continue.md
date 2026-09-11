@@ -14,7 +14,9 @@ Confirms: current task, git state, recent commits.
 <!-- BEGIN skill-garden patch trellis-continue-task-progress-recovery v0.6 -->
 ## Step 1.5: Recover Saved Task Progress
 
-Before loading the Phase Index or deciding a workflow step, run:
+For Steps 1 and 2, reuse task context and the Phase Index already loaded in the current turn when still valid; otherwise load them normally. Saved-progress recovery and all workflow review/confirmation gates remain required.
+
+Before deciding a workflow step, run:
 
 ```bash
 python3 ./.trellis/scripts/task_progress.py status --json

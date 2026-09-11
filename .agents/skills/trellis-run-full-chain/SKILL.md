@@ -1,6 +1,6 @@
 ---
 name: trellis-run-full-chain
-description: "Run full-chain behavior verification across UI + API + DB — cross-layer (browser driver + HTTP client + DB client), NOT frontend-only e2e like Playwright/Cypress test suites. Input is a 场景-路径-期望 scenario table; executes each row, logs pass/fail, and restores test data when feasible. Triggers: 「跑全链路」「全链路测试」「跨层验证」「跑E2E」「端到端验证」「自动化测试场景」「跑场景测试」「e2e test」. Not for lint/unit/spec-only (use trellis-check); not for frontend-only e2e suites."
+description: "Run full-chain behavior verification across UI + API + DB — cross-layer (browser driver + HTTP client + DB client), NOT frontend-only e2e like Playwright/Cypress test suites. Input is a 场景-路径-期望 scenario table; executes each row, logs pass/fail, and restores test data when feasible. Triggers: 「跑全链路」「全链路测试」「跨层验证」「跑E2E」「端到端验证」「自动化测试场景」「跑场景测试」「e2e test」. Not for lint/unit/spec-only (use trellis-route(target=check) to enter trellis-check-all); not for frontend-only e2e suites."
 ---
 
 # Run Full-Chain Verification — 跨层自动化验证
@@ -8,7 +8,7 @@ description: "Run full-chain behavior verification across UI + API + DB — cros
 以"场景-路径-期望"三列表为输入，逐条跨层执行并验证：UI 驱动 + HTTP 调用 + DB 断言三种能力配合使用。最后汇总结果与**尽力而为**的数据恢复。
 
 > **何时用**：PR 前 UAT、功能端到端验收、单测覆盖不到的跨层流程验证。
-> **何时不用**：只跑 lint/typecheck/spec 合规（去 `trellis-check`）；只做 PRD↔代码静态对照（去 `trellis-check-all`）。
+> **何时不用**：lint/typecheck/spec 合规或 PRD↔代码静态对照，均经 `trellis-route(target=check)` 进入 `trellis-check-all`。
 
 ---
 
@@ -322,8 +322,8 @@ Playbook 内容范围（**跨任务可复用的环境常量**，不含具体场�
 
 | 入口 | 形态 | 用途 |
 |------|------|------|
-| `trellis-check` | skill | lint / typecheck / spec 规范 |
-| `trellis-check-all` | skill | PRD→代码 静态对照 + 假设验证 |
+| `trellis-route(target=check)` | skill | 统一质量检查路由（主会话 / 子代理） |
+| `trellis-check-all` | skill | 三件套实现、实现假设、完整性与规范的统一检查 |
 | **`trellis-run-full-chain`** | skill（本技能）| **运行时行为跨层验证（UI+API+DB）** |
 | `trellis-verify-task` | skill | 三件套（prd/design/implement）↔源需求文档 + 跨层一致性对账 |
 

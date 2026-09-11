@@ -171,18 +171,12 @@ Never express binary certainty when evidence is incomplete. Use "most likely", "
 
 ---
 
-## After Analysis: Immediate Actions
+<!-- BEGIN skill-garden patch trellis-break-loop-spec-evaluation v0.6 -->
+## After Analysis: Spec Evaluation
 
-**IMPORTANT**: After completing the analysis above, you MUST immediately:
+Carry the analysis findings and supporting evidence into `trellis-update-spec` when the workflow reaches spec evaluation or the user explicitly requests it. That skill owns the spec decision, minimal writes, validation, and `no-op | written | needs-review` result.
 
-1. **Update spec/guides** - Don't just list TODOs, actually update the relevant files:
-   - If it's a cross-platform issue → update `cross-platform-thinking-guide.md`
-   - If it's a cross-layer issue → update `cross-layer-thinking-guide.md`
-   - If it's a code reuse issue → update `code-reuse-thinking-guide.md`
-   - If it's domain-specific → update `backend/*.md` or `frontend/*.md`
+When existing specs already cover the lesson or no reusable executable knowledge was learned, `no-op` is a valid outcome. Do not create duplicate rules or generic principles merely to produce a spec change.
 
-2. **Sync templates** - After updating `.trellis/spec/`, sync to `src/templates/markdown/spec/`
-
-3. **Commit the spec updates** - This is the primary output, not just the analysis text
-
-> **The analysis is worthless if it stays in chat. The value is in the updated specs.**
+Keep phase ordering and Git confirmation with their existing workflow owners. This retrospective does not independently synchronize templates or commit spec changes.
+<!-- END skill-garden patch trellis-break-loop-spec-evaluation v0.6 -->

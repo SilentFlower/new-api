@@ -118,7 +118,9 @@ git log @{u}..HEAD --oneline 2>/dev/null || true
 
 命令必须是受版本控制的稳定入口，并且本地、确定性、可重复、无外部副作用。工作目录和预期影响路径必须可审计；只有名称相似、mtime、目录邻近或惯例不足以执行。禁止任意 shell 字符串、管道、重定向、命令替换、push、release、deploy、archive、凭证和生产数据操作；证据不足时失败关闭。
 
-`retained` 只是内部集合名。用户可见输出统一写“保留未提交的变更（dirty）”，并逐项标注 `[untracked]`、`[unstaged]`、`[staged]`。unknown ahead、branch/upstream 异常、归属不确定等真正需要处理的事项单独进入“风险”区；普通 retained dirty 不默认视为阻塞。
+`retained` 只是内部集合名。用户可见输出统一写“保留未提交的变更（dirty）”，按输出 reference 的阈值展示；内部始终保留 exact paths 和 Git 状态，分组摘要不得用于 pathspec 或替代校验。unknown ahead、branch/upstream 异常、归属不确定等真正需要处理的事项单独进入“风险”区；普通 retained dirty 不默认视为阻塞。
+
+普通模式和用户 `commit-only` 的计划与校验基线默认保存在当前执行上下文。仅跨进程校验或中断恢复确需落盘时，才在 Git 忽略的 runtime 目录保存一份必要的临时 JSON；已有可复用记录时不另建副本。不得仅为缩短对话、提供链接或展示完整清单生成 `retained.md` 等清单附件，也不把临时计划写入任务产物或提交范围。auto-loop 沿用 runner 的既有持久化契约，不增加额外清单。
 
 普通模式允许 `retained` 存在。执行前记录计划外 staged set，提交后确认这些 staged 文件仍保持原状。用户明确要求新增文件时，重新生成计划并确认，不能在执行中静默扩大范围。
 
@@ -142,7 +144,7 @@ auto-loop 内部 `commit-only` 不渲染交互式计划或结果，也不再次�
 
 每个仓库按计划顺序执行。执行前重新检查 planned files、当前分支、HEAD、upstream、冲突状态、staged、全部 dirty paths 和 retained 摘要；任一关键条件变化都停止当前执行并重新规划。普通模式仅 `retained` 内容变化时可更新说明；auto-loop 内部模式的 retained 内容必须保持不变。
 
-计划包含本地生成命令时，前置仓成功后按计划执行命令，再复用本节现有预检。命令成功、后续仓全部 dirty paths 都在预计 exact files 内且 retained 摘要未漂移时直接继续；否则停止并重新生成计划。预计文件最终 clean 时不强行提交。
+计划包含本地生成命令时，前置仓成功后按计划执行命令，再复用本节现有预检。命令成功、后续仓全部 dirty paths（auto-loop 内部 `commit-only` 扣除已登记且验证未变化的 retained paths）都在预计 exact files 内且 retained 摘要未漂移时直接继续；否则停止并重新生成计划。预计文件最终 clean 时不强行提交。
 
 auto-loop retry/resume 时，读取调用方提供的已完成仓库提交，逐个验证 repository、commit object、message 和文件集合仍符合当前任务证据，并确认当前分支/HEAD 变化可由这些提交解释。验证通过的提交直接跳过；验证失败立即 blocked，不重复提交。确定性生成入口可以安全重跑，以当前 Git 状态重新规划后续步骤。
 

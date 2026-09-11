@@ -320,7 +320,7 @@ Sub-agent dispatch protocol applies to all platforms and all sub-agents, includi
 
 [workflow-state:in_progress]
 <!-- BEGIN skill-garden patch workflow-state-in-progress v0.6 -->
-Before the first implement route, restate `<task>/brief.md`; if it is missing, read the task artifacts and suggest backfilling it instead of relying on memory.
+Before the first implement route, read `<task>/brief.md` and task artifacts without routine redisplay, including after context recovery; if the Brief is missing, follow `trellis-task-brief` backfill guidance.
 Before routing or editing, apply the `Request Triage` Active Task Scope Guard. New implementation work outside the active task title/brief stops here until the user chooses a new task, updates this task's artifacts first, or explicitly proceeds untracked without reusing its progress.
 Enter Phase 2.1/2.2 through the target-matched `trellis-route`; a user route override wins over remembered evidence. Do NOT call the harness built-in plan mode (`EnterPlanMode` / `ExitPlanMode`) to plan sub-changes; keep planning in Trellis artifacts.
 After implementation and focused validation, return to the Phase 2.1 completion contract and resolve its Pre-Check action before ending the turn; the full hold/default policy remains owned by Phase 2.1.
@@ -337,7 +337,7 @@ Dispatch `trellis-implement` or audit-only Check-All sub-agents only when the ma
 
 [workflow-state:in_progress-inline]
 <!-- BEGIN skill-garden patch workflow-state-in-progress-inline v0.6 -->
-Before the first implement route, restate `<task>/brief.md`; if it is missing, read the task artifacts and suggest backfilling it instead of relying on memory.
+Before the first implement route, read `<task>/brief.md` and task artifacts without routine redisplay, including after context recovery; if the Brief is missing, follow `trellis-task-brief` backfill guidance.
 Before routing or editing, apply the `Request Triage` Active Task Scope Guard. New implementation work outside the active task title/brief stops here until the user chooses a new task, updates this task's artifacts first, or explicitly proceeds untracked without reusing its progress.
 Enter Phase 2.1/2.2 through the target-matched `trellis-route`; a user route override wins over remembered evidence. Do NOT call the harness built-in plan mode (`EnterPlanMode` / `ExitPlanMode`) to plan sub-changes; keep planning in Trellis artifacts.
 After implementation and focused validation, return to the Phase 2.1 completion contract and resolve its Pre-Check action before ending the turn; the full hold/default policy remains owned by Phase 2.1.

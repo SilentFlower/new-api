@@ -88,9 +88,9 @@ def _rel_path(repo_root: Path, path: Path) -> str:
 def _resolve_task_dir(repo_root: Path, task_ref: str) -> Path:
     """解析任务目录引用。"""
     _load_common_modules(repo_root)
-    from common.task_utils import resolve_task_dir  # type: ignore[import-not-found]
+    from common.task_utils import resolve_task_reference  # type: ignore[import-not-found]
 
-    return resolve_task_dir(task_ref, repo_root)
+    return resolve_task_reference(task_ref, repo_root)
 
 
 def _current_task_dir(repo_root: Path) -> Path | None:
@@ -125,6 +125,11 @@ def _progress_summary(progress: dict[str, Any]) -> dict[str, Any]:
 def _utc_date() -> str:
     """返回 UTC 日期，保持 task.json 既有 completedAt 格式。"""
     return datetime.now(timezone.utc).date().isoformat()
+
+
+def _utc_now() -> str:
+    """返回秒级 UTC ISO-8601 时间。"""
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def _legacy_progress(snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -273,6 +278,15 @@ def _validate_progress(value: Any) -> tuple[dict[str, Any] | None, list[str]]:
     return value, []
 
 
+def _normalize_progress_for_write(value: Any) -> Any:
+    """仅为完全缺失的 updatedAt 补充机械时间字段。"""
+    if not isinstance(value, dict) or "updatedAt" in value:
+        return value
+    normalized = dict(value)
+    normalized["updatedAt"] = _utc_now()
+    return normalized
+
+
 def _print_json(data: dict[str, Any], exit_code: int = 0) -> int:
     """输出紧凑 JSON。"""
     print(json.dumps(data, ensure_ascii=False, sort_keys=True))
@@ -379,7 +393,7 @@ def cmd_write(args: argparse.Namespace, repo_root: Path) -> int:
         print(f"错误：invalid-progress-json：{exc}", file=sys.stderr)
         return 1
 
-    progress, errors = _validate_progress(raw_progress)
+    progress, errors = _validate_progress(_normalize_progress_for_write(raw_progress))
     if progress is None:
         result = {
             "status": "error",
@@ -489,13 +503,29 @@ def build_parser() -> argparse.ArgumentParser:
     """创建命令行解析器。"""
     parser = argparse.ArgumentParser(description="读取或写入 Trellis 任务进度。")
     subparsers = parser.add_subparsers(dest="command", required=True)
+    task_help = "任务完整目录名、项目内路径、允许的绝对路径或唯一短名（例如 cli-invocation-contracts）"
 
     status = subparsers.add_parser("status", help="读取任务进度")
-    status.add_argument("--task", help="任务目录、路径或任务名")
+    status.add_argument("--task", help=task_help)
     status.add_argument("--json", action="store_true", help="输出 JSON")
 
-    write = subparsers.add_parser("write", help="写入任务进度")
-    write.add_argument("--task", required=True, help="任务目录、路径或任务名")
+    write = subparsers.add_parser(
+        "write",
+        help="写入任务进度",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""字段：
+  completedSteps  已完成步骤的字符串数组
+  partialStep     当前部分完成步骤，字符串或 null
+  nextStep        下一步，非空字符串
+  notes           补充说明字符串
+  updatedAt       可选；缺失时自动生成 UTC 时间，显式空值仍会失败
+
+最小示例：
+  task_progress.py write --task cli-invocation-contracts \\
+    --progress-json '{"completedSteps":[],"partialStep":null,"nextStep":"继续实现","notes":""}'
+""",
+    )
+    write.add_argument("--task", required=True, help=task_help)
     write.add_argument("--progress-json", required=True, help="progress JSON 对象")
     write.add_argument(
         "--complete",
@@ -505,7 +535,7 @@ def build_parser() -> argparse.ArgumentParser:
     write.add_argument("--json", action="store_true", help="输出 JSON")
 
     reopen = subparsers.add_parser("reopen", help="把 completed 任务恢复为 in_progress")
-    reopen.add_argument("--task", required=True, help="任务目录、路径或任务名")
+    reopen.add_argument("--task", required=True, help=task_help)
     reopen.add_argument("--json", action="store_true", help="输出 JSON")
 
     return parser
@@ -520,12 +550,23 @@ def main() -> int:
 
     parser = build_parser()
     args = parser.parse_args()
-    if args.command == "status":
-        return cmd_status(args, repo_root)
-    if args.command == "write":
-        return cmd_write(args, repo_root)
-    if args.command == "reopen":
-        return cmd_reopen(args, repo_root)
+    try:
+        if args.command == "status":
+            return cmd_status(args, repo_root)
+        if args.command == "write":
+            return cmd_write(args, repo_root)
+        if args.command == "reopen":
+            return cmd_reopen(args, repo_root)
+    except ValueError as exc:
+        payload = {
+            "status": "error",
+            "reason": "task-reference-error",
+            "message": str(exc),
+        }
+        if getattr(args, "json", False):
+            return _print_json(payload, 1)
+        print(f"错误：task-reference-error：{exc}", file=sys.stderr)
+        return 1
     parser.print_help()
     return 1
 

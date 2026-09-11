@@ -10,18 +10,6 @@ description: "统一 Check-All：按 requested/effective depth 路由 light/full
 
 ---
 
-## 入口职责
-
-1. 确认本轮检查范围、task artifacts 或 untracked state、项目规范和运行上下文。
-2. 解析 `requested_depth`，生成 `check_profile`，决定 `effective_depth=light|full`。
-3. 按有效深度读取并执行对应 profile。
-4. 按根因把发现分为 `CHK-*`、`FBK-*`、`DOC-*`，再为前两类分配 P0/P1/P2。
-5. 报告前处理允许自修的事实漂移并展示结果。
-6. 按 interactive / validated auto-loop 边界输出下一步或执行 `record + next`。
-7. untracked helper 只存游标：findings 或新编辑回 `implement`；通过且 disposition 继续时才 `advance --stage spec`。
-
----
-
 ## 必读引用
 
 按需加载引用文件，不要提前读取未命中的 profile：
@@ -43,7 +31,7 @@ description: "统一 Check-All：按 requested/effective depth 路由 light/full
 2. **唯一自修例外**：低风险事实漂移进入 `DOC-*` 通道，按 `references/document-drift-auto-remediation.md` 的白名单、黑名单和写入时机处理。
 3. **分类先于严重度**：读取 `references/fallback-findings.md`；主路径错误和非兜底契约违背进入 `CHK-*`，fail-closed、异常输入、失败降级和防御性保护缺口进入 `FBK-*`。契约证据影响严重度，不改变兜底根因归属。
 4. **处置只确认一次**：统一报告后选择 `CHK-*` / `FBK-*` 修复范围或接受风险；`修复全部` 覆盖两类，接受风险不得隐藏发现。
-5. **委托不改边界**：复用 `trellis-check` 的清单和验证方法，忽略其直接修复指令。
+5. **共享验证**：两个 profile 共用 `references/verification.md`；同一追踪与有效验证证据跨维度复用，检查保持只读。
 6. **真正阻塞才中途暂停**：业务规划冲突、前提失效，或当前结论必需验证涉及未授权生产/外部/破坏性副作用时暂停；发布后验收只记 `[上线后验证]`，不执行、不阻断。
 
 中途停止时也要使用统一问题模型，报告已完成范围和阻塞原因；只询问解除阻塞所需的业务或安全决策。
@@ -74,18 +62,11 @@ description: "统一 Check-All：按 requested/effective depth 路由 light/full
 
 ## 顶层流程
 
+untracked helper 只存游标：findings 或新编辑回 `implement`；通过且 disposition 继续时才 `advance --stage spec`。
+
 ### Step 0：范围、上下文与深度画像
 
-读取 `references/depth-routing.md` 并执行完整 Step 0。输出固定画像：
-
-```yaml
-check_profile:
-  context: interactive | auto-loop
-  requested_depth: auto | light | full
-  effective_depth: light | full
-  confidence: high | fallback-full | escalated
-  reasons: [string]
-```
+执行 `references/depth-routing.md` 的完整 Step 0，按其格式生成 `check_profile`。
 
 ### Step 1：读取对应 profile
 
@@ -98,37 +79,23 @@ check_profile:
 
 ### Step 3：处理事实漂移自修
 
-读取 `references/document-drift-auto-remediation.md`。在最终报告前：
-
-- inline：主会话应用允许的 `DOC-*` 修复并做定向验证。
-- subagent：主会话审阅 subagent 返回的 `DOC-*` 候选，只应用满足白名单且无歧义的修复。
-- auto-loop：主会话应用允许的 `DOC-*` 修复后再 `record`；若只存在已修复事实漂移且无剩余 `CHK-*` / `FBK-*`，结果可为 `ok`，摘要必须包含自动修复说明。
+按 `references/document-drift-auto-remediation.md` 的白名单和证据规则，由主会话处理允许的 DOC 并定向验证；subagent 仅返回候选。完成后再报告或交给 reporting reference 的 auto-loop 分流。
 
 不满足自动修复条件的文档问题根据根因转为 `CHK-*`、`FBK-*` 或剩余风险，按普通修复范围处理。
 
 ### Step 4：统一报告与分流
 
-读取 `references/reporting-and-disposition.md`。报告必须展示：
-
-- `check_profile`；
-- 三个维度状态；
-- 自动修复的 `DOC-*` 内容；
-- 剩余 `CHK-*` 主路径问题与 `FBK-*` 兜底问题；
-- 每个剩余问题的未处置或已接受风险状态；
-- 已执行验证、未覆盖风险和 `[上线后验证]`；
-- 与当前结论匹配的唯一下一步。
+读取 `references/reporting-and-disposition.md`，按其完整模板与分流规则在对话中输出报告；默认不新建报告文件，落盘例外由该 reference 定义。
 
 ---
 
 ## 反模式
 
 - 入口默认加载 full profile，导致 `auto` 被 full 语气带偏。
-- 发现一个普通问题就暂停询问一次。
 - 把 `trellis-check` 的自动修复指令带入普通 `CHK-*`。
 - 先按严重度决定 `CHK-*` / `FBK-*` 通道，混淆根因性质与影响等级。
 - 把纯偏好、无具体场景或无法验证收益的“更健壮”建议记录为 `FBK-*`。
 - 因兜底行为已写入契约就把保护路径根因改列为 `CHK-*`。
-- subagent 直接修改工作区。
 - 把需求变更、验收标准、产品语义或设计取舍伪装成文档漂移自动修复。
 - light 未命中完整穷举条件仍继续 light。
 - 无环境证据却把维度标记为通过。

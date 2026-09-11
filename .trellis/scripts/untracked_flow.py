@@ -363,11 +363,11 @@ def read_untracked_state(
         repo_root: Trellis 项目根目录。
         platform_input: 可选平台 hook 输入。
         platform: 可选平台名称。
-        allow_active_task: 是否允许 session 同时已有 task，供 adoption 清理使用。
+        allow_active_task: 是否允许读取已有活动 task；状态查询会返回不适用结果。
         validate_workspace: 兼容旧调用方的废弃参数；不再读取或校验 Git workspace。
 
     Returns:
-        ``hit`` 或 ``miss`` 的结构化状态。
+        ``hit``、``miss`` 或 ``not-applicable`` 的结构化状态。
     """
     del validate_workspace
     scope = _runtime_scope(
@@ -376,6 +376,14 @@ def read_untracked_state(
         platform,
         allow_active_task=allow_active_task,
     )
+    current_task = scope.get("current_task")
+    if allow_active_task and isinstance(current_task, str) and current_task.strip():
+        return {
+            "status": "not-applicable",
+            "reason": "active-task-present",
+            "task": current_task,
+            "contextKey": scope["context_key"],
+        }
     raw = scope["context"].get(STATE_KEY)
     if raw is None:
         return {"status": "miss", "reason": "no-active-work", "contextKey": scope["context_key"]}
@@ -398,7 +406,7 @@ def clear_untracked_state(
     platform: str | None = None,
     *,
     work_id: str | None = None,
-    allow_active_task: bool = True,
+    allow_active_task: bool = False,
 ) -> dict[str, Any]:
     """按明确原因清理当前 session 的 untracked 状态。
 
@@ -408,7 +416,7 @@ def clear_untracked_state(
         platform_input: 可选平台 hook 输入。
         platform: 可选平台名称。
         work_id: 可选的精确事项 ID 防误清。
-        allow_active_task: 是否允许 session 已绑定 task。
+        allow_active_task: 是否显式允许 session 已绑定 task。
 
     Returns:
         清理结果和被清理事项 ID。
@@ -538,7 +546,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "advance":
             payload = advance_stage(repo_root, args.stage)
         elif args.command == "status":
-            payload = read_untracked_state(repo_root)
+            payload = read_untracked_state(repo_root, allow_active_task=True)
         elif args.command == "session-start-hint":
             hint = session_start_hint(repo_root)
             payload = {"status": "hit", "hint": hint} if hint else {"status": "miss"}

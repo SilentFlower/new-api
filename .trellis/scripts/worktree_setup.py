@@ -35,7 +35,7 @@ ROUTE_PREFERENCE_MODES = {
 NOT_INHERITED_LOCAL_STATE = (
     "session-state",
     "auto-loop",
-    "flower-local-state",
+    "flower-control-state",
     "platform-local-settings",
     "cache-and-transaction-state",
 )
@@ -496,6 +496,60 @@ def _registry_registration_conflicts(
     return conflicts
 
 
+def _flower_call(operation: str, **values: Any) -> dict[str, Any]:
+    """调用 Flower 随包适配器，保持 Plugin schema 和写入逻辑的单一归属。"""
+    executable = os.environ.get("FLOWER_WORKTREE_NODE")
+    helper = os.environ.get("FLOWER_WORKTREE_HELPER")
+    if not executable or not helper:
+        if operation == "status":
+            return {"installation": "unchecked", "version": None, "source": None, "reason": "flower-cli-required"}
+        source = Path(values.get("source", "."))
+        flower_directory = source / ".flower"
+        if operation == "plan" and not flower_directory.is_symlink() and not any(
+            (flower_directory / name).exists() for name in ("plugins.json", "plugin-lock.json", "state.json")
+        ):
+            return {"action": "unavailable", "paths": [], "reason": "source-installation-missing"}
+        raise WorktreeSetupError("flower-cli-required", "Flower 继承需要通过外部 flower-trellis worktree 命令执行")
+    try:
+        result = subprocess.run(
+            [executable, helper],
+            input=json.dumps({"operation": operation, **values}, ensure_ascii=False),
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        payload = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError) as error:
+        raise WorktreeSetupError("flower-adapter-failed", "Flower worktree 适配器执行失败", error=str(error)) from error
+    if not isinstance(payload, dict) or payload.get("ok") is not True or result.returncode != 0:
+        details = payload if isinstance(payload, dict) else {}
+        raise WorktreeSetupError(
+            details.get("reason", "flower-adapter-failed"),
+            details.get("message", "Flower worktree 适配器返回非法结果"),
+            path=details.get("path"),
+        )
+    if not isinstance(payload.get("result"), dict):
+        raise WorktreeSetupError("flower-adapter-failed", "Flower worktree 适配器缺少结构化结果")
+    value = payload["result"]
+    if operation == "status":
+        valid = value.get("installation") in {"complete", "incomplete", "invalid"}
+    elif operation in {"plan", "apply"}:
+        valid = (
+            value.get("action") in {"inherited", "preserved", "unavailable"}
+            and isinstance(value.get("paths"), list)
+            and all(isinstance(item, str) for item in value["paths"])
+            and isinstance(value.get("digest"), str)
+            and value["digest"].startswith("sha256:")
+            and len(value["digest"]) == 71
+        )
+    else:
+        valid = value.get("action") == "rolledBack"
+    if not valid:
+        raise WorktreeSetupError("flower-adapter-failed", "Flower worktree 适配器结果不符合操作契约")
+    return value
+
+
 def _analyze(target_arg: str | None) -> dict[str, Any]:
     """生成 target-local readiness 诊断，且不写盘。"""
     context = _worktree_context(_resolve_start(target_arg))
@@ -537,7 +591,7 @@ def _analyze(target_arg: str | None) -> dict[str, Any]:
             conflicts.append({"path": relative, "reason": item["reason"]})
         else:
             item["state"] = "missing"
-            if relative in configured:
+            if relative in configured and relative != ".flower":
                 missing_configured.append(relative)
         entries.append(item)
 
@@ -610,11 +664,14 @@ def _analyze(target_arg: str | None) -> dict[str, Any]:
         },
         "actions": actions,
         "conflicts": conflicts,
+        "flower": _flower_call("status", target=str(target_root)),
     }
 
 
 def _developer_from_file(target_root: Path) -> str | None:
     """从目标本地 `.developer` 读取开发者名。"""
+    if (target_root / ".trellis").is_symlink() or (target_root / ".trellis/.developer").is_symlink():
+        return None
     try:
         lines = (target_root / ".trellis/.developer").read_text(encoding="utf-8").splitlines()
     except OSError:
@@ -721,6 +778,7 @@ def _prepare_local(
     *,
     source: str | None = None,
     inherit_route_prefs: bool = False,
+    inherit_flower: bool = False,
 ) -> dict[str, Any]:
     """初始化当前 worktree 自己的 gitignored 运行态并注册。"""
     if plan["status"] == "needs-migration":
@@ -734,22 +792,23 @@ def _prepare_local(
     context = _worktree_context(target_root)
     source_context = None
     source_developer = None
-    if inherit_route_prefs:
+    if inherit_route_prefs or inherit_flower:
         if not source:
             raise WorktreeSetupError(
                 "route-preferences-source-required",
-                "显式继承 route 偏好时需要 --source",
+                "显式继承本地信息时需要 --source",
             )
         source_context = _worktree_context(_resolve_start(source))
         if source_context["gitCommonDir"] != context["gitCommonDir"]:
             raise WorktreeSetupError(
                 "route-preferences-repository-mismatch",
-                "route 偏好来源与目标不属于同一 Git 仓库",
+                "继承来源与目标不属于同一 Git 仓库",
             )
         source_developer = _developer_from_file(source_context["targetRoot"])
     changed_paths: list[str] = []
     route_transfer = {"action": "notRequested", "values": {}}
-    with _registry_lock(context["gitCommonDir"]):
+    flower_transfer: dict[str, Any] = {"action": "notRequested", "paths": []}
+    with _registry_lock(context["gitCommonDir"]), tempfile.TemporaryDirectory(prefix="flower-worktree-") as temporary:
         current_developer = _developer_from_file(target_root)
         registry = _load_registry(context["gitCommonDir"])
         registration_conflicts = _registry_registration_conflicts(context, registry, task=None)
@@ -781,17 +840,42 @@ def _prepare_local(
                 source_developer,
                 normalized_developer,
             )
-        runtime_sessions = target_root / ".trellis/.runtime/sessions"
-        if not runtime_sessions.is_dir():
-            runtime_sessions.mkdir(parents=True, exist_ok=True)
-            changed_paths.append(".trellis/.runtime/sessions")
-        if current_developer is None:
-            _write_developer(target_root, normalized_developer)
-            changed_paths.append(".trellis/.developer")
-        if route_transfer["action"] == "inherited":
-            _write_route_preferences(target_root, route_transfer["values"])
-            changed_paths.append(ROUTE_PREFERENCES_PATH)
-        registry_changed = _register_worktree(context, developer=normalized_developer)
+        journal = str(Path(temporary) / "flower-receipt.json")
+        try:
+            if inherit_flower:
+                flower_input = {
+                    "source": str(source_context["targetRoot"]),
+                    "target": str(target_root),
+                    "sourceDeveloper": source_developer,
+                    "targetDeveloper": normalized_developer,
+                }
+                flower_transfer = _flower_call("plan", **flower_input)
+                flower_transfer = _flower_call(
+                    "apply", **flower_input, expectedDigest=flower_transfer.get("digest"), journal=journal,
+                )
+                flower_transfer.pop("receipt", None)
+                changed_paths.extend(flower_transfer.get("paths", []))
+            runtime_sessions = target_root / ".trellis/.runtime/sessions"
+            if not runtime_sessions.is_dir():
+                runtime_sessions.mkdir(parents=True, exist_ok=True)
+                changed_paths.append(".trellis/.runtime/sessions")
+            if current_developer is None:
+                _write_developer(target_root, normalized_developer)
+                changed_paths.append(".trellis/.developer")
+            if route_transfer["action"] == "inherited":
+                _write_route_preferences(target_root, route_transfer["values"])
+                changed_paths.append(ROUTE_PREFERENCES_PATH)
+            registry_changed = _register_worktree(context, developer=normalized_developer)
+        except Exception as error:
+            if Path(journal).is_file():
+                try:
+                    _flower_call("rollback", target=str(target_root), journal=journal)
+                except WorktreeSetupError as rollback_error:
+                    raise WorktreeSetupError(
+                        "flower-rollback-failed", "prepare 失败且 Flower 记录回滚不完整",
+                        error=str(error), rollbackError=str(rollback_error),
+                    ) from error
+            raise
     result = {
         **_analyze(str(target_root)),
         "status": "prepared" if changed_paths or registry_changed else "ready-local",
@@ -801,6 +885,7 @@ def _prepare_local(
     }
     result["localStateTransfer"] = {
         "routePreferences": route_transfer,
+        "flower": flower_transfer,
         "notInherited": list(NOT_INHERITED_LOCAL_STATE),
     }
     return result
@@ -1121,6 +1206,10 @@ def _create_plan(args: argparse.Namespace) -> dict[str, Any]:
     if not developer:
         raise WorktreeSetupError("developer-required", "create 需要 --developer 或来源 worktree 的本地身份")
     route_transfer = _route_preference_transfer(source_root, target, source_developer, developer)
+    flower_transfer = _flower_call(
+        "plan", source=str(source_root), target=str(target), baseCommit=resolved_commit,
+        sourceDeveloper=source_developer, targetDeveloper=developer,
+    )
     plan: dict[str, Any] = {
         "status": "confirmation-required",
         "changed": False,
@@ -1161,6 +1250,7 @@ def _create_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "sourceName": source_developer,
             },
             "routePreferences": route_transfer,
+            "flower": flower_transfer,
             "initialized": ["session-runtime"],
             "notInherited": list(NOT_INHERITED_LOCAL_STATE),
         },
@@ -1238,6 +1328,16 @@ def _create(args: argparse.Namespace) -> dict[str, Any]:
             route_transfer = plan["localStateTransfer"]["routePreferences"]
             if route_transfer["action"] == "inherited":
                 _write_route_preferences(target, route_transfer["values"])
+
+            flower_transfer = plan["localStateTransfer"]["flower"]
+            if flower_transfer.get("digest"):
+                flower_transfer = _flower_call(
+                    "apply", source=str(source_root), target=str(target), baseCommit=base_commit,
+                    sourceDeveloper=plan["localStateTransfer"]["developer"]["sourceName"],
+                    targetDeveloper=developer, expectedDigest=flower_transfer["digest"],
+                )
+                flower_transfer.pop("receipt", None)
+                plan["localStateTransfer"]["flower"] = flower_transfer
 
             task_script = target / ".trellis/scripts/task.py"
             if not task_script.is_file():
@@ -1561,6 +1661,7 @@ def build_parser() -> argparse.ArgumentParser:
                 action="store_true",
                 help="inherit normalized route preferences from --source",
             )
+            command_parser.add_argument("--inherit-flower", action="store_true", help="inherit verified Flower records from --source")
         if command == "migrate":
             command_parser.add_argument("--dry-run", action="store_true", help="validate migration without writing")
 
@@ -1603,6 +1704,7 @@ def main(argv: list[str] | None = None) -> int:
                     args.developer,
                     source=args.source,
                     inherit_route_prefs=args.inherit_route_prefs,
+                    inherit_flower=args.inherit_flower,
                 )
             elif args.command == "migrate":
                 payload = _migrate(plan, dry_run=args.dry_run)
