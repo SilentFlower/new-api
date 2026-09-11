@@ -204,3 +204,10 @@ D1 只写现有映射与本地管理审计，不新增策略、个人覆盖或�
 - 用户已明确确认“现在执行持久化修复”：允许备份当前 Redis 数据、短暂停止 NewAPI/Redis、挂载 `/root/new-api/redis-data:/data`、开启 AOF 每秒同步，并在恢复服务前验证全部个人／号池计数保持。
 
 - 最新界面反馈：本人面板去掉“规则与统计说明”及额外规则说明文字，只保留额度卡片。详细规则在管理入口；卡片标签和金额的 title 可保留必要来源与统计边界。按用户此前明确要求继续部署最新前端。
+
+## 2026-09-11 最终降级提示实现边界
+
+- ai-fund 的 `getSelfPoolLimit` 复用既有本人统一状态；仅渠道启用且 `blocked && fallback_enabled` 时读取既有周期策略，从同一 revision 获取模型。
+- 触发原因只取本人状态中 `enforced && limit > 0 && used >= limit` 的指标；公开 `period_limits.fallback` 仅含模型与 scope/period，不返回目标渠道、密钥或他人状态。
+- 策略按渠道与 revision 缓存 3 秒，个人原因不共享；读取失败、配置变化或版本不一致时仅对应号池暂不可用。冷请求最多 7 次 NewAPI HTTP 调用，正常用户不额外读取策略。
+- NewAPI 不增加展示字段，最终版本仅发布 ai-fund Worker 与 Pages；不改额度计算、请求预检或财务结算。

@@ -3,7 +3,7 @@
   "name": "channel-period-budget-fallback",
   "title": "渠道周期预算、时间规则与超限降级及 ai-fund 联动",
   "description": "new-api 增加渠道池子日周额度、自定义时段额度、个人优先覆盖与一次 HTTP 超限降级；ai-fund 同步管理和状态合同。",
-  "status": "in_progress",
+  "status": "completed",
   "dev_type": null,
   "scope": "channel-limits",
   "package": null,
@@ -11,7 +11,7 @@
   "creator": "silentflower",
   "assignee": "silentflower",
   "createdAt": "2026-09-11",
-  "completedAt": null,
+  "completedAt": "2026-09-11",
   "branch": null,
   "base_branch": "build-bak",
   "worktree_path": null,
@@ -21,7 +21,7 @@
   "children": [],
   "parent": null,
   "relatedFiles": [],
-  "notes": "两仓实现、本地 Check-All 与规范同步已完成；Go 全量及关键路径/Controller 全包 race、三库合同、Worker/React/Vue 与构建通过。未提交、推送或部署。保留两仓初始 pycache。",
+  "notes": "两仓业务实现及后续回归修复已推送。最终降级提示仅修改并部署 ai-fund，NewAPI 保持现有线上版本；Worker 584 项、相关 Vue 8 项、安装器 11 项及构建通过。线上已登录全链路、最低数据库版本和真实供应商验证边界详见 implement.md。保留两仓原有 pycache。",
   "meta": {
     "intentRouting": {
       "autoCreated": true,
@@ -65,13 +65,14 @@
   },
   "progress": {
     "completedSteps": [
-      "完成 new-api 与 ai-fund 周期预算、任意日期规则、个人特批和 HTTP 一次降级联动",
-      "完成本地完整检查与两仓规范同步",
-      "new-api 与 ai-fund 业务提交和远端推送成功，new-api 已触发镜像构建"
+      "完成渠道周期预算、时间规则、个人特批和一次 HTTP 超限降级",
+      "完成 Compact、预检、请求克隆和策略缓存并发回归修复并推送",
+      "完成 ai-fund 额度卡片、页签隔离和本人降级提示并推送",
+      "完成测试、构建、规范同步及已授权部署；最终提示不更新 NewAPI"
     ],
     "partialStep": null,
-    "nextStep": "按需检查镜像构建结果；会话收尾与归档由用户另行发起",
-    "notes": "镜像构建已触发，尚未确认产物发布成功。未实测最低数据库版本及真实供应商环境；两仓原有 Python 缓存文件保留未提交。",
-    "updatedAt": "2026-09-11T05:06:07Z"
+    "nextStep": "按用户要求归档任务并记录会话",
+    "notes": "最终只部署号池 Worker 与 Pages；公共号池已用金额人工调整暂不实施。验证边界与部署证据已写入 implement.md；原有 pycache 保留未提交。",
+    "updatedAt": "2026-09-11T08:59:11Z"
   }
 }

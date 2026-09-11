@@ -198,3 +198,15 @@ npm run build
 - `go test ./controller ./relay ./relay/helper ./relay/common ./middleware -run 'ChannelLimitFallback|ResponsesCompact|BillingModel|MappedUpstreamModel' -count=1` 通过（`/tmp/channel-compact-related-tests.log`）。
 - `go test -race ./controller -run 'ChannelLimitFallback|ResponsesCompact' -count=1` 通过（`/tmp/channel-compact-race.log`）；`go build -o /tmp/new-api-compact-fix .` 和 `git diff --check` 通过。
 - 当前为本地已验证修复，尚未提交／推送或更新生产镜像；后续 NewAPI 发布提交须保留用户要求的 `[build]` 标记。
+
+## 2026-09-11 最终状态与归档依据
+
+- NewAPI Compact 修复 `34e7869b9` 与预检、克隆、能力判断和缓存并发修复 `0bb0c1489` 已推送；线上状态接口确认版本为 `build-0bb0c14`。
+- 最终降级提示由 ai-fund 复用现有本人状态与周期策略接口生成，个人与整体触发原因隔离，配置版本一致后才显示模型。此前为提示新增的 NewAPI DTO、状态生成代码及测试已全部撤回，NewAPI 业务 diff 为空。
+- ai-fund 同时保留已部署的个人／号池卡片整理与周期页签隔离修复。公共号池修改已用金额不在本轮范围。
+- 最终验证：Worker 全量 584 项通过（`/tmp/pool-fallback-worker-all-tests.log`）；相关 Vue 组件 8 项、安装器 11 项通过；前端生产构建及两仓 diff 空白检查通过。
+- 浏览器预览覆盖个人超限、其他用户正常、整体超限、明暗主题与手机宽度；模拟额度只用于展示验证，不改变线上计数。
+- Worker 部署 `01ab105b-5017-41c7-b576-b5307366a0cf`；Pages 生产部署 `c227969b`，`https://ai.hub.flower-cli.com/pools` 返回 200，`Pools-Czw1lvLO.js` 与本地构建 SHA-256 一致。
+- 本轮未切换、重启或重新部署 NewAPI。部署记录：`/tmp/pool-fallback-release/deployment-result.json`；Worker / Pages 日志分别为 `/tmp/pool-fallback-worker-deploy.log`、`/tmp/pool-fallback-pages-deploy.log`。
+- 验证边界：本地保存的登录签名密钥无法通过线上认证，本轮没有完成已登录生产用户的浏览器全链路验收；用户隔离由实际 Controller 合同、Worker 与 Vue 回归验证。未实测最低数据库版本和真实供应商调用的历史边界继续保留。
+- 当前最终改动没有独立的标准 Check-All 报告或 spec_update_result；不得将上述测试证据改记为重新完成正式 Check-All。规范中的本人展示合同已随实际改动更新。
