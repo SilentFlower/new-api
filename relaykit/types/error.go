@@ -46,6 +46,9 @@ const (
 	ErrorCodeChannelUserConcurrencyUnavailable ErrorCode = "channel_user_concurrency_unavailable"
 	ErrorCodeChannelUserDailyQuotaExceeded     ErrorCode = "channel_user_daily_quota_exceeded"
 	ErrorCodeChannelUserDailyQuotaUnavailable  ErrorCode = "channel_user_daily_quota_unavailable"
+	ErrorCodeChannelLimitFallbackUnavailable   ErrorCode = "channel_limit_fallback_unavailable"
+	ErrorCodeChannelPeriodQuotaExceeded        ErrorCode = "channel_period_quota_exceeded"
+	ErrorCodeChannelPeriodQuotaUnavailable     ErrorCode = "channel_period_quota_unavailable"
 	ErrorCodeChannelUserWeeklyQuotaExceeded    ErrorCode = "channel_user_weekly_quota_exceeded"
 	ErrorCodeChannelUserWeeklyQuotaUnavailable ErrorCode = "channel_user_weekly_quota_unavailable"
 

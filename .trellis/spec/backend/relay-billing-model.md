@@ -56,7 +56,7 @@ type TaskBillingContext struct {
 - 模型语义：
   - `OriginModelName` 始终表示用户请求的原始模型，不能被覆盖成计费模型。
   - `UpstreamModelName` 表示模型映射后的最终上游模型。
-  - `ResolveBillingModelName()` 只解析当前渠道尝试：开关开启、`IsModelMapped=true` 且上游模型非空时使用上游模型，否则使用原始模型。
+  - `ResolveBillingModelName()` 只解析当前渠道尝试：开关开启、`IsModelMapped=true` 且上游模型非空时使用上游模型，否则使用 `RoutingModel()`（无降级等于原始模型，降级等于目标配置模型），详见 [周期预算与降级契约](./channel-period-budget-fallback.md)。
   - 原始模型带 `-openai-compact` 后缀且选择上游模型计费时，计费模型必须通过 `ratio_setting.WithCompactModelSuffix` 保留后缀。
 - 冻结与读取：
   - `relay/helper/price.go` 必须先用 `ResolveBillingModelName()` 读取价格、倍率或表达式；价格计算成功后调用 `FreezeBillingModelName()`。

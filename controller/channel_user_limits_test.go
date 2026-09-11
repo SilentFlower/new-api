@@ -55,7 +55,7 @@ func setupChannelUserLimitsTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
 	model.DB, model.LOG_DB = db, db
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelUserLimitOverride{}, &model.User{}, &model.Log{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelUserLimitOverride{}, &model.ChannelPeriodPolicy{}, &model.ChannelQuotaTracking{}, &model.ChannelUserPeriodOverride{}, &model.User{}, &model.Log{}))
 
 	t.Cleanup(func() {
 		model.DB, model.LOG_DB = previousDB, previousLogDB

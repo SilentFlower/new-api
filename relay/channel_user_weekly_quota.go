@@ -13,6 +13,9 @@ import (
 )
 
 func checkChannelUserQuotaLimits(c *gin.Context) *types.NewAPIError {
+	if apiErr := service.CheckSelectedChannelPeriodLimits(c); apiErr != nil {
+		return apiErr
+	}
 	if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
 		return apiErr
 	}
@@ -26,6 +29,13 @@ func channelUserQuotaLimitMidjourneyError(apiErr *types.NewAPIError) *dto.Midjou
 	if apiErr.GetErrorCode() == types.ErrorCodeChannelUserWeeklyQuotaExceeded ||
 		apiErr.GetErrorCode() == types.ErrorCodeChannelUserWeeklyQuotaUnavailable {
 		return channelUserWeeklyQuotaMidjourneyError(apiErr)
+	}
+	if apiErr.GetErrorCode() == types.ErrorCodeChannelPeriodQuotaExceeded || apiErr.GetErrorCode() == types.ErrorCodeChannelPeriodQuotaUnavailable {
+		code := 4
+		if apiErr.StatusCode == http.StatusTooManyRequests {
+			code = 30
+		}
+		return &dto.MidjourneyResponse{Code: code, Description: string(apiErr.GetErrorCode()), Result: apiErr.Error()}
 	}
 	return channelUserDailyQuotaMidjourneyError(apiErr)
 }

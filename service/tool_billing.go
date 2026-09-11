@@ -119,9 +119,11 @@ func PostToolCallConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 
 	model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, result.TotalQuota)
 	model.UpdateChannelUsedQuota(relayInfo.ChannelId, result.TotalQuota)
-	RecordRelayChannelUserQuotaUsage(ctx, relayInfo, result.TotalQuota)
 	if err := SettleBilling(ctx, relayInfo, result.TotalQuota); err != nil {
 		logger.LogError(ctx, "工具调用计费结算失败: "+err.Error())
+	} else {
+		// 只有资金结算成功后才计入软额度，失败消费不能伪装成已结算。
+		RecordRelayChannelUserQuotaUsage(ctx, relayInfo, result.TotalQuota)
 	}
 
 	webSearchCalls := 0

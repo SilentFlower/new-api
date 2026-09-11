@@ -16,7 +16,7 @@ import (
 )
 
 // LogTaskConsumption 记录任务消费日志和统计信息（仅记录，不涉及实际扣费）。
-// 实际扣费已由 BillingSession（PreConsumeBilling + SettleBilling）完成。
+// 实际扣费由 BillingSession 完成；周期软额度由调用者在资金结算成功后记录。
 func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	tokenName := c.GetString("token_name")
 	billingModelName := info.BillingModelName()
@@ -69,7 +69,6 @@ func LogTaskConsumption(c *gin.Context, info *relaycommon.RelayInfo) {
 	})
 	model.UpdateUserUsedQuotaAndRequestCount(info.UserId, info.PriceData.Quota)
 	model.UpdateChannelUsedQuota(info.ChannelId, info.PriceData.Quota)
-	RecordRelayChannelUserQuotaUsage(c, info, info.PriceData.Quota)
 }
 
 // ---------------------------------------------------------------------------

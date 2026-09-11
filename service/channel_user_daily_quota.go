@@ -263,7 +263,11 @@ func currentChannelUserDailyQuotaStore() (channelUserDailyQuotaStore, error) {
 }
 
 func currentChannelUserDailyQuotaPeriod(channelID int) channelUserDailyQuotaPeriod {
-	now := channelUserDailyQuotaNow().In(time.Local)
+	return channelUserDailyQuotaPeriodAt(channelID, channelUserDailyQuotaNow())
+}
+
+func channelUserDailyQuotaPeriodAt(channelID int, now time.Time) channelUserDailyQuotaPeriod {
+	now = now.In(time.Local)
 	resetAt := time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, time.Local)
 	return channelUserDailyQuotaPeriod{
 		channelID: channelID,

@@ -132,9 +132,11 @@ func TestShouldRetryAlphaSearchUpstreamError(t *testing.T) {
 }
 
 func TestPrepareAlphaSearchBillingReservesOneWebSearchCall(t *testing.T) {
+	setupChannelUserLimitsTestDB(t)
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
+	common.SetContextKey(c, appconstant.ContextKeyChannelId, 1)
 	billing := &billingSettlerStub{}
 	info := &relaycommon.RelayInfo{
 		OriginModelName: "gpt-5",

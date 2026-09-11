@@ -7,6 +7,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
@@ -25,16 +26,19 @@ type channelUserLimitMetric struct {
 }
 
 type channelUserLimitStatusResponse struct {
-	ChannelID         int                    `json:"channel_id"`
-	User              model.UserLimitSummary `json:"user"`
-	Concurrency       channelUserLimitMetric `json:"concurrency"`
-	DailyQuota        channelUserLimitMetric `json:"daily_quota"`
-	WeeklyQuota       channelUserLimitMetric `json:"weekly_quota"`
-	OverrideActive    bool                   `json:"override_active"`
-	OverrideExpiresAt int64                  `json:"override_expires_at"`
+	PeriodLimits      dto.ChannelPeriodStatus `json:"period_limits"`
+	ChannelID         int                     `json:"channel_id"`
+	User              model.UserLimitSummary  `json:"user"`
+	Concurrency       channelUserLimitMetric  `json:"concurrency"`
+	DailyQuota        channelUserLimitMetric  `json:"daily_quota"`
+	WeeklyQuota       channelUserLimitMetric  `json:"weekly_quota"`
+	OverrideActive    bool                    `json:"override_active"`
+	OverrideExpiresAt int64                   `json:"override_expires_at"`
 }
 
 type channelUserLimitOverrideItem struct {
+	BaseDailyQuotaLimit       int                    `json:"base_daily_quota_limit"`
+	BaseWeeklyQuotaLimit      int                    `json:"base_weekly_quota_limit"`
 	User                      model.UserLimitSummary `json:"user"`
 	UserConcurrencyLimit      *int                   `json:"user_concurrency_limit,omitempty"`
 	UserDailyQuotaLimit       *int                   `json:"user_daily_quota_limit,omitempty"`
@@ -131,6 +135,8 @@ func GetChannelUserLimitOverrides(c *gin.Context) {
 			return
 		}
 		items = append(items, channelUserLimitOverrideItem{
+			BaseDailyQuotaLimit:       limits.BaseDailyQuota,
+			BaseWeeklyQuotaLimit:      limits.BaseWeeklyQuota,
 			User:                      userMap[override.UserId],
 			UserConcurrencyLimit:      override.UserConcurrencyLimit,
 			UserDailyQuotaLimit:       override.UserDailyQuotaLimit,
@@ -244,9 +250,14 @@ func buildChannelUserLimitStatus(c *gin.Context, channel *model.Channel, userID 
 	if err != nil {
 		return nil, err
 	}
+	periodStatus, err := service.GetChannelPeriodStatus(c, channel, userID)
+	if err != nil {
+		return nil, err
+	}
 	return &channelUserLimitStatusResponse{
-		ChannelID: channel.Id,
-		User:      users[0],
+		PeriodLimits: periodStatus,
+		ChannelID:    channel.Id,
+		User:         users[0],
 		Concurrency: channelUserLimitMetric{
 			BaseLimit:      limits.BaseConcurrency,
 			OverrideLimit:  limits.OverrideConcurrency,

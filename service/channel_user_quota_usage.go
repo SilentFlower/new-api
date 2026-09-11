@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
@@ -10,20 +9,25 @@ import (
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 )
 
-// RecordChannelUserQuotaUsage 同时记录指定渠道用户的日、周正向额度。
+// RecordChannelUserQuotaUsage 同时记录指定渠道用户的个人、池子和规则整段正向额度。
 //
 // @param ctx 请求上下文。
 // @param channelID 实际记账的渠道 ID。
 // @param userID 实际消费的用户 ID。
 // @param quota 本次新增的正向额度。
-// @return error 日或周状态任一写入失败时返回错误。
+// @return error 任一周期状态写入失败时返回错误。
 func RecordChannelUserQuotaUsage(ctx context.Context, channelID int, userID int, quota int) error {
-	dailyErr := RecordChannelUserDailyQuota(ctx, channelID, userID, quota)
-	weeklyErr := RecordChannelUserWeeklyQuota(ctx, channelID, userID, quota)
-	return errors.Join(dailyErr, weeklyErr)
+	err := recordChannelPeriodUsage(ctx, channelID, userID, quota)
+	if err != nil && channelID > 0 && userID > 0 && quota > 0 && quota <= common.MaxQuota {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		recordChannelQuotaGap(ctx, channelID, channelPeriodNow().Unix())
+	}
+	return err
 }
 
-// RecordRelayChannelUserQuotaUsage 同时记录 Relay 已完成的日、周正向额度。
+// RecordRelayChannelUserQuotaUsage 同时记录 Relay 已完成的个人、池子和规则整段正向额度。
 //
 // @param ctx 请求上下文。
 // @param relayInfo 包含最终渠道和用户的 Relay 信息。

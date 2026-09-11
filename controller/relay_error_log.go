@@ -25,6 +25,9 @@ func recordRelayErrorLog(c *gin.Context, err *types.NewAPIError) {
 	if !prepareChannelUserWeeklyQuotaErrorLog(c, err) {
 		return
 	}
+	if !prepareChannelPeriodErrorLog(c, err) {
+		return
+	}
 	// 保存错误日志到数据库；视觉辅助预处理失败也走这里，但不触发主渠道自动封禁。
 	userId := c.GetInt("id")
 	tokenName := c.GetString("token_name")

@@ -263,7 +263,11 @@ func currentChannelUserWeeklyQuotaStore() (channelUserWeeklyQuotaStore, error) {
 }
 
 func currentChannelUserWeeklyQuotaPeriod(channelID int) channelUserWeeklyQuotaPeriod {
-	now := channelUserWeeklyQuotaNow().In(time.Local)
+	return channelUserWeeklyQuotaPeriodAt(channelID, channelUserWeeklyQuotaNow())
+}
+
+func channelUserWeeklyQuotaPeriodAt(channelID int, now time.Time) channelUserWeeklyQuotaPeriod {
+	now = now.In(time.Local)
 	daysSinceMonday := (int(now.Weekday()) + 6) % 7
 	weekStart := time.Date(now.Year(), now.Month(), now.Day()-daysSinceMonday, 0, 0, 0, 0, time.Local)
 	resetAt := weekStart.AddDate(0, 0, 7)

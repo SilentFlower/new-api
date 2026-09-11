@@ -23,7 +23,7 @@ func ModelMappedHelper(c *gin.Context, info *relaycommon.RelayInfo, request dto.
 	}
 
 	isResponsesCompact := info.IsResponsesCompact()
-	originModelName := info.OriginModelName
+	originModelName := info.RoutingModel()
 	mappingModelName := originModelName
 	if isResponsesCompact && strings.HasSuffix(originModelName, ratio_setting.CompactModelSuffix) {
 		mappingModelName = strings.TrimSuffix(originModelName, ratio_setting.CompactModelSuffix)

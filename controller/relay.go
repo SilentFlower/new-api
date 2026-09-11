@@ -217,6 +217,11 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 			newAPIError = channelErr
 			break
 		}
+		channel, newAPIError = prepareChannelLimitFallback(c, relayInfo, channel, originalRequest)
+		if newAPIError != nil {
+			recordRelayErrorLog(c, newAPIError)
+			break
+		}
 		addUsedChannel(c, channel.Id)
 		if relay.ShouldHandleResponsesCompactPassthrough(relayInfo) {
 			newAPIError = relay.PrepareResponsesCompactPassthrough(c, relayInfo)
@@ -252,6 +257,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 		}
 		c.Request.Body = io.NopCloser(bodyStorage)
 
+		c.Set("channel_limit_upstream_started", true)
 		switch relayFormat {
 		case types.RelayFormatOpenAIRealtime:
 			newAPIError = relay.WssHelper(c, relayInfo)
@@ -280,7 +286,7 @@ func Relay(c *gin.Context, relayFormat types.RelayFormat) {
 
 		processChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, common.GetContextKeyString(c, constant.ContextKeyChannelKey), channel.GetAutoBan()), newAPIError)
 
-		if !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
+		if relayInfo.LimitFallback != nil || !shouldRetry(c, newAPIError, common.RetryTimes-retryParam.GetRetry()) {
 			break
 		}
 	}
@@ -433,6 +439,7 @@ func RelayMidjourney(c *gin.Context) {
 			code := types.ErrorCode(mjErr.Description)
 			recordChannelUserDailyQuotaErrorCode(c, code)
 			recordChannelUserWeeklyQuotaErrorCode(c, code)
+			recordChannelPeriodErrorCode(c, code)
 			statusCode = quotaStatus
 		} else if mjErr.Code == 30 {
 			mjErr.Result = "当前分组负载已饱和，请稍后再试，或升级账户以提升服务质量。"
@@ -594,6 +601,8 @@ func RelayTask(c *gin.Context) {
 	if taskErr == nil {
 		if settleErr := service.SettleBilling(c, relayInfo, result.Quota); settleErr != nil {
 			common.SysError("settle task billing error: " + settleErr.Error())
+		} else {
+			service.RecordRelayChannelUserQuotaUsage(c, relayInfo, result.Quota)
 		}
 		service.LogTaskConsumption(c, relayInfo)
 
@@ -630,6 +639,7 @@ func respondTaskError(c *gin.Context, taskErr *taskdto.TaskError) {
 	recordChannelUserConcurrencyErrorCode(c, types.ErrorCode(taskErr.Code))
 	recordChannelUserDailyQuotaErrorCode(c, types.ErrorCode(taskErr.Code))
 	recordChannelUserWeeklyQuotaErrorCode(c, types.ErrorCode(taskErr.Code))
+	recordChannelPeriodErrorCode(c, types.ErrorCode(taskErr.Code))
 	if taskErr.StatusCode == http.StatusTooManyRequests {
 		taskErr.Message = "当前分组上游负载已饱和，请稍后再试"
 	}

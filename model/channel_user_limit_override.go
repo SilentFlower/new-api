@@ -1,6 +1,8 @@
 package model
 
 import (
+	"context"
+	"errors"
 	"time"
 
 	"gorm.io/gorm"
@@ -106,4 +108,25 @@ func ReplaceChannelUserLimitOverride(override *ChannelUserLimitOverride) error {
 func DeleteChannelUserLimitOverride(channelID int, userID int) error {
 	return DB.Where("channel_id = ? AND user_id = ?", channelID, userID).
 		Delete(&ChannelUserLimitOverride{}).Error
+}
+
+// GetActiveChannelUserLimitOverrideStrict 严格查询个人覆盖，周期策略不得把缺表当成无覆盖。
+// @param ctx 请求上下文。
+// @param channelID 渠道 ID。
+// @param userID 用户 ID。
+// @param now 当前秒级时间。
+// @return 当前覆盖或真实数据库错误。
+func GetActiveChannelUserLimitOverrideStrict(ctx context.Context, channelID, userID int, now int64) (*ChannelUserLimitOverride, error) {
+	if DB == nil {
+		return nil, errors.New("个人覆盖数据库未初始化")
+	}
+	var override ChannelUserLimitOverride
+	err := DB.WithContext(ctx).Where("channel_id = ? AND user_id = ? AND (expires_at = 0 OR expires_at > ?)", channelID, userID, now).First(&override).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &override, nil
 }

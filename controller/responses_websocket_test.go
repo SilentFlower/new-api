@@ -21,6 +21,7 @@ import (
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/QuantumNous/new-api/setting/ratio_setting"
 
+	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/stretchr/testify/assert"
@@ -311,6 +312,7 @@ func TestHandleResponsesWebSocketUpstreamEventRefundsFailureTerminals(t *testing
 }
 
 func TestProxyResponsesWebSocketRetriesFirstBusinessErrorBeforeDownstreamWrite(t *testing.T) {
+	setupChannelUserLimitsTestDB(t)
 	gin.SetMode(gin.TestMode)
 	oldRetryTimes := common.RetryTimes
 	oldLogConsumeEnabled := common.LogConsumeEnabled
@@ -536,6 +538,10 @@ func TestProxyResponsesWebSocketForwardsCancelPongAndCloseCode(t *testing.T) {
 
 func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	// 真实回合会异步记录性能指标，必须在后续用例切换全局缓存状态前收口。
+	defer func() {
+		require.Eventually(t, func() bool { return gopool.WorkerCount() == 0 }, 2*time.Second, time.Millisecond)
+	}()
 	oldLogConsumeEnabled := common.LogConsumeEnabled
 	oldGuardAcquirer := responsesWebSocketConcurrencyGuardAcquirer
 	common.LogConsumeEnabled = false

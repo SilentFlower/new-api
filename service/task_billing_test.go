@@ -53,6 +53,8 @@ func TestMain(m *testing.M) {
 		&model.QuotaData{},
 		&model.Channel{},
 		&model.ChannelUserLimitOverride{},
+		&model.ChannelPeriodPolicy{}, &model.ChannelQuotaTracking{},
+		&model.ChannelUserPeriodOverride{},
 		&model.TopUp{},
 		&model.UserSubscription{},
 		&model.SystemTask{},

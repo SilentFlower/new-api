@@ -122,6 +122,8 @@ type RelayInfo struct {
 	RelayMode              int
 	ResponsesCompactMode   relayconstant.ResponsesCompactMode
 	ResponsesClientStream  bool
+	RoutingModelName       string // 本次额度降级的目标模型，不覆盖原始请求。
+	LimitFallback          *ChannelLimitFallbackInfo
 	OriginModelName        string
 	RequestURLPath         string
 	UpstreamRequestURLPath string
@@ -241,7 +243,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 		ChannelCreateTime:           c.GetInt64("channel_create_time"),
 		ParamOverride:               paramOverride,
 		HeadersOverride:             headerOverride,
-		UpstreamModelName:           common.GetContextKeyString(c, constant.ContextKeyOriginalModel),
+		UpstreamModelName:           info.RoutingModel(),
 		IsModelMapped:               false,
 		SupportStreamOptions:        false,
 		ChannelUserDailyQuotaLimit:  common.GetContextKeyInt(c, constant.ContextKeyChannelUserDailyQuotaLimit),
@@ -278,7 +280,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	// reset some fields based on channel meta
 	// 重置某些字段，例如模型名称等
 	if info.Request != nil {
-		info.Request.SetModelName(info.OriginModelName)
+		info.Request.SetModelName(info.RoutingModel())
 	}
 }
 

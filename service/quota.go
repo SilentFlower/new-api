@@ -230,11 +230,13 @@ func PostWssConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, mod
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
-		RecordRelayChannelUserQuotaUsage(ctx, relayInfo, quota)
 	}
 
 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
+	} else {
+		// 只有资金结算成功后才计入软额度，失败消费不能伪装成已结算。
+		RecordRelayChannelUserQuotaUsage(ctx, relayInfo, quota)
 	}
 
 	logModel := billingModelName
@@ -355,11 +357,13 @@ func PostAudioConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, u
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, quota)
-		RecordRelayChannelUserQuotaUsage(ctx, relayInfo, quota)
 	}
 
 	if err := SettleBilling(ctx, relayInfo, quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
+	} else {
+		// 只有资金结算成功后才计入软额度，失败消费不能伪装成已结算。
+		RecordRelayChannelUserQuotaUsage(ctx, relayInfo, quota)
 	}
 
 	logModel := billingModelName

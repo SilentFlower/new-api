@@ -408,6 +408,7 @@ func doVisionAssistRequest(c *gin.Context, info *relaycommon.RelayInfo, request 
 	}
 	info.UpstreamRequestBodySize = int64(len(jsonData))
 
+	c.Set("channel_limit_upstream_started", true)
 	respAny, err := adaptor.DoRequest(c, info, bytes.NewReader(jsonData))
 	if err != nil {
 		return "", nil, types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
@@ -686,7 +687,7 @@ func switchContextToVisionAssistChannel(c *gin.Context, channelModel *model.Chan
 			snapshot.values[string(key)] = value
 		}
 	}
-	for _, key := range []string{"api_version", "region", "plugin", "bot_id", "chat_completion_web_search_context_size", common.UpstreamRequestIdKey} {
+	for _, key := range []string{"api_version", "region", "plugin", "bot_id", "channel_period_base_channel", "chat_completion_web_search_context_size", common.UpstreamRequestIdKey} {
 		if value, ok := c.Get(key); ok {
 			snapshot.values[key] = value
 		}
@@ -698,7 +699,7 @@ func switchContextToVisionAssistChannel(c *gin.Context, channelModel *model.Chan
 			for _, key := range keys {
 				delete(c.Keys, string(key))
 			}
-			for _, key := range []string{"api_version", "region", "plugin", "bot_id", "chat_completion_web_search_context_size", common.UpstreamRequestIdKey} {
+			for _, key := range []string{"api_version", "region", "plugin", "bot_id", "channel_period_base_channel", "chat_completion_web_search_context_size", common.UpstreamRequestIdKey} {
 				delete(c.Keys, key)
 			}
 			for key, value := range snapshot.values {
@@ -722,7 +723,7 @@ func switchContextToVisionAssistChannel(c *gin.Context, channelModel *model.Chan
 		for _, key := range keys {
 			delete(c.Keys, string(key))
 		}
-		for _, key := range []string{"api_version", "region", "plugin", "bot_id", "chat_completion_web_search_context_size", common.UpstreamRequestIdKey} {
+		for _, key := range []string{"api_version", "region", "plugin", "bot_id", "channel_period_base_channel", "chat_completion_web_search_context_size", common.UpstreamRequestIdKey} {
 			delete(c.Keys, key)
 		}
 		for key, value := range snapshot.values {

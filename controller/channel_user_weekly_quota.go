@@ -20,6 +20,9 @@ const (
 )
 
 func checkChannelUserQuotaLimits(c *gin.Context) *types.NewAPIError {
+	if apiErr := service.CheckSelectedChannelPeriodLimits(c); apiErr != nil {
+		return apiErr
+	}
 	if apiErr := checkChannelUserDailyQuota(c); apiErr != nil {
 		return apiErr
 	}
@@ -133,6 +136,9 @@ func channelUserQuotaMidjourneyHTTPStatus(response *dto.MidjourneyResponse) (int
 		return apiErr.StatusCode, true
 	}
 	if apiErr := channelUserWeeklyQuotaAPIErrorFromCode(code); apiErr != nil {
+		return apiErr.StatusCode, true
+	}
+	if apiErr := channelPeriodAPIErrorFromCode(code); apiErr != nil {
 		return apiErr.StatusCode, true
 	}
 	return 0, false

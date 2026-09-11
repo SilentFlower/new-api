@@ -450,11 +450,13 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	} else {
 		model.UpdateUserUsedQuotaAndRequestCount(relayInfo.UserId, summary.Quota)
 		model.UpdateChannelUsedQuota(relayInfo.ChannelId, summary.Quota)
-		RecordRelayChannelUserQuotaUsage(ctx, relayInfo, summary.Quota)
 	}
 
 	if err := SettleBilling(ctx, relayInfo, summary.Quota); err != nil {
 		logger.LogError(ctx, "error settling billing: "+err.Error())
+	} else {
+		// 只有资金结算成功后才计入软额度，失败消费不能伪装成已结算。
+		RecordRelayChannelUserQuotaUsage(ctx, relayInfo, summary.Quota)
 	}
 
 	logModel := ConsumeLogModelName(relayInfo)

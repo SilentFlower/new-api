@@ -583,4 +583,9 @@ export const STATIC_I18N_KEYS = [
   'This user account is disabled.',
   'Telegram binding failed. Please try again.',
   'Verification scope is missing',
+  // 周期策略接口的动态错误键。
+  'Saved, but status refresh failed. Reload before editing again.',
+  'The policy has changed. Reload before editing again.',
+  'Check rule times, overlapping limits, and quota values.',
+  'Period policy is unavailable. Reload and try again.',
 ] as const

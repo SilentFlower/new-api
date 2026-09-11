@@ -29,7 +29,7 @@ func (info *RelayInfo) ResolveBillingModelName() string {
 		}
 		return info.UpstreamModelName
 	}
-	return info.OriginModelName
+	return info.RoutingModel()
 }
 
 // FreezeBillingModelName 冻结本次请求实际用于查价和结算的模型名。

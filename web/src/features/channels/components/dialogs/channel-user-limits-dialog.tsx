@@ -103,6 +103,8 @@ import type {
   ChannelUserLimitUser,
   ChannelUserWeeklyQuotaItem,
 } from '../../types'
+import { ChannelPeriodOverrideEditor } from './channel-period-override-editor'
+import { ChannelPeriodPolicyPanel } from './channel-period-policy-panel'
 
 const PAGE_SIZE = 20
 const MAX_QUOTA = 2147483647
@@ -822,7 +824,10 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
           onValueChange={setActiveTab}
           className='h-full gap-3'
         >
-          <TabsList className='grid w-full grid-cols-4'>
+          <TabsList className='grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-5'>
+            <TabsTrigger value='period-policy'>
+              {t('Period policy')}
+            </TabsTrigger>
             <TabsTrigger value='daily-quota'>{t('Daily quota')}</TabsTrigger>
             <TabsTrigger value='weekly-quota'>{t('Weekly quota')}</TabsTrigger>
             <TabsTrigger value='concurrency'>
@@ -833,6 +838,15 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
             </TabsTrigger>
           </TabsList>
 
+          <TabsContent value='period-policy' className='min-h-0'>
+            {props.open && activeTab === 'period-policy' && channelId > 0 && (
+              <ChannelPeriodPolicyPanel
+                key={channelId}
+                channelId={channelId}
+                canOperate={canOperate}
+              />
+            )}
+          </TabsContent>
           <TabsContent value='daily-quota' className='min-h-0'>
             {renderQuotaTab('daily', dailyQuery, dailyPage, setDailyPage)}
           </TabsContent>
@@ -1192,7 +1206,7 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
           }
         }}
       >
-        <AlertDialogContent className='sm:max-w-2xl'>
+        <AlertDialogContent className='max-h-[90dvh] overflow-y-auto sm:max-w-2xl'>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('Personal limit override')}</AlertDialogTitle>
             <AlertDialogDescription>
@@ -1234,6 +1248,16 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
               onExpirationChange={setExpirationInput}
             />
           ) : null}
+          {overrideStatusQuery.data && overrideUser && (
+            <ChannelPeriodOverrideEditor
+              key={`${channelId}:${overrideUser.id}`}
+              status={overrideStatusQuery.data}
+              canOperate={canOperate}
+              onChanged={() => {
+                void overrideStatusQuery.refetch()
+              }}
+            />
+          )}
           {overridePayload === null && overrideStatusQuery.data ? (
             <p className='text-destructive text-sm'>
               {t(

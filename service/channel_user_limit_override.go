@@ -78,8 +78,24 @@ func ResolveChannelUserEffectiveLimits(ctx context.Context, channel *model.Chann
 	if channel == nil || channel.Id <= 0 || userID <= 0 {
 		return limits, nil
 	}
-	override, err := getCachedChannelUserLimitOverride(ctx, channel.Id, userID)
-	if err != nil || override == nil {
+	policy, err := GetChannelPeriodPolicy(ctx, channel.Id)
+	if err != nil {
+		return limits, err
+	}
+	values, _, _, _, err := resolveChannelPeriodSources(policy.Config, limits.BaseDailyQuota, channelPeriodNow().In(time.Local))
+	if err != nil {
+		return limits, err
+	}
+	limits.BaseDailyQuota = values["user_daily"]
+	limits.EffectiveDailyQuota = limits.BaseDailyQuota
+	var override *model.ChannelUserLimitOverride
+	if policy.Revision > 0 {
+		// 个人明确覆盖可能比临时规则更严格，故障时不能静默回落到较宽的基础额度。
+		override, err = model.GetActiveChannelUserLimitOverrideStrict(ctx, channel.Id, userID, channelPeriodNow().Unix())
+	} else {
+		override, err = getCachedChannelUserLimitOverride(ctx, channel.Id, userID)
+	}
+	if err != nil || override == nil || (override.ExpiresAt > 0 && override.ExpiresAt <= channelPeriodNow().Unix()) {
 		return limits, err
 	}
 	limits.Active = true
@@ -90,6 +106,14 @@ func ResolveChannelUserEffectiveLimits(ctx context.Context, channel *model.Chann
 	limits.EffectiveConcurrency = effectiveChannelUserLimit(limits.BaseConcurrency, override.UserConcurrencyLimit)
 	limits.EffectiveDailyQuota = effectiveChannelUserLimit(limits.BaseDailyQuota, override.UserDailyQuotaLimit)
 	limits.EffectiveWeeklyQuota = effectiveChannelUserLimit(limits.BaseWeeklyQuota, override.UserWeeklyQuotaLimit)
+	if policy.Revision > 0 {
+		if override.UserDailyQuotaLimit != nil && *override.UserDailyQuotaLimit > 0 && *override.UserDailyQuotaLimit <= common.MaxQuota {
+			limits.EffectiveDailyQuota = *override.UserDailyQuotaLimit
+		}
+		if override.UserWeeklyQuotaLimit != nil && *override.UserWeeklyQuotaLimit > 0 && *override.UserWeeklyQuotaLimit <= common.MaxQuota {
+			limits.EffectiveWeeklyQuota = *override.UserWeeklyQuotaLimit
+		}
+	}
 	return limits, nil
 }
 
@@ -99,6 +123,7 @@ func ResolveChannelUserEffectiveLimits(ctx context.Context, channel *model.Chann
 // @param channel 已选定的渠道。
 // @return ChannelUserEffectiveLimits 本次请求使用的限制快照。
 func ApplyChannelUserEffectiveLimits(c *gin.Context, channel *model.Channel) ChannelUserEffectiveLimits {
+	c.Set("channel_period_base_channel", channel)
 	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
 	requestContext := context.Background()
 	if c.Request != nil {
@@ -144,7 +169,15 @@ func ReplaceChannelUserLimitOverride(ctx context.Context, channel *model.Channel
 	if err := validateChannelUserLimitOverrideValue("并发", channel.GetUserConcurrencyLimit(), input.UserConcurrencyLimit, maxChannelUserOverrideConcurrency); err != nil {
 		return err
 	}
-	if err := validateChannelUserLimitOverrideValue("每日额度", channel.GetUserDailyQuotaLimit(), input.UserDailyQuotaLimit, common.MaxQuota); err != nil {
+	policy, err := GetChannelPeriodPolicy(ctx, channel.Id)
+	if err != nil {
+		return err
+	}
+	values, _, _, _, err := resolveChannelPeriodSources(policy.Config, channel.GetUserDailyQuotaLimit(), channelPeriodNow().In(time.Local))
+	if err != nil {
+		return err
+	}
+	if err := validateChannelUserLimitOverrideValue("每日额度", values["user_daily"], input.UserDailyQuotaLimit, common.MaxQuota); err != nil {
 		return err
 	}
 	if err := validateChannelUserLimitOverrideValue("每周额度", channel.GetUserWeeklyQuotaLimit(), input.UserWeeklyQuotaLimit, common.MaxQuota); err != nil {

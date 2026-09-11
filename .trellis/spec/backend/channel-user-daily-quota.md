@@ -168,10 +168,10 @@ ErrorCodeChannelUserDailyQuotaUnavailable = "channel_user_daily_quota_unavailabl
 
 - 检查顺序固定为：完成选渠和价格计算 -> 免费请求直接继续 -> 检查当日已结算额度 -> 预扣费 -> 实际上游调用。
 - `used < limit` 时放行；`used >= limit` 时返回本地 `429`。不得把估算额度加入检查，也不得实现请求排队或严格预占。
-- `429/503` 均设置 `skipRetry`，不得进入 `processChannelError`、渠道自动禁用、换渠重试或预扣费。
+- `429/503` 均设置 `skipRetry`，不得进入 `processChannelError`、渠道自动禁用或普通换渠重试。已配置周期策略的三类 HTTP 入口可在副作用前由独立协调器处理一次额度降级，见 [周期预算与降级契约](./channel-period-budget-fallback.md)；503 不降级。
 - 每次真实换渠重试都重新检查当前候选渠道；失败尝试没有正向结算，不增加旧渠道累计。
 - 普通文本、图片、音频、Realtime、Responses、Alpha Search、视觉辅助、异步任务和 Midjourney 必须在各自真实预扣与上游调用前走同一领域检查。
-- 正向累计与现有 `model.UpdateChannelUsedQuota` 调用点相邻，并始终使用最终 `channel_id + user_id` 记录；`RelayInfo.ChannelMeta.ChannelUserDailyQuotaLimit` 快照只决定请求前是否检查，不得决定是否追踪，也不得把累计塞入 `BillingSession.Settle` 或预扣逻辑。
+- 正向累计只在资金结算成功分支调用，并始终使用最终 `channel_id + user_id` 记录；`RelayInfo.ChannelMeta.ChannelUserDailyQuotaLimit` 快照只决定请求前是否检查，不得决定是否追踪，也不得把累计塞入 `BillingSession.Settle` 或预扣逻辑。
 - 同一业务结果必须复用现有一次性结算保护，重复终止事件、重试失败事件或重复回调不得重复累计。
 - 后续退款、负向差额和管理员退款不自动回退每日累计；每日累计与渠道 `used_quota` 一致，表示历史正向使用量。
 - 异步任务初始正向额度计入提交日，后续正向差额计入实际结算日；不得持久化或读取 `ChannelUserDailyQuotaTracked` 门控记录。旧任务 JSON 中残留的该字段必须兼容忽略，旧任务在新版本上线后的正向差额从本次结算开始记录，但不扫描日志补记此前额度。

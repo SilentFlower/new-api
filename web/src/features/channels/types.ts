@@ -18,6 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
+import type { ChannelPeriodStatus } from './period-types'
+
 // ============================================================================
 // Channel Schema & Types
 // ============================================================================
@@ -280,6 +282,7 @@ export interface ChannelUserLimitMetric {
 
 /** 指定用户的统一渠道限制状态。 */
 export interface ChannelUserLimitStatus {
+  period_limits?: ChannelPeriodStatus
   channel_id: number
   user: ChannelUserLimitUser
   concurrency: ChannelUserLimitMetric
