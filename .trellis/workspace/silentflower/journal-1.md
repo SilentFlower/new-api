@@ -1246,3 +1246,26 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 40: 号池降级展示推送与周期额度任务归档
+
+**Date**: 2026-09-11
+**Task**: 号池降级展示推送与周期额度任务归档
+**Branch**: `build-bak`
+
+### Summary
+
+完成 ai-fund 额度卡片、周期页签隔离和本人降级提示；最终提示复用 NewAPI 现有接口，撤回为展示新增的 NewAPI 改动，线上保持 build-0bb0c14。Worker 584 项、相关 Vue 8 项、安装器 11 项及构建通过，Worker 和 Pages 已部署且生产页面资源一致。ai-fund master 已推送，NewAPI 任务完成记录已同步；归档渠道周期预算任务并补齐上线及回滚记录。公共号池已用金额人工调整暂不实施；正式检查报告及已登录生产全链路验证边界保留在任务记录。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `45dc87b` | (see git log) |
+| `0bb0c1489` | (see git log) |
+| `34e7869b9` | (see git log) |
+
+### Status
+
+[OK] **Completed**
