@@ -1,0 +1,77 @@
+{
+  "id": "channel-period-budget-fallback",
+  "name": "channel-period-budget-fallback",
+  "title": "渠道周期预算、时间规则与超限降级及 ai-fund 联动",
+  "description": "new-api 增加渠道池子日周额度、自定义时段额度、个人优先覆盖与一次 HTTP 超限降级；ai-fund 同步管理和状态合同。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": "channel-limits",
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-09-11",
+  "completedAt": "2026-09-11",
+  "branch": null,
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "两仓实现、本地 Check-All 与规范同步已完成；Go 全量及关键路径/Controller 全包 race、三库合同、Worker/React/Vue 与构建通过。未提交、推送或部署。保留两仓初始 pycache。",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-09-11T01:26:27Z",
+      "contextKey": "codex_01a08e10-18d4-79c3-898b-df4941aa5182",
+      "implementationStarted": true,
+      "baseline": {
+        "head": "fa4263ad885dc6172e7dffdd43b71775ae6a01b9",
+        "status": [
+          {
+            "status": "??",
+            "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+          }
+        ],
+        "repositories": [
+          {
+            "root": ".",
+            "head": "fa4263ad885dc6172e7dffdd43b71775ae6a01b9",
+            "status": [
+              {
+                "status": "??",
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+              }
+            ],
+            "worktreeDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "indexDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "untracked": [
+              {
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc",
+                "sha256": "1d2f57c10c78999e9ad2e460dd6ef0801e3db602ee8e8faa48b90df176b98a57"
+              }
+            ],
+            "conflicts": [],
+            "integration": [],
+            "fingerprint": "38f0e239ff811cba1d9f3095e45ae829090d5d0fd701446d37e9d1c4d37a1672"
+          }
+        ],
+        "fingerprint": "d8157b8ebe42ef778289c8b55b98d5e3416f06d5e523bab4324f8304171ebaa8"
+      }
+    }
+  },
+  "progress": {
+    "completedSteps": [
+      "完成 new-api 与 ai-fund 周期预算、任意日期规则、个人特批和 HTTP 一次降级联动",
+      "完成本地完整检查与两仓规范同步",
+      "new-api 与 ai-fund 业务提交和远端推送成功，new-api 已触发镜像构建"
+    ],
+    "partialStep": null,
+    "nextStep": "按需检查镜像构建结果；会话收尾与归档由用户另行发起",
+    "notes": "镜像构建已触发，尚未确认产物发布成功。未实测最低数据库版本及真实供应商环境；两仓原有 Python 缓存文件保留未提交。",
+    "updatedAt": "2026-09-11T05:06:07Z"
+  }
+}

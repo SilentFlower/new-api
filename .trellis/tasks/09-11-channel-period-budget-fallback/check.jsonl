@@ -1,0 +1,11 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "后端规范索引与领域约束"}
+{"file": ".trellis/spec/guides/build-upstream-friendly-customization.md", "reason": "独立模块与上游薄接入要求"}
+{"file": ".trellis/spec/backend/channel-user-daily-quota.md", "reason": "自然日软限额、正向记账与多入口合同"}
+{"file": ".trellis/spec/backend/channel-user-weekly-quota-and-overrides.md", "reason": "自然周、个人覆盖与 ai-fund 权威边界"}
+{"file": ".trellis/spec/backend/channel-user-concurrency.md", "reason": "切换渠道时的并发租约生命周期"}
+{"file": ".trellis/spec/backend/relay-billing-model.md", "reason": "原始模型与价格冻结的既有合同"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "三库迁移；行锁旧示例以 AGENTS.md 为准"}
+{"file": ".trellis/spec/backend/api-contracts.md", "reason": "管理 API 边界与旧字段兼容"}
+{"file": ".trellis/spec/frontend/base-ui-composition.md", "reason": "NewAPI 工作区子组件组合和交互"}
+{"file": ".trellis/spec/frontend/i18n-merge-guidelines.md", "reason": "七语言与源码缺键检查"}
+{"file": ".trellis/tasks/09-11-channel-period-budget-fallback/research/integration-evidence.md", "reason": "两仓实际入口、外部规范路径、验证脚本与实现假设"}
