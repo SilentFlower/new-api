@@ -291,3 +291,50 @@ err := service.SetChannelUserDailyQuota(ctx, channelID, userID, newUsedQuota)
 ```
 
 个人目标值调整不是财务操作，不得修改余额、Token、日志或渠道历史累计。
+
+## 场景：Redis 持久化迁移与丢失计数恢复
+
+### 1. Scope / Trigger
+
+- 更换或重建承载渠道日周／池子计数的 Redis 容器，或排查部署后已用金额归零。
+- Redis 中的额度计数属于业务状态；MySQL 消费日志仍在不能证明 Redis 计数没有丢失。此处是独立运维恢复，不把日志回填加入 Relay 热路径。
+
+### 2. Signatures
+
+- 只读诊断：`docker inspect redis` 的 `Mounts/Created/State.StartedAt`，`redis-cli INFO persistence`，`redis-cli CONFIG GET dir save appendonly appendfsync`。
+- 数据目录挂载到 `/data`，启动参数可使用 `redis-server --appendonly yes --appendfsync everysec`；部署时同时核对实际挂载和运行配置。
+- 个人日周键：`channel_user_daily_quota:{channel_id}:YYYY-MM-DD`、`channel_user_weekly_quota:{channel_id}:YYYY-MM-DD`。
+- 池子日周键使用 `channel_pool_daily_quota` / `channel_pool_weekly_quota` 前缀，用户字段之外包含 `__pool` 与 `__since`。
+- 恢复来源为 `logs(type, created_at, channel_id, user_id, quota)`，人工调整从 `logs.other.op.action/params` 核对；金额换算读取实际 `/api/status` 的 `quota_per_unit`。
+
+### 3. Contracts
+
+- 没有数据卷时，容器内 RDB/AOF 会随容器删除而丢失；开启 AOF 不能代替挂载数据目录。AOF 每秒同步也不等同于每次写入同步落盘。
+- 已有实例迁移必须备份配置和数据：先开启 AOF 并等待首次后台写入完成，暂停写入方、保存快照、停止 Redis，再复制完整 RDB/AOF 到宿主机。保留目录所有权和访问权限；不能给旧数据实例直接挂一个空目录后重建。
+- 重启写入方前，验证实际挂载、AOF 写入状态，以及迁移前后额度键的字段值逐项一致；只验证 `PING` 或容器运行状态不够。
+- 恢复前固定渠道、用户、自然周期和丢失区间，核对日志记账时刻及人工目标值调整。日志口径不清、存在覆盖调整或缺失日志时，先厘清差异，不能直接将完整日志总额当成增量。
+- 在线恢复使用确认未计入现有 Redis 的历史增量，原子累加并同事务写幂等回执，保留恢复期间的新消费；重试必须命中同一计划标记，不重复加额。脚本先验证全部键类型、数值和溢出边界，再执行写入。
+- 保留日周 TTL。恢复池子历史时同步其用户字段、`__pool` 与实际统计起点；只更新个人计数不代表池子历史已恢复。恢复不会修改钱包、Token、消费日志或渠道历史总额。
+- 宿主机保留计划、执行前值、执行后值和指纹回执，避免 Redis 再次丢失时连恢复记录一起丢失；不记录凭据或请求正文。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 处理 |
+| --- | --- |
+| 容器重建、无挂载、没有加载旧数据 | 核对历史消费与当前计数，不能归因于前端格式化 |
+| 数据目录已有未知文件／容器身份变化 | 停止覆盖，重新确认来源 |
+| AOF 首次写入未完成／状态异常 | 不进入迁移步骤 |
+| 迁移后额度值不同 | 对照备份修复后再恢复写入方 |
+| 同一恢复计划已执行 | 返回原回执，不重复累加 |
+| 周期、键类型、数值或审计不满足前置条件 | 不修改任何计数 |
+
+### 5. Scenarios and Examples
+
+- 正常：历史丢失 100，现有累计 55，增量恢复后为 155；新消费 7 后为 162，重复执行恢复仍为 162。
+- 边界：只调整过昨天的个人日用量，不把该调整混入今天日用量或本周正向累计；周目标值调整则必须单独合并审计。
+- 错误：用历史总额 `HSET` 覆盖现有值，或给已有 Redis 挂空卷重建。正确：确认未计入的增量并原子加回；先迁移完整持久化数据，再重建并对账。
+
+### 6. Tests Required
+
+- 在隔离 Redis 验证增量保留当前值、恢复期间后续消费不丢、幂等重试不重复、错误类型／越界时所有键不变，以及 TTL 与回执一致。
+- 迁移实测需比较全部相关额度哈希字段，并核对 AOF、挂载、NewAPI 健康与实际状态 API；计数恢复记录和迁移备份分开保留。

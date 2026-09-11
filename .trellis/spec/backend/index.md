@@ -26,7 +26,7 @@
 | [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) | JSON 空白心跳、响应提交、重试、错误体、响应头和并发 writer 生命周期 | 已完成 |
 | [Relay 流式 SSE 响应保活契约](./relay-stream-keepalive.md) | 流式响应头等待、正文扫描、SSE comment 保活、idle timeout 和请求体读取边界 | 已完成 |
 | [渠道单用户并发限制契约](./channel-user-concurrency.md) | 渠道配置、Redis/内存租约、HTTP/WebSocket/任务生命周期、429/503 错误与取消传播 | 已完成 |
-| [渠道单用户每日额度契约](./channel-user-daily-quota.md) | 渠道每日软上限、自然日 Redis/内存状态、正向记账、管理 API、个人目标值调整与可视化 | 已完成 |
+| [渠道单用户每日额度契约](./channel-user-daily-quota.md) | 渠道每日软上限、自然日 Redis/内存状态、正向记账、管理 API、个人目标值调整、可视化、Redis 持久化与恢复 | 已完成 |
 | [渠道周期预算与降级契约](./channel-period-budget-fallback.md) | 任意日期/每周规则、池子/整段软额度、个人优先级、一次 HTTP 降级与两仓合同 | 已完成 |
 | [渠道单用户每周额度与个人覆盖契约](./channel-user-weekly-quota-and-overrides.md) | 自然周软上限、日周统一记账、并发/日限/周限个人提额、统一管理 API、缓存与 ai-fund BFF 边界 | 已完成 |
 | [消息审计控制面契约](./message-audit-control-plane.md) | 消息审计跨数据库快速清空、保留水位、AI 重审 Tool 降级与上游上下文边界 | 已完成 |

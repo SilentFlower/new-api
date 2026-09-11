@@ -63,6 +63,11 @@ func preflightChannelPeriodLimits(c *gin.Context, info *relaycommon.RelayInfo) *
 }
 
 func prepareChannelLimitFallback(c *gin.Context, info *relaycommon.RelayInfo, source *model.Channel, original dto.Request) (*model.Channel, *types.NewAPIError) {
+	// Compact 的历史 bridge 和 V2 也使用 /v1/responses，不能仅按路径识别普通请求。
+	// 保留独立透传链路的基础模型查价及后续额度门禁，避免预检生成旧 Compact 价格后缀。
+	if relay.ShouldHandleResponsesCompactPassthrough(info) {
+		return source, nil
+	}
 	policy, err := service.GetChannelPeriodPolicy(c, source.Id)
 	if err != nil {
 		return source, service.ChannelPeriodAPIError(err)

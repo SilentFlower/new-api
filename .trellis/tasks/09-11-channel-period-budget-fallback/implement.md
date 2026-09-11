@@ -149,3 +149,52 @@ npm run build
 - 最终检查修复：配置缓存发布比较 revision；阶梯预检不执行零输入表达式；所有正向累计入口只在资金成功后调用；测试等待异步退款与 WebSocket 性能指标任务收口。
 - 最后新增测试后，Controller 全包 `go test -race ./controller -count=1` 和 `go vet ./controller` 通过（`/tmp/channel-period-controller-final-race.log`）。未改动产品代码的其他包复用前述全量有效证据。
 - 以上不代表真实供应商或生产部署验收；没有使用生产配置、数据或凭据。
+
+## 2026-09-11 上线反馈返修
+
+- [x] 重排本人面板的个人／号池额度分组、同款进度条、规则详情与统计边界。
+- [x] 用实际 Controller 合同验证卡片不重复、旧个人金额保留、缺失周期状态不伪造号池零值、动态刷新与整段限制。
+- [x] 运行 Vue 组件测试及生产构建，并检查宽窄屏显示。
+- [x] 只读核对线上 Redis 启动与持久化、当前计数和消费日志，记录可证实的归零原因。
+
+### 本轮返修验证与运维结果
+
+- Vue 组件共 6 项通过，其中新增本人额度面板 3 项；修改最终 CSS 后生产构建通过。
+- 实际 Chromium 挂载组件，1200px／375px 均无水平溢出，页面无 JS 错误，规则详情可展开；已检查截图并修复来源标签挤压“今日”换行。预览仅使用 Controller 测试数据。
+- 用户追加授权恢复线上计数，并明确保留现有累计。8 个个人／号池日周键已于 13:39:26 增量恢复，逐字段回执及实际 API 核验通过。详见 `research/redis-recovery-20260911.md`。
+- 本次 UI 返修已按用户要求部署，代码尚未提交或推送。Pre-Check hold 已清除，完整复查及最后一轮展示简化的轻量复查均通过；Redis 持久化已获授权并完成，40 个额度哈希、324 个字段迁移前后完全一致，NewAPI 健康检查通过。
+
+- 用户已明确确认“现在执行持久化修复”：允许备份当前 Redis 数据、短暂停止 NewAPI/Redis、挂载 `/root/new-api/redis-data:/data`、开启 AOF 每秒同步，并在恢复服务前验证全部个人／号池计数保持。
+
+- 最新界面反馈：本人面板去掉“规则与统计说明”及额外规则说明文字，只保留额度卡片。详细规则在管理入口；卡片标签和金额的 title 可保留必要来源与统计边界。按用户此前明确要求继续部署最新前端。
+
+### 最终界面部署证据
+
+- 最新反馈要求去掉规则与说明，最终组件只保留两组额度卡片，来源与统计边界移入 title；6 项组件测试及最终构建通过。
+- 生产部署 ID：`47e2ddc0-a7e5-4c97-87b8-d788b72486ac`，Cloudflare Pages 项目 `ai-hub-all`、分支 `main`、环境 `Production`。
+- 部署地址：`https://47e2ddc0.ai-hub-all.pages.dev`；生产页面：`https://ai.hub.flower-cli.com/pools`。
+- 生产 HTML 与本地构建入口一致，`index-DN-upI3p.js`、`Pools-BfQk7eN_.js`、`Pools-5eRFoWtR.css` 及入口 CSS 的 SHA-256 全部匹配；生产号池 JS 不再包含“规则与统计说明”。
+- 本轮只更新 Pages，Worker 沿用首版已部署版本。仓库 HEAD 仍为 ai-fund `2c275bf`，使用已授权的 `--commit-dirty=true` 部署实际工作区构建。
+- Redis 已完成持久化修复与备份；SSH 连接及本地隔离 Redis／预览服务已关闭。原有两仓 pycache 文件哈希保持不变。
+
+### 周期策略页签显示修复
+
+- 用户反馈周期策略下出现个人覆盖，并明确要求快速修正。已将 `PoolLimitAdminModal.vue` 的覆盖表单从兜底 `v-else` 收紧为仅匹配 `activeTab === 'overrides'`；周期策略仍用 `v-show` 保留未保存草稿。
+- 新增真实管理工作区交互回归，原实现明确失败于周期页签含个人覆盖标题；修复后验证独立显示、切换后保留金额草稿及仅进入覆盖页签才请求覆盖列表。happy-dom 挂载到 document.body 后断言实际表单可见性。
+- Vue 组件 7 项通过，生产构建通过（`/tmp/channel-period-tab-fix-build.log`），定向轻量复查和 diff 空白检查通过。原有界面与后端证据继续有效；同步 ai-fund 页签规范。
+- 按本轮既有前端部署授权，Pages 生产分支 main 部署成功：`https://6e20add1.ai-hub-all.pages.dev`（日志 `/tmp/channel-period-tab-fix-deploy.log`）。生产 `/pools` 与部署预览 HTML 均与本地一致；入口、`PoolLimitAdminModal-UWxn0F3d.js`、`Pools-BA8g6F8p.js` 和入口 CSS 的 SHA-256 均一致。
+- 本次仅部署前端；没有修改额度、数据库或重启 NewAPI。代码与规范尚未提交。
+
+### Compact 查价回归修复计划
+
+- 线上请求 `202609110711158911996698268d9d6trJDuw4E` 命中渠道 52、`/v1/responses`，产生 `model_price_error`，未扣费。新增降级入口只排除了 Compact 专用 URL，遗漏同 URL 的历史 bridge 与 V2 HTTP，预检误执行模型映射并生成旧价格后缀。
+- 在独立 `controller/channel_limit_fallback.go` 中按已解析 Compact 模式提前返回，保留既有 Compact 准备、额度门禁和基础模型计费。测试放入独立 `controller/channel_limit_fallback_compact_test.go`，不改原有 Relay 主流程、价格配置或额度数据。
+- 完整 Relay 回归覆盖三个 HTTP Compact 模式：正常透传基础模型、禁用能力在查价前拒绝、额度耗尽不降级；真实模拟上游验证原始请求/响应、唯一账单、基础模型及计数。先在旧实现复现失败，修复后定向、race、构建及关联降级/Compact 回归。
+
+### Compact 回归修复证据
+
+- 修改仅在 `prepareChannelLimitFallback` 开头增加 Compact 模式门禁，使用已有 `relay.ShouldHandleResponsesCompactPassthrough`；原始计费、价格配置、生产额度及 Redis 未改动。
+- 原实现中 bridge/V2 的完整 Relay 测试复现同一 `gpt-6-astra-openai-compact` 缺价格错误（`/tmp/channel-compact-regression-before.log`）；修复后 3 种 HTTP 模式 × 正常／额度耗尽／能力关闭共 9 个场景通过（`/tmp/channel-compact-regression-after.log`）。正常路径验证仅调用来源、原始请求/响应、唯一基础模型消费及钱包扣款；拒绝路径验证零上游调用、零消费和钱包不变。
+- `go test ./controller ./relay ./relay/helper ./relay/common ./middleware -run 'ChannelLimitFallback|ResponsesCompact|BillingModel|MappedUpstreamModel' -count=1` 通过（`/tmp/channel-compact-related-tests.log`）。
+- `go test -race ./controller -run 'ChannelLimitFallback|ResponsesCompact' -count=1` 通过（`/tmp/channel-compact-race.log`）；`go build -o /tmp/new-api-compact-fix .` 和 `git diff --check` 通过。
+- 当前为本地已验证修复，尚未提交／推送或更新生产镜像；后续 NewAPI 发布提交须保留用户要求的 `[build]` 标记。

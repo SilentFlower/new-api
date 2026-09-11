@@ -36,6 +36,7 @@
 - 适配器转换和最终出站 JSON 都必须保留全部客户端字段，例外仅顶层 model 和 false stream 省略。原生结构不一致、参数覆盖、上游会话/文件引用时保守拒绝。不靠厂商或模型名猜测兼容性。
 - OriginModelName 保持原始审计值，RoutingModelName 表示目标，价格仍经 Resolve/FreezeBillingModelName；目标映射计费开关生效。阶梯表达式留到真实输入估算阶段，纯预检只判断分组免费语义。
 - WebSocket/任务/MJ/Compact 等执行同一额度检查，不自动降级。成功日志 `other.admin_info.channel_limit_fallback` 保留来源、目标与原因；亲和性不把备用误记成原路由成功。
+- 降级预检必须先用 `relay.ShouldHandleResponsesCompactPassthrough(info)` 排除全部 Compact 模式，再查询策略或执行模型映射/查价。历史 body bridge 与 V2 HTTP 也使用 `/v1/responses`，只按 URL 排除 `/v1/responses/compact` 会误查旧的 `*-openai-compact` 价格；这些请求继续由独立 Compact 准备和 `prepareMainRelayBilling` 执行基础模型计费、能力及额度门禁。
 
 ### 4. Validation & Error Matrix
 
@@ -64,6 +65,7 @@
 - `service/channel_period_policy_test.go`：两种存储、假期/跨周/到期/遮盖/停用、140 软超额、人工调整隔离、整数原子性、缺口、缓存损坏/迟到发布、结算失败不累计。
 - `model/channel_period_policy_database_test.go`：sqlite + 专用 MYSQL/POSTGRES DSN，重入迁移、CAS、upsert、缺口单调。不得用生产 DSN。
 - `controller/channel_limit_fallback_test.go`：三协议 × 流/非流实际模拟上游、目标价格、唯一日志/钱包扣费、原始 DTO 不污染。
+- `controller/channel_limit_fallback_compact_test.go`：只配置基础模型价格，完整 Relay 覆盖 V1 path、历史 body bridge、V2 HTTP 的正常透传、额度耗尽和能力关闭；断言原始请求/响应、唯一基础模型账单和钱包扣款，拒绝时零上游/消费且不调用备用渠道。
 - `controller/channel_limit_fallback_boundary_test.go`：完整 Relay 的 retry=0、一次/禁用/恢复/目标限制与权限/不可迁移/Compact、并发释放、阶梯预检；WebSocket 回合准备、任务和 Midjourney 在启用降级时仍因池子耗尽拒绝，上游调用和扣款均为零。
 - `controller/channel_period_policy_test.go`：实际管理响应合同与 400/409；ai-fund fixture 来自该响应。
 - React 渠道测试、Vue 真实挂载、Worker 全量；两端 build、NewAPI typecheck/lint/i18n；relaykit 独立 build/vet。
