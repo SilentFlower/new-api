@@ -15,7 +15,8 @@
 - `model/channel_user_period_override.go`：唯一 `(channel_id,user_id,rule_id)`，只保存规则个人整段额度和到期时间。
 - `model/channel_quota_tracking.go`：渠道最近一次计数缺口时间，无金额副本。三表同时加入普通和快速迁移。
 - `GetChannelPeriodStatus(ctx, channel, userID)` 返回权威指标；`CheckSelectedChannelPeriodLimits(c)` 由 Controller 与 Relay 旧统一检查点调用。
-- `RecordChannelUserQuotaUsage(ctx, channelID, userID, quota)` 原子累计限额计数。
+- `RecordChannelUserQuotaUsage(ctx, channelID, userID, quota)` 原子累计限额计数；`RecordChannelUserModelQuotaUsage(ctx, channelID, userID, quota, modelName)` 带客户端原始模型名累计，前者委托后者并传空模型名。relay 入口 `RecordRelayChannelUserQuotaUsage` 传 `relayInfo.OriginModelName`，任务结算传 `task.Properties.OriginModelName`。
+- 内核（`service/channel_budget_plan.go` / `channel_budget_usage.go` / `channel_budget_guard.go`）：`buildChannelBudgetPlan(view, userDaily, userWeekly) channelBudgetPlan` 由 v1 策略与渠道列派生预算行；`resolveChannelBudgetRows(plan, now, modelName)` 解析时段状态、下一切换点与每组生效行；`newChannelBudgetCounter(channelID, row, res)` 把行映射到计数 key；`evaluateChannelBudgets(ctx, channel, userID, modelName)` 产出指标及对应行；`SelectChannelLimitFallback(config, sourceChannelID, block) (dto.ChannelLimitFallback, bool)` 选择降级目标。`resolveChannelPeriodSources` 只是该计划的 v1 五槽位投影，供 v1 预览与旧个人覆盖校验。
 - `GetChannelPeriodPolicy(ctx, channelID)` / `SaveChannelPeriodPolicy(ctx, channelID, input, updatedBy)` 读取或按版本保存策略；本地缓存发布由 `cacheChannelPeriodPolicy(key, data, revision) []byte` 返回选定版本。
 - `controller/relay_attempt.go` 的 `cloneRelayRequest(request dto.Request)` 隔离每次尝试；`service.ChannelLimitFallbackRequestPortable(body []byte) bool` 检查实际协议引用。
 - GET/PUT `/api/channel/:id/period-policy`，POST `/period-policy/preview`，GET `/period-policy/targets`；GET/preview 为 ChannelRead，PUT 为 ChannelOperate。
@@ -29,6 +30,10 @@
 - date_range 使用服务器 time.Local 解释 start_local/end_local，保存 start_at/end_at；weekly 用周一=0 的星期和 HH:mm，支持跨周。区间 `[start,end)`，DST 不存在/歧义边界拒绝；同级同指标相交拒绝。
 - ID/created_at 由服务端建立；名称/额度修改不换计数身份。正在计量的边界不得修改；停用、遮盖期间仍累计，删除转为停用。最多 64 条（含停用），预览不会为新规则保存身份。
 - Redis key 保留旧个人日/周结构，新增池子日/周与规则 occurrence Hash 使用相同渠道 hash tag。Lua 预检所有类型与 int64 溢出后 HINCRBY；内存锁顺序固定为新增计数→个人日→个人周。Redis 故障不得改走内存。
+- 预算行内核：每行 `{id, scope: user|pool, window: daily|weekly|occurrence, schedule_id, models, limit, on_exceed: inherit|reject|fallback, created_at}`。v1 派生 id 固定为 `legacy-user-daily` / `legacy-user-weekly` / `legacy-pool-daily` / `legacy-pool-weekly` 与 `rule-<ruleID>-{user,pool}-{daily,occurrence}`；规则未填写的整段额度生成 `implicit` 行，只保持状态形状，不参与生效。分组键 `(scope, window, models)` 内按个人覆盖 > date_range 时段行 > weekly 时段行 > 无时段行取一条生效，同级后者覆盖前者；不同分组并行约束。计数身份 `(window, occurrence 时的 schedule_id, models)`：无模型的 daily/weekly 身份个人字段在旧 `channel_user_{daily,weekly}_quota` key、`__pool` 在 `channel_pool_{daily,weekly}_quota` key；无模型 occurrence 身份两者同为 `channel_period_quota:{cid}:{ruleID}:{occStart}`；其余身份为 `channel_budget:{cid}:{sha1(window|schedule|models) 前 12 位}:{windowStart}`。规则内日限与无时段日限同身份，只改上限不换计数；修改行的 `models` 即换身份。
+- 累计脚本 ARGV 固定为 `(userID, delta, now)`，其后每个 KEY 依次携带 `(expireAt, since, poolFlag)`；`poolFlag=1` 时同时累加 `__pool` 并 `HSETNX __since`。停用规则的 occurrence 仍计数但不展示、不拦截；请求前检查只解析命中原始模型名的行，管理端展示传空模型名取全部行。
+- 旧错误码只属于 `scope=user` 且 `models` 为空的行（daily → `channel_user_daily_quota_exceeded`，weekly → `channel_user_weekly_quota_exceeded`）；按模型的行超限统一返回 `channel_period_quota_exceeded`。降级动作按“行级 `on_exceed` 优先、`inherit` 回落策略级 `fallback`”选择，行级 `channel_id=0` 表示同渠道换模型，此时目标渠道为来源渠道。
+- 阶段一契约冻结：指标 JSON 不新增字段，`period` 仍输出 `custom`；`CheckSelectedChannelPeriodLimits` 保留 revision=0 早返回并继续把渠道级个人日/周上限写回 `ContextKeyChannelUserDailyQuotaLimit/Weekly`；`relay/channel_user_{daily,weekly}_quota.go` 与降级预检里的旧检查保留，因为降级目标渠道可能没有策略。这些删除在 v2 迁移完成后进行。
 - 请求仅检查 `used >= limit`，不预占。正向消费按资金结算成功时刻进入所有当时区间；零额、退款、负差额忽略。文本/音频/工具/任务/MJ 的调用必须在资金成功分支。人工修改个人 used 不改变池子/整段、账单或其他人。
 - 配置缓存 5 秒，本地最多 4096 项；Redis 发布比较 revision，迟到的旧实例不能覆盖新版本。缓存保存失败返回 committed=true；TTL 期间仍可能存在旧配置，不宣称跨存储强一致。
 - 策略缓存的进程级锁只保护本地 map 读取和发布，不跨 Redis GET/Lua 或数据库查询、保存。锁外查询可能迟到，本地发布也必须比较 revision；缓存仍持有更高版本时返回该版本，不覆盖为旧值。数据库保存继续以 revision CAS 防止并发编辑覆盖。
@@ -73,6 +78,7 @@
 ### 6. Tests Required
 
 - `service/channel_period_policy_test.go`：两种存储、假期/跨周/到期/遮盖/停用、140 软超额、人工调整隔离、整数原子性、缺口、缓存损坏/迟到发布、结算失败不累计。
+- `service/channel_budget_plan_test.go`：v1 派生身份的 userKey/poolKey 与旧 key 逐字节一致、规则内日限与无时段日限同身份、implicit 行不生效、同组优先级、`next` 切换点、计数身份去重顺序；模型行仅精确命中且与渠道级行并行、`channel_budget` key 与 12 位哈希；`SelectChannelLimitFallback` 的 nil block / inherit / reject / 同渠道 / 指定渠道；同一结算序列在内存与 Redis 下指标相等。
 - `service/channel_period_policy_concurrency_test.go`：用显式屏障暂停存储访问，验证不同渠道 Redis 读取不互相阻塞；内存/Redis 均验证旧数据库快照恢复后返回新版且不覆盖新版缓存，并执行 race 检查。
 - `service/channel_limit_fallback_portability_test.go`：三协议工具 Schema、结构化输出、metadata、Claude 工具调用参数可迁移；真实会话、文件、附件、工具资源和密文引用仍不可迁移。
 - `model/channel_period_policy_database_test.go`：sqlite + 专用 MYSQL/POSTGRES DSN，重入迁移、CAS、upsert、缺口单调。不得用生产 DSN。

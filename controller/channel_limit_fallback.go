@@ -85,7 +85,13 @@ func prepareChannelLimitFallback(c *gin.Context, info *relaycommon.RelayInfo, so
 	if apiErr == nil {
 		return source, nil
 	}
-	if apiErr.StatusCode != http.StatusTooManyRequests || !policy.Config.Fallback.Enabled || info.LimitFallback != nil || info.Billing != nil || c.GetBool("channel_limit_upstream_started") || c.GetBool("channel_limit_fallback_used") || info.SendResponseCount > 0 {
+	var block *service.ChannelPeriodBlock
+	if value, ok := c.Get("channel_period_block"); ok {
+		block, _ = value.(*service.ChannelPeriodBlock)
+	}
+	// 触发行自带的降级动作优先，未配置时回落策略级默认动作。
+	selected, allowed := service.SelectChannelLimitFallback(policy.Config, source.Id, block)
+	if apiErr.StatusCode != http.StatusTooManyRequests || !allowed || info.LimitFallback != nil || info.Billing != nil || c.GetBool("channel_limit_upstream_started") || c.GetBool("channel_limit_fallback_used") || info.SendResponseCount > 0 {
 		return source, apiErr
 	}
 	if _, pinned := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId); pinned {
@@ -99,7 +105,7 @@ func prepareChannelLimitFallback(c *gin.Context, info *relaycommon.RelayInfo, so
 	if err != nil || !service.ChannelLimitFallbackRequestPortable(body) {
 		return source, apiErr
 	}
-	target, targetErr := service.ResolveChannelLimitFallbackTarget(c, policy.Config.Fallback)
+	target, targetErr := service.ResolveChannelLimitFallbackTarget(c, selected)
 	if targetErr != nil {
 		return source, targetErr
 	}
@@ -107,11 +113,9 @@ func prepareChannelLimitFallback(c *gin.Context, info *relaycommon.RelayInfo, so
 	if err != nil {
 		return source, types.NewError(err, types.ErrorCodeInvalidRequest, types.ErrOptionWithSkipRetry())
 	}
-	fallback := &relaycommon.ChannelLimitFallbackInfo{SourceChannelID: source.Id, TargetChannelID: target.Id, OriginalModel: info.OriginModelName, TargetModel: policy.Config.Fallback.Model}
-	if value, ok := c.Get("channel_period_block"); ok {
-		if block, valid := value.(*service.ChannelPeriodBlock); valid {
-			fallback.Scope, fallback.Period, fallback.RuleID = block.Metric.Scope, block.Metric.Period, block.Metric.Source.RuleID
-		}
+	fallback := &relaycommon.ChannelLimitFallbackInfo{SourceChannelID: source.Id, TargetChannelID: target.Id, OriginalModel: info.OriginModelName, TargetModel: selected.Model}
+	if block != nil {
+		fallback.Scope, fallback.Period, fallback.RuleID = block.Metric.Scope, block.Metric.Period, block.Metric.Source.RuleID
 	}
 	c.Set("channel_limit_fallback_used", true)
 	info.LimitFallback, info.RoutingModelName = fallback, fallback.TargetModel

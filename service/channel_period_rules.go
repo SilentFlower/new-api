@@ -213,43 +213,34 @@ func channelPeriodOccurrence(rule dto.ChannelPeriodRule, now time.Time) (channel
 	return result, false, nil
 }
 
+// resolveChannelPeriodSources 是预算计划的 v1 投影：五个固定指标槽位的生效额度与来源。
+// 仅供 v1 预览与旧个人覆盖校验使用；判定与计数直接基于预算行。
 func resolveChannelPeriodSources(config dto.ChannelPeriodPolicyConfig, userDaily int64, now time.Time) (map[string]int64, map[string]dto.ChannelPeriodSource, []channelRuleOccurrence, int64, error) {
+	plan := buildChannelBudgetPlan(dto.ChannelPeriodPolicyView{Config: config}, userDaily, 0)
+	res, err := resolveChannelBudgetRows(plan, now, "")
+	if err != nil {
+		return nil, nil, nil, 0, err
+	}
 	limits := map[string]int64{"user_daily": userDaily, "pool_daily": config.PoolDailyQuotaLimit, "pool_weekly": config.PoolWeeklyQuotaLimit, "user_custom": 0, "pool_custom": 0}
-	sources := make(map[string]dto.ChannelPeriodSource)
-	for key := range limits {
-		sources[key] = dto.ChannelPeriodSource{Kind: "default"}
+	groups := map[string]string{
+		"user_daily":  channelBudgetScopeUser + "|" + channelBudgetWindowDaily + "|",
+		"pool_daily":  channelBudgetScopePool + "|" + channelBudgetWindowDaily + "|",
+		"pool_weekly": channelBudgetScopePool + "|" + channelBudgetWindowWeekly + "|",
+		"user_custom": channelBudgetScopeUser + "|" + channelBudgetWindowOccurrence + "|",
+		"pool_custom": channelBudgetScopePool + "|" + channelBudgetWindowOccurrence + "|",
+	}
+	sources := make(map[string]dto.ChannelPeriodSource, len(groups))
+	for key, group := range groups {
+		sources[key] = dto.ChannelPeriodSource{Kind: channelBudgetSourceDefault}
+		row, ok := res.effectiveRow(plan, group)
+		if !ok || row.ScheduleID == "" {
+			continue
+		}
+		limits[key], sources[key] = row.Limit, res.source(row)
 	}
 	var active []channelRuleOccurrence
-	var next int64
-	// 后覆盖只作用于明确填写的指标，不把整个低优先级规则抹掉。
-	for _, kind := range []string{"weekly", "date_range"} {
-		for _, rule := range config.Rules {
-			if rule.Kind != kind || !rule.Enabled {
-				continue
-			}
-			occ, matches, err := channelPeriodOccurrence(rule, now)
-			if err != nil {
-				return nil, nil, nil, 0, err
-			}
-			boundary := occ.start.Unix()
-			if matches {
-				boundary = occ.end.Unix()
-			}
-			if boundary > now.Unix() && (next == 0 || boundary < next) {
-				next = boundary
-			}
-			if !matches {
-				continue
-			}
-			active = append(active, occ)
-			for key, value := range map[string]*int64{"user_daily": rule.UserDailyQuotaLimit, "pool_daily": rule.PoolDailyQuotaLimit, "user_custom": rule.UserPeriodQuotaLimit, "pool_custom": rule.PoolPeriodQuotaLimit} {
-				if value == nil {
-					continue
-				}
-				limits[key] = *value
-				sources[key] = dto.ChannelPeriodSource{Kind: kind, RuleID: rule.ID, RuleName: rule.Name, StartAt: occ.start.Unix(), EndAt: occ.end.Unix()}
-			}
-		}
+	for _, state := range res.activeSchedules {
+		active = append(active, state.occ)
 	}
-	return limits, sources, active, next, nil
+	return limits, sources, active, res.next, nil
 }

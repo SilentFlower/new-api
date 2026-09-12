@@ -123,7 +123,7 @@ func TestChannelPeriodSoftLimitAndAtomicFailure(t *testing.T) {
 			for _, quota := range []int{0, -30} {
 				require.NoError(t, RecordChannelUserQuotaUsage(ctx, channel.Id, 7, quota))
 			}
-			key := channelPeriodCounters(channel.Id, now, nil)[0].key
+			key := newChannelBudgetCounter(channel.Id, channelBudgetRow{ID: legacyPoolDailyBudgetID, Scope: channelBudgetScopePool, Window: channelBudgetWindowDaily}, channelBudgetResolution{now: now}).poolKey
 			if mode == "redis" {
 				require.NoError(t, common.RDB.HSet(ctx, key, "__pool", math.MaxInt64).Err())
 			} else {
