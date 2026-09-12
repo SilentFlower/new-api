@@ -20,6 +20,7 @@ import { useTranslation } from 'react-i18next'
 
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
+import { channelPeriodMetricLabel } from '../../lib/channel-period-label'
 import type {
   ChannelPeriodSource,
   ChannelPeriodStatus,
@@ -39,12 +40,12 @@ export function ChannelPeriodSourceLabel(props: {
   return (
     <>
       {labels[props.source.kind]}
-      {props.source.rule_name ? ` · ${props.source.rule_name}` : ''}
+      {props.source.schedule_name ? ` · ${props.source.schedule_name}` : ''}
     </>
   )
 }
 
-/** @param props 权威周期状态。 @returns 个人、池子与整段指标及统计起点。 */
+/** @param props 权威周期状态。 @returns 每条预算行对当前用户的指标。 */
 export function ChannelPeriodMetrics(props: { status?: ChannelPeriodStatus }) {
   const { t } = useTranslation()
   if (!props.status) {
@@ -53,11 +54,6 @@ export function ChannelPeriodMetrics(props: { status?: ChannelPeriodStatus }) {
         {t('Period status is not available on this server.')}
       </p>
     )
-  }
-  const periods = {
-    daily: t('Daily quota'),
-    weekly: t('Weekly quota'),
-    custom: t('Whole-period quota'),
   }
   return (
     <section
@@ -76,20 +72,22 @@ export function ChannelPeriodMetrics(props: { status?: ChannelPeriodStatus }) {
       )}
       {props.status.next_change_at > 0 && (
         <p>
-          {t('Next rule change: {{time}}', {
+          {t('Next schedule change: {{time}}', {
             time: formatTimestampToDate(props.status.next_change_at),
           })}
         </p>
       )}
+      {props.status.metrics.length === 0 && (
+        <p className='text-muted-foreground'>{t('No budgets configured.')}</p>
+      )}
       <div className='grid gap-3 sm:grid-cols-2'>
         {props.status.metrics.map((metric) => (
           <div
-            key={`${metric.scope}:${metric.period}:${metric.source.rule_id ?? ''}`}
+            key={`${metric.budget_id}:${metric.scope}:${metric.period}`}
             className='space-y-1 rounded-lg border p-3'
           >
             <div className='font-medium'>
-              {metric.scope === 'pool' ? t('Pool') : t('User')} ·{' '}
-              {periods[metric.period]}
+              {channelPeriodMetricLabel(metric, t)}
             </div>
             <div>
               {formatQuota(metric.used)} /{' '}
@@ -104,7 +102,7 @@ export function ChannelPeriodMetrics(props: { status?: ChannelPeriodStatus }) {
             <div className='text-muted-foreground'>
               <ChannelPeriodSourceLabel source={metric.source} />
               {!metric.enforced &&
-                ` · ${t('Overridden by a higher-priority rule')}`}
+                ` · ${t('Overridden by a higher-priority schedule')}`}
             </div>
             <div>
               {t('Resets at {{time}}', {

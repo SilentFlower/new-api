@@ -111,8 +111,7 @@ func TestRecordRelayChannelUserDailyQuotaTracksWhenLimitDisabled(t *testing.T) {
 	relayInfo := &relaycommon.RelayInfo{
 		UserId: 123,
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelId:                  80,
-			ChannelUserDailyQuotaLimit: 0,
+			ChannelId: 80,
 		},
 	}
 

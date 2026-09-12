@@ -33,14 +33,14 @@ import {
 import {
   channelPeriodErrorKey,
   getChannelPeriodPolicy,
-  saveChannelPeriodOverride,
+  saveChannelBudgetOverride,
 } from '../../period-api'
 import { MAX_PERIOD_QUOTA } from '../../period-types'
 import type { ChannelUserLimitStatus } from '../../types'
+import { ChannelPeriodAmount } from './channel-period-amount'
 import { ChannelPeriodMetrics } from './channel-period-metrics'
-import { ChannelPeriodAmount } from './channel-period-policy-panel'
 
-/** @param props 当前用户的权威状态、权限与刷新回调。 @returns 整段特批编辑。 */
+/** @param props 当前用户的权威状态、权限与刷新回调。 @returns 按预算行的个人提额编辑。 */
 export function ChannelPeriodOverrideEditor(props: {
   status: ChannelUserLimitStatus
   canOperate: boolean
@@ -54,26 +54,28 @@ export function ChannelPeriodOverrideEditor(props: {
     queryFn: () => getChannelPeriodPolicy(channelId),
     retry: false,
   })
-  const [ruleId, setRuleId] = useState('')
+  const [budgetId, setBudgetId] = useState('')
   const [amount, setAmount] = useState<number | null>(null)
   const [expires, setExpires] = useState('')
   const [stale, setStale] = useState(false)
   const [error, setError] = useState('')
-  const rules =
-    query.data?.config.rules.filter(
-      (rule) => rule.id && (rule.user_period_quota_limit ?? 0) > 0
+  const rows =
+    query.data?.config.budgets.filter(
+      (row) => row.id && row.scope === 'user' && row.limit > 0
     ) ?? []
   const mutation = useMutation({
-    mutationFn: (
-      input: { user_period_quota_limit: number; expires_at: number } | null
-    ) =>
-      saveChannelPeriodOverride(channelId, ruleId, props.status.user.id, input),
+    mutationFn: (input: { limit: number; expires_at: number } | null) =>
+      saveChannelBudgetOverride(
+        channelId,
+        budgetId,
+        props.status.user.id,
+        input
+      ),
   })
   const submit = (remove: boolean) => {
-    if (!ruleId || stale || mutation.isPending) return
+    if (!budgetId || stale || mutation.isPending) return
     const expiration = expires ? parseTimestampFromInput(expires) : 0
-    const base =
-      rules.find((rule) => rule.id === ruleId)?.user_period_quota_limit ?? 0
+    const base = rows.find((row) => row.id === budgetId)?.limit ?? 0
     if (
       !remove &&
       (amount === null ||
@@ -84,15 +86,13 @@ export function ChannelPeriodOverrideEditor(props: {
         (expires && expiration <= Date.now() / 1000))
     ) {
       setError(
-        t('The override must exceed the rule limit and expire in the future.')
+        t('The override must exceed the budget limit and expire in the future.')
       )
       return
     }
     setError('')
     mutation.mutate(
-      remove
-        ? null
-        : { user_period_quota_limit: amount ?? 0, expires_at: expiration },
+      remove ? null : { limit: amount ?? 0, expires_at: expiration },
       {
         onSuccess: () => {
           props.onChanged()
@@ -109,10 +109,10 @@ export function ChannelPeriodOverrideEditor(props: {
     <section className='border-t pt-3'>
       <FieldGroup>
         <ChannelPeriodMetrics status={props.status.period_limits} />
-        <h4 className='font-medium'>{t('Whole-period personal override')}</h4>
+        <h4 className='font-medium'>{t('Personal budget override')}</h4>
         <p className='text-muted-foreground text-sm'>
           {t(
-            'This override only changes the selected rule for this user. Pool and other limits still apply.'
+            'This override only raises the selected budget for this user. Pool and other budgets still apply.'
           )}
         </p>
         {query.isError && (
@@ -133,15 +133,14 @@ export function ChannelPeriodOverrideEditor(props: {
         >
           <Field>
             <FieldLabel className='grid gap-1 text-sm'>
-              {t('Time rule')}
+              {t('Budget')}
               <NativeSelect
-                value={ruleId}
+                value={budgetId}
                 onChange={(event) => {
                   const id = event.target.value
-                  setRuleId(id)
+                  setBudgetId(id)
                   const metric = props.status.period_limits?.metrics.find(
-                    (item) =>
-                      item.scope === 'user' && item.source.rule_id === id
+                    (item) => item.budget_id === id
                   )
                   setAmount(metric?.override_limit ?? null)
                   setExpires(
@@ -152,12 +151,11 @@ export function ChannelPeriodOverrideEditor(props: {
                 }}
               >
                 <NativeSelectOption value='' disabled>
-                  {t('Select a rule')}
+                  {t('Select a budget')}
                 </NativeSelectOption>
-                {rules.map((rule) => (
-                  <NativeSelectOption key={rule.id} value={rule.id}>
-                    {rule.name} ·{' '}
-                    {formatQuota(rule.user_period_quota_limit ?? 0)}
+                {rows.map((row) => (
+                  <NativeSelectOption key={row.id} value={row.id}>
+                    {row.name} · {formatQuota(row.limit)}
                   </NativeSelectOption>
                 ))}
               </NativeSelect>
@@ -184,15 +182,15 @@ export function ChannelPeriodOverrideEditor(props: {
           <div className='flex flex-wrap gap-2'>
             <Button
               type='button'
-              disabled={!ruleId}
+              disabled={!budgetId}
               onClick={() => submit(false)}
             >
-              {t('Save whole-period override')}
+              {t('Save budget override')}
             </Button>
             <Button
               type='button'
               variant='outline'
-              disabled={!ruleId}
+              disabled={!budgetId}
               onClick={() => submit(true)}
             >
               {t('Revoke selected override')}

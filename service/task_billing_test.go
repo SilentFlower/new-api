@@ -553,8 +553,7 @@ func TestChargeViolationFeeRecordsChannelUserDailyQuota(t *testing.T) {
 			GroupRatioInfo: types.GroupRatioInfo{GroupRatio: 1},
 		},
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelId:                  channelID,
-			ChannelUserDailyQuotaLimit: feeQuota * 2,
+			ChannelId: channelID,
 		},
 	}
 	apiErr := relaykittypes.NewOpenAIError(

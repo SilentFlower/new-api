@@ -60,8 +60,6 @@ export const channelSchema = z.object({
   priority: z.number().nullish(),
   auto_ban: z.number().nullish(),
   user_concurrency_limit: z.number().nullish(),
-  user_daily_quota_limit: z.number().nullish(),
-  user_weekly_quota_limit: z.number().nullish(),
   other_info: z.string().default(''),
   tag: z.string().nullish(),
   setting: z.string().nullish(),
@@ -234,22 +232,6 @@ export interface ChannelOpsResponse {
   }
 }
 
-/** 渠道用户当日额度列表项。 */
-export interface ChannelUserDailyQuotaItem {
-  user_id: number
-  username: string
-  display_name: string
-  used_quota: number
-  base_limit?: number
-  override_limit?: number
-  override_expires_at?: number
-  limit: number
-  remaining_quota: number
-}
-
-/** 渠道用户本周额度列表项。 */
-export type ChannelUserWeeklyQuotaItem = ChannelUserDailyQuotaItem
-
 /** 渠道用户当前并发列表项。 */
 export interface ChannelUserConcurrencyItem {
   user_id: number
@@ -286,8 +268,6 @@ export interface ChannelUserLimitStatus {
   channel_id: number
   user: ChannelUserLimitUser
   concurrency: ChannelUserLimitMetric
-  daily_quota: ChannelUserLimitMetric
-  weekly_quota: ChannelUserLimitMetric
   override_active: boolean
   override_expires_at: number
 }
@@ -295,8 +275,6 @@ export interface ChannelUserLimitStatus {
 /** 管理员提交的整条个人覆盖。 */
 export interface ChannelUserLimitOverrideInput {
   user_concurrency_limit: number | null
-  user_daily_quota_limit: number | null
-  user_weekly_quota_limit: number | null
   expires_at: number
 }
 
@@ -304,11 +282,7 @@ export interface ChannelUserLimitOverrideInput {
 export interface ChannelUserLimitOverrideItem {
   user: ChannelUserLimitUser
   user_concurrency_limit?: number
-  user_daily_quota_limit?: number
-  user_weekly_quota_limit?: number
   effective_concurrency_limit: number
-  effective_daily_quota_limit: number
-  effective_weekly_quota_limit: number
   expires_at: number
 }
 
@@ -520,8 +494,6 @@ export interface ChannelFormData {
   test_model?: string
   auto_ban?: number
   user_concurrency_limit?: number
-  user_daily_quota_limit?: number
-  user_weekly_quota_limit?: number
   status: number
   status_code_mapping?: string
   tag?: string

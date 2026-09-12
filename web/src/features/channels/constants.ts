@@ -289,8 +289,6 @@ export const DEFAULT_CHANNEL_VALUES = {
   priority: 0,
   weight: 0,
   user_concurrency_limit: 0,
-  user_daily_quota_limit: 0,
-  user_weekly_quota_limit: 0,
   auto_ban: 1,
   remark: '',
 } as const

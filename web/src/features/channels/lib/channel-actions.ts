@@ -54,20 +54,6 @@ export const channelsQueryKeys = {
     [...channelsQueryKeys.lists(), params] as const,
   details: () => [...channelsQueryKeys.all, 'detail'] as const,
   detail: (id: number) => [...channelsQueryKeys.details(), id] as const,
-  userDailyQuota: (id: number, page: number, pageSize: number) =>
-    [
-      ...channelsQueryKeys.detail(id),
-      'user-daily-quota',
-      page,
-      pageSize,
-    ] as const,
-  userWeeklyQuota: (id: number, page: number, pageSize: number) =>
-    [
-      ...channelsQueryKeys.detail(id),
-      'user-weekly-quota',
-      page,
-      pageSize,
-    ] as const,
   userConcurrency: (id: number, page: number, pageSize: number) =>
     [
       ...channelsQueryKeys.detail(id),
@@ -79,6 +65,13 @@ export const channelsQueryKeys = {
     [
       ...channelsQueryKeys.detail(id),
       'user-limit-overrides',
+      page,
+      pageSize,
+    ] as const,
+  budgetUserOverrides: (id: number, page: number, pageSize: number) =>
+    [
+      ...channelsQueryKeys.detail(id),
+      'budget-user-overrides',
       page,
       pageSize,
     ] as const,

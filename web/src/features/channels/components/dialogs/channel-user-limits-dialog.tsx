@@ -71,55 +71,42 @@ import {
   ADMIN_PERMISSION_RESOURCES,
   hasPermission,
 } from '@/lib/admin-permissions'
-import { getCurrencyLabel } from '@/lib/currency'
 import {
   formatQuota,
   formatTimestampForInput,
   formatTimestampToDate,
-  getEditableQuotaStep,
-  parseQuotaFromDollars,
   parseTimestampFromInput,
-  quotaUnitsToEditableAmount,
 } from '@/lib/format'
 import { useAuthStore } from '@/stores/auth-store'
 
 import {
   deleteChannelUserLimitOverride,
   getChannelUserConcurrency,
-  getChannelUserDailyQuota,
   getChannelUserLimitOverrides,
   getChannelUserLimitStatus,
-  getChannelUserWeeklyQuota,
   searchChannelUserLimitUsers,
-  setChannelUserDailyQuota,
   setChannelUserLimitOverride,
-  setChannelUserWeeklyQuota,
 } from '../../api'
 import { channelsQueryKeys } from '../../lib'
+import {
+  channelPeriodErrorKey,
+  getChannelBudgetUserOverrides,
+} from '../../period-api'
 import type {
   Channel,
-  ChannelUserDailyQuotaItem,
   ChannelUserLimitStatus,
   ChannelUserLimitUser,
-  ChannelUserWeeklyQuotaItem,
 } from '../../types'
+import { ChannelBudgetUsageTab } from './channel-budget-usage'
 import { ChannelPeriodOverrideEditor } from './channel-period-override-editor'
 import { ChannelPeriodPolicyPanel } from './channel-period-policy-panel'
 
 const PAGE_SIZE = 20
-const MAX_QUOTA = 2147483647
 
 type ChannelUserLimitsDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
   channel: Channel | null
-}
-
-type QuotaPeriod = 'daily' | 'weekly'
-
-type QuotaAdjustment = {
-  period: QuotaPeriod
-  item: ChannelUserDailyQuotaItem | ChannelUserWeeklyQuotaItem
 }
 
 function UserIdentity(props: {
@@ -235,13 +222,10 @@ function OverrideBadge(props: {
   overrideLimit?: number
   effectiveLimit: number
   expiresAt: number
-  quota: boolean
 }) {
   const { t } = useTranslation()
-  const formatLimit = (value: number) => {
-    if (value <= 0) return t('Unlimited')
-    return props.quota ? formatQuota(value) : String(value)
-  }
+  const formatLimit = (value: number) =>
+    value <= 0 ? t('Unlimited') : String(value)
   return (
     <div className='space-y-1 text-sm'>
       <div>{formatLimit(props.effectiveLimit)}</div>
@@ -265,7 +249,7 @@ function OverrideBadge(props: {
 }
 
 /**
- * 展示并管理渠道用户日限、周限、并发与个人覆盖。
+ * 展示并管理渠道预算策略、按行用量、并发与个人覆盖。
  *
  * @param props Dialog 开关、当前渠道和关闭回调。
  * @returns 渠道用户限制状态 Dialog。
@@ -274,22 +258,16 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.auth.user)
-  const [activeTab, setActiveTab] = useState('daily-quota')
-  const [dailyPage, setDailyPage] = useState(1)
-  const [weeklyPage, setWeeklyPage] = useState(1)
+  const [activeTab, setActiveTab] = useState('budget-usage')
   const [concurrencyPage, setConcurrencyPage] = useState(1)
   const [overridePage, setOverridePage] = useState(1)
+  const [budgetOverridePage, setBudgetOverridePage] = useState(1)
   const [searchKeyword, setSearchKeyword] = useState('')
   const [searchInput, setSearchInput] = useState('')
-  const [quotaAdjustment, setQuotaAdjustment] =
-    useState<QuotaAdjustment | null>(null)
-  const [adjustedAmount, setAdjustedAmount] = useState('')
   const [overrideUser, setOverrideUser] = useState<ChannelUserLimitUser | null>(
     null
   )
   const [concurrencyOverride, setConcurrencyOverride] = useState('')
-  const [dailyOverride, setDailyOverride] = useState('')
-  const [weeklyOverride, setWeeklyOverride] = useState('')
   const [hasExpiration, setHasExpiration] = useState(false)
   const [expirationInput, setExpirationInput] = useState('')
   const channelId = props.channel?.id ?? 0
@@ -301,43 +279,18 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
 
   useEffect(() => {
     if (!props.open) {
-      setQuotaAdjustment(null)
-      setAdjustedAmount('')
       setOverrideUser(null)
       return
     }
-    setActiveTab('daily-quota')
-    setDailyPage(1)
-    setWeeklyPage(1)
+    setActiveTab('budget-usage')
     setConcurrencyPage(1)
     setOverridePage(1)
+    setBudgetOverridePage(1)
     setSearchInput('')
     setSearchKeyword('')
     setOverrideUser(null)
   }, [props.open, channelId])
 
-  const dailyQuery = useQuery({
-    queryKey: channelsQueryKeys.userDailyQuota(channelId, dailyPage, PAGE_SIZE),
-    queryFn: () =>
-      getChannelUserDailyQuota(channelId, {
-        p: dailyPage,
-        page_size: PAGE_SIZE,
-      }),
-    enabled: props.open && activeTab === 'daily-quota' && channelId > 0,
-  })
-  const weeklyQuery = useQuery({
-    queryKey: channelsQueryKeys.userWeeklyQuota(
-      channelId,
-      weeklyPage,
-      PAGE_SIZE
-    ),
-    queryFn: () =>
-      getChannelUserWeeklyQuota(channelId, {
-        p: weeklyPage,
-        page_size: PAGE_SIZE,
-      }),
-    enabled: props.open && activeTab === 'weekly-quota' && channelId > 0,
-  })
   const concurrencyQuery = useQuery({
     queryKey: channelsQueryKeys.userConcurrency(
       channelId,
@@ -362,6 +315,19 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
     queryFn: () =>
       getChannelUserLimitOverrides(channelId, {
         p: overridePage,
+        page_size: PAGE_SIZE,
+      }),
+    enabled: props.open && activeTab === 'overrides' && channelId > 0,
+  })
+  const budgetOverridesQuery = useQuery({
+    queryKey: channelsQueryKeys.budgetUserOverrides(
+      channelId,
+      budgetOverridePage,
+      PAGE_SIZE
+    ),
+    queryFn: () =>
+      getChannelBudgetUserOverrides(channelId, {
+        p: budgetOverridePage,
         page_size: PAGE_SIZE,
       }),
     enabled: props.open && activeTab === 'overrides' && channelId > 0,
@@ -402,18 +368,6 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
         ? ''
         : String(status.concurrency.override_limit)
     )
-    setDailyOverride(
-      status.daily_quota.base_limit <= 0 ||
-        status.daily_quota.override_limit === undefined
-        ? ''
-        : String(quotaUnitsToEditableAmount(status.daily_quota.override_limit))
-    )
-    setWeeklyOverride(
-      status.weekly_quota.base_limit <= 0 ||
-        status.weekly_quota.override_limit === undefined
-        ? ''
-        : String(quotaUnitsToEditableAmount(status.weekly_quota.override_limit))
-    )
     setHasExpiration(status.override_expires_at > 0)
     setExpirationInput(
       status.override_expires_at > 0
@@ -424,12 +378,6 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
 
   useEffect(() => {
     const totals = [
-      { page: dailyPage, total: dailyQuery.data?.total, setPage: setDailyPage },
-      {
-        page: weeklyPage,
-        total: weeklyQuery.data?.total,
-        setPage: setWeeklyPage,
-      },
       {
         page: concurrencyPage,
         total: concurrencyQuery.data?.total,
@@ -440,6 +388,11 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
         total: overridesQuery.data?.total,
         setPage: setOverridePage,
       },
+      {
+        page: budgetOverridePage,
+        total: budgetOverridesQuery.data?.total,
+        setPage: setBudgetOverridePage,
+      },
     ]
     for (const item of totals) {
       if (item.total === undefined) continue
@@ -447,114 +400,41 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
       if (item.page > lastPage) item.setPage(lastPage)
     }
   }, [
+    budgetOverridePage,
+    budgetOverridesQuery.data?.total,
     concurrencyPage,
     concurrencyQuery.data?.total,
-    dailyPage,
-    dailyQuery.data?.total,
     overridePage,
     overridesQuery.data?.total,
-    weeklyPage,
-    weeklyQuery.data?.total,
   ])
-
-  const adjustedQuota = useMemo(() => {
-    if (adjustedAmount.trim() === '') return null
-    const amount = Number(adjustedAmount)
-    if (!Number.isFinite(amount) || amount < 0) return null
-    const quota = parseQuotaFromDollars(amount)
-    return quota >= 0 && quota <= MAX_QUOTA ? quota : null
-  }, [adjustedAmount])
-
-  const quotaAdjustmentMutation = useMutation({
-    mutationFn: async () => {
-      if (!quotaAdjustment || adjustedQuota === null) return
-      const response =
-        quotaAdjustment.period === 'daily'
-          ? await setChannelUserDailyQuota(
-              channelId,
-              quotaAdjustment.item.user_id,
-              adjustedQuota
-            )
-          : await setChannelUserWeeklyQuota(
-              channelId,
-              quotaAdjustment.item.user_id,
-              adjustedQuota
-            )
-      if (!response.success) {
-        throw new Error(response.message || t('Failed to adjust quota usage'))
-      }
-    },
-    onSuccess: async () => {
-      toast.success(t('Quota usage updated'))
-      setQuotaAdjustment(null)
-      setAdjustedAmount('')
-      await queryClient.invalidateQueries({
-        queryKey: channelsQueryKeys.detail(channelId),
-      })
-    },
-    onError: (error) => {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : t('Failed to adjust quota usage')
-      )
-    },
-  })
 
   const overridePayload = useMemo(() => {
     const status = overrideStatusQuery.data
     if (!status) return null
     const concurrency = concurrencyOverride.trim()
-    const daily = dailyOverride.trim()
-    const weekly = weeklyOverride.trim()
     const parsedConcurrency = concurrency === '' ? null : Number(concurrency)
-    const parsedDaily =
-      daily === '' ? null : parseQuotaFromDollars(Number(daily))
-    const parsedWeekly =
-      weekly === '' ? null : parseQuotaFromDollars(Number(weekly))
     const expiresAt = hasExpiration
       ? parseTimestampFromInput(expirationInput)
       : 0
     if (
-      (parsedConcurrency !== null &&
-        (status.concurrency.base_limit <= 0 ||
-          !Number.isInteger(parsedConcurrency) ||
-          parsedConcurrency <= status.concurrency.base_limit ||
-          parsedConcurrency > 1000)) ||
-      (parsedDaily !== null &&
-        (status.daily_quota.base_limit <= 0 ||
-          !Number.isFinite(parsedDaily) ||
-          parsedDaily <= status.daily_quota.base_limit ||
-          parsedDaily > MAX_QUOTA)) ||
-      (parsedWeekly !== null &&
-        (status.weekly_quota.base_limit <= 0 ||
-          !Number.isFinite(parsedWeekly) ||
-          parsedWeekly <= status.weekly_quota.base_limit ||
-          parsedWeekly > MAX_QUOTA)) ||
+      parsedConcurrency === null ||
+      status.concurrency.base_limit <= 0 ||
+      !Number.isInteger(parsedConcurrency) ||
+      parsedConcurrency <= status.concurrency.base_limit ||
+      parsedConcurrency > 1000 ||
       (hasExpiration && expiresAt <= Math.floor(Date.now() / 1000))
-    ) {
-      return null
-    }
-    if (
-      parsedConcurrency === null &&
-      parsedDaily === null &&
-      parsedWeekly === null
     ) {
       return null
     }
     return {
       user_concurrency_limit: parsedConcurrency,
-      user_daily_quota_limit: parsedDaily,
-      user_weekly_quota_limit: parsedWeekly,
       expires_at: expiresAt,
     }
   }, [
     concurrencyOverride,
-    dailyOverride,
     expirationInput,
     hasExpiration,
     overrideStatusQuery.data,
-    weeklyOverride,
   ])
 
   const overrideMutation = useMutation({
@@ -607,19 +487,9 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
     },
   })
 
-  const openQuotaAdjustment = (
-    period: QuotaPeriod,
-    item: ChannelUserDailyQuotaItem | ChannelUserWeeklyQuotaItem
-  ) => {
-    setQuotaAdjustment({ period, item })
-    setAdjustedAmount(String(quotaUnitsToEditableAmount(item.used_quota)))
-  }
-
   const openOverride = (user: ChannelUserLimitUser) => {
     setOverrideUser(user)
     setConcurrencyOverride('')
-    setDailyOverride('')
-    setWeeklyOverride('')
     setHasExpiration(false)
     setExpirationInput('')
   }
@@ -655,155 +525,6 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
     </Tooltip>
   )
 
-  const renderQuotaTab = (
-    period: QuotaPeriod,
-    query: typeof dailyQuery | typeof weeklyQuery,
-    page: number,
-    setPage: (page: number) => void
-  ) => {
-    const periodLabel = period === 'daily' ? t('today') : t('this week')
-    return (
-      <div className='min-h-0 space-y-3'>
-        <div className='flex min-h-8 items-center justify-between gap-3'>
-          <div className='text-muted-foreground min-w-0 text-sm'>
-            {query.data?.reset_at
-              ? t('Resets at {{time}}', {
-                  time: formatTimestampToDate(query.data.reset_at),
-                })
-              : null}
-          </div>
-          <RefreshButton
-            loading={query.isFetching}
-            onClick={() => void query.refetch()}
-          />
-        </div>
-        {query.data?.storage_mode === 'memory' ? (
-          <Alert>
-            <AlertTriangle className='size-4' />
-            <AlertDescription>
-              {t('Usage data is available for this instance only.')}
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        {query.isLoading ? (
-          <LoadingState />
-        ) : query.isError ? (
-          <ErrorState
-            message={
-              query.error instanceof Error
-                ? t(query.error.message)
-                : t('Unknown error')
-            }
-            onRetry={() => void query.refetch()}
-          />
-        ) : query.data?.items.length ? (
-          <>
-            <div className='overflow-x-auto'>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t('User')}</TableHead>
-                    <TableHead>{t('Used')}</TableHead>
-                    <TableHead>{t('Effective limit')}</TableHead>
-                    <TableHead>{t('Remaining')}</TableHead>
-                    <TableHead className='text-right'>{t('Actions')}</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {query.data.items.map((item) => (
-                    <TableRow key={item.user_id}>
-                      <TableCell>
-                        <UserIdentity
-                          userId={item.user_id}
-                          username={item.username}
-                          displayName={item.display_name}
-                        />
-                      </TableCell>
-                      <TableCell>{formatQuota(item.used_quota)}</TableCell>
-                      <TableCell>
-                        <OverrideBadge
-                          baseLimit={item.base_limit ?? query.data.limit}
-                          overrideLimit={item.override_limit}
-                          effectiveLimit={item.limit}
-                          expiresAt={item.override_expires_at ?? 0}
-                          quota
-                        />
-                      </TableCell>
-                      <TableCell>
-                        {item.limit > 0
-                          ? formatQuota(item.remaining_quota)
-                          : t('Unlimited')}
-                      </TableCell>
-                      <TableCell className='text-right'>
-                        <div className='flex justify-end gap-2'>
-                          <Tooltip>
-                            <TooltipTrigger
-                              render={
-                                <span
-                                  className='inline-flex'
-                                  tabIndex={canOperate ? undefined : 0}
-                                  aria-label={
-                                    canOperate
-                                      ? undefined
-                                      : t(
-                                          'No permission to perform this action'
-                                        )
-                                  }
-                                />
-                              }
-                            >
-                              <Button
-                                variant='outline'
-                                size='sm'
-                                disabled={!canOperate}
-                                onClick={() =>
-                                  openQuotaAdjustment(period, item)
-                                }
-                              >
-                                {t('Set usage')}
-                              </Button>
-                            </TooltipTrigger>
-                            {!canOperate ? (
-                              <TooltipContent>
-                                {t('No permission to perform this action')}
-                              </TooltipContent>
-                            ) : null}
-                          </Tooltip>
-                          {renderOperateButton({
-                            id: item.user_id,
-                            username: item.username,
-                            display_name: item.display_name,
-                          })}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-            <Pagination
-              page={page}
-              total={query.data.total}
-              loading={query.isFetching}
-              onChange={setPage}
-            />
-          </>
-        ) : (
-          <Empty className='min-h-56'>
-            <EmptyHeader>
-              <EmptyTitle>{t('No quota usage')}</EmptyTitle>
-              <EmptyDescription>
-                {t('No user usage has been recorded for {{period}}.', {
-                  period: periodLabel,
-                })}
-              </EmptyDescription>
-            </EmptyHeader>
-          </Empty>
-        )}
-      </div>
-    )
-  }
-
   return (
     <>
       <Dialog
@@ -824,12 +545,11 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
           onValueChange={setActiveTab}
           className='h-full gap-3'
         >
-          <TabsList className='grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-5'>
+          <TabsList className='grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4'>
             <TabsTrigger value='period-policy'>
               {t('Period policy')}
             </TabsTrigger>
-            <TabsTrigger value='daily-quota'>{t('Daily quota')}</TabsTrigger>
-            <TabsTrigger value='weekly-quota'>{t('Weekly quota')}</TabsTrigger>
+            <TabsTrigger value='budget-usage'>{t('Budget usage')}</TabsTrigger>
             <TabsTrigger value='concurrency'>
               {t('Current concurrency')}
             </TabsTrigger>
@@ -847,11 +567,14 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
               />
             )}
           </TabsContent>
-          <TabsContent value='daily-quota' className='min-h-0'>
-            {renderQuotaTab('daily', dailyQuery, dailyPage, setDailyPage)}
-          </TabsContent>
-          <TabsContent value='weekly-quota' className='min-h-0'>
-            {renderQuotaTab('weekly', weeklyQuery, weeklyPage, setWeeklyPage)}
+          <TabsContent value='budget-usage' className='min-h-0'>
+            {props.open && activeTab === 'budget-usage' && channelId > 0 && (
+              <ChannelBudgetUsageTab
+                key={channelId}
+                channelId={channelId}
+                canOperate={canOperate}
+              />
+            )}
           </TabsContent>
           <TabsContent value='concurrency' className='min-h-0 space-y-3'>
             <div className='flex min-h-8 items-center justify-end'>
@@ -911,7 +634,6 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
                             overrideLimit={item.override_limit}
                             effectiveLimit={item.limit}
                             expiresAt={item.override_expires_at ?? 0}
-                            quota={false}
                           />
                         </TableCell>
                         <TableCell className='text-right'>
@@ -995,7 +717,9 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
               </div>
             ) : null}
             <div className='flex items-center justify-between gap-3'>
-              <div className='text-sm font-medium'>{t('Active overrides')}</div>
+              <div className='text-sm font-medium'>
+                {t('Concurrency overrides')}
+              </div>
               <RefreshButton
                 loading={overridesQuery.isFetching}
                 onClick={() => void overridesQuery.refetch()}
@@ -1019,8 +743,6 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
                     <TableRow>
                       <TableHead>{t('User')}</TableHead>
                       <TableHead>{t('Concurrency')}</TableHead>
-                      <TableHead>{t('Daily quota')}</TableHead>
-                      <TableHead>{t('Weekly quota')}</TableHead>
                       <TableHead>{t('Expiration')}</TableHead>
                       <TableHead className='text-right'>
                         {t('Actions')}
@@ -1039,16 +761,6 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
                         </TableCell>
                         <TableCell>
                           {item.user_concurrency_limit ?? '-'}
-                        </TableCell>
-                        <TableCell>
-                          {item.user_daily_quota_limit === undefined
-                            ? '-'
-                            : formatQuota(item.user_daily_quota_limit)}
-                        </TableCell>
-                        <TableCell>
-                          {item.user_weekly_quota_limit === undefined
-                            ? '-'
-                            : formatQuota(item.user_weekly_quota_limit)}
                         </TableCell>
                         <TableCell>
                           {item.expires_at > 0
@@ -1081,118 +793,77 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
                 </EmptyHeader>
               </Empty>
             )}
+            <div className='flex items-center justify-between gap-3'>
+              <div className='text-sm font-medium'>{t('Budget overrides')}</div>
+              <RefreshButton
+                loading={budgetOverridesQuery.isFetching}
+                onClick={() => void budgetOverridesQuery.refetch()}
+              />
+            </div>
+            {budgetOverridesQuery.isLoading ? (
+              <LoadingState />
+            ) : budgetOverridesQuery.isError ? (
+              <ErrorState
+                message={t(channelPeriodErrorKey(budgetOverridesQuery.error))}
+                onRetry={() => void budgetOverridesQuery.refetch()}
+              />
+            ) : budgetOverridesQuery.data?.items.length ? (
+              <>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('User')}</TableHead>
+                      <TableHead>{t('Budget')}</TableHead>
+                      <TableHead>{t('Default')}</TableHead>
+                      <TableHead>{t('Override amount')}</TableHead>
+                      <TableHead>{t('Expiration')}</TableHead>
+                      <TableHead className='text-right'>
+                        {t('Actions')}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {budgetOverridesQuery.data.items.map((item) => (
+                      <TableRow key={`${item.user.id}:${item.budget_id}`}>
+                        <TableCell>
+                          <UserIdentity
+                            userId={item.user.id}
+                            username={item.user.username}
+                            displayName={item.user.display_name}
+                          />
+                        </TableCell>
+                        <TableCell>
+                          {item.budget_name || item.budget_id}
+                        </TableCell>
+                        <TableCell>{formatQuota(item.base_limit)}</TableCell>
+                        <TableCell>{formatQuota(item.limit)}</TableCell>
+                        <TableCell>
+                          {item.expires_at > 0
+                            ? formatTimestampToDate(item.expires_at)
+                            : t('No expiration')}
+                        </TableCell>
+                        <TableCell className='text-right'>
+                          {renderOperateButton(item.user)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+                <Pagination
+                  page={budgetOverridePage}
+                  total={budgetOverridesQuery.data.total}
+                  loading={budgetOverridesQuery.isFetching}
+                  onChange={setBudgetOverridePage}
+                />
+              </>
+            ) : (
+              <p className='text-muted-foreground text-sm'>
+                {t('No budget overrides are active.')}
+              </p>
+            )}
           </TabsContent>
         </Tabs>
       </Dialog>
-
-      <AlertDialog
-        open={quotaAdjustment !== null}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen && !quotaAdjustmentMutation.isPending) {
-            setQuotaAdjustment(null)
-            setAdjustedAmount('')
-          }
-        }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              {quotaAdjustment?.period === 'daily'
-                ? t('Set daily used quota')
-                : t('Set weekly used quota')}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {t(
-                'This only adjusts the period counter and does not change billing data.'
-              )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {quotaAdjustment ? (
-            <div className='space-y-3 rounded-md border p-3 text-sm'>
-              <UserIdentity
-                userId={quotaAdjustment.item.user_id}
-                username={quotaAdjustment.item.username}
-                displayName={quotaAdjustment.item.display_name}
-              />
-              <div className='font-medium'>
-                {quotaAdjustment.period === 'daily'
-                  ? t('Adjust daily usage for {{user}} (ID: {{id}}).', {
-                      user:
-                        quotaAdjustment.item.display_name ||
-                        quotaAdjustment.item.username ||
-                        `#${quotaAdjustment.item.user_id}`,
-                      id: quotaAdjustment.item.user_id,
-                    })
-                  : t('Adjust weekly usage for {{user}} (ID: {{id}}).', {
-                      user:
-                        quotaAdjustment.item.display_name ||
-                        quotaAdjustment.item.username ||
-                        `#${quotaAdjustment.item.user_id}`,
-                      id: quotaAdjustment.item.user_id,
-                    })}
-              </div>
-              <div className='grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-2'>
-                <span className='text-muted-foreground'>
-                  {t('Before adjustment')}
-                </span>
-                <span className='font-medium'>
-                  {formatQuota(quotaAdjustment.item.used_quota)}
-                </span>
-                <span className='text-muted-foreground'>
-                  {t('After adjustment')}
-                </span>
-                <span className='font-medium'>
-                  {adjustedQuota === null ? '-' : formatQuota(adjustedQuota)}
-                </span>
-              </div>
-            </div>
-          ) : null}
-          <div className='space-y-2 py-2'>
-            <Label
-              htmlFor={
-                quotaAdjustment?.period === 'daily'
-                  ? 'channel-user-daily-quota-amount'
-                  : 'channel-user-weekly-quota-amount'
-              }
-            >
-              {t('Adjusted used amount ({{unit}})', {
-                unit: getCurrencyLabel(),
-              })}
-            </Label>
-            <Input
-              id={
-                quotaAdjustment?.period === 'daily'
-                  ? 'channel-user-daily-quota-amount'
-                  : 'channel-user-weekly-quota-amount'
-              }
-              type='number'
-              min={0}
-              step={getEditableQuotaStep()}
-              value={adjustedAmount}
-              onChange={(event) => setAdjustedAmount(event.target.value)}
-            />
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={quotaAdjustmentMutation.isPending}>
-              {t('Cancel')}
-            </AlertDialogCancel>
-            <AlertDialogAction
-              disabled={
-                adjustedQuota === null || quotaAdjustmentMutation.isPending
-              }
-              onClick={(event) => {
-                event.preventDefault()
-                quotaAdjustmentMutation.mutate()
-              }}
-            >
-              {quotaAdjustmentMutation.isPending ? (
-                <Loader2 className='size-4 animate-spin' />
-              ) : null}
-              {t('Confirm')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog
         open={overrideUser !== null}
@@ -1237,13 +908,9 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
             <OverrideEditor
               status={overrideStatusQuery.data}
               concurrencyValue={concurrencyOverride}
-              dailyValue={dailyOverride}
-              weeklyValue={weeklyOverride}
               hasExpiration={hasExpiration}
               expirationValue={expirationInput}
               onConcurrencyChange={setConcurrencyOverride}
-              onDailyChange={setDailyOverride}
-              onWeeklyChange={setWeeklyOverride}
               onExpirationToggle={setHasExpiration}
               onExpirationChange={setExpirationInput}
             />
@@ -1255,13 +922,16 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
               canOperate={canOperate}
               onChanged={() => {
                 void overrideStatusQuery.refetch()
+                void queryClient.invalidateQueries({
+                  queryKey: channelsQueryKeys.detail(channelId),
+                })
               }}
             />
           )}
           {overridePayload === null && overrideStatusQuery.data ? (
             <p className='text-destructive text-sm'>
               {t(
-                'Each override must be above the channel default and within the allowed range.'
+                'The concurrency override must be above the channel default and within the allowed range.'
               )}
             </p>
           ) : null}
@@ -1313,85 +983,35 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
 function OverrideEditor(props: {
   status: ChannelUserLimitStatus
   concurrencyValue: string
-  dailyValue: string
-  weeklyValue: string
   hasExpiration: boolean
   expirationValue: string
   onConcurrencyChange: (value: string) => void
-  onDailyChange: (value: string) => void
-  onWeeklyChange: (value: string) => void
   onExpirationToggle: (value: boolean) => void
   onExpirationChange: (value: string) => void
 }) {
   const { t } = useTranslation()
   return (
     <div className='space-y-4'>
-      <div className='grid gap-4 sm:grid-cols-3'>
-        <div className='space-y-2'>
-          <Label htmlFor='personal-concurrency'>{t('Concurrency')}</Label>
-          <Input
-            id='personal-concurrency'
-            type='number'
-            min={props.status.concurrency.base_limit + 1}
-            max={1000}
-            step={1}
-            disabled={props.status.concurrency.base_limit <= 0}
-            value={props.concurrencyValue}
-            onChange={(event) => props.onConcurrencyChange(event.target.value)}
-          />
-          <p className='text-muted-foreground text-xs'>
-            {t('Channel default: {{value}}', {
-              value:
-                props.status.concurrency.base_limit > 0
-                  ? props.status.concurrency.base_limit
-                  : t('Unlimited'),
-            })}
-          </p>
-        </div>
-        <div className='space-y-2'>
-          <Label htmlFor='personal-daily'>
-            {t('Daily quota ({{unit}})', { unit: getCurrencyLabel() })}
-          </Label>
-          <Input
-            id='personal-daily'
-            type='number'
-            min={0}
-            step={getEditableQuotaStep()}
-            disabled={props.status.daily_quota.base_limit <= 0}
-            value={props.dailyValue}
-            onChange={(event) => props.onDailyChange(event.target.value)}
-          />
-          <p className='text-muted-foreground text-xs'>
-            {t('Channel default: {{value}}', {
-              value:
-                props.status.daily_quota.base_limit > 0
-                  ? formatQuota(props.status.daily_quota.base_limit)
-                  : t('Unlimited'),
-            })}
-          </p>
-        </div>
-        <div className='space-y-2'>
-          <Label htmlFor='personal-weekly'>
-            {t('Weekly quota ({{unit}})', { unit: getCurrencyLabel() })}
-          </Label>
-          <Input
-            id='personal-weekly'
-            type='number'
-            min={0}
-            step={getEditableQuotaStep()}
-            disabled={props.status.weekly_quota.base_limit <= 0}
-            value={props.weeklyValue}
-            onChange={(event) => props.onWeeklyChange(event.target.value)}
-          />
-          <p className='text-muted-foreground text-xs'>
-            {t('Channel default: {{value}}', {
-              value:
-                props.status.weekly_quota.base_limit > 0
-                  ? formatQuota(props.status.weekly_quota.base_limit)
-                  : t('Unlimited'),
-            })}
-          </p>
-        </div>
+      <div className='space-y-2'>
+        <Label htmlFor='personal-concurrency'>{t('Concurrency')}</Label>
+        <Input
+          id='personal-concurrency'
+          type='number'
+          min={props.status.concurrency.base_limit + 1}
+          max={1000}
+          step={1}
+          disabled={props.status.concurrency.base_limit <= 0}
+          value={props.concurrencyValue}
+          onChange={(event) => props.onConcurrencyChange(event.target.value)}
+        />
+        <p className='text-muted-foreground text-xs'>
+          {t('Channel default: {{value}}', {
+            value:
+              props.status.concurrency.base_limit > 0
+                ? props.status.concurrency.base_limit
+                : t('Unlimited'),
+          })}
+        </p>
       </div>
       <div className='flex items-center justify-between gap-3 rounded-md border p-3'>
         <div>

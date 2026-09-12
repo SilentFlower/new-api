@@ -23,7 +23,7 @@ import {
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query'
-import { useState } from 'react'
+import { useId, useRef, useState } from 'react'
 import { useFieldArray, useForm } from 'react-hook-form'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
@@ -32,73 +32,53 @@ import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
-import { Switch } from '@/components/ui/switch'
-import { getCurrencyLabel } from '@/lib/currency'
 import {
-  formatQuota,
-  formatTimestampToDate,
-  parseQuotaFromDollars,
-  quotaUnitsToDollars,
-} from '@/lib/format'
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetDescription,
+} from '@/components/ui/sheet'
+import { Switch } from '@/components/ui/switch'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
 import {
   channelPeriodErrorKey,
   getChannelPeriodPolicy,
   getChannelPeriodTargets,
+  previewChannelPeriodPolicy,
   saveChannelPeriodPolicy,
 } from '../../period-api'
 import {
   channelPeriodConfigSchema,
-  periodQuotaKeys,
+  type ChannelBudgetPreview,
+  type ChannelBudgetRow,
   type ChannelPeriodConfig,
   type ChannelPeriodTarget,
   type ChannelPeriodView,
 } from '../../period-types'
+import { ChannelBudgetProgress } from './channel-budget-progress'
+import { ChannelBudgetUsagePanel } from './channel-budget-usage'
+import { ChannelPeriodAmount } from './channel-period-amount'
 import { ChannelPeriodSourceLabel } from './channel-period-metrics'
 
-/** @param props 金额输入契约，null 为继承。 @returns 按当前币种转换的输入框。 */
-export function ChannelPeriodAmount(props: {
-  label: string
-  value: number | null
-  nullable?: boolean
-  onChange: (value: number | null) => void
-}) {
-  const { t } = useTranslation()
-  return (
-    <Field>
-      <FieldLabel className='grid gap-1 text-sm'>
-        {props.label} ({getCurrencyLabel()})
-        <Input
-          type='number'
-          min='0'
-          step='any'
-          required={!props.nullable}
-          value={
-            props.value === null || Number.isNaN(props.value)
-              ? ''
-              : quotaUnitsToDollars(props.value)
-          }
-          placeholder={
-            props.nullable
-              ? t('Blank inherits; zero means unlimited')
-              : undefined
-          }
-          onChange={(event) => {
-            const text = event.target.value
-            if (text === '') {
-              props.onChange(props.nullable ? null : Number.NaN)
-              return
-            }
-            const amount = Number(text)
-            props.onChange(amount < 0 ? -1 : parseQuotaFromDollars(amount))
-          }}
-        />
-      </FieldLabel>
-    </Field>
-  )
+/** 新时段与新预算行的临时 id 前缀；服务端保存时替换为稳定 id，同一次保存内的行可按临时 id 引用新时段。 */
+const NEW_ID_PREFIX = 'new-'
+
+/** @param id 时段或预算行 id。 @returns 是否为尚未保存的临时身份。 */
+function isNewId(id: string): boolean {
+  return id === '' || id.startsWith(NEW_ID_PREFIX)
 }
 
-/** @param props 渠道 ID 和操作权限。 @returns 独立查询的周期管理面板。 */
+/** @param props 渠道 ID 和操作权限。 @returns 独立查询的预算策略面板。 */
 export function ChannelPeriodPolicyPanel(props: {
   channelId: number
   canOperate: boolean
@@ -158,7 +138,7 @@ export function ChannelPeriodPolicyPanel(props: {
   )
 }
 
-/** @param props 权威配置和渠道快照。 @returns 版本化策略编辑与确认预览。 */
+/** @param props 权威配置、降级候选与权限。 @returns 版本化的预算表编辑与确认预览。 */
 function ChannelPeriodPolicyForm(props: {
   channelId: number
   view: ChannelPeriodView
@@ -167,17 +147,27 @@ function ChannelPeriodPolicyForm(props: {
 }) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
+  const formId = useId()
   const form = useForm<ChannelPeriodConfig>({
     defaultValues: props.view.config,
     resolver: zodResolver(channelPeriodConfigSchema),
   })
-  const rules = useFieldArray({
+  const schedules = useFieldArray({
     control: form.control,
-    name: 'rules',
+    name: 'schedules',
+    keyName: 'formKey',
+  })
+  const budgets = useFieldArray({
+    control: form.control,
+    name: 'budgets',
     keyName: 'formKey',
   })
   const config = form.watch()
-  const [preview, setPreview] = useState<ChannelPeriodView | null>(null)
+  const nextId = useRef(0)
+  const [editing, setEditing] = useState<number | null>(null)
+  const [editingModels, setEditingModels] = useState('')
+  const [usageRow, setUsageRow] = useState<ChannelBudgetRow | null>(null)
+  const [preview, setPreview] = useState<ChannelBudgetPreview | null>(null)
   const [previewSnapshot, setPreviewSnapshot] = useState('')
   const [stale, setStale] = useState(false)
   const [error, setError] = useState('')
@@ -190,74 +180,89 @@ function ChannelPeriodPolicyForm(props: {
     t('Saturday'),
     t('Sunday'),
   ]
-  const labels = [
-    t('User daily amount'),
-    t('Pool daily amount'),
-    t('User whole-period amount'),
-    t('Pool whole-period amount'),
-  ]
-  const metrics: Record<string, string> = {
-    user_daily: labels[0],
-    pool_daily: labels[1],
-    pool_weekly: t('Pool weekly amount'),
-    user_custom: labels[2],
-    pool_custom: labels[3],
+  const scopeLabels = { user: t('Per user'), pool: t('Pool') }
+  const windowLabels = {
+    daily: t('Daily'),
+    weekly: t('Weekly'),
+    occurrence: t('Whole period'),
   }
-  const models =
-    props.targets.find((item) => item.id === config.fallback.channel_id)
-      ?.models ?? []
-  const mutation = useMutation({
-    mutationKey: ['channels', props.channelId, 'period-policy'],
-    mutationFn: (input: { config: ChannelPeriodConfig; preview: boolean }) =>
-      saveChannelPeriodPolicy(
-        props.channelId,
-        props.view.revision,
-        input.config,
-        input.preview
-      ),
+  const modeLabels = {
+    inherit: t('Use policy default'),
+    reject: t('Reject'),
+    fallback: t('Fallback'),
+  }
+  const selfTarget = props.targets.find((item) => item.self)
+  const otherTargets = props.targets.filter((item) => !item.self)
+  const mutationKey = ['channels', props.channelId, 'period-policy']
+  const previewMutation = useMutation({
+    mutationKey,
+    mutationFn: (input: ChannelPeriodConfig) =>
+      previewChannelPeriodPolicy(props.channelId, props.view.revision, input),
   })
-  const disabled = !props.canOperate || stale || mutation.isPending
-  const submit = (previewOnly: boolean) =>
-    form.handleSubmit(
-      (value) => {
-        if (disabled) return
-        const snapshot = JSON.stringify(value)
-        if (!previewOnly && snapshot !== previewSnapshot) return
-        setError('')
-        mutation.mutate(
-          { config: value, preview: previewOnly },
-          {
-            onSuccess: (result) => {
-              if (previewOnly) {
-                setPreview(result)
-                setPreviewSnapshot(snapshot)
-                return
-              }
-              toast.success(t('Period policy saved'))
-              queryClient.setQueryData(
-                ['channels', props.channelId, 'period-policy'],
-                result
-              )
-              void queryClient.invalidateQueries({ queryKey: ['channels'] })
-            },
-            onError: (reason) => {
-              setError(t(channelPeriodErrorKey(reason)))
-              if (
-                !previewOnly ||
-                channelPeriodErrorKey(reason) ===
-                  'The policy has changed. Reload before editing again.'
-              ) {
-                setStale(true)
-              }
-            },
-          }
-        )
+  const saveMutation = useMutation({
+    mutationKey,
+    mutationFn: (input: ChannelPeriodConfig) =>
+      saveChannelPeriodPolicy(props.channelId, props.view.revision, input),
+  })
+  const disabled =
+    !props.canOperate ||
+    stale ||
+    previewMutation.isPending ||
+    saveMutation.isPending
+  const fail = (reason: unknown, lock: boolean) => {
+    const key = channelPeriodErrorKey(reason)
+    setError(t(key))
+    if (
+      lock ||
+      key === 'The policy has changed. Reload before editing again.'
+    ) {
+      setStale(true)
+    }
+  }
+  const runPreview = form.handleSubmit(
+    (value) => {
+      if (disabled) return
+      setError('')
+      previewMutation.mutate(value, {
+        onSuccess: (result) => {
+          setPreview(result)
+          setPreviewSnapshot(JSON.stringify(value))
+        },
+        onError: (reason) => fail(reason, false),
+      })
+    },
+    () => setError(t('Check schedules, overlapping budgets, and quota values.'))
+  )
+  const runSave = form.handleSubmit((value) => {
+    // 只允许保存与预览完全一致的草稿，避免预览后继续修改却按旧预览确认。
+    if (disabled || JSON.stringify(value) !== previewSnapshot) return
+    setError('')
+    saveMutation.mutate(value, {
+      onSuccess: (result) => {
+        toast.success(t('Period policy saved'))
+        queryClient.setQueryData(mutationKey, result)
+        void queryClient.invalidateQueries({ queryKey: ['channels'] })
       },
-      () =>
-        setError(t('Check rule times, overlapping limits, and quota values.'))
-    )
+      onError: (reason) => fail(reason, true),
+    })
+  })
+  /** @param channelId 行级降级目标；0 表示同渠道换模型。 @returns 目标渠道的可选模型。 */
+  const targetModels = (channelId: number) =>
+    props.targets.find(
+      (item) => item.id === channelId || (channelId === 0 && item.self)
+    )?.models ?? []
+  /** @param row 预算行。 @returns 表格中的超限动作摘要。 */
+  const actionSummary = (row: ChannelBudgetRow) => {
+    if (row.on_exceed.mode !== 'fallback') return modeLabels[row.on_exceed.mode]
+    const target =
+      row.on_exceed.channel_id === 0
+        ? t('This channel')
+        : `#${row.on_exceed.channel_id}`
+    return `${modeLabels.fallback} · ${target} · ${row.on_exceed.model}`
+  }
+  const editingRow = editing === null ? null : config.budgets[editing]
   return (
-    <form onSubmit={submit(true)}>
+    <form id={formId} onSubmit={runPreview}>
       <FieldGroup>
         <p className='text-sm'>
           {t('Server timezone: {{timezone}}', {
@@ -266,7 +271,7 @@ function ChannelPeriodPolicyForm(props: {
         </p>
         <p className='text-muted-foreground text-sm'>
           {t(
-            'Personal overrides, specific dates, weekly schedules, then defaults apply per limit. Other limits still apply.'
+            'Each budget limits one scope, window, and model set. Personal overrides, specific dates, weekly schedules, then default rows apply within a group; other groups still apply.'
           )}
         </p>
         <p className='text-muted-foreground text-sm'>
@@ -280,272 +285,677 @@ function ChannelPeriodPolicyForm(props: {
           </p>
         )}
         <FieldSet disabled={disabled} className='space-y-4'>
-          <div className='grid gap-3 sm:grid-cols-2'>
-            <ChannelPeriodAmount
-              label={t('Pool daily amount')}
-              value={config.pool_daily_quota_limit}
-              onChange={(value) =>
-                form.setValue('pool_daily_quota_limit', value ?? 0)
+          <section className='space-y-3' aria-label={t('Schedules')}>
+            <h4 className='font-medium'>{t('Schedules')}</h4>
+            {schedules.fields.map((field, index) => {
+              const schedule = config.schedules[index]
+              return (
+                <section
+                  key={field.formKey}
+                  className='space-y-3 rounded-lg border p-4'
+                  aria-label={t('Schedule {{index}}', { index: index + 1 })}
+                >
+                  <div className='flex items-center justify-between gap-2'>
+                    <Field>
+                      <FieldLabel className='flex items-center gap-2 text-sm'>
+                        <Switch
+                          checked={schedule.enabled}
+                          onCheckedChange={(checked) =>
+                            form.setValue(`schedules.${index}.enabled`, checked)
+                          }
+                        />
+                        {t('Enabled')}
+                      </FieldLabel>
+                    </Field>
+                    {isNewId(schedule.id) && (
+                      <Button
+                        type='button'
+                        variant='ghost'
+                        onClick={() => schedules.remove(index)}
+                      >
+                        {t('Remove')}
+                      </Button>
+                    )}
+                  </div>
+                  <div className='grid gap-3 sm:grid-cols-2'>
+                    <Field>
+                      <FieldLabel className='grid gap-1 text-sm'>
+                        {t('Schedule name')}
+                        <Input
+                          required
+                          maxLength={80}
+                          {...form.register(`schedules.${index}.name`)}
+                        />
+                      </FieldLabel>
+                    </Field>
+                    <Field>
+                      <FieldLabel className='grid gap-1 text-sm'>
+                        {t('Schedule type')}
+                        <NativeSelect
+                          disabled={!isNewId(schedule.id)}
+                          {...form.register(`schedules.${index}.kind`)}
+                        >
+                          <NativeSelectOption value='date_range'>
+                            {t('Specific dates')}
+                          </NativeSelectOption>
+                          <NativeSelectOption value='weekly'>
+                            {t('Weekly schedule')}
+                          </NativeSelectOption>
+                        </NativeSelect>
+                      </FieldLabel>
+                    </Field>
+                    {schedule.kind === 'date_range' ? (
+                      <>
+                        <Field>
+                          <FieldLabel className='grid gap-1 text-sm'>
+                            {t('Start time')}
+                            <Input
+                              type='datetime-local'
+                              required
+                              {...form.register(
+                                `schedules.${index}.start_local`
+                              )}
+                            />
+                          </FieldLabel>
+                        </Field>
+                        <Field>
+                          <FieldLabel className='grid gap-1 text-sm'>
+                            {t('End time')}
+                            <Input
+                              type='datetime-local'
+                              required
+                              {...form.register(`schedules.${index}.end_local`)}
+                            />
+                          </FieldLabel>
+                        </Field>
+                      </>
+                    ) : (
+                      <>
+                        <Field>
+                          <FieldLabel className='grid gap-1 text-sm'>
+                            {t('Start weekday')}
+                            <NativeSelect
+                              {...form.register(
+                                `schedules.${index}.start_weekday`,
+                                { valueAsNumber: true }
+                              )}
+                            >
+                              {weekdays.map((day, i) => (
+                                <NativeSelectOption key={day} value={i}>
+                                  {day}
+                                </NativeSelectOption>
+                              ))}
+                            </NativeSelect>
+                            <Input
+                              aria-label={t('Start time')}
+                              type='time'
+                              required
+                              {...form.register(
+                                `schedules.${index}.start_time`
+                              )}
+                            />
+                          </FieldLabel>
+                        </Field>
+                        <Field>
+                          <FieldLabel className='grid gap-1 text-sm'>
+                            {t('End weekday')}
+                            <NativeSelect
+                              {...form.register(
+                                `schedules.${index}.end_weekday`,
+                                { valueAsNumber: true }
+                              )}
+                            >
+                              {weekdays.map((day, i) => (
+                                <NativeSelectOption key={day} value={i}>
+                                  {day}
+                                </NativeSelectOption>
+                              ))}
+                            </NativeSelect>
+                            <Input
+                              aria-label={t('End time')}
+                              type='time'
+                              required
+                              {...form.register(`schedules.${index}.end_time`)}
+                            />
+                          </FieldLabel>
+                        </Field>
+                      </>
+                    )}
+                  </div>
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'Started schedules keep their time boundaries. Disabling a schedule preserves its usage.'
+                    )}
+                  </p>
+                </section>
+              )
+            })}
+            <Button
+              type='button'
+              variant='outline'
+              disabled={schedules.fields.length >= 64}
+              onClick={() =>
+                schedules.append({
+                  id: `${NEW_ID_PREFIX}schedule-${++nextId.current}`,
+                  name: '',
+                  enabled: true,
+                  kind: 'date_range',
+                  start_local: '',
+                  end_local: '',
+                  start_at: 0,
+                  end_at: 0,
+                  start_weekday: 0,
+                  end_weekday: 1,
+                  start_time: '00:00',
+                  end_time: '00:00',
+                  created_at: 0,
+                })
               }
-            />
-            <ChannelPeriodAmount
-              label={t('Pool weekly amount')}
-              value={config.pool_weekly_quota_limit}
-              onChange={(value) =>
-                form.setValue('pool_weekly_quota_limit', value ?? 0)
-              }
-            />
-          </div>
-          <p className='text-muted-foreground text-xs'>
-            {t('Zero means unlimited. New counters exclude earlier usage.')}
-          </p>
-          {rules.fields.map((field, index) => {
-            const rule = config.rules[index]
-            return (
-              <section
-                key={field.formKey}
-                className='space-y-3 rounded-lg border p-4'
-                aria-label={t('Time rule {{index}}', { index: index + 1 })}
+            >
+              {t('Add schedule')}
+            </Button>
+          </section>
+          <section className='space-y-3' aria-label={t('Budgets')}>
+            <h4 className='font-medium'>{t('Budgets')}</h4>
+            {budgets.fields.length === 0 ? (
+              <p className='text-muted-foreground text-sm'>
+                {t('No budgets configured.')}
+              </p>
+            ) : (
+              <div className='overflow-x-auto'>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>{t('Enabled')}</TableHead>
+                      <TableHead>{t('Name')}</TableHead>
+                      <TableHead>{t('Scope')}</TableHead>
+                      <TableHead>{t('Window')}</TableHead>
+                      <TableHead>{t('Schedule')}</TableHead>
+                      <TableHead>{t('Models')}</TableHead>
+                      <TableHead>{t('Limit')}</TableHead>
+                      <TableHead>
+                        {t('Used')} / {t('Remaining')}
+                      </TableHead>
+                      <TableHead>{t('When exceeded')}</TableHead>
+                      <TableHead className='text-right'>
+                        {t('Actions')}
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {budgets.fields.map((field, index) => {
+                      const row = config.budgets[index]
+                      const schedule = config.schedules.find(
+                        (item) => item.id === row.schedule_id
+                      )
+                      return (
+                        <TableRow
+                          key={field.formKey}
+                          data-state={
+                            editing === index ? 'selected' : undefined
+                          }
+                        >
+                          <TableCell>
+                            <Switch
+                              aria-label={t('Enabled')}
+                              checked={row.enabled}
+                              onCheckedChange={(checked) =>
+                                form.setValue(
+                                  `budgets.${index}.enabled`,
+                                  checked
+                                )
+                              }
+                            />
+                          </TableCell>
+                          <TableCell className='font-medium'>
+                            {row.name || t('Untitled budget')}
+                          </TableCell>
+                          <TableCell>{scopeLabels[row.scope]}</TableCell>
+                          <TableCell>{windowLabels[row.window]}</TableCell>
+                          <TableCell>
+                            {schedule?.name || t('No schedule')}
+                          </TableCell>
+                          <TableCell>
+                            {row.models.length > 0
+                              ? row.models.join(', ')
+                              : t('All models')}
+                          </TableCell>
+                          <TableCell>
+                            {row.limit > 0
+                              ? formatQuota(row.limit)
+                              : t('Unlimited')}
+                          </TableCell>
+                          <TableCell>
+                            {isNewId(row.id) ? (
+                              t('Save to view usage')
+                            ) : (
+                              <ChannelBudgetProgress
+                                channelId={props.channelId}
+                                row={row}
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell>{actionSummary(row)}</TableCell>
+                          <TableCell className='text-right'>
+                            <div className='flex justify-end gap-2'>
+                              <Button
+                                type='button'
+                                variant='outline'
+                                size='sm'
+                                onClick={() => {
+                                  setEditingModels(row.models.join(', '))
+                                  setEditing(editing === index ? null : index)
+                                }}
+                              >
+                                {editing === index ? t('Done') : t('Edit')}
+                              </Button>
+                              {!isNewId(row.id) && (
+                                <Button
+                                  type='button'
+                                  variant='outline'
+                                  size='sm'
+                                  onClick={() => setUsageRow(row)}
+                                >
+                                  {t('Usage')}
+                                </Button>
+                              )}
+                              {isNewId(row.id) && (
+                                <Button
+                                  type='button'
+                                  variant='ghost'
+                                  size='sm'
+                                  onClick={() => {
+                                    setEditing(null)
+                                    budgets.remove(index)
+                                  }}
+                                >
+                                  {t('Remove')}
+                                </Button>
+                              )}
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      )
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+            {editing !== null && editingRow && (
+              <Sheet
+                open
+                onOpenChange={(open) => {
+                  if (!open) setEditing(null)
+                }}
               >
-                <div className='flex items-center justify-between gap-2'>
-                  <Field>
-                    <FieldLabel className='flex items-center gap-2 text-sm'>
-                      <Switch
-                        checked={rule.enabled}
-                        onCheckedChange={(checked) =>
-                          form.setValue(`rules.${index}.enabled`, checked)
+                <SheetContent
+                  className='w-full sm:max-w-2xl'
+                  showCloseButton={false}
+                  aria-label={t('Budget editor')}
+                >
+                  <SheetHeader>
+                    <SheetTitle>{t('Budget editor')}</SheetTitle>
+                    <SheetDescription>
+                      {t(
+                        'Close to keep your draft, then preview and save the policy.'
+                      )}
+                    </SheetDescription>
+                  </SheetHeader>
+                  <FieldSet
+                    key={budgets.fields[editing]?.formKey}
+                    disabled={disabled}
+                    className='visible-scrollbar min-h-0 flex-1 space-y-3 overflow-y-auto px-4 pb-4'
+                  >
+                    <div className='grid gap-3 sm:grid-cols-2'>
+                      <Field>
+                        <FieldLabel className='grid gap-1 text-sm'>
+                          {t('Budget name')}
+                          <Input
+                            form={formId}
+                            required
+                            maxLength={80}
+                            {...form.register(`budgets.${editing}.name`)}
+                          />
+                        </FieldLabel>
+                      </Field>
+                      <Field>
+                        <FieldLabel className='grid gap-1 text-sm'>
+                          {t('Scope')}
+                          <NativeSelect
+                            form={formId}
+                            {...form.register(`budgets.${editing}.scope`)}
+                          >
+                            <NativeSelectOption value='user'>
+                              {scopeLabels.user}
+                            </NativeSelectOption>
+                            <NativeSelectOption value='pool'>
+                              {scopeLabels.pool}
+                            </NativeSelectOption>
+                          </NativeSelect>
+                        </FieldLabel>
+                      </Field>
+                      <Field>
+                        <FieldLabel className='grid gap-1 text-sm'>
+                          {t('Window')}
+                          <NativeSelect
+                            form={formId}
+                            {...form.register(`budgets.${editing}.window`)}
+                          >
+                            <NativeSelectOption value='daily'>
+                              {windowLabels.daily}
+                            </NativeSelectOption>
+                            <NativeSelectOption value='weekly'>
+                              {windowLabels.weekly}
+                            </NativeSelectOption>
+                            <NativeSelectOption value='occurrence'>
+                              {windowLabels.occurrence}
+                            </NativeSelectOption>
+                          </NativeSelect>
+                        </FieldLabel>
+                      </Field>
+                      <Field>
+                        <FieldLabel className='grid gap-1 text-sm'>
+                          {t('Schedule')}
+                          <NativeSelect
+                            form={formId}
+                            required={editingRow.window === 'occurrence'}
+                            {...form.register(`budgets.${editing}.schedule_id`)}
+                          >
+                            <NativeSelectOption
+                              value=''
+                              disabled={editingRow.window === 'occurrence'}
+                            >
+                              {editingRow.window === 'occurrence'
+                                ? t('Select a schedule')
+                                : t('No schedule')}
+                            </NativeSelectOption>
+                            {config.schedules.map((item) => (
+                              <NativeSelectOption key={item.id} value={item.id}>
+                                {item.name || t('Untitled schedule')}
+                              </NativeSelectOption>
+                            ))}
+                          </NativeSelect>
+                        </FieldLabel>
+                      </Field>
+                      <Field>
+                        <FieldLabel className='grid gap-1 text-sm'>
+                          {t('Models')}
+                          <Input
+                            form={formId}
+                            value={editingModels}
+                            placeholder={t('Blank applies to all models')}
+                            onChange={(event) => {
+                              setEditingModels(event.target.value)
+                              form.setValue(
+                                `budgets.${editing}.models`,
+                                event.target.value
+                                  .split(/[,\n]/)
+                                  .map((item) => item.trim())
+                                  .filter(Boolean)
+                              )
+                            }}
+                          />
+                        </FieldLabel>
+                      </Field>
+                      <ChannelPeriodAmount
+                        label={t('Limit')}
+                        value={editingRow.limit}
+                        onChange={(value) =>
+                          form.setValue(`budgets.${editing}.limit`, value ?? 0)
                         }
                       />
-                      {t('Enabled')}
-                    </FieldLabel>
-                  </Field>
-                  {!rule.id && (
+                      <Field>
+                        <FieldLabel className='grid gap-1 text-sm'>
+                          {t('When exceeded')}
+                          <NativeSelect
+                            form={formId}
+                            {...form.register(
+                              `budgets.${editing}.on_exceed.mode`
+                            )}
+                          >
+                            <NativeSelectOption value='inherit'>
+                              {modeLabels.inherit}
+                            </NativeSelectOption>
+                            <NativeSelectOption value='reject'>
+                              {modeLabels.reject}
+                            </NativeSelectOption>
+                            <NativeSelectOption value='fallback'>
+                              {modeLabels.fallback}
+                            </NativeSelectOption>
+                          </NativeSelect>
+                        </FieldLabel>
+                      </Field>
+                      {editingRow.on_exceed.mode === 'fallback' && (
+                        <>
+                          <Field>
+                            <FieldLabel className='grid gap-1 text-sm'>
+                              {t('Target channel')}
+                              <NativeSelect
+                                form={formId}
+                                value={
+                                  editingRow.on_exceed.channel_id === 0
+                                    ? (selfTarget?.id ?? 0)
+                                    : editingRow.on_exceed.channel_id
+                                }
+                                onChange={(event) => {
+                                  form.setValue(
+                                    `budgets.${editing}.on_exceed.channel_id`,
+                                    Number(event.target.value)
+                                  )
+                                  form.setValue(
+                                    `budgets.${editing}.on_exceed.model`,
+                                    ''
+                                  )
+                                }}
+                              >
+                                <NativeSelectOption value={0} disabled>
+                                  {t('Select channel')}
+                                </NativeSelectOption>
+                                {selfTarget && editingRow.models.length > 0 && (
+                                  <NativeSelectOption value={selfTarget.id}>
+                                    #{selfTarget.id} · {selfTarget.name} ·{' '}
+                                    {t('This channel')}
+                                  </NativeSelectOption>
+                                )}
+                                {editingRow.on_exceed.channel_id > 0 &&
+                                  !props.targets.some(
+                                    (item) =>
+                                      item.id ===
+                                      editingRow.on_exceed.channel_id
+                                  ) && (
+                                    <NativeSelectOption
+                                      value={editingRow.on_exceed.channel_id}
+                                    >
+                                      #{editingRow.on_exceed.channel_id} ·{' '}
+                                      {t('Unavailable')}
+                                    </NativeSelectOption>
+                                  )}
+                                {otherTargets.map((item) => (
+                                  <NativeSelectOption
+                                    key={item.id}
+                                    value={item.id}
+                                  >
+                                    #{item.id} · {item.name}
+                                  </NativeSelectOption>
+                                ))}
+                              </NativeSelect>
+                            </FieldLabel>
+                          </Field>
+                          <Field>
+                            <FieldLabel className='grid gap-1 text-sm'>
+                              {t('Target model')}
+                              <NativeSelect
+                                form={formId}
+                                required
+                                {...form.register(
+                                  `budgets.${editing}.on_exceed.model`
+                                )}
+                              >
+                                <NativeSelectOption value='' disabled>
+                                  {t('Select model')}
+                                </NativeSelectOption>
+                                {!!editingRow.on_exceed.model &&
+                                  !targetModels(
+                                    editingRow.on_exceed.channel_id
+                                  ).includes(editingRow.on_exceed.model) && (
+                                    <NativeSelectOption
+                                      value={editingRow.on_exceed.model}
+                                    >
+                                      {editingRow.on_exceed.model} ·{' '}
+                                      {t('Unavailable')}
+                                    </NativeSelectOption>
+                                  )}
+                                {targetModels(editingRow.on_exceed.channel_id)
+                                  .filter(
+                                    (model) =>
+                                      editingRow.on_exceed.channel_id !== 0 ||
+                                      !editingRow.models.includes(model)
+                                  )
+                                  .map((model) => (
+                                    <NativeSelectOption
+                                      key={model}
+                                      value={model}
+                                    >
+                                      {model}
+                                    </NativeSelectOption>
+                                  ))}
+                              </NativeSelect>
+                            </FieldLabel>
+                          </Field>
+                        </>
+                      )}
+                    </div>
+                    <p className='text-muted-foreground text-xs'>
+                      {t(
+                        'Zero means unlimited. Changing models starts a new counter; renaming or changing the limit keeps it.'
+                      )}
+                    </p>
                     <Button
                       type='button'
-                      variant='ghost'
-                      onClick={() => rules.remove(index)}
+                      variant='outline'
+                      onClick={() => setEditing(null)}
                     >
-                      {t('Remove')}
+                      {t('Done')}
                     </Button>
-                  )}
-                </div>
-                <div className='grid gap-3 sm:grid-cols-2'>
+                  </FieldSet>
+                </SheetContent>
+              </Sheet>
+            )}
+            <Button
+              type='button'
+              variant='outline'
+              disabled={budgets.fields.length >= 128}
+              onClick={() => {
+                budgets.append({
+                  id: `${NEW_ID_PREFIX}budget-${++nextId.current}`,
+                  name: '',
+                  enabled: true,
+                  scope: 'pool',
+                  window: 'daily',
+                  schedule_id: '',
+                  models: [],
+                  limit: 0,
+                  on_exceed: { mode: 'inherit', channel_id: 0, model: '' },
+                  created_at: 0,
+                })
+                setEditingModels('')
+                setEditing(budgets.fields.length)
+              }}
+            >
+              {t('Add budget')}
+            </Button>
+          </section>
+          <section
+            className='space-y-3 rounded-lg border p-4'
+            aria-label={t('Default action when exceeded')}
+          >
+            <h4 className='font-medium'>{t('Default action when exceeded')}</h4>
+            <div className='grid gap-3 sm:grid-cols-3'>
+              <Field>
+                <FieldLabel className='grid gap-1 text-sm'>
+                  {t('Action')}
+                  <NativeSelect {...form.register('default_on_exceed.mode')}>
+                    <NativeSelectOption value='reject'>
+                      {modeLabels.reject}
+                    </NativeSelectOption>
+                    <NativeSelectOption value='fallback'>
+                      {modeLabels.fallback}
+                    </NativeSelectOption>
+                  </NativeSelect>
+                </FieldLabel>
+              </Field>
+              {config.default_on_exceed.mode === 'fallback' && (
+                <>
                   <Field>
                     <FieldLabel className='grid gap-1 text-sm'>
-                      {t('Rule name')}
-                      <Input
-                        required
-                        maxLength={80}
-                        {...form.register(`rules.${index}.name`)}
-                      />
-                    </FieldLabel>
-                  </Field>
-                  <Field>
-                    <FieldLabel className='grid gap-1 text-sm'>
-                      {t('Schedule type')}
+                      {t('Target channel')}
                       <NativeSelect
-                        disabled={!!rule.id}
-                        {...form.register(`rules.${index}.kind`)}
+                        value={config.default_on_exceed.channel_id}
+                        onChange={(event) => {
+                          form.setValue(
+                            'default_on_exceed.channel_id',
+                            Number(event.target.value)
+                          )
+                          form.setValue('default_on_exceed.model', '')
+                        }}
                       >
-                        <NativeSelectOption value='date_range'>
-                          {t('Specific dates')}
+                        <NativeSelectOption value={0} disabled>
+                          {t('Select channel')}
                         </NativeSelectOption>
-                        <NativeSelectOption value='weekly'>
-                          {t('Weekly schedule')}
-                        </NativeSelectOption>
+                        {config.default_on_exceed.channel_id > 0 &&
+                          !otherTargets.some(
+                            (item) =>
+                              item.id === config.default_on_exceed.channel_id
+                          ) && (
+                            <NativeSelectOption
+                              value={config.default_on_exceed.channel_id}
+                            >
+                              #{config.default_on_exceed.channel_id} ·{' '}
+                              {t('Unavailable')}
+                            </NativeSelectOption>
+                          )}
+                        {otherTargets.map((item) => (
+                          <NativeSelectOption key={item.id} value={item.id}>
+                            #{item.id} · {item.name}
+                          </NativeSelectOption>
+                        ))}
                       </NativeSelect>
                     </FieldLabel>
                   </Field>
-                  {rule.kind === 'date_range' ? (
-                    <>
-                      <Field>
-                        <FieldLabel className='grid gap-1 text-sm'>
-                          {t('Start time')}
-                          <Input
-                            type='datetime-local'
-                            required
-                            {...form.register(`rules.${index}.start_local`)}
-                          />
-                        </FieldLabel>
-                      </Field>
-                      <Field>
-                        <FieldLabel className='grid gap-1 text-sm'>
-                          {t('End time')}
-                          <Input
-                            type='datetime-local'
-                            required
-                            {...form.register(`rules.${index}.end_local`)}
-                          />
-                        </FieldLabel>
-                      </Field>
-                    </>
-                  ) : (
-                    <>
-                      <Field>
-                        <FieldLabel className='grid gap-1 text-sm'>
-                          {t('Start weekday')}
-                          <NativeSelect
-                            {...form.register(`rules.${index}.start_weekday`, {
-                              valueAsNumber: true,
-                            })}
-                          >
-                            {weekdays.map((day, i) => (
-                              <NativeSelectOption key={day} value={i}>
-                                {day}
-                              </NativeSelectOption>
-                            ))}
-                          </NativeSelect>
-                          <Input
-                            aria-label={t('Start time')}
-                            type='time'
-                            required
-                            {...form.register(`rules.${index}.start_time`)}
-                          />
-                        </FieldLabel>
-                      </Field>
-                      <Field>
-                        <FieldLabel className='grid gap-1 text-sm'>
-                          {t('End weekday')}
-                          <NativeSelect
-                            {...form.register(`rules.${index}.end_weekday`, {
-                              valueAsNumber: true,
-                            })}
-                          >
-                            {weekdays.map((day, i) => (
-                              <NativeSelectOption key={day} value={i}>
-                                {day}
-                              </NativeSelectOption>
-                            ))}
-                          </NativeSelect>
-                          <Input
-                            aria-label={t('End time')}
-                            type='time'
-                            required
-                            {...form.register(`rules.${index}.end_time`)}
-                          />
-                        </FieldLabel>
-                      </Field>
-                    </>
-                  )}
-                  {periodQuotaKeys.map((key, i) => (
-                    <ChannelPeriodAmount
-                      key={key}
-                      label={labels[i]}
-                      value={rule[key]}
-                      nullable
-                      onChange={(value) =>
-                        form.setValue(`rules.${index}.${key}`, value)
-                      }
-                    />
-                  ))}
-                </div>
-                <p className='text-muted-foreground text-xs'>
-                  {t(
-                    'Started rules keep their time boundaries. Disabling a rule preserves its usage.'
-                  )}
-                </p>
-              </section>
-            )
-          })}
-          <Button
-            type='button'
-            variant='outline'
-            disabled={rules.fields.length >= 64}
-            onClick={() =>
-              rules.append({
-                id: '',
-                name: '',
-                enabled: true,
-                kind: 'date_range',
-                start_local: '',
-                end_local: '',
-                start_at: 0,
-                end_at: 0,
-                start_weekday: 0,
-                end_weekday: 1,
-                start_time: '00:00',
-                end_time: '00:00',
-                created_at: 0,
-                user_daily_quota_limit: null,
-                pool_daily_quota_limit: null,
-                user_period_quota_limit: null,
-                pool_period_quota_limit: null,
-              })
-            }
-          >
-            {t('Add time rule')}
-          </Button>
-          <section className='space-y-3 rounded-lg border p-4'>
-            <Field>
-              <FieldLabel className='flex items-center gap-2 text-sm'>
-                <Switch
-                  checked={config.fallback.enabled}
-                  onCheckedChange={(checked) =>
-                    form.setValue('fallback.enabled', checked)
-                  }
-                />
-                {t('Try one fallback when a quota is exhausted')}
-              </FieldLabel>
-            </Field>
-            {config.fallback.enabled && (
-              <div className='grid gap-3 sm:grid-cols-2'>
-                <Field>
-                  <FieldLabel className='grid gap-1 text-sm'>
-                    {t('Target channel')}
-                    <NativeSelect
-                      value={config.fallback.channel_id}
-                      onChange={(event) => {
-                        form.setValue(
-                          'fallback.channel_id',
-                          Number(event.target.value)
-                        )
-                        form.setValue('fallback.model', '')
-                      }}
-                    >
-                      <NativeSelectOption value={0} disabled>
-                        {t('Select channel')}
-                      </NativeSelectOption>
-                      {config.fallback.channel_id > 0 &&
-                        !props.targets.some(
-                          (item) => item.id === config.fallback.channel_id
-                        ) && (
-                          <NativeSelectOption
-                            value={config.fallback.channel_id}
-                          >
-                            #{config.fallback.channel_id} · {t('Unavailable')}
-                          </NativeSelectOption>
-                        )}
-                      {props.targets.map((item) => (
-                        <NativeSelectOption key={item.id} value={item.id}>
-                          #{item.id} · {item.name}
+                  <Field>
+                    <FieldLabel className='grid gap-1 text-sm'>
+                      {t('Target model')}
+                      <NativeSelect
+                        required
+                        {...form.register('default_on_exceed.model')}
+                      >
+                        <NativeSelectOption value='' disabled>
+                          {t('Select model')}
                         </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  </FieldLabel>
-                </Field>
-                <Field>
-                  <FieldLabel className='grid gap-1 text-sm'>
-                    {t('Target model')}
-                    <NativeSelect required {...form.register('fallback.model')}>
-                      <NativeSelectOption value='' disabled>
-                        {t('Select model')}
-                      </NativeSelectOption>
-                      {!!config.fallback.model &&
-                        !models.includes(config.fallback.model) && (
-                          <NativeSelectOption value={config.fallback.model}>
-                            {config.fallback.model} · {t('Unavailable')}
-                          </NativeSelectOption>
+                        {!!config.default_on_exceed.model &&
+                          !targetModels(
+                            config.default_on_exceed.channel_id
+                          ).includes(config.default_on_exceed.model) && (
+                            <NativeSelectOption
+                              value={config.default_on_exceed.model}
+                            >
+                              {config.default_on_exceed.model} ·{' '}
+                              {t('Unavailable')}
+                            </NativeSelectOption>
+                          )}
+                        {targetModels(config.default_on_exceed.channel_id).map(
+                          (model) => (
+                            <NativeSelectOption key={model} value={model}>
+                              {model}
+                            </NativeSelectOption>
+                          )
                         )}
-                      {models.map((model) => (
-                        <NativeSelectOption key={model} value={model}>
-                          {model}
-                        </NativeSelectOption>
-                      ))}
-                    </NativeSelect>
-                  </FieldLabel>
-                </Field>
-              </div>
-            )}
+                      </NativeSelect>
+                    </FieldLabel>
+                  </Field>
+                </>
+              )}
+            </div>
             <p className='text-muted-foreground text-xs'>
               {t(
                 'Fallback requires a compatible HTTP Chat, Messages, or Responses request, model access, and target quota. New requests return to the source after recovery.'
@@ -556,6 +966,15 @@ function ChannelPeriodPolicyForm(props: {
             {t('Preview effective limits')}
           </Button>
         </FieldSet>
+        {usageRow && (
+          <ChannelBudgetUsagePanel
+            key={usageRow.id}
+            channelId={props.channelId}
+            row={usageRow}
+            canOperate={props.canOperate}
+            onClose={() => setUsageRow(null)}
+          />
+        )}
         {preview && previewSnapshot === JSON.stringify(config) && (
           <section
             className='space-y-2 rounded-lg border p-4'
@@ -564,18 +983,27 @@ function ChannelPeriodPolicyForm(props: {
             <h4 className='font-medium'>
               {t('Policy preview')} · {t('Version')} {preview.revision}
             </h4>
-            {Object.entries(preview.sources ?? {}).map(([key, source]) => (
-              <p key={key} className='text-sm'>
-                {metrics[key]}:{' '}
-                {preview.limits?.[key]
-                  ? formatQuota(preview.limits[key])
-                  : t('Unlimited')}{' '}
-                · <ChannelPeriodSourceLabel source={source} />
-              </p>
-            ))}
+            {preview.rows.map((row) => {
+              const budget = preview.config.budgets.find(
+                (item) => item.id === row.budget_id
+              )
+              return (
+                <p key={row.budget_id} className='text-sm'>
+                  {budget?.name ?? row.budget_id}:{' '}
+                  {budget && budget.limit > 0
+                    ? formatQuota(budget.limit)
+                    : t('Unlimited')}{' '}
+                  · {row.active ? t('Active now') : t('Inactive now')} ·{' '}
+                  {row.enforced
+                    ? t('Enforced')
+                    : t('Overridden by a higher-priority schedule')}{' '}
+                  · <ChannelPeriodSourceLabel source={row.source} />
+                </p>
+              )
+            })}
             {!!preview.next_change_at && (
               <p className='text-sm'>
-                {t('Next rule change: {{time}}', {
+                {t('Next schedule change: {{time}}', {
                   time: formatTimestampToDate(preview.next_change_at),
                 })}
               </p>
@@ -583,7 +1011,7 @@ function ChannelPeriodPolicyForm(props: {
             <Button
               type='button'
               disabled={disabled}
-              onClick={() => void submit(false)()}
+              onClick={() => void runSave()}
             >
               {t('Confirm and save policy')}
             </Button>

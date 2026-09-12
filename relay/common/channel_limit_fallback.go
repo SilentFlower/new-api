@@ -2,13 +2,15 @@ package common
 
 // ChannelLimitFallbackInfo 保存请求唯一一次额度降级的审计事实。
 type ChannelLimitFallbackInfo struct {
-	SourceChannelID int    `json:"source_channel_id"`
-	TargetChannelID int    `json:"target_channel_id"`
-	OriginalModel   string `json:"original_model"`
-	TargetModel     string `json:"target_model"`
-	Scope           string `json:"scope"`
-	Period          string `json:"period"`
-	RuleID          string `json:"rule_id,omitempty"`
+	SourceChannelID int      `json:"source_channel_id"`
+	TargetChannelID int      `json:"target_channel_id"`
+	OriginalModel   string   `json:"original_model"`
+	TargetModel     string   `json:"target_model"`
+	Scope           string   `json:"scope"`
+	Period          string   `json:"period"`
+	ScheduleID      string   `json:"schedule_id,omitempty"`
+	BudgetID        string   `json:"budget_id,omitempty"`
+	Models          []string `json:"models,omitempty"`
 }
 
 // RoutingModel 返回当前候选应映射的模型，原始模型仅保留客户端语义。

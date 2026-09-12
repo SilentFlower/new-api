@@ -49,17 +49,7 @@ func preflightChannelPeriodLimits(c *gin.Context, info *relaycommon.RelayInfo) *
 			return nil
 		}
 	}
-	if apiErr := service.CheckSelectedChannelPeriodLimits(c); apiErr != nil {
-		return apiErr
-	}
-	channelID, userID := common.GetContextKeyInt(c, constant.ContextKeyChannelId), common.GetContextKeyInt(c, constant.ContextKeyUserId)
-	if _, err := service.CheckChannelUserDailyQuota(c, channelID, userID, common.GetContextKeyInt(c, constant.ContextKeyChannelUserDailyQuotaLimit)); err != nil {
-		return newChannelUserDailyQuotaAPIError(err)
-	}
-	if _, err := service.CheckChannelUserWeeklyQuota(c, channelID, userID, common.GetContextKeyInt(c, constant.ContextKeyChannelUserWeeklyQuotaLimit)); err != nil {
-		return newChannelUserWeeklyQuotaAPIError(err)
-	}
-	return nil
+	return service.CheckSelectedChannelPeriodLimits(c)
 }
 
 func prepareChannelLimitFallback(c *gin.Context, info *relaycommon.RelayInfo, source *model.Channel, original dto.Request) (*model.Channel, *types.NewAPIError) {
@@ -72,7 +62,7 @@ func prepareChannelLimitFallback(c *gin.Context, info *relaycommon.RelayInfo, so
 	if err != nil {
 		return source, service.ChannelPeriodAPIError(err)
 	}
-	if policy.Revision == 0 {
+	if len(policy.Config.Budgets) == 0 {
 		return source, nil
 	}
 	// 只为获准的 HTTP 文本入口增加副作用前调度，其余入口仍由原检查点限制。
@@ -115,7 +105,7 @@ func prepareChannelLimitFallback(c *gin.Context, info *relaycommon.RelayInfo, so
 	}
 	fallback := &relaycommon.ChannelLimitFallbackInfo{SourceChannelID: source.Id, TargetChannelID: target.Id, OriginalModel: info.OriginModelName, TargetModel: selected.Model}
 	if block != nil {
-		fallback.Scope, fallback.Period, fallback.RuleID = block.Metric.Scope, block.Metric.Period, block.Metric.Source.RuleID
+		fallback.Scope, fallback.Period, fallback.ScheduleID, fallback.BudgetID, fallback.Models = block.Metric.Scope, block.Metric.Period, block.Metric.Source.ScheduleID, block.Metric.BudgetID, block.Metric.Models
 	}
 	c.Set("channel_limit_fallback_used", true)
 	info.LimitFallback, info.RoutingModelName = fallback, fallback.TargetModel

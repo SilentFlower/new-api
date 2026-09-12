@@ -71,7 +71,8 @@ func (*channelPeriodRedisReadBarrier) AfterProcessPipeline(ctx context.Context, 
 func TestChannelPeriodPolicyRedisReadsIndependent(t *testing.T) {
 	now := time.Now()
 	channel := setupChannelPeriodTest(t, &now, true)
-	input := dto.ChannelPeriodPolicyInput{Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 100}}
+	require.NoError(t, model.DB.Create(&model.Channel{Id: channel.Id + 1, Name: "独立缓存测试渠道"}).Error)
+	input := dto.ChannelPeriodPolicyInput{Config: poolDailyConfig(100)}
 	_, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, input, 1)
 	require.NoError(t, err)
 	_, err = SaveChannelPeriodPolicy(t.Context(), channel.Id+1, input, 1)
@@ -106,7 +107,7 @@ func TestChannelPeriodPolicyRedisReadsIndependent(t *testing.T) {
 	select {
 	case result := <-fast:
 		require.NoError(t, result.err)
-		assert.Equal(t, int64(100), result.view.Config.PoolDailyQuotaLimit)
+		assert.Equal(t, int64(100), result.view.Config.Budgets[0].Limit)
 	case <-time.After(2 * time.Second):
 		t.Fatal("另一渠道被尚未释放的 Redis 查询阻塞")
 	}
@@ -114,7 +115,7 @@ func TestChannelPeriodPolicyRedisReadsIndependent(t *testing.T) {
 	select {
 	case result := <-slow:
 		require.NoError(t, result.err)
-		assert.Equal(t, int64(100), result.view.Config.PoolDailyQuotaLimit)
+		assert.Equal(t, int64(100), result.view.Config.Budgets[0].Limit)
 	case <-time.After(2 * time.Second):
 		t.Fatal("慢请求未恢复")
 	}
@@ -127,7 +128,7 @@ func TestChannelPeriodPolicyLateDatabaseReadKeepsLatestRevision(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			now := time.Now()
 			channel := setupChannelPeriodTest(t, &now, mode == "redis")
-			config := dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 100, Rules: []dto.ChannelPeriodRule{}}
+			config := mustNormalizeBudgetConfig(t, poolDailyConfig(100), now)
 			data, err := common.Marshal(config)
 			require.NoError(t, err)
 			// 直接建立权威记录，首次服务层读取必然经过数据库。
@@ -161,7 +162,7 @@ func TestChannelPeriodPolicyLateDatabaseReadKeepsLatestRevision(t *testing.T) {
 			workers.Add(1)
 			go func() {
 				defer workers.Done()
-				config.PoolDailyQuotaLimit = 50
+				config.Budgets[0].Limit = 50
 				view, saveErr := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{ExpectedRevision: 1, Config: config}, 2)
 				saved <- channelPeriodReadResult{view, saveErr}
 			}()
@@ -177,14 +178,14 @@ func TestChannelPeriodPolicyLateDatabaseReadKeepsLatestRevision(t *testing.T) {
 			case result := <-stale:
 				require.NoError(t, result.err)
 				assert.Equal(t, 2, result.view.Revision)
-				assert.Equal(t, int64(50), result.view.Config.PoolDailyQuotaLimit)
+				assert.Equal(t, int64(50), result.view.Config.Budgets[0].Limit)
 			case <-time.After(2 * time.Second):
 				t.Fatal("旧请求未恢复")
 			}
 			current, err := GetChannelPeriodPolicy(t.Context(), channel.Id)
 			require.NoError(t, err)
 			assert.Equal(t, 2, current.Revision)
-			assert.Equal(t, int64(50), current.Config.PoolDailyQuotaLimit)
+			assert.Equal(t, int64(50), current.Config.Budgets[0].Limit)
 		})
 	}
 }

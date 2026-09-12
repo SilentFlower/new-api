@@ -11,53 +11,38 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestReplaceChannelUserLimitOverrideResolvesEffectiveLimits 验证覆盖放宽、持久化和撤销回落。
+// TestReplaceChannelUserLimitOverrideResolvesEffectiveLimits 验证并发覆盖放宽、持久化和撤销回落。
 func TestReplaceChannelUserLimitOverrideResolvesEffectiveLimits(t *testing.T) {
 	require.NoError(t, model.DB.Exec("DELETE FROM channel_user_limit_overrides").Error)
 	baseConcurrency := 2
-	baseDaily := 1000
-	baseWeekly := 5000
-	channel := &model.Channel{
-		Id:                   91,
-		UserConcurrencyLimit: &baseConcurrency,
-		UserDailyQuotaLimit:  &baseDaily,
-		UserWeeklyQuotaLimit: &baseWeekly,
-	}
+	channel := &model.Channel{Id: 91, UserConcurrencyLimit: &baseConcurrency}
 	overrideConcurrency := 4
-	overrideDaily := 2000
-	overrideWeekly := 9000
-	input := ChannelUserLimitOverrideInput{
-		UserConcurrencyLimit: &overrideConcurrency,
-		UserDailyQuotaLimit:  &overrideDaily,
-		UserWeeklyQuotaLimit: &overrideWeekly,
-		ExpiresAt:            time.Now().Add(time.Hour).Unix(),
-	}
+	input := ChannelUserLimitOverrideInput{UserConcurrencyLimit: &overrideConcurrency, ExpiresAt: time.Now().Add(time.Hour).Unix()}
 
 	require.NoError(t, ReplaceChannelUserLimitOverride(context.Background(), channel, 123, input, 1))
 	limits, err := ResolveChannelUserEffectiveLimits(context.Background(), channel, 123)
 	require.NoError(t, err)
 	assert.True(t, limits.Active)
 	assert.Equal(t, 4, limits.EffectiveConcurrency)
-	assert.Equal(t, 2000, limits.EffectiveDailyQuota)
-	assert.Equal(t, 9000, limits.EffectiveWeeklyQuota)
 
 	require.NoError(t, DeleteChannelUserLimitOverride(context.Background(), channel.Id, 123))
 	limits, err = ResolveChannelUserEffectiveLimits(context.Background(), channel, 123)
 	require.NoError(t, err)
 	assert.False(t, limits.Active)
-	assert.Equal(t, baseDaily, limits.EffectiveDailyQuota)
+	assert.Equal(t, baseConcurrency, limits.EffectiveConcurrency)
 }
 
 // TestReplaceChannelUserLimitOverrideRejectsUnlimitedOrNonIncrease 验证不限渠道和非提额输入被拒绝。
 func TestReplaceChannelUserLimitOverrideRejectsUnlimitedOrNonIncrease(t *testing.T) {
-	baseDaily := 1000
-	channel := &model.Channel{Id: 92, UserDailyQuotaLimit: &baseDaily}
-	equalDaily := 1000
-	err := ReplaceChannelUserLimitOverride(context.Background(), channel, 123, ChannelUserLimitOverrideInput{UserDailyQuotaLimit: &equalDaily}, 1)
+	baseConcurrency := 4
+	channel := &model.Channel{Id: 92, UserConcurrencyLimit: &baseConcurrency}
+	equal := 4
+	err := ReplaceChannelUserLimitOverride(context.Background(), channel, 123, ChannelUserLimitOverrideInput{UserConcurrencyLimit: &equal}, 1)
 	assert.ErrorIs(t, err, ErrInvalidChannelUserLimitOverride)
 
-	unlimitedConcurrency := 4
-	err = ReplaceChannelUserLimitOverride(context.Background(), channel, 123, ChannelUserLimitOverrideInput{UserConcurrencyLimit: &unlimitedConcurrency}, 1)
+	unlimited := &model.Channel{Id: 93}
+	higher := 4
+	err = ReplaceChannelUserLimitOverride(context.Background(), unlimited, 123, ChannelUserLimitOverrideInput{UserConcurrencyLimit: &higher}, 1)
 	assert.ErrorIs(t, err, ErrInvalidChannelUserLimitOverride)
 }
 

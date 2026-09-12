@@ -1,5 +1,7 @@
 # 渠道单用户每周额度与个人覆盖契约
 
+> 预算 v2 迁移说明：当前日/周额度与个人提额以 [周期预算与降级契约](./channel-period-budget-fallback.md) 为准。本文旧日周字段、独立检查和管理 API 仅供历史兼容/回滚查阅；渠道周额度列已 json:"-"，user-weekly-quota 接口已删除，user-limit-overrides 仅管理并发，统一状态用 v2 period_limits 返回预算。自然周计数、正向结算、并发覆盖缓存和 BFF 权威边界继续适用；预算覆盖读取失败必须报错，不能套用旧覆盖的回落默认行为。
+
 > 本规范约束渠道单用户每周额度、并发/日限/周限个人提额、统一管理 API，以及 ai-fund 通过 Cloudflare Worker BFF 接入时的权威边界。
 
 ## 1. 适用范围与触发条件

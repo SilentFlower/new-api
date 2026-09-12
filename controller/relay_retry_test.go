@@ -11,6 +11,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	appconstant "github.com/QuantumNous/new-api/constant"
+	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
@@ -132,7 +133,8 @@ func TestShouldRetryAlphaSearchUpstreamError(t *testing.T) {
 }
 
 func TestPrepareAlphaSearchBillingReservesOneWebSearchCall(t *testing.T) {
-	setupChannelUserLimitsTestDB(t)
+	db := setupChannelUserLimitsTestDB(t)
+	require.NoError(t, db.Create(&model.Channel{Id: 1, Name: "搜索计费测试渠道"}).Error)
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)

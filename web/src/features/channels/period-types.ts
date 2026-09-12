@@ -21,15 +21,14 @@ import { z } from 'zod'
 /** 周期额度上界，与后端 common.MaxPeriodQuota 一致；保持在 2^53 内以保证 JSON 精确往返。 */
 export const MAX_PERIOD_QUOTA = 1_000_000_000_000_000
 const quota = z.number().int().min(0).max(MAX_PERIOD_QUOTA)
-/** 四个逐项覆盖的规则金额字段。 */
-export const periodQuotaKeys = [
-  'user_daily_quota_limit',
-  'pool_daily_quota_limit',
-  'user_period_quota_limit',
-  'pool_period_quota_limit',
-] as const
-/** 时间规则表单与传输协议，null 继承、0 明确不限。 */
-export const channelPeriodRuleSchema = z.object({
+/** 超限动作：inherit 沿用策略级默认，reject 拒绝，fallback 降级到目标。 */
+export const channelBudgetActionSchema = z.object({
+  mode: z.enum(['inherit', 'reject', 'fallback']),
+  channel_id: z.number().int().nonnegative(),
+  model: z.string(),
+})
+/** 可复用时段；新时段用 new- 前缀的临时 id 供同一次保存的行引用。 */
+export const channelBudgetScheduleSchema = z.object({
   id: z.string(),
   name: z.string().trim().min(1).max(80),
   enabled: z.boolean(),
@@ -43,50 +42,74 @@ export const channelPeriodRuleSchema = z.object({
   start_time: z.string(),
   end_time: z.string(),
   created_at: z.number().int().nonnegative(),
-  user_daily_quota_limit: quota.nullable(),
-  pool_daily_quota_limit: quota.nullable(),
-  user_period_quota_limit: quota.nullable(),
-  pool_period_quota_limit: quota.nullable(),
 })
-/** 独立配置协议，不向普通渠道更新回传策略。 */
+/** 预算行：范围 × 周期 × 模型 × 上限 × 超限动作。 */
+export const channelBudgetRowSchema = z.object({
+  id: z.string(),
+  name: z.string().trim().min(1).max(80),
+  enabled: z.boolean(),
+  scope: z.enum(['user', 'pool']),
+  window: z.enum(['daily', 'weekly', 'occurrence']),
+  schedule_id: z.string(),
+  models: z.array(z.string().trim().min(1).max(255)).max(64),
+  limit: quota,
+  on_exceed: channelBudgetActionSchema,
+  created_at: z.number().int().nonnegative(),
+})
+/** schema_version=2 的预算策略协议。 */
 export const channelPeriodConfigSchema = z.object({
-  schema_version: z.literal(1),
-  pool_daily_quota_limit: quota,
-  pool_weekly_quota_limit: quota,
-  rules: z.array(channelPeriodRuleSchema).max(64),
-  fallback: z.object({
-    enabled: z.boolean(),
-    channel_id: z.number().int().nonnegative(),
-    model: z.string(),
-  }),
+  schema_version: z.literal(2),
+  default_on_exceed: channelBudgetActionSchema,
+  schedules: z.array(channelBudgetScheduleSchema).max(64),
+  budgets: z.array(channelBudgetRowSchema).max(128),
 })
-/** 周期规则。 */
-export type ChannelPeriodRule = z.infer<typeof channelPeriodRuleSchema>
-/** 周期策略。 */
+/** 超限动作。 */
+export type ChannelBudgetAction = z.infer<typeof channelBudgetActionSchema>
+/** 时段。 */
+export type ChannelBudgetSchedule = z.infer<typeof channelBudgetScheduleSchema>
+/** 预算行。 */
+export type ChannelBudgetRow = z.infer<typeof channelBudgetRowSchema>
+/** 预算策略。 */
 export type ChannelPeriodConfig = z.infer<typeof channelPeriodConfigSchema>
 /** 指标来源。 */
 export interface ChannelPeriodSource {
   kind: 'default' | 'weekly' | 'date_range' | 'personal'
-  rule_id?: string
-  rule_name?: string
+  schedule_id?: string
+  schedule_name?: string
   start_at?: number
   end_at?: number
   expires_at?: number
 }
-/** 权威策略与只读预览。 */
+/** 权威策略视图。 */
 export interface ChannelPeriodView {
   revision: number
   config: ChannelPeriodConfig
   timezone: string
   now: number
-  limits?: Record<string, number>
-  sources?: Record<string, ChannelPeriodSource>
-  next_change_at?: number
 }
-/** 个人或池子当前计数。 */
+/** 预览时每行的解析状态。 */
+export interface ChannelBudgetPreviewRow {
+  budget_id: string
+  active: boolean
+  enforced: boolean
+  source: ChannelPeriodSource
+}
+/** 只读预览结果。 */
+export interface ChannelBudgetPreview {
+  config: ChannelPeriodConfig
+  revision: number
+  timezone: string
+  now: number
+  next_change_at: number
+  rows: ChannelBudgetPreviewRow[]
+}
+/** 某行对当前用户的额度状态。 */
 export interface ChannelPeriodMetric {
+  budget_id: string
+  budget_name: string
   scope: 'user' | 'pool'
-  period: 'daily' | 'weekly' | 'custom'
+  period: 'daily' | 'weekly' | 'occurrence'
+  models: string[]
   limit: number
   used: number
   remaining: number | null
@@ -109,9 +132,39 @@ export interface ChannelPeriodStatus {
   fallback_enabled: boolean
   blocked: boolean
 }
-/** 安全降级目标选项。 */
+/** 降级目标候选；self 表示本渠道，只能作为按模型行的同渠道换模型目标。 */
 export interface ChannelPeriodTarget {
   id: number
   name: string
   models: string[]
+  self: boolean
+}
+/** 某行当前窗口的用量视图。 */
+export interface ChannelBudgetUsageView {
+  channel_id: number
+  budget_id: string
+  scope: 'user' | 'pool'
+  window_start: number
+  window_end: number
+  tracking_since: number
+  storage_mode: 'memory' | 'redis'
+  used_quota: number
+  page: number
+  page_size: number
+  total: number
+  items: {
+    user_id: number
+    username: string
+    display_name: string
+    used_quota: number
+  }[]
+}
+/** 行级提额列表项。 */
+export interface ChannelBudgetUserOverrideItem {
+  user: { id: number; username: string; display_name: string }
+  budget_id: string
+  budget_name: string
+  base_limit: number
+  limit: number
+  expires_at: number
 }

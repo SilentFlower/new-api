@@ -93,10 +93,11 @@ func TestChannelLimitFallbackPreservesCompactPassthrough(t *testing.T) {
 				if state == "额度耗尽" {
 					limit = 1
 				}
-				_, err := service.SaveChannelPeriodPolicy(t.Context(), id, appdto.ChannelPeriodPolicyInput{Config: appdto.ChannelPeriodPolicyConfig{
-					SchemaVersion: 1, PoolDailyQuotaLimit: limit,
-					Fallback: appdto.ChannelLimitFallback{Enabled: state != "正常", ChannelID: target.Id, Model: "gpt-6-astra"},
-				}}, 1)
+				config := budgetPoolDailyConfig(limit, target.Id, "gpt-6-astra")
+				if state == "正常" {
+					config.DefaultOnExceed = appdto.ChannelBudgetAction{Mode: "reject"}
+				}
+				_, err := service.SaveChannelPeriodPolicy(t.Context(), id, appdto.ChannelPeriodPolicyInput{Config: config}, 1)
 				require.NoError(t, err)
 				require.NoError(t, service.RecordChannelUserQuotaUsage(t.Context(), id, 77, 1))
 				recorder := httptest.NewRecorder()

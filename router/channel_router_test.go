@@ -23,8 +23,11 @@ func TestChannelModelOptionsRouteUsesReadPermission(t *testing.T) {
 }
 
 func TestChannelUserLimitRoutesUseExpectedPermissions(t *testing.T) {
-	assertChannelRoutePermission(t, http.MethodGet, "/:id/user-daily-quota", authz.ChannelRead, controller.GetChannelUserDailyQuota)
-	assertChannelRoutePermission(t, http.MethodPut, "/:id/user-daily-quota/:user_id", authz.ChannelOperate, controller.SetChannelUserDailyQuota)
+	assertChannelRoutePermission(t, http.MethodGet, "/:id/budgets/:budget_id/usage", authz.ChannelRead, controller.GetChannelBudgetUsage)
+	assertChannelRoutePermission(t, http.MethodPut, "/:id/budgets/:budget_id/usage", authz.ChannelOperate, controller.SetChannelBudgetUsage)
+	assertChannelRoutePermission(t, http.MethodPut, "/:id/budgets/:budget_id/user-overrides/:user_id", authz.ChannelOperate, controller.SetChannelUserBudgetOverride)
+	assertChannelRoutePermission(t, http.MethodDelete, "/:id/budgets/:budget_id/user-overrides/:user_id", authz.ChannelOperate, controller.DeleteChannelUserBudgetOverride)
+	assertChannelRoutePermission(t, http.MethodGet, "/:id/budget-user-overrides", authz.ChannelRead, controller.GetChannelUserBudgetOverrides)
 	assertChannelRoutePermission(t, http.MethodGet, "/:id/user-concurrency", authz.ChannelRead, controller.GetChannelUserConcurrency)
 }
 

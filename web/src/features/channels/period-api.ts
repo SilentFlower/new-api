@@ -21,6 +21,9 @@ import { isAxiosError } from 'axios'
 import { api } from '@/lib/api'
 
 import type {
+  ChannelBudgetPreview,
+  ChannelBudgetUsageView,
+  ChannelBudgetUserOverrideItem,
   ChannelPeriodConfig,
   ChannelPeriodTarget,
   ChannelPeriodView,
@@ -32,6 +35,7 @@ const requestConfig = {
   skipErrorHandler: true,
   disableDuplicate: true,
 }
+const unavailable = 'Period policy is unavailable. Reload and try again.'
 
 /**
  * 将稳定状态转换为可翻译错误，不依赖后端的原始中文错误。
@@ -47,79 +51,131 @@ export function channelPeriodErrorKey(error: unknown): string {
       return 'The policy has changed. Reload before editing again.'
     }
     if (error.response?.status === 400) {
-      return 'Check rule times, overlapping limits, and quota values.'
+      return 'Check schedules, overlapping budgets, and quota values.'
     }
   }
-  return 'Period policy is unavailable. Reload and try again.'
+  return unavailable
 }
 
-/** @param channelId 渠道 ID。 @returns 权威周期策略。 */
-export async function getChannelPeriodPolicy(
-  channelId: number
-): Promise<ChannelPeriodView> {
-  const res = await api.get<{ success: boolean; data: ChannelPeriodView }>(
-    `/api/channel/${channelId}/period-policy`,
-    requestConfig
-  )
-  if (!res.data.success) {
-    throw new Error('Period policy is unavailable. Reload and try again.')
-  }
+async function unwrap<T>(
+  promise: Promise<{ data: { success: boolean; data: T } }>
+): Promise<T> {
+  const res = await promise
+  if (!res.data.success) throw new Error(unavailable)
   return res.data.data
 }
 
-/** @param channelId 渠道 ID。 @returns 安全降级选项。 */
-export async function getChannelPeriodTargets(
+/** @param channelId 渠道 ID。 @returns 权威预算策略。 */
+export function getChannelPeriodPolicy(
+  channelId: number
+): Promise<ChannelPeriodView> {
+  return unwrap(
+    api.get(`/api/channel/${channelId}/period-policy`, requestConfig)
+  )
+}
+
+/** @param channelId 渠道 ID。 @returns 含本渠道的降级候选。 */
+export function getChannelPeriodTargets(
   channelId: number
 ): Promise<ChannelPeriodTarget[]> {
-  const res = await api.get<{ success: boolean; data: ChannelPeriodTarget[] }>(
-    `/api/channel/${channelId}/period-policy/targets`,
-    requestConfig
+  return unwrap(
+    api.get(`/api/channel/${channelId}/period-policy/targets`, requestConfig)
   )
-  if (!res.data.success) {
-    throw new Error('Period policy is unavailable. Reload and try again.')
-  }
-  return res.data.data
 }
 
-/** @param channelId 渠道 ID。 @param revision 预期版本。 @param config 配置。 @param preview 只读预览。 @returns 权威视图。 */
-export async function saveChannelPeriodPolicy(
+/** @param channelId 渠道 ID。 @param revision 预期版本。 @param config 配置。 @returns 只读预览。 */
+export function previewChannelPeriodPolicy(
   channelId: number,
   revision: number,
-  config: ChannelPeriodConfig,
-  preview = false
-): Promise<ChannelPeriodView> {
-  const body = { expected_revision: revision, config }
-  const path = `/api/channel/${channelId}/period-policy${preview ? '/preview' : ''}`
-  const res = await api.request<{ success: boolean; data: ChannelPeriodView }>({
-    ...requestConfig,
-    method: preview ? 'POST' : 'PUT',
-    url: path,
-    data: body,
-  })
-  if (!res.data.success) {
-    throw new Error('Period policy is unavailable. Reload and try again.')
-  }
-  return res.data.data
+  config: ChannelPeriodConfig
+): Promise<ChannelBudgetPreview> {
+  return unwrap(
+    api.request({
+      ...requestConfig,
+      method: 'POST',
+      url: `/api/channel/${channelId}/period-policy/preview`,
+      data: { expected_revision: revision, config },
+    })
+  )
 }
 
-/** @param channelId 渠道 ID。 @param ruleId 规则 ID。 @param userId 用户 ID。 @param input 特批或 null 撤销。 @returns 权威用户状态。 */
-export async function saveChannelPeriodOverride(
+/** @param channelId 渠道 ID。 @param revision 预期版本。 @param config 配置。 @returns 权威视图。 */
+export function saveChannelPeriodPolicy(
   channelId: number,
-  ruleId: string,
+  revision: number,
+  config: ChannelPeriodConfig
+): Promise<ChannelPeriodView> {
+  return unwrap(
+    api.request({
+      ...requestConfig,
+      method: 'PUT',
+      url: `/api/channel/${channelId}/period-policy`,
+      data: { expected_revision: revision, config },
+    })
+  )
+}
+
+/** @param channelId 渠道 ID。 @param budgetId 预算行。 @param params 范围与分页。 @returns 当前窗口用量。 */
+export function getChannelBudgetUsage(
+  channelId: number,
+  budgetId: string,
+  params: { scope: 'user' | 'pool'; p: number; page_size: number }
+): Promise<ChannelBudgetUsageView> {
+  return unwrap(
+    api.get(`/api/channel/${channelId}/budgets/${budgetId}/usage`, {
+      ...requestConfig,
+      params,
+    })
+  )
+}
+
+/** @param channelId 渠道 ID。 @param budgetId 预算行。 @param input 范围、用户与目标已用额度。 @returns 调整结果。 */
+export function setChannelBudgetUsage(
+  channelId: number,
+  budgetId: string,
+  input: { scope: 'user' | 'pool'; user_id: number; used_quota: number }
+): Promise<{ used_quota: number }> {
+  return unwrap(
+    api.request({
+      ...requestConfig,
+      method: 'PUT',
+      url: `/api/channel/${channelId}/budgets/${budgetId}/usage`,
+      data: input,
+    })
+  )
+}
+
+/** @param channelId 渠道 ID。 @param budgetId 预算行。 @param userId 用户 ID。 @param input 提额或 null 撤销。 @returns 权威用户状态。 */
+export function saveChannelBudgetOverride(
+  channelId: number,
+  budgetId: string,
   userId: number,
-  input: { user_period_quota_limit: number; expires_at: number } | null
+  input: { limit: number; expires_at: number } | null
 ): Promise<ChannelUserLimitStatus> {
-  const res = await api.request<{
-    success: boolean
-    data: ChannelUserLimitStatus
-  }>({
-    ...requestConfig,
-    method: input === null ? 'DELETE' : 'PUT',
-    url: `/api/channel/${channelId}/period-rules/${ruleId}/user-overrides/${userId}`,
-    data: input ?? undefined,
-  })
-  if (!res.data.success) {
-    throw new Error('Period policy is unavailable. Reload and try again.')
-  }
-  return res.data.data
+  return unwrap(
+    api.request({
+      ...requestConfig,
+      method: input === null ? 'DELETE' : 'PUT',
+      url: `/api/channel/${channelId}/budgets/${budgetId}/user-overrides/${userId}`,
+      data: input ?? undefined,
+    })
+  )
+}
+
+/** @param channelId 渠道 ID。 @param params 分页。 @returns 当前有效的行级提额。 */
+export function getChannelBudgetUserOverrides(
+  channelId: number,
+  params: { p: number; page_size: number }
+): Promise<{
+  total: number
+  page: number
+  page_size: number
+  items: ChannelBudgetUserOverrideItem[]
+}> {
+  return unwrap(
+    api.get(`/api/channel/${channelId}/budget-user-overrides`, {
+      ...requestConfig,
+      params,
+    })
+  )
 }

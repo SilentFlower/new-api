@@ -39,11 +39,10 @@ func TestApplyMidjourneyOriginChannelAttributesDailyQuotaToOriginChannel(t *test
 	relayInfo := &relaycommon.RelayInfo{
 		UserId: userID,
 		ChannelMeta: &relaycommon.ChannelMeta{
-			ChannelId:                  initialChannelID,
-			ChannelType:                constant.ChannelTypeMidjourneyPlus,
-			ChannelBaseUrl:             "https://initial.example.com",
-			ApiKey:                     "initial-key",
-			ChannelUserDailyQuotaLimit: dailyLimit,
+			ChannelId:      initialChannelID,
+			ChannelType:    constant.ChannelTypeMidjourneyPlus,
+			ChannelBaseUrl: "https://initial.example.com",
+			ApiKey:         "initial-key",
 		},
 	}
 	recorder := httptest.NewRecorder()

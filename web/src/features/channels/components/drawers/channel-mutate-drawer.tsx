@@ -196,8 +196,6 @@ import {
   BuildChannelUpstreamModelDetectionSection,
   ChannelEditorLoadingState,
   ChannelModelsSection,
-  ChannelUserDailyQuotaLimitField,
-  ChannelUserWeeklyQuotaLimitField,
 } from './sections'
 
 type ChannelMutateDrawerProps = {
@@ -345,8 +343,6 @@ function hasAdvancedSettingsValues(values: ChannelFormValues): boolean {
     values.priority ||
     values.weight ||
     values.user_concurrency_limit ||
-    values.user_daily_quota_limit ||
-    values.user_weekly_quota_limit ||
     values.proxy?.trim() ||
     values.system_prompt?.trim() ||
     values.force_format ||
@@ -725,8 +721,6 @@ export function ChannelMutateDrawer({
   const currentPriority = form.watch('priority')
   const currentWeight = form.watch('weight')
   const currentUserConcurrencyLimit = form.watch('user_concurrency_limit')
-  const currentUserDailyQuotaLimit = form.watch('user_daily_quota_limit')
-  const currentUserWeeklyQuotaLimit = form.watch('user_weekly_quota_limit')
   const currentTestModel = form.watch('test_model')
   const currentAutoBan = form.watch('auto_ban')
   const currentTag = form.watch('tag')
@@ -998,8 +992,6 @@ export function ChannelMutateDrawer({
     currentPriority ||
     currentWeight ||
     currentUserConcurrencyLimit ||
-    currentUserDailyQuotaLimit ||
-    currentUserWeeklyQuotaLimit ||
     currentTestModel?.trim() ||
     (currentAutoBan ?? 1) !== 1
   )
@@ -3698,9 +3690,6 @@ export function ChannelMutateDrawer({
                                   </FormItem>
                                 )}
                               />
-
-                              <ChannelUserDailyQuotaLimitField />
-                              <ChannelUserWeeklyQuotaLimitField />
                             </div>
 
                             <FormField

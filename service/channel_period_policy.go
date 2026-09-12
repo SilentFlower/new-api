@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"reflect"
 	"sync"
 	"time"
 
@@ -45,7 +44,7 @@ return ARGV[1]
 // @param channelID 渠道 ID。
 // @return 权威策略视图及错误；无记录时返回版本 0。
 func GetChannelPeriodPolicy(ctx context.Context, channelID int) (dto.ChannelPeriodPolicyView, error) {
-	view := dto.ChannelPeriodPolicyView{Timezone: time.Local.String(), Now: time.Now().Unix(), Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, Rules: []dto.ChannelPeriodRule{}}}
+	view := dto.ChannelPeriodPolicyView{Timezone: time.Local.String(), Now: time.Now().Unix(), Config: defaultChannelBudgetConfig()}
 	if channelID <= 0 {
 		return view, fmt.Errorf("%w: 渠道无效", ErrInvalidChannelPeriodPolicy)
 	}
@@ -72,7 +71,7 @@ func GetChannelPeriodPolicy(ctx context.Context, channelID int) (dto.ChannelPeri
 		if err := common.Unmarshal(cached, &view); err != nil {
 			return view, err
 		}
-		if err := validateChannelPeriodStoredPolicy(view); err != nil {
+		if err := validateChannelBudgetStoredPolicy(view); err != nil {
 			return view, err
 		}
 		view.Now, view.Timezone = time.Now().Unix(), time.Local.String()
@@ -82,14 +81,17 @@ func GetChannelPeriodPolicy(ctx context.Context, channelID int) (dto.ChannelPeri
 	if err != nil {
 		return view, err
 	}
+	raw := `{"schema_version":1}`
 	if item != nil {
 		view.Revision = item.Revision
-		if err = common.UnmarshalJsonStr(item.Config, &view.Config); err != nil {
-			return view, err
-		}
-		if err := validateChannelPeriodStoredPolicy(view); err != nil {
-			return view, err
-		}
+		raw = item.Config
+	}
+	// 从节点先启动或迁移写入失败时，尚无策略记录的渠道也必须继续受旧日/周列约束。
+	if view.Config, err = decodeChannelBudgetPolicyConfig(raw, channelID); err != nil {
+		return view, err
+	}
+	if err := validateChannelBudgetStoredPolicy(view); err != nil {
+		return view, err
 	}
 	data, err := common.Marshal(view)
 	if err != nil {
@@ -106,7 +108,7 @@ func GetChannelPeriodPolicy(ctx context.Context, channelID int) (dto.ChannelPeri
 	if err == nil {
 		err = common.Unmarshal(cached, &view)
 		if err == nil {
-			err = validateChannelPeriodStoredPolicy(view)
+			err = validateChannelBudgetStoredPolicy(view)
 		}
 		view.Now, view.Timezone = time.Now().Unix(), time.Local.String()
 	}
@@ -151,16 +153,24 @@ func SaveChannelPeriodPolicy(ctx context.Context, channelID int, input dto.Chann
 	if old.Revision != input.ExpectedRevision {
 		return result, model.ErrChannelPeriodPolicyConflict
 	}
-	config, err := NormalizeChannelPeriodConfig(input.Config, old.Config, channelPeriodNow().In(time.Local))
+	// 指向本渠道的行级降级归一为同渠道换模型；策略级仍禁止自指。
+	config, err := NormalizeChannelBudgetConfig(channelBudgetSameChannelToZero(input.Config, channelID), old.Config, channelPeriodNow().In(time.Local))
 	if err != nil {
 		return result, err
 	}
-	if config.Fallback.Enabled {
-		if config.Fallback.ChannelID == channelID {
+	targets := []dto.ChannelBudgetAction{config.DefaultOnExceed}
+	for _, row := range config.Budgets {
+		targets = append(targets, row.OnExceed)
+	}
+	for i, target := range targets {
+		if target.Mode != channelBudgetActionFallback || target.ChannelID == 0 {
+			continue
+		}
+		if i == 0 && target.ChannelID == channelID {
 			return result, fmt.Errorf("%w: 降级不能指向自身", ErrInvalidChannelPeriodPolicy)
 		}
-		target, targetErr := model.GetChannelById(config.Fallback.ChannelID, false)
-		if targetErr != nil || target == nil {
+		candidate, targetErr := model.GetChannelById(target.ChannelID, false)
+		if targetErr != nil || candidate == nil {
 			return result, fmt.Errorf("%w: 降级目标不存在", ErrInvalidChannelPeriodPolicy)
 		}
 	}
@@ -189,85 +199,47 @@ func SaveChannelPeriodPolicy(ctx context.Context, channelID int, input dto.Chann
 	return result, err
 }
 
-// ReplaceChannelUserPeriodOverride 校验并保存指定规则的个人整段提额。
-// @param ctx 请求上下文。
-// @param channelID 渠道 ID。
-// @param userID 用户 ID。
-// @param ruleID 稳定规则 ID。
-// @param input 额度和到期时间。
-// @param updatedBy 管理员 ID。
-// @return 校验或持久化错误。
-func ReplaceChannelUserPeriodOverride(ctx context.Context, channelID, userID int, ruleID string, input dto.ChannelUserPeriodOverrideInput, updatedBy int) error {
-	view, err := GetChannelPeriodPolicy(ctx, channelID)
+// decodeChannelBudgetPolicyConfig 解析已存储的策略正文；遇到 v1 形状时按渠道列兜底转换，不改写存储。
+func decodeChannelBudgetPolicyConfig(raw string, channelID int) (dto.ChannelPeriodPolicyConfig, error) {
+	var probe struct {
+		SchemaVersion int `json:"schema_version"`
+	}
+	if err := common.UnmarshalJsonStr(raw, &probe); err != nil {
+		return dto.ChannelPeriodPolicyConfig{}, err
+	}
+	if probe.SchemaVersion == channelBudgetSchemaVersion {
+		var config dto.ChannelPeriodPolicyConfig
+		err := common.UnmarshalJsonStr(raw, &config)
+		return config, err
+	}
+	if probe.SchemaVersion != 1 {
+		return dto.ChannelPeriodPolicyConfig{}, fmt.Errorf("不支持的已存储预算策略版本: %d", probe.SchemaVersion)
+	}
+	var v1 dto.ChannelPeriodPolicyConfigV1
+	if err := common.UnmarshalJsonStr(raw, &v1); err != nil {
+		return dto.ChannelPeriodPolicyConfig{}, err
+	}
+	channel, err := model.GetChannelById(channelID, false)
 	if err != nil {
-		return err
+		return dto.ChannelPeriodPolicyConfig{}, err
 	}
-	if input.ExpiresAt < 0 || input.ExpiresAt > 0 && input.ExpiresAt <= time.Now().Unix() {
-		return fmt.Errorf("%w: 特批到期时间须在未来", ErrInvalidChannelPeriodPolicy)
+	var userDaily, userWeekly int64
+	if channel.UserDailyQuotaLimit != nil && *channel.UserDailyQuotaLimit > 0 {
+		userDaily = int64(*channel.UserDailyQuotaLimit)
 	}
-	if userID <= 0 || updatedBy <= 0 {
-		return fmt.Errorf("%w: 用户或管理员无效", ErrInvalidChannelPeriodPolicy)
+	if channel.UserWeeklyQuotaLimit != nil && *channel.UserWeeklyQuotaLimit > 0 {
+		userWeekly = int64(*channel.UserWeeklyQuotaLimit)
 	}
-	for _, rule := range view.Config.Rules {
-		if rule.ID != ruleID {
-			continue
-		}
-		if rule.UserPeriodQuotaLimit == nil || *rule.UserPeriodQuotaLimit <= 0 || input.UserPeriodQuotaLimit <= *rule.UserPeriodQuotaLimit || input.UserPeriodQuotaLimit > common.MaxPeriodQuota {
-			return fmt.Errorf("%w: 整段特批须高于规则基础额度且不超过最大值", ErrInvalidChannelPeriodPolicy)
-		}
-		return model.ReplaceChannelUserPeriodOverride(ctx, &model.ChannelUserPeriodOverride{ChannelId: channelID, UserId: userID, RuleId: ruleID, UserPeriodQuotaLimit: input.UserPeriodQuotaLimit, ExpiresAt: input.ExpiresAt, UpdatedBy: updatedBy})
-	}
-	return fmt.Errorf("%w: 规则不存在", ErrInvalidChannelPeriodPolicy)
+	return convertChannelBudgetPolicyV1(v1, userDaily, userWeekly, channelPeriodNow().Unix()), nil
 }
 
-// PreviewChannelPeriodPolicy 解析服务端时间、生效指标与下一切换点，不写配置。
-// @param ctx 请求上下文。
-// @param channel 渠道配置。
-// @param config 待预览的配置。
-// @param now 预览时刻。
-// @return 配置及生效结果，或校验错误。
-func PreviewChannelPeriodPolicy(ctx context.Context, channel *model.Channel, config dto.ChannelPeriodPolicyConfig, now time.Time) (map[string]interface{}, error) {
-	previous, err := GetChannelPeriodPolicy(ctx, channel.Id)
-	if err != nil {
-		return nil, err
+// invalidateChannelPeriodPolicyCache 让本地与 Redis 的策略缓存失效，下一次读取回源数据库。
+func invalidateChannelPeriodPolicyCache(ctx context.Context, channelID int) {
+	key := fmt.Sprintf("channel_period_policy:{%d}", channelID)
+	channelPeriodPolicyCache.Lock()
+	delete(channelPeriodPolicyCache.values, fmt.Sprintf("%p:%s", model.DB, key))
+	channelPeriodPolicyCache.Unlock()
+	if common.RedisEnabled && common.RDB != nil {
+		_ = common.RDB.Del(ctx, key).Err()
 	}
-	normalized, err := NormalizeChannelPeriodConfig(config, previous.Config, now)
-	if err != nil {
-		return nil, err
-	}
-	limits, sources, _, next, err := resolveChannelPeriodSources(normalized, int64(channel.GetUserDailyQuotaLimit()), now)
-	if err != nil {
-		return nil, err
-	}
-	// 预览不会建立规则身份；保留新规则的空 ID，避免预览结果无法随后保存。
-	for i := range config.Rules {
-		if config.Rules[i].ID != "" {
-			continue
-		}
-		previewID := normalized.Rules[i].ID
-		normalized.Rules[i].ID = ""
-		for key, source := range sources {
-			if source.RuleID == previewID {
-				source.RuleID = ""
-				sources[key] = source
-			}
-		}
-	}
-	return map[string]interface{}{"config": normalized, "revision": previous.Revision, "timezone": time.Local.String(), "now": now.Unix(), "limits": limits, "sources": sources, "next_change_at": next}, nil
-}
-
-func validateChannelPeriodStoredPolicy(view dto.ChannelPeriodPolicyView) error {
-	if view.Revision < 0 || (view.Revision == 0 && (view.Config.PoolDailyQuotaLimit != 0 || view.Config.PoolWeeklyQuotaLimit != 0 || len(view.Config.Rules) > 0 || view.Config.Fallback.Enabled)) {
-		return errors.New("周期策略版本无效")
-	}
-	for _, rule := range view.Config.Rules {
-		if len(rule.ID) != 32 || rule.CreatedAt <= 0 {
-			return errors.New("已存储的规则身份或统计起点无效")
-		}
-	}
-	normalized, err := NormalizeChannelPeriodConfig(view.Config, view.Config, channelPeriodNow().In(time.Local))
-	if err != nil || !reflect.DeepEqual(normalized, view.Config) {
-		return errors.New("已存储的周期策略无效")
-	}
-	return nil
 }

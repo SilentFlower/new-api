@@ -117,20 +117,21 @@ func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
 			require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "gpt-4o-mini", ChannelId: target.Id, Enabled: scenario.name != "group_denied"}).Error)
 			require.NoError(t, db.Create(&model.User{Id: 77, Username: "测试用户", Quota: 1000000}).Error)
 			require.NoError(t, db.Create(&model.Token{Id: 78, UserId: 77, Key: "test-token", RemainQuota: 1000000}).Error)
-			config := appdto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 1, Fallback: appdto.ChannelLimitFallback{Enabled: true, ChannelID: target.Id, Model: "gpt-4o-mini"}}
+			config := budgetPoolDailyConfig(1, target.Id, "gpt-4o-mini")
 			if scenario.name == "disabled_fallback" || scenario.name == "tiered_preflight" {
-				config.Fallback.Enabled = false
+				config.DefaultOnExceed = appdto.ChannelBudgetAction{Mode: "reject"}
 			}
 			revision, err := service.SaveChannelPeriodPolicy(t.Context(), source.Id, appdto.ChannelPeriodPolicyInput{Config: config}, 1)
 			require.NoError(t, err)
 			require.NoError(t, service.RecordChannelUserQuotaUsage(t.Context(), source.Id, 77, 1))
 			if scenario.name == "source_recovery" {
-				config.PoolDailyQuotaLimit = 1000
+				config = revision.Config
+				config.Budgets[0].Limit = 1000
 				_, err = service.SaveChannelPeriodPolicy(t.Context(), source.Id, appdto.ChannelPeriodPolicyInput{ExpectedRevision: revision.Revision, Config: config}, 1)
 				require.NoError(t, err)
 			}
 			if scenario.name == "target_exhausted" {
-				_, err = service.SaveChannelPeriodPolicy(t.Context(), target.Id, appdto.ChannelPeriodPolicyInput{Config: appdto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 1, Fallback: appdto.ChannelLimitFallback{Enabled: true, ChannelID: source.Id, Model: "gpt-4o-mini"}}}, 1)
+				_, err = service.SaveChannelPeriodPolicy(t.Context(), target.Id, appdto.ChannelPeriodPolicyInput{Config: budgetPoolDailyConfig(1, source.Id, "gpt-4o-mini")}, 1)
 				require.NoError(t, err)
 				require.NoError(t, service.RecordChannelUserQuotaUsage(t.Context(), target.Id, 77, 1))
 			}

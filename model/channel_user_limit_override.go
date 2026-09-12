@@ -10,12 +10,13 @@ import (
 
 // ChannelUserLimitOverride 描述指定用户在指定渠道上的个人上限覆盖。
 type ChannelUserLimitOverride struct {
-	Id                   int   `json:"id"`
-	ChannelId            int   `json:"channel_id" gorm:"uniqueIndex:idx_channel_user_limit_override"`
-	UserId               int   `json:"user_id" gorm:"uniqueIndex:idx_channel_user_limit_override"`
-	UserConcurrencyLimit *int  `json:"user_concurrency_limit"`
-	UserDailyQuotaLimit  *int  `json:"user_daily_quota_limit"`
-	UserWeeklyQuotaLimit *int  `json:"user_weekly_quota_limit"`
+	Id                   int  `json:"id"`
+	ChannelId            int  `json:"channel_id" gorm:"uniqueIndex:idx_channel_user_limit_override"`
+	UserId               int  `json:"user_id" gorm:"uniqueIndex:idx_channel_user_limit_override"`
+	UserConcurrencyLimit *int `json:"user_concurrency_limit"`
+	// 旧日/周提额已迁移到行级提额表，仅为兼容历史表结构保留，不再读写。
+	UserDailyQuotaLimit  *int  `json:"-"`
+	UserWeeklyQuotaLimit *int  `json:"-"`
 	ExpiresAt            int64 `json:"expires_at" gorm:"bigint;index"`
 	UpdatedBy            int   `json:"updated_by"`
 	CreatedAt            int64 `json:"created_at" gorm:"bigint"`
@@ -86,12 +87,10 @@ func ReplaceChannelUserLimitOverride(override *ChannelUserLimitOverride) error {
 		}
 		if err == nil {
 			return tx.Model(&existing).Updates(map[string]interface{}{
-				"user_concurrency_limit":  override.UserConcurrencyLimit,
-				"user_daily_quota_limit":  override.UserDailyQuotaLimit,
-				"user_weekly_quota_limit": override.UserWeeklyQuotaLimit,
-				"expires_at":              override.ExpiresAt,
-				"updated_by":              override.UpdatedBy,
-				"updated_at":              now,
+				"user_concurrency_limit": override.UserConcurrencyLimit,
+				"expires_at":             override.ExpiresAt,
+				"updated_by":             override.UpdatedBy,
+				"updated_at":             now,
 			}).Error
 		}
 		override.CreatedAt = now

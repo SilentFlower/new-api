@@ -21,9 +21,12 @@ import assert from 'node:assert/strict'
 import { Window } from 'happy-dom'
 
 import type {
+  ChannelBudgetUsageView,
+  ChannelPeriodView,
+} from '../../../period-types'
+import type {
   Channel,
   ChannelUserConcurrencyItem,
-  ChannelUserDailyQuotaItem,
   ChannelUserLimitPage,
 } from '../../../types'
 
@@ -44,6 +47,7 @@ const domGlobals = [
   'HTMLButtonElement',
   'HTMLInputElement',
   'HTMLLabelElement',
+  'HTMLSelectElement',
   'HTMLDivElement',
   'HTMLSpanElement',
   'SVGElement',
@@ -99,15 +103,13 @@ await i18n.use(initReactI18next).init({
   resources: {
     en: {
       translation: {
-        'Adjust daily usage for {{user}} (ID: {{id}}).':
-          'Adjust daily usage for {{user}} (ID: {{id}}).',
-        'Adjusted used amount ({{unit}})': 'Adjusted used amount ({{unit}})',
         'Failed to load current concurrency':
           'Localized concurrency load failure',
-        'Failed to load daily quota usage':
-          'Localized daily quota load failure',
         'Page {{current}} of {{total}}': 'Page {{current}} of {{total}}',
-        'Resets at {{time}}': 'Resets at {{time}}',
+        'Period policy is unavailable. Reload and try again.':
+          'Localized period policy load failure',
+        'Set current usage for {{target}}. This only changes the counter, not billing.':
+          'Set current usage for {{target}}.',
       },
     },
   },
@@ -123,16 +125,22 @@ notifyManager.setNotifyFunction((callback) => {
 
 type ApiGet = (
   url: string,
-  config?: { params?: { p?: number; page_size?: number } }
+  config?: { params?: { p?: number; page_size?: number; scope?: string } }
 ) => Promise<{ data: unknown }>
 type ApiPut = (
   url: string,
   data?: unknown,
   config?: unknown
 ) => Promise<{ data: unknown }>
+type ApiRequest = (input: {
+  method: string
+  url: string
+  data?: unknown
+}) => Promise<{ data: unknown }>
 type MockableApi = {
   get: ApiGet
   put: ApiPut
+  request: ApiRequest
 }
 type RenderedDialog = {
   host: HTMLDivElement
@@ -144,21 +152,66 @@ type RenderedDialog = {
 const apiClient = api as unknown as MockableApi
 const originalGet = apiClient.get
 const originalPut = apiClient.put
-const testChannel = { id: 77, name: 'Daily quota channel' } as Channel
+const originalRequest = apiClient.request
+const testChannel = { id: 77, name: 'Budget channel' } as Channel
 let renderedDialog: RenderedDialog | null = null
 const originalSetInterval = globalThis.setInterval
 const originalClearInterval = globalThis.clearInterval
 
-function dailyPage(
-  items: ChannelUserDailyQuotaItem[],
+/** @returns 含个人日预算行与池子行的 v2 策略。 */
+function policyView(): ChannelPeriodView {
+  return {
+    revision: 2,
+    timezone: 'Asia/Shanghai',
+    now: 1_787_100_000,
+    config: {
+      schema_version: 2,
+      default_on_exceed: { mode: 'reject', channel_id: 0, model: '' },
+      schedules: [],
+      budgets: [
+        {
+          id: 'b-user',
+          name: 'User daily',
+          enabled: true,
+          scope: 'user',
+          window: 'daily',
+          schedule_id: '',
+          models: [],
+          limit: 500_000,
+          on_exceed: { mode: 'inherit', channel_id: 0, model: '' },
+          created_at: 1,
+        },
+        {
+          id: 'b-pool',
+          name: 'Pool daily',
+          enabled: true,
+          scope: 'pool',
+          window: 'daily',
+          schedule_id: '',
+          models: [],
+          limit: 900_000,
+          on_exceed: { mode: 'inherit', channel_id: 0, model: '' },
+          created_at: 1,
+        },
+      ],
+    },
+  }
+}
+
+function usagePage(
+  items: ChannelBudgetUsageView['items'],
   total = items.length,
   storageMode: 'redis' | 'memory' = 'redis'
-): ChannelUserLimitPage<ChannelUserDailyQuotaItem> {
+): ChannelBudgetUsageView {
   return {
     channel_id: testChannel.id,
-    limit: 500_000,
+    budget_id: 'b-user',
+    scope: 'user',
+    window_start: 1_787_075_200,
+    window_end: 1_787_161_600,
+    tracking_since: 0,
     storage_mode: storageMode,
-    reset_at: 1_787_161_600,
+    used_quota: items.reduce((sum, item) => sum + item.used_quota, 0),
     page: 1,
     page_size: 20,
     total,
@@ -179,6 +232,10 @@ function concurrencyPage(
     total,
     items,
   }
+}
+
+function overridesPage(total: number, items: unknown[]) {
+  return { channel_id: testChannel.id, page: 1, page_size: 20, total, items }
 }
 
 function setOperator(canOperate: boolean) {
@@ -235,6 +292,24 @@ async function changeInput(input: HTMLInputElement, value: string) {
   })
 }
 
+/** @param budgetId 预算行 id。 @returns 在用量页签的预算选择器里选中该行。 */
+async function selectBudget(budgetId: string) {
+  await waitForCondition(
+    () => document.querySelector('select[data-slot="native-select"]') !== null,
+    '预算选择器未加载'
+  )
+  const select = document.querySelector<HTMLSelectElement>(
+    'select[data-slot="native-select"]'
+  )
+  assert.ok(select)
+  await act(async () => {
+    select.value = budgetId
+    select.dispatchEvent(
+      new domWindow.Event('change', { bubbles: true }) as unknown as Event
+    )
+  })
+}
+
 async function renderChannelUserLimitsDialog(open = true) {
   const host = document.createElement('div')
   document.body.append(host)
@@ -269,6 +344,7 @@ async function renderChannelUserLimitsDialog(open = true) {
 afterEach(async () => {
   apiClient.get = originalGet
   apiClient.put = originalPut
+  apiClient.request = originalRequest
   globalThis.setInterval = originalSetInterval
   globalThis.clearInterval = originalClearInterval
   if (renderedDialog) {
@@ -288,206 +364,134 @@ afterAll(() => {
   domWindow.close()
 })
 
-test('调整确认展示用户和调整前后金额，并提交目标额度', async () => {
+test('按行用量页签选中预算后展示用户用量，并按行提交目标已用额度', async () => {
   setOperator(true)
-  const putCalls: Array<{ url: string; data: unknown }> = []
-  apiClient.get = async () => ({
-    data: {
-      success: true,
-      data: dailyPage(
-        [
-          {
-            user_id: 81,
-            username: 'alice',
-            display_name: 'Alice',
-            used_quota: 1000,
-            limit: 500_000,
-            remaining_quota: 499_000,
-          },
-        ],
-        1,
-        'memory'
-      ),
-    },
-  })
-  apiClient.put = async (url, data) => {
-    putCalls.push({ url, data })
-    return { data: { success: true } }
+  const requests: Array<{ method: string; url: string; data?: unknown }> = []
+  apiClient.get = async (url) => {
+    if (url.includes('/usage')) {
+      return {
+        data: {
+          success: true,
+          data: usagePage(
+            [
+              {
+                user_id: 81,
+                username: 'alice',
+                display_name: 'Alice',
+                used_quota: 1000,
+              },
+            ],
+            1,
+            'memory'
+          ),
+        },
+      }
+    }
+    return { data: { success: true, data: policyView() } }
+  }
+  apiClient.request = async (input) => {
+    requests.push({ method: input.method, url: input.url, data: input.data })
+    return { data: { success: true, data: { used_quota: 0 } } }
   }
 
   await renderChannelUserLimitsDialog()
+  await selectBudget('b-user')
   await waitForCondition(
     () => document.body.textContent?.includes('Set usage') === true,
-    '每日额度列表未加载'
+    '按行用量列表未加载'
   )
-  assert.match(
-    document.body.textContent ?? '',
-    /Usage data is available for this instance only\./
-  )
+  assert.ok(document.body.textContent?.includes(formatQuota(1000)))
 
   await act(async () => findButton('Set usage').click())
   await waitForCondition(
     () =>
-      document.body.textContent?.includes(
-        'Adjust daily usage for Alice (ID: 81).'
-      ) === true,
-    '调整确认弹窗未打开'
+      document.body.textContent?.includes('Set current usage for Alice.') ===
+      true,
+    '调整表单未打开'
   )
-  assert.match(document.body.textContent ?? '', /Before adjustment/)
-  assert.match(document.body.textContent ?? '', /After adjustment/)
-  assert.ok(document.body.textContent?.includes(formatQuota(1000)))
-
-  const input = document.querySelector<HTMLInputElement>(
-    '#channel-user-daily-quota-amount'
-  )
+  const panel = document.querySelector('[aria-label="Budget usage"]')
+  assert.ok(panel)
+  const input = panel.querySelector<HTMLInputElement>('input[type="number"]')
   assert.ok(input)
   await changeInput(input, '0')
-  assert.ok(document.body.textContent?.includes(formatQuota(0)))
-
   await act(async () => findButton('Confirm').click())
-  await waitForCondition(() => putCalls.length === 1, '调整请求未提交')
-  assert.deepEqual(putCalls[0], {
-    url: '/api/channel/77/user-daily-quota/81',
-    data: { used_quota: 0 },
+  await waitForCondition(() => requests.length === 1, '调整请求未提交')
+  assert.deepEqual(requests[0], {
+    method: 'PUT',
+    url: '/api/channel/77/budgets/b-user/usage',
+    data: { scope: 'user', user_id: 81, used_quota: 0 },
   })
 })
 
-test('个人调整在人民币显示下回填无浮点尾数并保持额度往返', async () => {
-  setOperator(true)
-  useSystemConfigStore.getState().setConfig({
-    currency: {
-      ...DEFAULT_CURRENCY_CONFIG,
-      quotaDisplayType: 'CNY',
-      usdExchangeRate: 7.2,
-    },
-  })
-  const putCalls: Array<{ url: string; data: unknown }> = []
-  apiClient.get = async () => ({
-    data: {
-      success: true,
-      data: dailyPage([
-        {
-          user_id: 85,
-          username: 'currency-user',
-          display_name: 'Currency User',
-          used_quota: 50_000,
-          limit: 500_000,
-          remaining_quota: 450_000,
+test('缺少渠道运行权限时禁用按行用量调整', async () => {
+  setOperator(false)
+  apiClient.get = async (url) => {
+    if (url.includes('/usage')) {
+      return {
+        data: {
+          success: true,
+          data: usagePage([
+            {
+              user_id: 82,
+              username: 'bob',
+              display_name: 'Bob',
+              used_quota: 2000,
+            },
+          ]),
         },
-      ]),
-    },
-  })
-  apiClient.put = async (url, data) => {
-    putCalls.push({ url, data })
-    return { data: { success: true } }
+      }
+    }
+    return { data: { success: true, data: policyView() } }
   }
 
   await renderChannelUserLimitsDialog()
+  await selectBudget('b-user')
   await waitForCondition(
     () => document.body.textContent?.includes('Set usage') === true,
-    '每日额度列表未加载'
+    '按行用量列表未加载'
   )
-  await act(async () => findButton('Set usage').click())
-
-  const input = document.querySelector<HTMLInputElement>(
-    '#channel-user-daily-quota-amount'
-  )
-  assert.ok(input)
-  assert.equal(input.value, '0.72')
-
-  await act(async () => findButton('Confirm').click())
-  await waitForCondition(() => putCalls.length === 1, '调整请求未提交')
-  assert.deepEqual(putCalls[0], {
-    url: '/api/channel/77/user-daily-quota/85',
-    data: { used_quota: 50_000 },
-  })
-})
-
-test('缺少渠道运行权限时禁用调整并提供可聚焦说明', async () => {
-  setOperator(false)
-  apiClient.get = async () => ({
-    data: {
-      success: true,
-      data: dailyPage([
-        {
-          user_id: 82,
-          username: 'bob',
-          display_name: 'Bob',
-          used_quota: 2000,
-          limit: 500_000,
-          remaining_quota: 498_000,
-        },
-      ]),
-    },
-  })
-
-  await renderChannelUserLimitsDialog()
-  await waitForCondition(
-    () => document.body.textContent?.includes('Set usage') === true,
-    '每日额度列表未加载'
-  )
-
-  const button = findButton('Set usage')
-  assert.equal(button.disabled, true)
-  const permissionTrigger = button.parentElement
-  assert.ok(permissionTrigger)
-  assert.equal(
-    permissionTrigger.getAttribute('aria-label'),
-    'No permission to perform this action'
-  )
-  assert.equal(permissionTrigger.tabIndex, 0)
+  assert.equal(findButton('Set usage').disabled, true)
 })
 
 test('刷新后总数收缩时从空的末页自动回到有效页', async () => {
   setOperator(true)
   let secondPageRequests = 0
-  apiClient.get = async (_url, config) => {
-    const page = config?.params?.p ?? 1
-    if (page === 2) {
-      secondPageRequests++
+  const overrideItem = (id: number, name: string) => ({
+    user: { id, username: name.toLowerCase(), display_name: name },
+    user_concurrency_limit: 5,
+    effective_concurrency_limit: 5,
+    expires_at: 0,
+  })
+  apiClient.get = async (url, config) => {
+    if (url.includes('/budget-user-overrides')) {
+      return { data: { success: true, data: overridesPage(0, []) } }
+    }
+    if (url.includes('/user-limit-overrides')) {
+      const page = config?.params?.p ?? 1
+      if (page === 2) {
+        secondPageRequests++
+        return {
+          data: {
+            success: true,
+            data:
+              secondPageRequests === 1
+                ? overridesPage(21, [overrideItem(99, 'Last Page')])
+                : overridesPage(20, []),
+          },
+        }
+      }
       return {
         data: {
           success: true,
-          data:
-            secondPageRequests === 1
-              ? dailyPage(
-                  [
-                    {
-                      user_id: 99,
-                      username: 'last-page',
-                      display_name: 'Last Page',
-                      used_quota: 100,
-                      limit: 500_000,
-                      remaining_quota: 499_900,
-                    },
-                  ],
-                  21
-                )
-              : dailyPage([], 20),
+          data: overridesPage(21, [overrideItem(83, 'First Page')]),
         },
       }
     }
-    return {
-      data: {
-        success: true,
-        data: dailyPage(
-          [
-            {
-              user_id: 83,
-              username: 'first-page',
-              display_name: 'First Page',
-              used_quota: 100,
-              limit: 500_000,
-              remaining_quota: 499_900,
-            },
-          ],
-          21
-        ),
-      },
-    }
+    return { data: { success: true, data: policyView() } }
   }
 
   await renderChannelUserLimitsDialog()
+  await act(async () => findButton('Personal overrides').click())
   await waitForCondition(
     () => document.body.textContent?.includes('Page 1 of 2') === true,
     '第一页分页状态未加载'
@@ -551,7 +555,7 @@ test('当前并发仅在对应页签打开时轮询，Dialog 关闭后停止', a
         },
       }
     }
-    return { data: { success: true, data: dailyPage([]) } }
+    return { data: { success: true, data: policyView() } }
   }
 
   const rendered = await renderChannelUserLimitsDialog()
@@ -580,20 +584,15 @@ test('当前并发仅在对应页签打开时轮询，Dialog 关闭后停止', a
 
 test('查询失败时使用国际化后的兜底文案', async () => {
   setOperator(true)
-  apiClient.get = async (url) => {
-    if (url.endsWith('/user-concurrency')) {
-      return { data: { success: false } }
-    }
-    return { data: { success: false } }
-  }
+  apiClient.get = async () => ({ data: { success: false } })
 
   await renderChannelUserLimitsDialog()
   await waitForCondition(
     () =>
       document.body.textContent?.includes(
-        'Localized daily quota load failure'
+        'Localized period policy load failure'
       ) === true,
-    '每日额度查询失败文案未经过国际化'
+    '预算策略查询失败文案未经过国际化'
   )
 
   await act(async () => findButton('Current concurrency').click())
@@ -606,23 +605,29 @@ test('查询失败时使用国际化后的兜底文案', async () => {
   )
 })
 
-test('无请求记录的用户可通过搜索提前配置个人覆盖', async () => {
+test('无请求记录的用户可通过搜索提前配置并发覆盖，行级提额列表按行展示', async () => {
   setOperator(true)
   const putCalls: Array<{ url: string; data: unknown }> = []
   apiClient.get = async (url) => {
-    if (url.includes('/user-limit-overrides')) {
+    if (url.includes('/budget-user-overrides')) {
       return {
         data: {
           success: true,
-          data: {
-            channel_id: 77,
-            page: 1,
-            page_size: 20,
-            total: 0,
-            items: [],
-          },
+          data: overridesPage(1, [
+            {
+              user: { id: 92, username: 'raised', display_name: 'Raised' },
+              budget_id: 'b-user',
+              budget_name: 'User daily',
+              base_limit: 500_000,
+              limit: 800_000,
+              expires_at: 0,
+            },
+          ]),
         },
       }
+    }
+    if (url.includes('/user-limit-overrides')) {
+      return { data: { success: true, data: overridesPage(0, []) } }
     }
     if (url.includes('/user-limit-users')) {
       return {
@@ -655,27 +660,21 @@ test('无请求记录的用户可通过搜索提前配置个人覆盖', async ()
               display_name: 'Future User',
             },
             concurrency: {
-              base_limit: 0,
-              effective_limit: 0,
+              base_limit: 3,
+              effective_limit: 3,
               current: 0,
-              remaining: 0,
+              remaining: 3,
               storage_mode: 'memory',
             },
-            daily_quota: {
-              base_limit: 500_000,
-              effective_limit: 500_000,
-              current: 0,
-              remaining: 500_000,
-              reset_at: 1_787_241_600,
+            period_limits: {
+              schema_version: 2,
+              revision: 2,
+              timezone: 'Asia/Shanghai',
               storage_mode: 'memory',
-            },
-            weekly_quota: {
-              base_limit: 0,
-              effective_limit: 0,
-              current: 0,
-              remaining: 0,
-              reset_at: 1_787_760_000,
-              storage_mode: 'memory',
+              next_change_at: 0,
+              metrics: [],
+              fallback_enabled: false,
+              blocked: false,
             },
             override_active: false,
             override_expires_at: 0,
@@ -683,20 +682,21 @@ test('无请求记录的用户可通过搜索提前配置个人覆盖', async ()
         },
       }
     }
-    throw new Error(`unexpected GET ${url}`)
+    return { data: { success: true, data: policyView() } }
   }
   apiClient.put = async (url, data) => {
     putCalls.push({ url, data })
-    return {
-      data: {
-        success: true,
-        data: {},
-      },
-    }
+    return { data: { success: true, data: {} } }
   }
 
   await renderChannelUserLimitsDialog()
   await act(async () => findButton('Personal overrides').click())
+  await waitForCondition(
+    () => document.body.textContent?.includes('Raised') === true,
+    '行级提额列表未加载'
+  )
+  assert.match(document.body.textContent ?? '', /User daily/)
+  assert.ok(document.body.textContent?.includes(formatQuota(800_000)))
   const searchInput = document.querySelector<HTMLInputElement>(
     'input[aria-label="Search users"]'
   )
@@ -709,21 +709,19 @@ test('无请求记录的用户可通过搜索提前配置个人覆盖', async ()
   )
   await act(async () => findButton('Temporarily increase').click())
   await waitForCondition(
-    () => document.querySelector('#personal-daily') !== null,
+    () => document.querySelector('#personal-concurrency') !== null,
     '个人覆盖编辑器未打开'
   )
-  const dailyInput = document.querySelector<HTMLInputElement>('#personal-daily')
-  assert.ok(dailyInput)
-  await changeInput(dailyInput, '2')
+  assert.equal(document.querySelector('#personal-daily'), null)
+  const concurrencyInput = document.querySelector<HTMLInputElement>(
+    '#personal-concurrency'
+  )
+  assert.ok(concurrencyInput)
+  await changeInput(concurrencyInput, '5')
   await act(async () => findButton('Save override').click())
   await waitForCondition(() => putCalls.length === 1, '个人覆盖请求未提交')
   assert.deepEqual(putCalls[0], {
     url: '/api/channel/77/user-limit-overrides/91',
-    data: {
-      user_concurrency_limit: null,
-      user_daily_quota_limit: 1_000_000,
-      user_weekly_quota_limit: null,
-      expires_at: 0,
-    },
+    data: { user_concurrency_limit: 5, expires_at: 0 },
   })
 })

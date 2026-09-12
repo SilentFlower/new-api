@@ -328,6 +328,7 @@ func InitResources() error {
 		if err := model.MigrateRetiredFrontendOptions(); err != nil {
 			common.SysError("failed to migrate retired frontend options: " + err.Error())
 		}
+		service.MigrateChannelBudgetPolicies(context.Background())
 	}
 	model.InitOptionMap()
 

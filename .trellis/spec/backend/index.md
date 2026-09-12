@@ -27,7 +27,7 @@
 | [Relay 流式 SSE 响应保活契约](./relay-stream-keepalive.md) | 流式响应头等待、正文扫描、SSE comment 保活、idle timeout 和请求体读取边界 | 已完成 |
 | [渠道单用户并发限制契约](./channel-user-concurrency.md) | 渠道配置、Redis/内存租约、HTTP/WebSocket/任务生命周期、429/503 错误与取消传播 | 已完成 |
 | [渠道单用户每日额度契约](./channel-user-daily-quota.md) | 渠道每日软上限、自然日 Redis/内存状态、正向记账、管理 API、个人目标值调整、可视化、Redis 持久化与恢复 | 已完成 |
-| [渠道周期预算与降级契约](./channel-period-budget-fallback.md) | 任意日期/每周规则、池子/整段软额度、个人优先级、一次 HTTP 降级与两仓合同 | 已完成 |
+| [渠道周期预算与降级契约](./channel-period-budget-fallback.md) | 预算 v2 配置、按行用量/提额、迁移撤销与回滚、统计起点、预算表抽屉、一次 HTTP 降级与两仓合同 | 已完成 |
 | [渠道单用户每周额度与个人覆盖契约](./channel-user-weekly-quota-and-overrides.md) | 自然周软上限、日周统一记账、并发/日限/周限个人提额、统一管理 API、缓存与 ai-fund BFF 边界 | 已完成 |
 | [消息审计控制面契约](./message-audit-control-plane.md) | 消息审计跨数据库快速清空、保留水位、AI 重审 Tool 降级与上游上下文边界 | 已完成 |
 | [GitHub 用户 Key 公开泄露扫描契约](./token-leak-scan.md) | 用户 Key 的公开代码搜索、精确确认、任务互斥、通知幂等、敏感信息边界和处置流程 | 已完成 |

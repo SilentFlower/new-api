@@ -112,7 +112,7 @@ func TestChannelLimitFallbackPreflightCompatibility(t *testing.T) {
 				selected = target
 			}
 			if scenario.fallback || scenario.withPolicy {
-				_, err := service.SaveChannelPeriodPolicy(t.Context(), source.Id, appdto.ChannelPeriodPolicyInput{Config: appdto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 1, Fallback: appdto.ChannelLimitFallback{Enabled: true, ChannelID: target.Id, Model: "gpt-4o"}}}, 1)
+				_, err := service.SaveChannelPeriodPolicy(t.Context(), source.Id, appdto.ChannelPeriodPolicyInput{Config: budgetPoolDailyConfig(1, target.Id, "gpt-4o")}, 1)
 				require.NoError(t, err)
 				if scenario.fallback {
 					require.NoError(t, service.RecordChannelUserQuotaUsage(t.Context(), source.Id, 77, 1))

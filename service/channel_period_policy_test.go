@@ -33,7 +33,7 @@ func setupChannelPeriodTest(t *testing.T, now *time.Time, useRedis bool) *model.
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.ChannelPeriodPolicy{}, &model.ChannelQuotaTracking{}, &model.ChannelUserPeriodOverride{}, &model.ChannelUserLimitOverride{}, &model.Channel{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.ChannelPeriodPolicy{}, &model.ChannelQuotaTracking{}, &model.ChannelUserPeriodOverride{}, &model.ChannelUserLimitOverride{}, &model.ChannelUserBudgetOverride{}, &model.Channel{}, &model.User{}))
 	model.DB = db
 	common.RedisEnabled, common.RDB = useRedis, nil
 	if useRedis {
@@ -71,6 +71,7 @@ func setupChannelPeriodTest(t *testing.T, now *time.Time, useRedis bool) *model.
 		channelPeriodPolicyCache.Unlock()
 		_ = sqlDB.Close()
 	})
+	// 旧日/周列用于迁移及未迁移兜底测试，已持久化的 v2 策略不再读取它们。
 	daily, weekly := 100, 500
 	channel := &model.Channel{Id: 80, Name: "测试渠道", UserDailyQuotaLimit: &daily, UserWeeklyQuotaLimit: &weekly}
 	require.NoError(t, db.Create(channel).Error)
@@ -83,9 +84,14 @@ func TestChannelPeriodHolidayQuotaSurvivesDailyReset(t *testing.T) {
 			now := time.Date(2031, 9, 15, 9, 0, 0, 0, time.Local)
 			channel := setupChannelPeriodTest(t, &now, mode == "redis")
 			ctx := context.Background()
-			five, fifteen := int64(5), int64(15)
-			input := dto.ChannelPeriodPolicyInput{Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, Rules: []dto.ChannelPeriodRule{{Name: "周中放假", Enabled: true, Kind: "date_range", StartLocal: "2031-09-15T00:00", EndLocal: "2031-09-20T00:00", UserDailyQuotaLimit: &five, UserPeriodQuotaLimit: &fifteen, PoolDailyQuotaLimit: &five, PoolPeriodQuotaLimit: &fifteen}}}}
-			_, err := SaveChannelPeriodPolicy(ctx, channel.Id, input, 1)
+			holiday := dateRangeSchedule("new-holiday", "周中放假", "2031-09-15T00:00", "2031-09-20T00:00")
+			config := budgetConfig([]dto.ChannelBudgetSchedule{holiday},
+				budgetRow("假期个人每日", channelBudgetScopeUser, channelBudgetWindowDaily, "new-holiday", 5),
+				budgetRow("假期个人整段", channelBudgetScopeUser, channelBudgetWindowOccurrence, "new-holiday", 15),
+				budgetRow("假期池子每日", channelBudgetScopePool, channelBudgetWindowDaily, "new-holiday", 5),
+				budgetRow("假期池子整段", channelBudgetScopePool, channelBudgetWindowOccurrence, "new-holiday", 15),
+			)
+			_, err := SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{Config: config}, 1)
 			require.NoError(t, err)
 			for day := 0; day < 3; day++ {
 				require.NoError(t, CheckChannelPeriodLimits(ctx, channel, 7))
@@ -94,10 +100,11 @@ func TestChannelPeriodHolidayQuotaSurvivesDailyReset(t *testing.T) {
 			}
 			var blocked *ChannelPeriodBlock
 			require.ErrorAs(t, CheckChannelPeriodLimits(ctx, channel, 7), &blocked)
-			assert.Equal(t, "custom", blocked.Metric.Period)
+			assert.Equal(t, "occurrence", blocked.Metric.Period)
 			assert.Equal(t, int64(15), blocked.Metric.Used)
 			require.ErrorAs(t, CheckChannelPeriodLimits(ctx, channel, 8), &blocked)
 			assert.Equal(t, "pool", blocked.Metric.Scope)
+			// 人工清零旧个人日/周计数不影响整段累计。
 			require.NoError(t, SetChannelUserDailyQuota(ctx, channel.Id, 7, 0))
 			require.NoError(t, SetChannelUserWeeklyQuota(ctx, channel.Id, 7, 0))
 			require.ErrorAs(t, CheckChannelPeriodLimits(ctx, channel, 7), &blocked)
@@ -112,7 +119,7 @@ func TestChannelPeriodSoftLimitAndAtomicFailure(t *testing.T) {
 			now := time.Date(2031, 9, 15, 9, 0, 0, 0, time.Local)
 			channel := setupChannelPeriodTest(t, &now, mode == "redis")
 			ctx := context.Background()
-			_, err := SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 100}}, 1)
+			_, err := SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{Config: poolDailyConfig(100)}, 1)
 			require.NoError(t, err)
 			require.NoError(t, RecordChannelUserQuotaUsage(ctx, channel.Id, 7, 80))
 			require.NoError(t, CheckChannelPeriodLimits(ctx, channel, 7))
@@ -123,7 +130,7 @@ func TestChannelPeriodSoftLimitAndAtomicFailure(t *testing.T) {
 			for _, quota := range []int{0, -30} {
 				require.NoError(t, RecordChannelUserQuotaUsage(ctx, channel.Id, 7, quota))
 			}
-			key := newChannelBudgetCounter(channel.Id, channelBudgetRow{ID: legacyPoolDailyBudgetID, Scope: channelBudgetScopePool, Window: channelBudgetWindowDaily}, channelBudgetResolution{now: now}).poolKey
+			key := newChannelBudgetCounter(channel.Id, channelBudgetRow{ChannelBudgetRow: dto.ChannelBudgetRow{ID: legacyPoolDailyBudgetID, Scope: channelBudgetScopePool, Window: channelBudgetWindowDaily}}, channelBudgetResolution{now: now}).poolKey
 			if mode == "redis" {
 				require.NoError(t, common.RDB.HSet(ctx, key, "__pool", math.MaxInt64).Err())
 			} else {
@@ -144,47 +151,46 @@ func TestChannelPeriodRulePriorityAndStableIdentity(t *testing.T) {
 	now := time.Date(2031, 9, 15, 9, 0, 0, 0, time.Local)
 	channel := setupChannelPeriodTest(t, &now, false)
 	ctx := context.Background()
-	five, twenty, fifty := int64(5), int64(20), int64(50)
-	personalDaily := 20
-	config := dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, Rules: []dto.ChannelPeriodRule{
-		{Name: "跨周区间", Kind: "weekly", Enabled: true, StartWeekday: 6, StartTime: "00:00", EndWeekday: 3, EndTime: "00:00", UserPeriodQuotaLimit: &fifty},
-		{Name: "放假", Kind: "date_range", Enabled: true, StartLocal: "2031-09-15T00:00", EndLocal: "2031-09-16T00:00", UserDailyQuotaLimit: &five, UserPeriodQuotaLimit: &twenty},
-	}}
+	config := budgetConfig([]dto.ChannelBudgetSchedule{
+		weeklySchedule("new-week", "跨周区间", 6, "00:00", 3, "00:00"),
+		dateRangeSchedule("new-holiday", "放假", "2031-09-15T00:00", "2031-09-16T00:00"),
+	},
+		budgetRow("跨周个人整段", channelBudgetScopeUser, channelBudgetWindowOccurrence, "new-week", 50),
+		budgetRow("放假个人每日", channelBudgetScopeUser, channelBudgetWindowDaily, "new-holiday", 5),
+		budgetRow("放假个人整段", channelBudgetScopeUser, channelBudgetWindowOccurrence, "new-holiday", 20),
+	)
 	view, err := SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{Config: config}, 1)
 	require.NoError(t, err)
 	require.NoError(t, RecordChannelUserQuotaUsage(ctx, channel.Id, 7, 12))
-	// 个人只覆盖填写的每日指标，整段及池子约束仍保留。
-	require.NoError(t, ReplaceChannelUserLimitOverride(ctx, channel, 7, ChannelUserLimitOverrideInput{UserDailyQuotaLimit: &personalDaily}, 1))
-	limits, err := ResolveChannelUserEffectiveLimits(ctx, channel, 7)
-	require.NoError(t, err)
-	assert.Equal(t, 20, limits.EffectiveDailyQuota)
-	require.NoError(t, CheckChannelPeriodLimits(ctx, channel, 7))
-	now = now.AddDate(0, 0, 1)
+	// 个人只对放假每日行提额，整段约束仍保留。
+	require.NoError(t, ReplaceChannelUserBudgetOverride(ctx, channel.Id, 7, view.Config.Budgets[1].ID, dto.ChannelBudgetUserOverrideInput{Limit: 20}, 1))
 	status, err := GetChannelPeriodStatus(ctx, channel, 7)
 	require.NoError(t, err)
-	var interval dto.ChannelPeriodMetric
-	for _, metric := range status.Metrics {
-		if metric.Scope == "user" && metric.Period == "custom" && metric.Enforced {
-			interval = metric
-		}
-	}
+	daily, ok := findMetric(status, "user", "daily", true)
+	require.True(t, ok)
+	assert.Equal(t, int64(20), daily.Limit)
+	assert.Equal(t, "personal", daily.Source.Kind)
+	require.NoError(t, CheckChannelPeriodLimits(ctx, channel, 7))
+	now = now.AddDate(0, 0, 1)
+	status, err = GetChannelPeriodStatus(ctx, channel, 7)
+	require.NoError(t, err)
+	interval, ok := findMetric(status, "user", "occurrence", true)
+	require.True(t, ok)
 	assert.Equal(t, int64(12), interval.Used)
 	assert.Equal(t, int64(50), interval.Limit)
-	view.Config.Rules[0].Enabled = false
+	view.Config.Schedules[0].Enabled = false
 	view, err = SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{ExpectedRevision: view.Revision, Config: view.Config}, 1)
 	require.NoError(t, err)
 	require.NoError(t, RecordChannelUserQuotaUsage(ctx, channel.Id, 7, 3))
-	view.Config.Rules[0].Enabled = true
+	view.Config.Schedules[0].Enabled = true
 	view, err = SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{ExpectedRevision: view.Revision, Config: view.Config}, 1)
 	require.NoError(t, err)
 	status, err = GetChannelPeriodStatus(ctx, channel, 7)
 	require.NoError(t, err)
-	for _, metric := range status.Metrics {
-		if metric.Scope == "user" && metric.Period == "custom" {
-			assert.Equal(t, int64(15), metric.Used)
-		}
-	}
-	view.Config.Rules[0].StartTime = "01:00"
+	interval, ok = findMetric(status, "user", "occurrence", true)
+	require.True(t, ok)
+	assert.Equal(t, int64(15), interval.Used)
+	view.Config.Schedules[0].StartTime = "01:00"
 	_, err = SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{ExpectedRevision: view.Revision, Config: view.Config}, 1)
 	assert.ErrorIs(t, err, ErrInvalidChannelPeriodPolicy)
 	_, err = SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{ExpectedRevision: 0, Config: config}, 1)
@@ -193,22 +199,28 @@ func TestChannelPeriodRulePriorityAndStableIdentity(t *testing.T) {
 
 func TestChannelPeriodRuleOverlapInheritanceAndTimezone(t *testing.T) {
 	now := time.Date(2031, 9, 15, 9, 0, 0, 0, time.UTC)
-	five, zero := int64(5), int64(0)
-	base := dto.ChannelPeriodRule{Name: "区间", Kind: "weekly", Enabled: true, StartWeekday: 6, StartTime: "21:00", EndWeekday: 0, EndTime: "09:00", UserDailyQuotaLimit: &five}
-	other := base
-	other.StartWeekday = 0
-	other.StartTime = "08:00"
-	other.EndTime = "10:00"
-	_, err := NormalizeChannelPeriodConfig(dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, Rules: []dto.ChannelPeriodRule{base, other}}, dto.ChannelPeriodPolicyConfig{}, now)
+	first := weeklySchedule("new-a", "区间", 6, "21:00", 0, "09:00")
+	second := weeklySchedule("new-b", "早间", 0, "08:00", 0, "10:00")
+	schedules := []dto.ChannelBudgetSchedule{first, second}
+	_, err := NormalizeChannelBudgetConfig(budgetConfig(schedules,
+		budgetRow("区间个人每日", channelBudgetScopeUser, channelBudgetWindowDaily, "new-a", 5),
+		budgetRow("早间个人每日", channelBudgetScopeUser, channelBudgetWindowDaily, "new-b", 8),
+	), defaultChannelBudgetConfig(), now)
 	assert.ErrorIs(t, err, ErrInvalidChannelPeriodPolicy)
-	other.UserDailyQuotaLimit = nil
-	other.PoolDailyQuotaLimit = &zero
-	config, err := NormalizeChannelPeriodConfig(dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, Rules: []dto.ChannelPeriodRule{base, other}}, dto.ChannelPeriodPolicyConfig{}, now)
+	config, err := NormalizeChannelBudgetConfig(budgetConfig(schedules,
+		budgetRow("区间个人每日", channelBudgetScopeUser, channelBudgetWindowDaily, "new-a", 5),
+		budgetRow("早间池子每日", channelBudgetScopePool, channelBudgetWindowDaily, "new-b", 0),
+	), defaultChannelBudgetConfig(), now)
 	require.NoError(t, err)
-	limits, _, _, _, err := resolveChannelPeriodSources(config, 100, now.Add(-30*time.Minute))
+	plan := buildChannelBudgetPlan(dto.ChannelPeriodPolicyView{Revision: 1, Config: config})
+	res, err := resolveChannelBudgetRows(plan, now.Add(-30*time.Minute), "")
 	require.NoError(t, err)
-	assert.Equal(t, int64(5), limits["user_daily"])
-	assert.Equal(t, int64(0), limits["pool_daily"])
+	userDaily, ok := res.effectiveRow(plan, channelBudgetScopeUser+"|"+channelBudgetWindowDaily+"|")
+	require.True(t, ok)
+	assert.Equal(t, int64(5), userDaily.Limit)
+	poolDaily, ok := res.effectiveRow(plan, channelBudgetScopePool+"|"+channelBudgetWindowDaily+"|")
+	require.True(t, ok)
+	assert.Equal(t, int64(0), poolDaily.Limit)
 	loc, err := time.LoadLocation("America/New_York")
 	require.NoError(t, err)
 	_, err = parseChannelRuleLocalTime("2031-11-02T01:30", loc)
@@ -222,22 +234,25 @@ func TestChannelPeriodPersonalExpiryAndStorageFailures(t *testing.T) {
 		t.Run(map[bool]string{false: "memory", true: "redis"}[useRedis], func(t *testing.T) {
 			now := time.Date(2031, 9, 16, 10, 0, 0, 0, time.Local)
 			channel := setupChannelPeriodTest(t, &now, useRedis)
-			five, fifteen := int64(5), int64(15)
-			view, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 100, Rules: []dto.ChannelPeriodRule{{Name: "假期", Enabled: true, Kind: "date_range", StartLocal: "2031-09-16T00:00", EndLocal: "2031-09-20T00:00", UserDailyQuotaLimit: &five, UserPeriodQuotaLimit: &fifteen}}}}, 1)
+			config := budgetConfig([]dto.ChannelBudgetSchedule{dateRangeSchedule("new-holiday", "假期", "2031-09-16T00:00", "2031-09-20T00:00")},
+				budgetRow("池子每日", channelBudgetScopePool, channelBudgetWindowDaily, "", 100),
+				budgetRow("假期个人每日", channelBudgetScopeUser, channelBudgetWindowDaily, "new-holiday", 5),
+				budgetRow("假期个人整段", channelBudgetScopeUser, channelBudgetWindowOccurrence, "new-holiday", 15),
+			)
+			view, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{Config: config}, 1)
 			require.NoError(t, err)
-			personal := 20
 			expires := now.Add(time.Hour).Unix()
-			require.NoError(t, ReplaceChannelUserLimitOverride(t.Context(), channel, 7, ChannelUserLimitOverrideInput{UserDailyQuotaLimit: &personal, ExpiresAt: expires}, 1))
-			require.NoError(t, ReplaceChannelUserPeriodOverride(t.Context(), channel.Id, 7, view.Config.Rules[0].ID, dto.ChannelUserPeriodOverrideInput{UserPeriodQuotaLimit: 30, ExpiresAt: expires}, 1))
+			require.NoError(t, ReplaceChannelUserBudgetOverride(t.Context(), channel.Id, 7, view.Config.Budgets[1].ID, dto.ChannelBudgetUserOverrideInput{Limit: 20, ExpiresAt: expires}, 1))
+			require.NoError(t, ReplaceChannelUserBudgetOverride(t.Context(), channel.Id, 7, view.Config.Budgets[2].ID, dto.ChannelBudgetUserOverrideInput{Limit: 30, ExpiresAt: expires}, 1))
 			require.NoError(t, RecordChannelUserQuotaUsage(t.Context(), channel.Id, 7, 16))
 			require.NoError(t, CheckChannelPeriodLimits(t.Context(), channel, 7))
 			now = now.Add(time.Hour)
 			status, err := GetChannelPeriodStatus(t.Context(), channel, 7)
 			require.NoError(t, err)
-			assert.Equal(t, int64(5), status.Metrics[0].Limit)
-			assert.Equal(t, int64(15), status.Metrics[4].Limit)
+			assert.Equal(t, int64(5), status.Metrics[1].Limit)
+			assert.Equal(t, int64(15), status.Metrics[2].Limit)
 			assert.True(t, status.Blocked)
-			require.NoError(t, model.DB.Migrator().DropTable(&model.ChannelUserLimitOverride{}))
+			require.NoError(t, model.DB.Migrator().DropTable(&model.ChannelUserBudgetOverride{}))
 			_, err = GetChannelPeriodStatus(t.Context(), channel, 7)
 			require.Error(t, err)
 			assert.Equal(t, 503, ChannelPeriodAPIError(err).StatusCode)
@@ -248,7 +263,12 @@ func TestChannelPeriodPersonalExpiryAndStorageFailures(t *testing.T) {
 func TestChannelPeriodCounterFailureIsVisibleAfterRedisRecovers(t *testing.T) {
 	now := time.Date(2031, 9, 16, 10, 0, 0, 0, time.Local)
 	channel := setupChannelPeriodTest(t, &now, true)
-	_, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 100}}, 1)
+	config := budgetConfig(nil,
+		budgetRow("个人每日", channelBudgetScopeUser, channelBudgetWindowDaily, "", 1000),
+		budgetRow("个人每周", channelBudgetScopeUser, channelBudgetWindowWeekly, "", 5000),
+		budgetRow("池子每日", channelBudgetScopePool, channelBudgetWindowDaily, "", 100),
+	)
+	_, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{Config: config}, 1)
 	require.NoError(t, err)
 	require.NoError(t, RecordChannelUserQuotaUsage(t.Context(), channel.Id, 7, 10))
 	client := common.RDB
@@ -265,13 +285,13 @@ func TestChannelPeriodCounterFailureIsVisibleAfterRedisRecovers(t *testing.T) {
 	status, err = GetChannelPeriodStatus(t.Context(), channel, 7)
 	require.NoError(t, err)
 	assert.Equal(t, "since_tracking_start", status.Metrics[2].Coverage)
-	assert.Equal(t, "incomplete", status.Metrics[3].Coverage)
+	assert.Equal(t, "incomplete", status.Metrics[1].Coverage)
 }
 
 func TestChannelPeriodCorruptCachedConfigurationFailsClosed(t *testing.T) {
 	now := time.Date(2031, 9, 16, 10, 0, 0, 0, time.Local)
 	channel := setupChannelPeriodTest(t, &now, true)
-	require.NoError(t, common.RDB.Set(t.Context(), "channel_period_policy:{80}", `{"revision":1,"config":{"schema_version":1,"pool_daily_quota_limit":-1,"rules":[]}}`, time.Minute).Err())
+	require.NoError(t, common.RDB.Set(t.Context(), "channel_period_policy:{80}", `{"revision":1,"config":{"schema_version":2,"default_on_exceed":{"mode":"reject","channel_id":0,"model":""},"schedules":[],"budgets":[{"id":"x","name":"x","enabled":true,"scope":"pool","window":"daily","schedule_id":"","models":[],"limit":-1,"on_exceed":{"mode":"inherit","channel_id":0,"model":""},"created_at":1}]}}`, time.Minute).Err())
 	_, err := GetChannelPeriodPolicy(t.Context(), channel.Id)
 	require.Error(t, err)
 	assert.Equal(t, 503, ChannelPeriodAPIError(err).StatusCode)
@@ -287,6 +307,13 @@ func TestChannelPeriodQuotaRequiresSuccessfulSettlement(t *testing.T) {
 			common.LogConsumeEnabled, common.BatchUpdateEnabled = false, false
 			t.Cleanup(func() { common.LogConsumeEnabled, common.BatchUpdateEnabled = oldLog, oldBatch })
 			require.NoError(t, model.DB.Create(&model.User{Id: 7, Username: "结算测试", Quota: 1000}).Error)
+			config := budgetConfig(nil,
+				budgetRow("个人每日", channelBudgetScopeUser, channelBudgetWindowDaily, "", 100),
+				budgetRow("个人每周", channelBudgetScopeUser, channelBudgetWindowWeekly, "", 500),
+				budgetRow("池子每日", channelBudgetScopePool, channelBudgetWindowDaily, "", 1000),
+			)
+			_, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{Config: config}, 1)
+			require.NoError(t, err)
 			billing := &textQuotaGuardBillingStub{}
 			if fail {
 				billing.settleErr = errors.New("模拟资金结算失败")
@@ -315,9 +342,11 @@ func TestChannelPeriodQuotaRequiresSuccessfulSettlement(t *testing.T) {
 func TestChannelPeriodPolicyLatePublishKeepsLatestRevision(t *testing.T) {
 	now := time.Now()
 	channel := setupChannelPeriodTest(t, &now, true)
-	older, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 100}}, 1)
+	older, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{Config: poolDailyConfig(100)}, 1)
 	require.NoError(t, err)
-	newer, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{ExpectedRevision: older.Revision, Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 50}}, 2)
+	next := older.Config
+	next.Budgets[0].Limit = 50
+	newer, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{ExpectedRevision: older.Revision, Config: next}, 2)
 	require.NoError(t, err)
 	raw, err := common.Marshal(older)
 	require.NoError(t, err)
@@ -326,10 +355,10 @@ func TestChannelPeriodPolicyLatePublishKeepsLatestRevision(t *testing.T) {
 	current, err := GetChannelPeriodPolicy(t.Context(), channel.Id)
 	require.NoError(t, err)
 	assert.Equal(t, newer.Revision, current.Revision)
-	assert.Equal(t, int64(50), current.Config.PoolDailyQuotaLimit)
+	assert.Equal(t, int64(50), current.Config.Budgets[0].Limit)
 }
 
-// TestChannelPeriodPolicyLimitAboveInt32 保证池子与规则额度不受 32 位 quota 列上限约束，且仍受 MaxPeriodQuota 兜底。
+// TestChannelPeriodPolicyLimitAboveInt32 保证池子与整段额度不受 32 位 quota 列上限约束，且仍受 MaxPeriodQuota 兜底。
 func TestChannelPeriodPolicyLimitAboveInt32(t *testing.T) {
 	now := time.Date(2031, 9, 16, 10, 0, 0, 0, time.Local)
 	channel := setupChannelPeriodTest(t, &now, false)
@@ -337,23 +366,24 @@ func TestChannelPeriodPolicyLimitAboveInt32(t *testing.T) {
 	// $4500 按默认单价换算后超过 math.MaxInt32，曾被误拒。
 	large := int64(4500) * int64(common.QuotaPerUnit)
 	require.Greater(t, large, int64(common.MaxQuota))
-	view, err := SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: large, Rules: []dto.ChannelPeriodRule{{Name: "大额假期", Enabled: true, Kind: "date_range", StartLocal: "2031-09-16T00:00", EndLocal: "2031-09-20T00:00", PoolPeriodQuotaLimit: &large}}}}, 1)
+	config := budgetConfig([]dto.ChannelBudgetSchedule{dateRangeSchedule("new-holiday", "大额假期", "2031-09-16T00:00", "2031-09-20T00:00")},
+		budgetRow("池子每日", channelBudgetScopePool, channelBudgetWindowDaily, "", large),
+		budgetRow("假期池子整段", channelBudgetScopePool, channelBudgetWindowOccurrence, "new-holiday", large),
+	)
+	view, err := SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{Config: config}, 1)
 	require.NoError(t, err)
-	assert.Equal(t, large, view.Config.PoolDailyQuotaLimit)
+	assert.Equal(t, large, view.Config.Budgets[0].Limit)
 	require.NoError(t, RecordChannelUserQuotaUsage(ctx, channel.Id, 7, common.MaxQuota))
 	status, err := GetChannelPeriodStatus(ctx, channel, 7)
 	require.NoError(t, err)
-	checked := 0
+	require.Len(t, status.Metrics, 2)
 	for _, metric := range status.Metrics {
-		if metric.Scope != "pool" || metric.Period == "weekly" {
-			continue
-		}
-		checked++
 		assert.Equal(t, large, metric.Limit, metric.Period)
 		assert.Equal(t, int64(common.MaxQuota), metric.Used, metric.Period)
 		assert.Less(t, metric.Used, metric.Limit, metric.Period)
 	}
-	assert.Equal(t, 2, checked)
-	_, err = SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{ExpectedRevision: view.Revision, Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: common.MaxPeriodQuota + 1}}, 1)
+	next := view.Config
+	next.Budgets[0].Limit = common.MaxPeriodQuota + 1
+	_, err = SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{ExpectedRevision: view.Revision, Config: next}, 1)
 	require.ErrorIs(t, err, ErrInvalidChannelPeriodPolicy)
 }

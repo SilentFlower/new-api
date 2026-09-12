@@ -43,26 +43,18 @@ type channelUserLimitOverrideCacheEntry struct {
 	expiresAt time.Time
 }
 
-// ChannelUserEffectiveLimits 描述渠道默认限制、个人覆盖和最终生效限制。
+// ChannelUserEffectiveLimits 描述渠道默认并发、个人覆盖和最终生效并发；日/周额度已迁移到预算行。
 type ChannelUserEffectiveLimits struct {
 	BaseConcurrency      int   `json:"base_concurrency"`
-	BaseDailyQuota       int   `json:"base_daily_quota"`
-	BaseWeeklyQuota      int   `json:"base_weekly_quota"`
 	OverrideConcurrency  *int  `json:"override_concurrency,omitempty"`
-	OverrideDailyQuota   *int  `json:"override_daily_quota,omitempty"`
-	OverrideWeeklyQuota  *int  `json:"override_weekly_quota,omitempty"`
 	EffectiveConcurrency int   `json:"effective_concurrency"`
-	EffectiveDailyQuota  int   `json:"effective_daily_quota"`
-	EffectiveWeeklyQuota int   `json:"effective_weekly_quota"`
 	ExpiresAt            int64 `json:"expires_at"`
 	Active               bool  `json:"active"`
 }
 
-// ChannelUserLimitOverrideInput 描述管理员提交的整条个人覆盖。
+// ChannelUserLimitOverrideInput 描述管理员提交的个人并发覆盖。
 type ChannelUserLimitOverrideInput struct {
 	UserConcurrencyLimit *int  `json:"user_concurrency_limit"`
-	UserDailyQuotaLimit  *int  `json:"user_daily_quota_limit"`
-	UserWeeklyQuotaLimit *int  `json:"user_weekly_quota_limit"`
 	ExpiresAt            int64 `json:"expires_at"`
 }
 
@@ -78,42 +70,14 @@ func ResolveChannelUserEffectiveLimits(ctx context.Context, channel *model.Chann
 	if channel == nil || channel.Id <= 0 || userID <= 0 {
 		return limits, nil
 	}
-	policy, err := GetChannelPeriodPolicy(ctx, channel.Id)
-	if err != nil {
-		return limits, err
-	}
-	values, _, _, _, err := resolveChannelPeriodSources(policy.Config, int64(limits.BaseDailyQuota), channelPeriodNow().In(time.Local))
-	if err != nil {
-		return limits, err
-	}
-	limits.BaseDailyQuota = int(values["user_daily"])
-	limits.EffectiveDailyQuota = limits.BaseDailyQuota
-	var override *model.ChannelUserLimitOverride
-	if policy.Revision > 0 {
-		// 个人明确覆盖可能比临时规则更严格，故障时不能静默回落到较宽的基础额度。
-		override, err = model.GetActiveChannelUserLimitOverrideStrict(ctx, channel.Id, userID, channelPeriodNow().Unix())
-	} else {
-		override, err = getCachedChannelUserLimitOverride(ctx, channel.Id, userID)
-	}
+	override, err := getCachedChannelUserLimitOverride(ctx, channel.Id, userID)
 	if err != nil || override == nil || (override.ExpiresAt > 0 && override.ExpiresAt <= channelPeriodNow().Unix()) {
 		return limits, err
 	}
 	limits.Active = true
 	limits.ExpiresAt = override.ExpiresAt
 	limits.OverrideConcurrency = override.UserConcurrencyLimit
-	limits.OverrideDailyQuota = override.UserDailyQuotaLimit
-	limits.OverrideWeeklyQuota = override.UserWeeklyQuotaLimit
 	limits.EffectiveConcurrency = effectiveChannelUserLimit(limits.BaseConcurrency, override.UserConcurrencyLimit)
-	limits.EffectiveDailyQuota = effectiveChannelUserLimit(limits.BaseDailyQuota, override.UserDailyQuotaLimit)
-	limits.EffectiveWeeklyQuota = effectiveChannelUserLimit(limits.BaseWeeklyQuota, override.UserWeeklyQuotaLimit)
-	if policy.Revision > 0 {
-		if override.UserDailyQuotaLimit != nil && *override.UserDailyQuotaLimit > 0 && *override.UserDailyQuotaLimit <= common.MaxQuota {
-			limits.EffectiveDailyQuota = *override.UserDailyQuotaLimit
-		}
-		if override.UserWeeklyQuotaLimit != nil && *override.UserWeeklyQuotaLimit > 0 && *override.UserWeeklyQuotaLimit <= common.MaxQuota {
-			limits.EffectiveWeeklyQuota = *override.UserWeeklyQuotaLimit
-		}
-	}
 	return limits, nil
 }
 
@@ -139,8 +103,6 @@ func ApplyChannelUserEffectiveLimits(c *gin.Context, channel *model.Channel) Cha
 		))
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelUserConcurrencyLimit, limits.EffectiveConcurrency)
-	common.SetContextKey(c, constant.ContextKeyChannelUserDailyQuotaLimit, limits.EffectiveDailyQuota)
-	common.SetContextKey(c, constant.ContextKeyChannelUserWeeklyQuotaLimit, limits.EffectiveWeeklyQuota)
 	return limits
 }
 
@@ -156,7 +118,7 @@ func ReplaceChannelUserLimitOverride(ctx context.Context, channel *model.Channel
 	if channel == nil || channel.Id <= 0 || userID <= 0 || updatedBy <= 0 {
 		return fmt.Errorf("%w: 渠道、用户或操作管理员无效", ErrInvalidChannelUserLimitOverride)
 	}
-	if input.UserConcurrencyLimit == nil && input.UserDailyQuotaLimit == nil && input.UserWeeklyQuotaLimit == nil {
+	if input.UserConcurrencyLimit == nil {
 		if err := model.DeleteChannelUserLimitOverride(channel.Id, userID); err != nil {
 			return err
 		}
@@ -169,26 +131,10 @@ func ReplaceChannelUserLimitOverride(ctx context.Context, channel *model.Channel
 	if err := validateChannelUserLimitOverrideValue("并发", channel.GetUserConcurrencyLimit(), input.UserConcurrencyLimit, maxChannelUserOverrideConcurrency); err != nil {
 		return err
 	}
-	policy, err := GetChannelPeriodPolicy(ctx, channel.Id)
-	if err != nil {
-		return err
-	}
-	values, _, _, _, err := resolveChannelPeriodSources(policy.Config, int64(channel.GetUserDailyQuotaLimit()), channelPeriodNow().In(time.Local))
-	if err != nil {
-		return err
-	}
-	if err := validateChannelUserLimitOverrideValue("每日额度", int(values["user_daily"]), input.UserDailyQuotaLimit, common.MaxQuota); err != nil {
-		return err
-	}
-	if err := validateChannelUserLimitOverrideValue("每周额度", channel.GetUserWeeklyQuotaLimit(), input.UserWeeklyQuotaLimit, common.MaxQuota); err != nil {
-		return err
-	}
 	override := &model.ChannelUserLimitOverride{
 		ChannelId:            channel.Id,
 		UserId:               userID,
 		UserConcurrencyLimit: input.UserConcurrencyLimit,
-		UserDailyQuotaLimit:  input.UserDailyQuotaLimit,
-		UserWeeklyQuotaLimit: input.UserWeeklyQuotaLimit,
 		ExpiresAt:            input.ExpiresAt,
 		UpdatedBy:            updatedBy,
 	}
@@ -219,11 +165,7 @@ func newBaseChannelUserEffectiveLimits(channel *model.Channel) ChannelUserEffect
 		return limits
 	}
 	limits.BaseConcurrency = channel.GetUserConcurrencyLimit()
-	limits.BaseDailyQuota = channel.GetUserDailyQuotaLimit()
-	limits.BaseWeeklyQuota = channel.GetUserWeeklyQuotaLimit()
 	limits.EffectiveConcurrency = limits.BaseConcurrency
-	limits.EffectiveDailyQuota = limits.BaseDailyQuota
-	limits.EffectiveWeeklyQuota = limits.BaseWeeklyQuota
 	return limits
 }
 

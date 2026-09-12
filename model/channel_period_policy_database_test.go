@@ -40,7 +40,7 @@ func TestChannelPeriodPolicyDatabaseContract(t *testing.T) {
 			sqlDB, err := db.DB()
 			require.NoError(t, err)
 			sqlDB.SetMaxOpenConns(1)
-			tables := []any{&ChannelPeriodPolicy{}, &ChannelUserPeriodOverride{}, &ChannelQuotaTracking{}}
+			tables := []any{&ChannelPeriodPolicy{}, &ChannelUserPeriodOverride{}, &ChannelUserBudgetOverride{}, &ChannelQuotaTracking{}}
 			t.Cleanup(func() {
 				require.NoError(t, db.Migrator().DropTable(tables...))
 				DB = old
@@ -71,6 +71,16 @@ func TestChannelPeriodPolicyDatabaseContract(t *testing.T) {
 			gap, err := GetChannelQuotaGap(t.Context(), 80)
 			require.NoError(t, err)
 			assert.Equal(t, int64(200), gap)
+			require.NoError(t, ReplaceChannelUserBudgetOverride(t.Context(), &ChannelUserBudgetOverride{ChannelId: 80, UserId: 7, BudgetId: "legacy-user-daily", QuotaLimit: 300, ExpiresAt: 200}))
+			require.NoError(t, ReplaceChannelUserBudgetOverride(t.Context(), &ChannelUserBudgetOverride{ChannelId: 80, UserId: 7, BudgetId: "legacy-user-daily", QuotaLimit: 400, ExpiresAt: 0}))
+			budgetOverrides, err := ListActiveChannelUserBudgetOverrides(t.Context(), 80, 7, 300)
+			require.NoError(t, err)
+			require.Len(t, budgetOverrides, 1)
+			assert.Equal(t, int64(400), budgetOverrides[0].QuotaLimit)
+			require.NoError(t, DeleteChannelUserBudgetOverride(t.Context(), 80, 7, "legacy-user-daily"))
+			budgetOverrides, err = ListActiveChannelUserBudgetOverrides(t.Context(), 80, 7, 300)
+			require.NoError(t, err)
+			assert.Empty(t, budgetOverrides)
 			require.NoError(t, DeleteChannelUserPeriodOverride(t.Context(), 80, 7, rule))
 			overrides, err = ListChannelUserPeriodOverrides(t.Context(), 80, 7, 300)
 			require.NoError(t, err)

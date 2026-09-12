@@ -312,7 +312,7 @@ func TestHandleResponsesWebSocketUpstreamEventRefundsFailureTerminals(t *testing
 }
 
 func TestProxyResponsesWebSocketRetriesFirstBusinessErrorBeforeDownstreamWrite(t *testing.T) {
-	setupChannelUserLimitsTestDB(t)
+	db := setupChannelUserLimitsTestDB(t)
 	gin.SetMode(gin.TestMode)
 	oldRetryTimes := common.RetryTimes
 	oldLogConsumeEnabled := common.LogConsumeEnabled
@@ -351,6 +351,8 @@ func TestProxyResponsesWebSocketRetriesFirstBusinessErrorBeforeDownstreamWrite(t
 
 	primaryChannel := &model.Channel{Id: 201, Type: constant.ChannelTypeOpenAI, Name: "primary", AutoBan: common.GetPointer(0)}
 	retryChannel := &model.Channel{Id: 202, Type: constant.ChannelTypeOpenAI, Name: "retry", AutoBan: common.GetPointer(0)}
+	require.NoError(t, db.Create(primaryChannel).Error)
+	require.NoError(t, db.Create(retryChannel).Error)
 	connectorCalls := 0
 	responsesWebSocketTurnConnector = func(c *gin.Context, turn *responsesWebSocketTurn, _ *model.Channel, startRetry int) (*websocket.Conn, *model.Channel, *types.NewAPIError) {
 		connectorCalls++
@@ -364,10 +366,9 @@ func TestProxyResponsesWebSocketRetriesFirstBusinessErrorBeforeDownstreamWrite(t
 		turn.info.PriceData.CompletionRatio = 1
 		turn.info.PriceData.GroupRatioInfo.GroupRatio = 1
 		turn.info.ChannelMeta = &relaycommon.ChannelMeta{
-			ChannelId:                  retryChannel.Id,
-			ChannelType:                retryChannel.Type,
-			UpstreamModelName:          turn.baseModel,
-			ChannelUserDailyQuotaLimit: dailyLimit,
+			ChannelId:         retryChannel.Id,
+			ChannelType:       retryChannel.Type,
+			UpstreamModelName: turn.baseModel,
 		}
 		common.SetContextKey(c, constant.ContextKeyChannelId, retryChannel.Id)
 		common.SetContextKey(c, constant.ContextKeyChannelName, retryChannel.Name)

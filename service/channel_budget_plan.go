@@ -11,7 +11,6 @@ import (
 )
 
 // 预算行是所有渠道金额限制在内核中的统一表示：范围 × 周期 × 模型 × 上限 × 超限动作。
-// 阶段一由 v1 策略与渠道列派生，阶段二直接来自 v2 配置。
 const (
 	channelBudgetScopeUser = "user"
 	channelBudgetScopePool = "pool"
@@ -27,50 +26,31 @@ const (
 	channelBudgetSourceDefault  = "default"
 	channelBudgetSourcePersonal = "personal"
 
+	// 由 v1 迁移派生的固定行 id；这些身份沿用旧 Redis key。
 	legacyUserDailyBudgetID  = "legacy-user-daily"
 	legacyUserWeeklyBudgetID = "legacy-user-weekly"
 	legacyPoolDailyBudgetID  = "legacy-pool-daily"
 	legacyPoolWeeklyBudgetID = "legacy-pool-weekly"
 )
 
-// channelBudgetAction 描述某行或策略级的超限动作。
-type channelBudgetAction struct {
-	Mode      string
-	ChannelID int
-	Model     string
-}
-
-// channelBudgetSchedule 是可复用的时段；阶段一直接包裹 v1 规则以复用 occurrence 解析。
+// channelBudgetSchedule 是带解析上下文的时段。
 type channelBudgetSchedule struct {
 	ID      string
 	Name    string
 	Enabled bool
 	Kind    string
-	rule    dto.ChannelPeriodRule
+	rule    dto.ChannelBudgetSchedule
 }
 
-// channelBudgetRow 是一条预算行。
+// channelBudgetRow 是一条预算行及其内核方法。
 type channelBudgetRow struct {
-	ID         string
-	Name       string
-	Enabled    bool
-	Scope      string
-	Window     string
-	ScheduleID string
-	Models     []string
-	Limit      int64
-	OnExceed   channelBudgetAction
-	CreatedAt  int64
-	// legacyUser 标记由渠道列派生的个人日/周行：指标形状与旧错误码沿用旧契约。
-	legacyUser bool
-	// implicit 标记 v1 规则未填写的整段额度：只为保持状态输出形状，不参与生效判定。
-	implicit bool
+	dto.ChannelBudgetRow
 }
 
 // channelBudgetPlan 是一个渠道当前版本的全部时段与预算行。
 type channelBudgetPlan struct {
 	Revision        int
-	DefaultOnExceed channelBudgetAction
+	DefaultOnExceed dto.ChannelBudgetAction
 	Schedules       []channelBudgetSchedule
 	Rows            []channelBudgetRow
 }
@@ -88,55 +68,33 @@ type channelBudgetResolution struct {
 	now       time.Time
 	modelName string
 	schedules map[string]channelBudgetScheduleState
-	// activeSchedules 按 v1 顺序（weekly 类先于 date_range，同类按配置顺序）列出当前 occurrence 内的时段。
+	// activeSchedules 按 weekly 类先于 date_range、同类按配置顺序列出当前 occurrence 内的启用时段。
 	activeSchedules []channelBudgetScheduleState
 	next            int64
 	// effective 记录每个分组当前生效行在 plan.Rows 中的下标。
 	effective map[string]int
 }
 
-// buildChannelBudgetPlan 由 v1 策略与渠道列派生预算计划。
+// buildChannelBudgetPlan 由 v2 策略构造预算计划。
 // @param view 当前权威策略。
-// @param userDaily 渠道列个人日限，0 表示不限。
-// @param userWeekly 渠道列个人周限，0 表示不限。
 // @return 预算计划。
-func buildChannelBudgetPlan(view dto.ChannelPeriodPolicyView, userDaily, userWeekly int64) channelBudgetPlan {
-	config := view.Config
-	plan := channelBudgetPlan{Revision: view.Revision, DefaultOnExceed: channelBudgetAction{Mode: channelBudgetActionReject}}
-	if config.Fallback.Enabled {
-		plan.DefaultOnExceed = channelBudgetAction{Mode: channelBudgetActionFallback, ChannelID: config.Fallback.ChannelID, Model: config.Fallback.Model}
+func buildChannelBudgetPlan(view dto.ChannelPeriodPolicyView) channelBudgetPlan {
+	plan := channelBudgetPlan{Revision: view.Revision, DefaultOnExceed: view.Config.DefaultOnExceed}
+	for _, item := range view.Config.Schedules {
+		plan.Schedules = append(plan.Schedules, channelBudgetSchedule{ID: item.ID, Name: item.Name, Enabled: item.Enabled, Kind: item.Kind, rule: item})
 	}
-	inherit := channelBudgetAction{Mode: channelBudgetActionInherit}
-	plan.Rows = append(plan.Rows,
-		channelBudgetRow{ID: legacyUserDailyBudgetID, Enabled: true, Scope: channelBudgetScopeUser, Window: channelBudgetWindowDaily, Limit: userDaily, OnExceed: inherit, legacyUser: true},
-		channelBudgetRow{ID: legacyUserWeeklyBudgetID, Enabled: true, Scope: channelBudgetScopeUser, Window: channelBudgetWindowWeekly, Limit: userWeekly, OnExceed: inherit, legacyUser: true},
-		channelBudgetRow{ID: legacyPoolDailyBudgetID, Enabled: true, Scope: channelBudgetScopePool, Window: channelBudgetWindowDaily, Limit: config.PoolDailyQuotaLimit, OnExceed: inherit},
-		channelBudgetRow{ID: legacyPoolWeeklyBudgetID, Enabled: true, Scope: channelBudgetScopePool, Window: channelBudgetWindowWeekly, Limit: config.PoolWeeklyQuotaLimit, OnExceed: inherit},
-	)
-	for _, rule := range config.Rules {
-		plan.Schedules = append(plan.Schedules, channelBudgetSchedule{ID: rule.ID, Name: rule.Name, Enabled: rule.Enabled, Kind: rule.Kind, rule: rule})
-		row := func(scope, window, suffix string, value *int64) channelBudgetRow {
-			item := channelBudgetRow{ID: "rule-" + rule.ID + "-" + suffix, Name: rule.Name, Enabled: rule.Enabled, Scope: scope, Window: window, ScheduleID: rule.ID, OnExceed: inherit, CreatedAt: rule.CreatedAt}
-			if value == nil {
-				item.implicit = true
-			} else {
-				item.Limit = *value
-			}
-			return item
-		}
-		// 规则内日限只改上限不换计数，因此仍属于无时段身份；未填写的日限不产生行。
-		if rule.UserDailyQuotaLimit != nil {
-			plan.Rows = append(plan.Rows, row(channelBudgetScopeUser, channelBudgetWindowDaily, "user-daily", rule.UserDailyQuotaLimit))
-		}
-		if rule.PoolDailyQuotaLimit != nil {
-			plan.Rows = append(plan.Rows, row(channelBudgetScopePool, channelBudgetWindowDaily, "pool-daily", rule.PoolDailyQuotaLimit))
-		}
-		plan.Rows = append(plan.Rows,
-			row(channelBudgetScopeUser, channelBudgetWindowOccurrence, "user-occurrence", rule.UserPeriodQuotaLimit),
-			row(channelBudgetScopePool, channelBudgetWindowOccurrence, "pool-occurrence", rule.PoolPeriodQuotaLimit),
-		)
+	for _, item := range view.Config.Budgets {
+		plan.Rows = append(plan.Rows, channelBudgetRow{ChannelBudgetRow: item})
 	}
 	return plan
+}
+
+// channelBudgetBaseRows 返回始终计数的渠道级日/周身份：即使没有对应行，用量也要持续累计，便于以后加行时有历史。
+func channelBudgetBaseRows() []channelBudgetRow {
+	return []channelBudgetRow{
+		{ChannelBudgetRow: dto.ChannelBudgetRow{ID: legacyUserDailyBudgetID, Enabled: true, Scope: channelBudgetScopeUser, Window: channelBudgetWindowDaily}},
+		{ChannelBudgetRow: dto.ChannelBudgetRow{ID: legacyUserWeeklyBudgetID, Enabled: true, Scope: channelBudgetScopeUser, Window: channelBudgetWindowWeekly}},
+	}
 }
 
 // channelBudgetModelsKey 返回排序去重后的模型选择器字符串，空表示全部模型。
@@ -193,6 +151,11 @@ func (row channelBudgetRow) precedence(schedules map[string]channelBudgetSchedul
 	return 1
 }
 
+// isChannelUserRow 判断是否为渠道级（不限模型）的个人日/周行：这类行沿用旧错误码。
+func (row channelBudgetRow) isChannelUserRow() bool {
+	return row.Scope == channelBudgetScopeUser && len(row.Models) == 0 && (row.Window == channelBudgetWindowDaily || row.Window == channelBudgetWindowWeekly)
+}
+
 // resolveChannelBudgetRows 解析时段状态、下一切换点与每组生效行。
 // @param plan 预算计划。
 // @param now 解析时刻。
@@ -242,7 +205,7 @@ func resolveChannelBudgetRows(plan channelBudgetPlan, now time.Time, modelName s
 
 // eligible 判断行此刻是否可参与生效判定。
 func (res channelBudgetResolution) eligible(row channelBudgetRow) bool {
-	if !row.Enabled || row.implicit || !row.matchesModel(res.modelName) {
+	if !row.Enabled || !row.matchesModel(res.modelName) {
 		return false
 	}
 	if row.ScheduleID == "" {
@@ -278,5 +241,5 @@ func (res channelBudgetResolution) source(row channelBudgetRow) dto.ChannelPerio
 		return dto.ChannelPeriodSource{Kind: channelBudgetSourceDefault}
 	}
 	state := res.schedules[row.ScheduleID]
-	return dto.ChannelPeriodSource{Kind: state.schedule.Kind, RuleID: state.schedule.ID, RuleName: state.schedule.Name, StartAt: state.occ.start.Unix(), EndAt: state.occ.end.Unix()}
+	return dto.ChannelPeriodSource{Kind: state.schedule.Kind, ScheduleID: state.schedule.ID, ScheduleName: state.schedule.Name, StartAt: state.occ.start.Unix(), EndAt: state.occ.end.Unix()}
 }

@@ -8,20 +8,19 @@ import "github.com/QuantumNous/new-api/dto"
 // @param block 触发拒绝的指标与预算行，可为 nil。
 // @return 目标与是否允许降级；拒绝或未配置时返回 false。
 func SelectChannelLimitFallback(config dto.ChannelPeriodPolicyConfig, sourceChannelID int, block *ChannelPeriodBlock) (dto.ChannelLimitFallback, bool) {
-	action := channelBudgetAction{Mode: channelBudgetActionInherit}
+	action := dto.ChannelBudgetAction{Mode: channelBudgetActionInherit}
 	if block != nil && block.row.OnExceed.Mode != "" {
 		action = block.row.OnExceed
 	}
-	switch action.Mode {
-	case channelBudgetActionFallback:
-		target := dto.ChannelLimitFallback{Enabled: true, ChannelID: action.ChannelID, Model: action.Model}
-		if target.ChannelID == 0 {
-			target.ChannelID = sourceChannelID
-		}
-		return target, true
-	case channelBudgetActionReject:
-		return dto.ChannelLimitFallback{}, false
-	default:
-		return config.Fallback, config.Fallback.Enabled
+	if action.Mode == channelBudgetActionInherit {
+		action = config.DefaultOnExceed
 	}
+	if action.Mode != channelBudgetActionFallback {
+		return dto.ChannelLimitFallback{}, false
+	}
+	target := dto.ChannelLimitFallback{Enabled: true, ChannelID: action.ChannelID, Model: action.Model}
+	if target.ChannelID == 0 {
+		target.ChannelID = sourceChannelID
+	}
+	return target, true
 }

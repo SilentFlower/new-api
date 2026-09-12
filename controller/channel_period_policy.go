@@ -76,7 +76,7 @@ func PreviewChannelPeriodPolicy(c *gin.Context) {
 		respondChannelPeriodPolicyError(c, model.ErrChannelPeriodPolicyConflict, false)
 		return
 	}
-	view, err := service.PreviewChannelPeriodPolicy(c, channel, input.Config, time.Now().In(time.Local))
+	view, err := service.PreviewChannelBudgetPolicy(c, channel.Id, input.Config, time.Now().In(time.Local))
 	if err != nil {
 		respondChannelPeriodPolicyError(c, err, false)
 		return
@@ -84,7 +84,13 @@ func PreviewChannelPeriodPolicy(c *gin.Context) {
 	common.ApiSuccess(c, view)
 }
 
-// GetChannelPeriodPolicyTargets 返回不含密钥的候选渠道及模型。
+// channelPeriodPolicyTarget 是候选目标渠道；self 标记本渠道，只能作为行级同渠道换模型的目标。
+type channelPeriodPolicyTarget struct {
+	model.ChannelModelOption
+	Self bool `json:"self"`
+}
+
+// GetChannelPeriodPolicyTargets 返回不含密钥的候选渠道及模型，含本渠道并标记 self。
 // @param c 管理员请求上下文。
 // @return 无，写入精简选项。
 func GetChannelPeriodPolicyTargets(c *gin.Context) {
@@ -97,13 +103,11 @@ func GetChannelPeriodPolicyTargets(c *gin.Context) {
 		respondChannelPeriodPolicyError(c, err, false)
 		return
 	}
-	filtered := make([]model.ChannelModelOption, 0, len(items))
+	targets := make([]channelPeriodPolicyTarget, 0, len(items))
 	for _, item := range items {
-		if item.ID != channel.Id {
-			filtered = append(filtered, item)
-		}
+		targets = append(targets, channelPeriodPolicyTarget{ChannelModelOption: item, Self: item.ID == channel.Id})
 	}
-	common.ApiSuccess(c, filtered)
+	common.ApiSuccess(c, targets)
 }
 
 func bindChannelPeriodJSON(c *gin.Context, input any) bool {

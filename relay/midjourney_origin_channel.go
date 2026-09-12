@@ -16,13 +16,11 @@ func applyMidjourneyOriginChannel(c *gin.Context, relayInfo *relaycommon.RelayIn
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
 	common.SetContextKey(c, constant.ContextKeyChannelType, channel.Type)
 	common.SetContextKey(c, constant.ContextKeyChannelKey, channel.Key)
-	limits := service.ApplyChannelUserEffectiveLimits(c, channel)
+	service.ApplyChannelUserEffectiveLimits(c, channel)
 
 	relayInfo.ChannelBaseUrl = channel.GetBaseURL()
 	relayInfo.ChannelId = channel.Id
 	relayInfo.ChannelType = channel.Type
 	relayInfo.ApiKey = channel.Key
-	relayInfo.ChannelUserDailyQuotaLimit = limits.EffectiveDailyQuota
-	relayInfo.ChannelUserWeeklyQuotaLimit = limits.EffectiveWeeklyQuota
 	c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
 }

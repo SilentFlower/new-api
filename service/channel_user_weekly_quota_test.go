@@ -74,10 +74,9 @@ func TestChannelUserWeeklyQuotaDisabledSkipsUnavailableRedis(t *testing.T) {
 // TestRecordChannelUserQuotaUsageTracksDailyAndWeekly 验证一次正向结算同时进入日、周状态。
 func TestRecordChannelUserQuotaUsageTracksDailyAndWeekly(t *testing.T) {
 	now := time.Date(2026, 8, 20, 10, 0, 0, 0, time.Local)
-	setupChannelUserDailyQuotaMemoryTest(t, &now)
-	setupChannelUserWeeklyQuotaMemoryTest(t, &now)
+	channel := setupChannelPeriodTest(t, &now, false)
 
-	require.NoError(t, RecordChannelUserQuotaUsage(context.Background(), 80, 123, 75))
+	require.NoError(t, RecordChannelUserQuotaUsage(context.Background(), channel.Id, 123, 75))
 	daily, _, _, err := GetChannelUserDailyQuotaUsage(context.Background(), 80, 123)
 	require.NoError(t, err)
 	weekly, _, _, err := GetChannelUserWeeklyQuotaUsage(context.Background(), 80, 123)

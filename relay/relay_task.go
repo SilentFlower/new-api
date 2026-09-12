@@ -98,14 +98,12 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		common.SetContextKey(c, constant.ContextKeyChannelType, ch.Type)
 		common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, ch.GetBaseURL())
 		common.SetContextKey(c, constant.ContextKeyChannelId, originTask.ChannelId)
-		limits := service.ApplyChannelUserEffectiveLimits(c, ch)
+		service.ApplyChannelUserEffectiveLimits(c, ch)
 
 		info.ChannelBaseUrl = ch.GetBaseURL()
 		info.ChannelId = originTask.ChannelId
 		info.ChannelType = ch.Type
 		info.ApiKey = key
-		info.ChannelUserDailyQuotaLimit = limits.EffectiveDailyQuota
-		info.ChannelUserWeeklyQuotaLimit = limits.EffectiveWeeklyQuota
 	}
 
 	// 提取 remix 参数（时长、分辨率 → OtherRatios）

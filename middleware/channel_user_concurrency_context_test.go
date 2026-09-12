@@ -29,6 +29,4 @@ func TestSetupContextForSelectedChannelSetsUserConcurrencyLimit(t *testing.T) {
 
 	require.Nil(t, apiErr)
 	require.Equal(t, 4, common.GetContextKeyInt(c, constant.ContextKeyChannelUserConcurrencyLimit))
-	require.Equal(t, 1000, common.GetContextKeyInt(c, constant.ContextKeyChannelUserDailyQuotaLimit))
-	require.Equal(t, 5000, common.GetContextKeyInt(c, constant.ContextKeyChannelUserWeeklyQuotaLimit))
 }

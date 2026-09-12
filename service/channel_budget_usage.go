@@ -115,6 +115,7 @@ func newChannelBudgetCounter(channelID int, row channelBudgetRow, res channelBud
 			counter.poolKey = counter.userKey
 			return counter
 		}
+		counter.createdAt = max(counter.createdAt, row.CreatedAt)
 	}
 	counter.userKey = fmt.Sprintf("channel_budget:{%d}:%s:%d", channelID, row.identityHash(), counter.start)
 	counter.poolKey = counter.userKey
@@ -160,11 +161,13 @@ func recordChannelBudgetUsage(ctx context.Context, channelID, userID, quota int,
 		return err
 	}
 	now := channelPeriodNow().In(time.Local)
-	plan := buildChannelBudgetPlan(policy, 0, 0)
+	plan := buildChannelBudgetPlan(policy)
 	res, err := resolveChannelBudgetRows(plan, now, modelName)
 	if err != nil {
 		return err
 	}
+	// 渠道级日/周身份始终累计，没有对应行时也保留历史，便于以后加行。
+	plan.Rows = append(channelBudgetBaseRows(), plan.Rows...)
 	counters := channelBudgetCounters(channelID, plan, res, res.counting)
 	if common.RedisEnabled {
 		if common.RDB == nil {
@@ -291,4 +294,112 @@ func readChannelBudgetHash(ctx context.Context, counter channelBudgetCounter, us
 		return 0, 0, channelBudgetTrackingStart(counter, now), nil
 	}
 	return bucket.values[strconv.Itoa(userID)], bucket.values["__pool"], bucket.since, nil
+}
+
+// listChannelBudgetUsage 返回某身份当前窗口内全部用户的已用额度。
+// @param ctx 请求上下文。
+// @param counter 计数位置。
+// @return 用户 ID 到已用额度的映射及存储错误。
+func listChannelBudgetUsage(ctx context.Context, counter channelBudgetCounter) (map[int]int64, error) {
+	switch counter.legacy {
+	case channelBudgetWindowDaily:
+		store, err := currentChannelUserDailyQuotaStore()
+		if err != nil {
+			return nil, err
+		}
+		return store.list(ctx, channelUserDailyQuotaPeriodAt(counter.channelID, time.Unix(counter.start, 0)))
+	case channelBudgetWindowWeekly:
+		store, err := currentChannelUserWeeklyQuotaStore()
+		if err != nil {
+			return nil, err
+		}
+		return store.list(ctx, channelUserWeeklyQuotaPeriodAt(counter.channelID, time.Unix(counter.start, 0)))
+	}
+	values := make(map[int]int64)
+	if common.RedisEnabled {
+		if common.RDB == nil {
+			return nil, errors.New("周期额度 Redis 未初始化")
+		}
+		fields, err := common.RDB.HGetAll(ctx, counter.poolKey).Result()
+		if err != nil {
+			return nil, err
+		}
+		for field, raw := range fields {
+			userID, parseErr := strconv.Atoi(field)
+			used, usedErr := strconv.ParseInt(raw, 10, 64)
+			if parseErr != nil || usedErr != nil || userID <= 0 {
+				continue
+			}
+			values[userID] = used
+		}
+		return values, nil
+	}
+	channelPeriodUsageMemory.Lock()
+	defer channelPeriodUsageMemory.Unlock()
+	if bucket := channelPeriodUsageMemory.values[counter.poolKey]; bucket != nil {
+		for field, used := range bucket.values {
+			if userID, err := strconv.Atoi(field); err == nil && userID > 0 {
+				values[userID] = used
+			}
+		}
+	}
+	return values, nil
+}
+
+// 直接设置池子汇总或某个用户字段；0 删除用户字段，统计起点只在缺失时建立。
+var channelBudgetUsageSetScript = redis.NewScript(`
+local kind = redis.call('TYPE', KEYS[1]).ok
+if kind ~= 'none' and kind ~= 'hash' then return redis.error_reply('invalid quota key type') end
+if ARGV[2] == '0' and ARGV[1] ~= '__pool' then
+  redis.call('HDEL', KEYS[1], ARGV[1])
+else
+  redis.call('HSET', KEYS[1], ARGV[1], ARGV[2])
+end
+if ARGV[4] == '1' then redis.call('HSETNX', KEYS[1], '__since', ARGV[5]) end
+redis.call('EXPIREAT', KEYS[1], ARGV[3])
+return 1
+`)
+
+// setChannelBudgetUsage 把某身份当前窗口的池子汇总或指定用户已用额度设为目标值。
+// @param ctx 请求上下文。
+// @param counter 计数位置。
+// @param scope pool 或 user。
+// @param userID scope=user 时的用户 ID。
+// @param used 目标已用额度。
+// @param now 当前时刻。
+// @return 存储错误。
+func setChannelBudgetUsage(ctx context.Context, counter channelBudgetCounter, scope string, userID int, used int64, now time.Time) error {
+	if scope == channelBudgetScopeUser && counter.legacy != "" {
+		// 渠道级个人日/周用量仍存放在旧个人 Hash，沿用其设置语义。
+		if used > common.MaxQuota {
+			return fmt.Errorf("%w: 旧个人日/周计数不支持超过 32 位的目标值", ErrInvalidChannelPeriodPolicy)
+		}
+		if counter.legacy == channelBudgetWindowDaily {
+			return SetChannelUserDailyQuota(ctx, counter.channelID, userID, int(used))
+		}
+		return SetChannelUserWeeklyQuota(ctx, counter.channelID, userID, int(used))
+	}
+	field := "__pool"
+	if scope == channelBudgetScopeUser {
+		field = strconv.Itoa(userID)
+	}
+	if common.RedisEnabled {
+		if common.RDB == nil {
+			return errors.New("周期额度 Redis 未初始化")
+		}
+		return channelBudgetUsageSetScript.Run(ctx, common.RDB, []string{counter.poolKey}, field, used, counter.end+86400, 1, channelBudgetTrackingStart(counter, now)).Err()
+	}
+	channelPeriodUsageMemory.Lock()
+	defer channelPeriodUsageMemory.Unlock()
+	bucket := channelPeriodUsageMemory.values[counter.poolKey]
+	if bucket == nil {
+		bucket = &channelPeriodUsageBucket{values: make(map[string]int64), since: channelBudgetTrackingStart(counter, now), expiresAt: counter.end + 86400}
+		channelPeriodUsageMemory.values[counter.poolKey] = bucket
+	}
+	if used == 0 && field != "__pool" {
+		delete(bucket.values, field)
+		return nil
+	}
+	bucket.values[field] = used
+	return nil
 }
