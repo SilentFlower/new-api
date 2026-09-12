@@ -1,0 +1,9 @@
+{"file": ".trellis/spec/backend/channel-period-budget-fallback.md", "reason": "现有周期策略、计数、降级与两仓契约，重构的行为基线"}
+{"file": ".trellis/spec/backend/channel-user-daily-quota.md", "reason": "旧个人日限 key、软上限与错误码语义，派生行必须保持"}
+{"file": ".trellis/spec/backend/channel-user-weekly-quota-and-overrides.md", "reason": "旧周限、个人覆盖提额约束与 ai-fund BFF 边界"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "三库兼容、迁移与 GORM 用法"}
+{"file": ".trellis/spec/backend/api-contracts.md", "reason": "管理 API 查询参数与跨层契约"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "测试质量、testify 与构建流程"}
+{"file": ".trellis/spec/frontend/index.md", "reason": "前端组件、i18n 与测试约定"}
+{"file": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/brief.md", "reason": "按模型预算的调研锚点（计数写入方、降级链路、ai-fund 文件）"}
+{"file": "/root/project/ai-fund/.trellis/spec/backend/newapi-pool-limits.md", "reason": "ai-fund 侧限额 BFF 契约"}

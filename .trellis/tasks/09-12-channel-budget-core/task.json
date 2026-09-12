@@ -1,0 +1,39 @@
+{
+  "id": "channel-budget-core",
+  "name": "channel-budget-core",
+  "title": "预算内核收敛：v1 策略转预算列表，判定/计数/降级按行（契约不变）",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-09-12",
+  "completedAt": "2026-09-12",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-12-channel-budget-unification",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-09-12T04:44:38Z",
+    "completedSteps": [
+      "预算行内核：计划/身份与 key 映射/逐条目 Lua/按行判定/行级降级选择",
+      "resolveChannelPeriodSources 改为 v1 投影",
+      "新增 RecordChannelUserModelQuotaUsage 与 relay/task 模型名入口",
+      "内核直接测试与内存/Redis 等价测试",
+      "Check-All 通过、规范更新 written"
+    ],
+    "partialStep": null,
+    "nextStep": "启动子任务 09-12-channel-budget-v2-contract",
+    "notes": "旧 relay 日/周检查与指标新增字段推迟到阶段二"
+  }
+}
