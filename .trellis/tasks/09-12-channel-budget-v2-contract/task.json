@@ -1,0 +1,42 @@
+{
+  "id": "channel-budget-v2-contract",
+  "name": "channel-budget-v2-contract",
+  "title": "预算 v2 契约：配置/覆盖/用量接口、迁移废弃旧列、new-api 前端预算表",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-09-12",
+  "completedAt": "2026-09-12",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-12-channel-budget-unification",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "completedSteps": [
+      "预算 v2 配置、用量、提额与前端预算表实现完成",
+      "全部检查发现及旧提额字段 HTTP 400 漏检已修复并通过重检",
+      "Go 全量与最终定向测试、build/vet、relaykit 独立构建通过",
+      "SQLite/MySQL 8/PostgreSQL 16 迁移、撤销重启与重新提额契约通过",
+      "SQLite 备份恢复后实际旧版预算内放行、到限拦截验证通过",
+      "前端 39 项测试、类型、lint、构建、格式与七语言同步通过",
+      "预算 v2 权威规范及旧日周迁移说明已同步",
+      "本任务代码与规范已提交并推送"
+    ],
+    "partialStep": null,
+    "nextStep": "推进 ai-fund 子任务并完成同版本联动发布准备",
+    "notes": "本子任务交付完成；父任务与 ai-fund 子任务仍独立推进。实际旧版回滚仅在 SQLite 演练；MySQL/PostgreSQL 已验证迁移契约。临时测试数据库已清理，未执行部署。",
+    "updatedAt": "2026-09-12T14:55:22Z"
+  }
+}
