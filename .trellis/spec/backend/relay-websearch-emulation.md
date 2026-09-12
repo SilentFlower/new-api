@@ -128,6 +128,7 @@ func syncAnthropicReasoningEffortFromRequestBody(info *relaycommon.RelayInfo, re
 - Provider 调用：
   - Tavily POST `https://api.tavily.com/search`，认证只能使用 `Authorization: Bearer <api_key>`，请求体不能包含 key。
   - AnySearch POST `https://api.anysearch.com/mcp`，JSON-RPC `method=tools/call`，工具名 `search`，有 key 时使用 Bearer header。
+  - AnySearch 实际常以 `result.content[{type:"text"}]` 返回 Markdown 文本（`## Search Results (N results, …)`、`### N. 标题`、`- **URL**: <url>`、`- 摘要 … date: <日期>`）；`collectAnySearchResultsFromText` 必须先尝试 JSON，再经 `parseAnySearchMarkdownResults` 拆成逐条 `SearchResult{URL,Title,Snippet,PageAge}`，都解析不到才退化为单条 `fallbackAnySearchTextResult`。否则模拟响应只剩一条无 URL 的整段文本。
   - provider JSON 编解码必须使用 `common.Marshal` / `common.Unmarshal` / `common.DecodeJson`。
   - provider 响应体读取必须设置大小上限，错误消息不得包含完整 key、请求体、响应体或用户对话内容。
 - Relay 短路：
@@ -206,6 +207,7 @@ func syncAnthropicReasoningEffortFromRequestBody(info *relaycommon.RelayInfo, re
   - Tavily / AnySearch 带 key 请求 Authorization header 正确，AnySearch 无 key 请求不发送 Authorization，JSON body 不包含 key。
   - Tavily `results[].url/title/content` 规范化为 `SearchResult`。
   - AnySearch MCP `content` 文本 JSON、嵌套 `results/items/data/list` 和错误响应都能稳定处理。
+  - AnySearch MCP `content` Markdown 文本（`TestNormalizeAnySearchResponseFromMCPMarkdownText`）解析出逐条 URL/标题/摘要/日期，非该格式纯文本仍退化为单条结果。
   - provider 错误消息不包含 key。
 - Relay 测试：
   - 纯 WebSearch 只接受单个搜索工具；混合工具不触发模拟。

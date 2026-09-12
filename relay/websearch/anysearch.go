@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -119,7 +120,82 @@ func collectAnySearchResultsFromText(text string) []SearchResult {
 			return results
 		}
 	}
+	// AnySearch 实际常以 Markdown 文本返回结果列表；先按该格式拆成逐条结果，
+	// 否则整段文本会退化成一条没有 URL 的结果。
+	if results := parseAnySearchMarkdownResults(text); len(results) > 0 {
+		return results
+	}
 	return []SearchResult{fallbackAnySearchTextResult(text)}
+}
+
+var (
+	// anySearchMarkdownTitlePattern 匹配 "### 1. 标题" 这类编号标题行。
+	anySearchMarkdownTitlePattern = regexp.MustCompile(`^#{1,6}\s*\d+[.)]\s+(.+?)\s*$`)
+	// anySearchMarkdownURLPattern 匹配 "- **URL**: https://..." 这类 URL 行。
+	anySearchMarkdownURLPattern = regexp.MustCompile(`(?i)^-?\s*\*{0,2}url\*{0,2}\s*[:：]\s*(\S+)`)
+)
+
+// anySearchMarkdownDateMarker 是摘要行尾部日期的分隔标记，例如 "… date: Sep 2, 2026"。
+const anySearchMarkdownDateMarker = " date: "
+
+// parseAnySearchMarkdownResults 解析 AnySearch MCP 文本形态的结果列表：
+//
+//	## Search Results (5 results, 2012ms)
+//	### 1. 标题
+//	- **URL**: https://example.com/a
+//	- 摘要 … date: Sep 2, 2026
+//
+// 标题行开启一条结果，URL 行填充 URL，其余列表行拼入摘要并把尾部 "date:" 提取为
+// PageAge；标题行之前的内容（如 "## Search Results" 头）忽略。文本不含编号标题时返回 nil。
+func parseAnySearchMarkdownResults(text string) []SearchResult {
+	var results []SearchResult
+	var current *SearchResult
+	flush := func() {
+		if current != nil && (current.URL != "" || current.Title != "") {
+			current.Snippet = limitSnippet(current.Snippet)
+			results = append(results, *current)
+		}
+		current = nil
+	}
+	for _, rawLine := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(rawLine)
+		if line == "" {
+			continue
+		}
+		if match := anySearchMarkdownTitlePattern.FindStringSubmatch(line); match != nil {
+			flush()
+			current = &SearchResult{Title: strings.TrimSpace(match[1])}
+			continue
+		}
+		if current == nil {
+			continue
+		}
+		if match := anySearchMarkdownURLPattern.FindStringSubmatch(line); match != nil {
+			current.URL = strings.TrimSpace(match[1])
+			continue
+		}
+		body := strings.TrimSpace(strings.TrimPrefix(line, "-"))
+		if body == "" {
+			continue
+		}
+		if strings.HasPrefix(strings.ToLower(body), "date:") {
+			current.PageAge = strings.TrimSpace(body[len("date:"):])
+			continue
+		}
+		if idx := strings.LastIndex(body, anySearchMarkdownDateMarker); idx >= 0 {
+			current.PageAge = strings.TrimSpace(body[idx+len(anySearchMarkdownDateMarker):])
+			body = strings.TrimSpace(body[:idx])
+		}
+		if body == "" {
+			continue
+		}
+		if current.Snippet != "" {
+			current.Snippet += " "
+		}
+		current.Snippet += body
+	}
+	flush()
+	return results
 }
 
 func collectAnySearchResults(value any) []SearchResult {

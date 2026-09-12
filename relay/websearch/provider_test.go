@@ -51,6 +51,40 @@ func TestNormalizeAnySearchResponseFromMCPTextJSON(t *testing.T) {
 	assert.Equal(t, "Snippet", resp.Results[0].Snippet)
 }
 
+func TestNormalizeAnySearchResponseFromMCPMarkdownText(t *testing.T) {
+	markdown := "## Search Results (2 results, 2012ms)\n\n" +
+		"### 1. 中国气象局举行2026年9月新闻发布会\n" +
+		"- **URL**: http://www.scio.gov.cn/xwfb/t20260904_1006845.html\n" +
+		"- 我国的台风数量具有偏多的特点。 ... date: Sep 2, 2026\n\n" +
+		"### 2. 9月将有2～3个台风生成可能影响我国 - 新闻\n" +
+		"- **URL**: https://news.sciencenet.cn/htmlnews/2026/9/570826.shtm\n" +
+		"- 今年已有7个台风登陆我国。\n" +
+		"- date: 5 days ago\n"
+	body, err := common.Marshal(map[string]any{
+		"result": map[string]any{"content": []map[string]any{{"type": "text", "text": markdown}}},
+	})
+	require.NoError(t, err)
+
+	resp, err := NormalizeAnySearchResponse("台风", body)
+
+	require.NoError(t, err)
+	require.Len(t, resp.Results, 2)
+	assert.Equal(t, "http://www.scio.gov.cn/xwfb/t20260904_1006845.html", resp.Results[0].URL)
+	assert.Equal(t, "中国气象局举行2026年9月新闻发布会", resp.Results[0].Title)
+	assert.Equal(t, "我国的台风数量具有偏多的特点。 ...", resp.Results[0].Snippet)
+	assert.Equal(t, "Sep 2, 2026", resp.Results[0].PageAge)
+	assert.Equal(t, "https://news.sciencenet.cn/htmlnews/2026/9/570826.shtm", resp.Results[1].URL)
+	assert.Equal(t, "今年已有7个台风登陆我国。", resp.Results[1].Snippet)
+	assert.Equal(t, "5 days ago", resp.Results[1].PageAge)
+
+	assert.Nil(t, parseAnySearchMarkdownResults("No numbered headings\n- **URL**: https://example.com"))
+	plain, err := NormalizeAnySearchResponse("q", []byte(`{"result":{"content":[{"type":"text","text":"just some prose"}]}}`))
+	require.NoError(t, err)
+	require.Len(t, plain.Results, 1)
+	assert.Equal(t, "just some prose", plain.Results[0].Title)
+	assert.Empty(t, plain.Results[0].URL)
+}
+
 func TestAnySearchProviderSearchRequest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		assert.Equal(t, "Bearer any-key", r.Header.Get("Authorization"))
