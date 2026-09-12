@@ -212,7 +212,7 @@ func ReplaceChannelUserPeriodOverride(ctx context.Context, channelID, userID int
 		if rule.ID != ruleID {
 			continue
 		}
-		if rule.UserPeriodQuotaLimit == nil || *rule.UserPeriodQuotaLimit <= 0 || input.UserPeriodQuotaLimit <= *rule.UserPeriodQuotaLimit || input.UserPeriodQuotaLimit > common.MaxQuota {
+		if rule.UserPeriodQuotaLimit == nil || *rule.UserPeriodQuotaLimit <= 0 || input.UserPeriodQuotaLimit <= *rule.UserPeriodQuotaLimit || input.UserPeriodQuotaLimit > common.MaxPeriodQuota {
 			return fmt.Errorf("%w: 整段特批须高于规则基础额度且不超过最大值", ErrInvalidChannelPeriodPolicy)
 		}
 		return model.ReplaceChannelUserPeriodOverride(ctx, &model.ChannelUserPeriodOverride{ChannelId: channelID, UserId: userID, RuleId: ruleID, UserPeriodQuotaLimit: input.UserPeriodQuotaLimit, ExpiresAt: input.ExpiresAt, UpdatedBy: updatedBy})
@@ -235,7 +235,7 @@ func PreviewChannelPeriodPolicy(ctx context.Context, channel *model.Channel, con
 	if err != nil {
 		return nil, err
 	}
-	limits, sources, _, next, err := resolveChannelPeriodSources(normalized, channel.GetUserDailyQuotaLimit(), now)
+	limits, sources, _, next, err := resolveChannelPeriodSources(normalized, int64(channel.GetUserDailyQuotaLimit()), now)
 	if err != nil {
 		return nil, err
 	}

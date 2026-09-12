@@ -18,7 +18,9 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { z } from 'zod'
 
-const quota = z.number().int().min(0).max(2147483647)
+/** 周期额度上界，与后端 common.MaxPeriodQuota 一致；保持在 2^53 内以保证 JSON 精确往返。 */
+export const MAX_PERIOD_QUOTA = 1_000_000_000_000_000
+const quota = z.number().int().min(0).max(MAX_PERIOD_QUOTA)
 /** 四个逐项覆盖的规则金额字段。 */
 export const periodQuotaKeys = [
   'user_daily_quota_limit',

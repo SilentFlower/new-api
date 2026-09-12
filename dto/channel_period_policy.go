@@ -3,8 +3,8 @@ package dto
 // ChannelPeriodPolicyConfig 描述渠道池子预算、时间规则及一次超限降级配置。
 type ChannelPeriodPolicyConfig struct {
 	SchemaVersion        int                  `json:"schema_version"`
-	PoolDailyQuotaLimit  int                  `json:"pool_daily_quota_limit"`
-	PoolWeeklyQuotaLimit int                  `json:"pool_weekly_quota_limit"`
+	PoolDailyQuotaLimit  int64                `json:"pool_daily_quota_limit"`
+	PoolWeeklyQuotaLimit int64                `json:"pool_weekly_quota_limit"`
 	Rules                []ChannelPeriodRule  `json:"rules"`
 	Fallback             ChannelLimitFallback `json:"fallback"`
 }
@@ -31,10 +31,10 @@ type ChannelPeriodRule struct {
 	StartTime            string `json:"start_time"`
 	EndTime              string `json:"end_time"`
 	CreatedAt            int64  `json:"created_at"`
-	UserDailyQuotaLimit  *int   `json:"user_daily_quota_limit"`
-	PoolDailyQuotaLimit  *int   `json:"pool_daily_quota_limit"`
-	UserPeriodQuotaLimit *int   `json:"user_period_quota_limit"`
-	PoolPeriodQuotaLimit *int   `json:"pool_period_quota_limit"`
+	UserDailyQuotaLimit  *int64 `json:"user_daily_quota_limit"`
+	PoolDailyQuotaLimit  *int64 `json:"pool_daily_quota_limit"`
+	UserPeriodQuotaLimit *int64 `json:"user_period_quota_limit"`
+	PoolPeriodQuotaLimit *int64 `json:"pool_period_quota_limit"`
 }
 
 // ChannelPeriodPolicyInput 是带乐观锁的整份策略替换请求。
@@ -65,7 +65,7 @@ type ChannelPeriodSource struct {
 type ChannelPeriodMetric struct {
 	Scope         string              `json:"scope"`
 	Period        string              `json:"period"`
-	Limit         int                 `json:"limit"`
+	Limit         int64               `json:"limit"`
 	Used          int64               `json:"used"`
 	Remaining     *int64              `json:"remaining"`
 	ResetAt       int64               `json:"reset_at"`
@@ -73,8 +73,8 @@ type ChannelPeriodMetric struct {
 	Coverage      string              `json:"coverage"`
 	Source        ChannelPeriodSource `json:"source"`
 	Enforced      bool                `json:"enforced"`
-	BaseLimit     int                 `json:"base_limit"`
-	OverrideLimit *int                `json:"override_limit,omitempty"`
+	BaseLimit     int64               `json:"base_limit"`
+	OverrideLimit *int64              `json:"override_limit,omitempty"`
 }
 
 // ChannelPeriodStatus 供管理端、本人门户与请求前检查共用。
@@ -91,6 +91,6 @@ type ChannelPeriodStatus struct {
 
 // ChannelUserPeriodOverrideInput 描述单个用户对一个规则的整段提额。
 type ChannelUserPeriodOverrideInput struct {
-	UserPeriodQuotaLimit int   `json:"user_period_quota_limit"`
+	UserPeriodQuotaLimit int64 `json:"user_period_quota_limit"`
 	ExpiresAt            int64 `json:"expires_at"`
 }

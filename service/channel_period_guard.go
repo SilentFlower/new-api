@@ -42,12 +42,12 @@ func GetChannelPeriodStatus(ctx context.Context, channel *model.Channel, userID 
 		return status, err
 	}
 	now := channelPeriodNow().In(time.Local)
-	limits, sources, active, next, err := resolveChannelPeriodSources(policy.Config, channel.GetUserDailyQuotaLimit(), now)
+	limits, sources, active, next, err := resolveChannelPeriodSources(policy.Config, int64(channel.GetUserDailyQuotaLimit()), now)
 	if err != nil {
 		return status, err
 	}
 	status.Revision, status.NextChangeAt, status.FallbackEnabled = policy.Revision, next, policy.Config.Fallback.Enabled
-	baseDaily, baseWeekly := limits["user_daily"], channel.GetUserWeeklyQuotaLimit()
+	baseDaily, baseWeekly := limits["user_daily"], int64(channel.GetUserWeeklyQuotaLimit())
 	limits["user_weekly"] = baseWeekly
 	sources["user_weekly"] = dto.ChannelPeriodSource{Kind: "default"}
 	var override *model.ChannelUserLimitOverride
@@ -65,10 +65,11 @@ func GetChannelPeriodStatus(ctx context.Context, channel *model.Channel, userID 
 			if value == nil || *value <= 0 || *value > common.MaxQuota {
 				continue
 			}
-			if policy.Revision == 0 && effectiveChannelUserLimit(limits[key], value) == limits[key] {
+			// revision 为 0 时基础额度来自渠道的 32 位列，转回 int 比较无损。
+			if policy.Revision == 0 && int64(effectiveChannelUserLimit(int(limits[key]), value)) == limits[key] {
 				continue
 			}
-			limits[key] = *value
+			limits[key] = int64(*value)
 			sources[key] = dto.ChannelPeriodSource{Kind: "personal", ExpiresAt: override.ExpiresAt}
 		}
 		if override.ExpiresAt > now.Unix() && (status.NextChangeAt == 0 || override.ExpiresAt < status.NextChangeAt) {
@@ -130,14 +131,14 @@ func GetChannelPeriodStatus(ctx context.Context, channel *model.Channel, userID 
 			if scope == "pool" {
 				value, used = occ.rule.PoolPeriodQuotaLimit, poolUsed
 			}
-			limit := 0
+			limit := int64(0)
 			if value != nil {
 				limit = *value
 			}
 			metric := dto.ChannelPeriodMetric{Scope: scope, Period: "custom", Limit: limit, BaseLimit: limit, Used: used, ResetAt: counter.end, TrackingSince: since, Coverage: coverage, Enforced: sources[key].RuleID == occ.rule.ID, Source: dto.ChannelPeriodSource{Kind: occ.rule.Kind, RuleID: occ.rule.ID, RuleName: occ.rule.Name, StartAt: occ.start.Unix(), EndAt: occ.end.Unix()}}
 			if scope == "user" {
 				for _, personal := range periodOverrides {
-					if personal.RuleId != occ.rule.ID || personal.UserPeriodQuotaLimit <= 0 || personal.UserPeriodQuotaLimit > common.MaxQuota {
+					if personal.RuleId != occ.rule.ID || personal.UserPeriodQuotaLimit <= 0 || personal.UserPeriodQuotaLimit > common.MaxPeriodQuota {
 						continue
 					}
 					metric.Limit = personal.UserPeriodQuotaLimit
@@ -163,9 +164,9 @@ func GetChannelPeriodStatus(ctx context.Context, channel *model.Channel, userID 
 			}
 		}
 		if metric.Limit > 0 {
-			remaining := max(int64(0), int64(metric.Limit)-metric.Used)
+			remaining := max(int64(0), metric.Limit-metric.Used)
 			metric.Remaining = &remaining
-			if metric.Enforced && metric.Used >= int64(metric.Limit) {
+			if metric.Enforced && metric.Used >= metric.Limit {
 				status.Blocked = true
 			}
 		}
@@ -184,7 +185,7 @@ func CheckChannelPeriodLimits(ctx context.Context, channel *model.Channel, userI
 		return err
 	}
 	for _, metric := range status.Metrics {
-		if metric.Enforced && metric.Limit > 0 && metric.Used >= int64(metric.Limit) {
+		if metric.Enforced && metric.Limit > 0 && metric.Used >= metric.Limit {
 			return &ChannelPeriodBlock{Metric: metric}
 		}
 	}
@@ -239,16 +240,17 @@ func CheckSelectedChannelPeriodLimits(c *gin.Context) *types.NewAPIError {
 	if err != nil {
 		return ChannelPeriodAPIError(err)
 	}
+	// gin 的 GetInt 只识别 int：若写入 int64，旧个人日周检查会读到 0 并误判为不限。
 	for _, metric := range status.Metrics {
 		if metric.Scope == "user" && metric.Period == "daily" {
-			common.SetContextKey(c, constant.ContextKeyChannelUserDailyQuotaLimit, metric.Limit)
+			common.SetContextKey(c, constant.ContextKeyChannelUserDailyQuotaLimit, int(metric.Limit))
 		}
 		if metric.Scope == "user" && metric.Period == "weekly" {
-			common.SetContextKey(c, constant.ContextKeyChannelUserWeeklyQuotaLimit, metric.Limit)
+			common.SetContextKey(c, constant.ContextKeyChannelUserWeeklyQuotaLimit, int(metric.Limit))
 		}
 	}
 	for _, metric := range status.Metrics {
-		if metric.Enforced && metric.Limit > 0 && metric.Used >= int64(metric.Limit) {
+		if metric.Enforced && metric.Limit > 0 && metric.Used >= metric.Limit {
 			block := &ChannelPeriodBlock{Metric: metric}
 			c.Set("channel_period_block", block)
 			return ChannelPeriodAPIError(block)

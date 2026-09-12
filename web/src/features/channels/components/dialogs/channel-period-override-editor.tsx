@@ -35,6 +35,7 @@ import {
   getChannelPeriodPolicy,
   saveChannelPeriodOverride,
 } from '../../period-api'
+import { MAX_PERIOD_QUOTA } from '../../period-types'
 import type { ChannelUserLimitStatus } from '../../types'
 import { ChannelPeriodMetrics } from './channel-period-metrics'
 import { ChannelPeriodAmount } from './channel-period-policy-panel'
@@ -78,7 +79,7 @@ export function ChannelPeriodOverrideEditor(props: {
       (amount === null ||
         !Number.isSafeInteger(amount) ||
         amount <= base ||
-        amount > 2147483647 ||
+        amount > MAX_PERIOD_QUOTA ||
         !Number.isSafeInteger(expiration) ||
         (expires && expiration <= Date.now() / 1000))
     ) {

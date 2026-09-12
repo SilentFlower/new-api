@@ -17,12 +17,13 @@ import (
 
 func TestChannelPeriodPolicyManagementContract(t *testing.T) {
 	db := setupChannelUserLimitsTestDB(t)
-	daily, whole := 5000000, 15000000
+	daily := 5000000
+	ruleDaily, whole := int64(daily), int64(15000000)
 	channel := model.Channel{Id: 80, Name: "合同渠道", Key: "must-not-leak", Status: common.ChannelStatusEnabled, UserDailyQuotaLimit: &daily}
 	require.NoError(t, db.Create(&channel).Error)
 	require.NoError(t, db.Create(&model.User{Id: 77, Username: "period-user", DisplayName: "周期用户"}).Error)
 	now := time.Now().In(time.Local)
-	input := dto.ChannelPeriodPolicyInput{Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 25000000, PoolWeeklyQuotaLimit: 100000000, Rules: []dto.ChannelPeriodRule{{Name: "指定假期", Enabled: true, Kind: "date_range", StartLocal: now.AddDate(0, 0, -1).Format("2006-01-02T00:00"), EndLocal: now.AddDate(0, 0, 4).Format("2006-01-02T00:00"), UserDailyQuotaLimit: &daily, UserPeriodQuotaLimit: &whole}}}}
+	input := dto.ChannelPeriodPolicyInput{Config: dto.ChannelPeriodPolicyConfig{SchemaVersion: 1, PoolDailyQuotaLimit: 25000000, PoolWeeklyQuotaLimit: 100000000, Rules: []dto.ChannelPeriodRule{{Name: "指定假期", Enabled: true, Kind: "date_range", StartLocal: now.AddDate(0, 0, -1).Format("2006-01-02T00:00"), EndLocal: now.AddDate(0, 0, 4).Format("2006-01-02T00:00"), UserDailyQuotaLimit: &ruleDaily, UserPeriodQuotaLimit: &whole}}}}
 	body, err := common.Marshal(input)
 	require.NoError(t, err)
 	params := gin.Params{{Key: "id", Value: "80"}}

@@ -23,7 +23,7 @@
 
 ### 3. Contracts
 
-- 写入为 `{expected_revision,config}`；完整显式字段，schema_version=1。默认池子日/周额度和规则四额度均受 `common.MaxQuota` 上界约束。
+- 写入为 `{expected_revision,config}`；完整显式字段，schema_version=1。默认池子日/周额度、规则四额度和整段特批均为 int64，受 `common.MaxPeriodQuota`（10^15，保持在 2^53 内）上界约束；它们只存于策略 JSON 与计数，不受 32 位 quota 列的 `common.MaxQuota` 限制。旧个人日/周覆盖仍受 `common.MaxQuota` 约束。写回 `ContextKeyChannelUserDailyQuotaLimit` / `WeeklyQuotaLimit` 时必须转为 `int`，gin 的 `GetInt` 对 int64 返回 0。
 - 规则四项：`user_daily_quota_limit`、`pool_daily_quota_limit`、`user_period_quota_limit`、`pool_period_quota_limit`。null 继承、0 不限、正整数为软上限；不提供零额度封禁。
 - 优先级逐项为个人明确覆盖 > date_range > weekly > default，未覆盖指标及池子上限仍约束。整段个人覆盖只作用于匹配 rule_id；不会绕过另一条更高优先级规则。
 - date_range 使用服务器 time.Local 解释 start_local/end_local，保存 start_at/end_at；weekly 用周一=0 的星期和 HH:mm，支持跨周。区间 `[start,end)`，DST 不存在/歧义边界拒绝；同级同指标相交拒绝。

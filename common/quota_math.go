@@ -16,6 +16,11 @@ const (
 	MinQuota = math.MinInt32
 )
 
+// MaxPeriodQuota 是渠道周期策略额度（池子日/周、时间规则四额度、整段特批）的上界。
+// 这些额度只存于策略 JSON 与 Redis/内存计数，不落 32 位 quota 列，因此不受 MaxQuota 约束；
+// 取值保持在 2^53 以内，保证浏览器与 ai-fund worker 的 JSON 数字往返精确。
+const MaxPeriodQuota int64 = 1_000_000_000_000_000
+
 // QuotaClampKind identifies why a quota conversion had to be saturated.
 type QuotaClampKind string
 

@@ -14,7 +14,7 @@ type ChannelUserPeriodOverride struct {
 	ChannelId            int    `json:"channel_id" gorm:"uniqueIndex:idx_channel_user_period_override"`
 	UserId               int    `json:"user_id" gorm:"uniqueIndex:idx_channel_user_period_override"`
 	RuleId               string `json:"rule_id" gorm:"type:varchar(32);uniqueIndex:idx_channel_user_period_override"`
-	UserPeriodQuotaLimit int    `json:"user_period_quota_limit"`
+	UserPeriodQuotaLimit int64  `json:"user_period_quota_limit"`
 	ExpiresAt            int64  `json:"expires_at" gorm:"type:bigint"`
 	UpdatedAt            int64  `json:"updated_at" gorm:"type:bigint"`
 	UpdatedBy            int    `json:"updated_by"`

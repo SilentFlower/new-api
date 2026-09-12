@@ -64,7 +64,7 @@ func TestChannelPeriodPolicyDatabaseContract(t *testing.T) {
 			overrides, err := ListChannelUserPeriodOverrides(t.Context(), 80, 7, 300)
 			require.NoError(t, err)
 			require.Len(t, overrides, 1)
-			assert.Equal(t, 200, overrides[0].UserPeriodQuotaLimit)
+			assert.Equal(t, int64(200), overrides[0].UserPeriodQuotaLimit)
 			assert.Zero(t, overrides[0].ExpiresAt)
 			require.NoError(t, RecordChannelQuotaGap(t.Context(), 80, 200))
 			require.NoError(t, RecordChannelQuotaGap(t.Context(), 80, 100))

@@ -23,7 +23,7 @@ func NormalizeChannelPeriodConfig(config, previous dto.ChannelPeriodPolicyConfig
 	invalid := func(message string) (dto.ChannelPeriodPolicyConfig, error) {
 		return config, fmt.Errorf("%w: %s", ErrInvalidChannelPeriodPolicy, message)
 	}
-	if config.SchemaVersion != 1 || config.PoolDailyQuotaLimit < 0 || config.PoolDailyQuotaLimit > common.MaxQuota || config.PoolWeeklyQuotaLimit < 0 || config.PoolWeeklyQuotaLimit > common.MaxQuota {
+	if config.SchemaVersion != 1 || config.PoolDailyQuotaLimit < 0 || config.PoolDailyQuotaLimit > common.MaxPeriodQuota || config.PoolWeeklyQuotaLimit < 0 || config.PoolWeeklyQuotaLimit > common.MaxPeriodQuota {
 		return invalid("策略版本或池子额度无效")
 	}
 	if len(config.Rules) > 64 {
@@ -55,14 +55,14 @@ func NormalizeChannelPeriodConfig(config, previous dto.ChannelPeriodPolicyConfig
 		if rule.Name == "" || len([]rune(rule.Name)) > 80 {
 			return invalid("规则名称须为 1 至 80 字")
 		}
-		values := []*int{rule.UserDailyQuotaLimit, rule.PoolDailyQuotaLimit, rule.UserPeriodQuotaLimit, rule.PoolPeriodQuotaLimit}
+		values := []*int64{rule.UserDailyQuotaLimit, rule.PoolDailyQuotaLimit, rule.UserPeriodQuotaLimit, rule.PoolPeriodQuotaLimit}
 		hasLimit := false
 		for _, value := range values {
 			if value == nil {
 				continue
 			}
 			hasLimit = true
-			if *value < 0 || *value > common.MaxQuota {
+			if *value < 0 || *value > common.MaxPeriodQuota {
 				return invalid("规则额度须为合法非负整数")
 			}
 		}
@@ -213,8 +213,8 @@ func channelPeriodOccurrence(rule dto.ChannelPeriodRule, now time.Time) (channel
 	return result, false, nil
 }
 
-func resolveChannelPeriodSources(config dto.ChannelPeriodPolicyConfig, userDaily int, now time.Time) (map[string]int, map[string]dto.ChannelPeriodSource, []channelRuleOccurrence, int64, error) {
-	limits := map[string]int{"user_daily": userDaily, "pool_daily": config.PoolDailyQuotaLimit, "pool_weekly": config.PoolWeeklyQuotaLimit, "user_custom": 0, "pool_custom": 0}
+func resolveChannelPeriodSources(config dto.ChannelPeriodPolicyConfig, userDaily int64, now time.Time) (map[string]int64, map[string]dto.ChannelPeriodSource, []channelRuleOccurrence, int64, error) {
+	limits := map[string]int64{"user_daily": userDaily, "pool_daily": config.PoolDailyQuotaLimit, "pool_weekly": config.PoolWeeklyQuotaLimit, "user_custom": 0, "pool_custom": 0}
 	sources := make(map[string]dto.ChannelPeriodSource)
 	for key := range limits {
 		sources[key] = dto.ChannelPeriodSource{Kind: "default"}
@@ -242,7 +242,7 @@ func resolveChannelPeriodSources(config dto.ChannelPeriodPolicyConfig, userDaily
 				continue
 			}
 			active = append(active, occ)
-			for key, value := range map[string]*int{"user_daily": rule.UserDailyQuotaLimit, "pool_daily": rule.PoolDailyQuotaLimit, "user_custom": rule.UserPeriodQuotaLimit, "pool_custom": rule.PoolPeriodQuotaLimit} {
+			for key, value := range map[string]*int64{"user_daily": rule.UserDailyQuotaLimit, "pool_daily": rule.PoolDailyQuotaLimit, "user_custom": rule.UserPeriodQuotaLimit, "pool_custom": rule.PoolPeriodQuotaLimit} {
 				if value == nil {
 					continue
 				}

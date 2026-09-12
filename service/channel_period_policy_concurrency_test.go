@@ -106,7 +106,7 @@ func TestChannelPeriodPolicyRedisReadsIndependent(t *testing.T) {
 	select {
 	case result := <-fast:
 		require.NoError(t, result.err)
-		assert.Equal(t, 100, result.view.Config.PoolDailyQuotaLimit)
+		assert.Equal(t, int64(100), result.view.Config.PoolDailyQuotaLimit)
 	case <-time.After(2 * time.Second):
 		t.Fatal("另一渠道被尚未释放的 Redis 查询阻塞")
 	}
@@ -114,7 +114,7 @@ func TestChannelPeriodPolicyRedisReadsIndependent(t *testing.T) {
 	select {
 	case result := <-slow:
 		require.NoError(t, result.err)
-		assert.Equal(t, 100, result.view.Config.PoolDailyQuotaLimit)
+		assert.Equal(t, int64(100), result.view.Config.PoolDailyQuotaLimit)
 	case <-time.After(2 * time.Second):
 		t.Fatal("慢请求未恢复")
 	}
@@ -177,14 +177,14 @@ func TestChannelPeriodPolicyLateDatabaseReadKeepsLatestRevision(t *testing.T) {
 			case result := <-stale:
 				require.NoError(t, result.err)
 				assert.Equal(t, 2, result.view.Revision)
-				assert.Equal(t, 50, result.view.Config.PoolDailyQuotaLimit)
+				assert.Equal(t, int64(50), result.view.Config.PoolDailyQuotaLimit)
 			case <-time.After(2 * time.Second):
 				t.Fatal("旧请求未恢复")
 			}
 			current, err := GetChannelPeriodPolicy(t.Context(), channel.Id)
 			require.NoError(t, err)
 			assert.Equal(t, 2, current.Revision)
-			assert.Equal(t, 50, current.Config.PoolDailyQuotaLimit)
+			assert.Equal(t, int64(50), current.Config.PoolDailyQuotaLimit)
 		})
 	}
 }

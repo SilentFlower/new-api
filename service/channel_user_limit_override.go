@@ -82,11 +82,11 @@ func ResolveChannelUserEffectiveLimits(ctx context.Context, channel *model.Chann
 	if err != nil {
 		return limits, err
 	}
-	values, _, _, _, err := resolveChannelPeriodSources(policy.Config, limits.BaseDailyQuota, channelPeriodNow().In(time.Local))
+	values, _, _, _, err := resolveChannelPeriodSources(policy.Config, int64(limits.BaseDailyQuota), channelPeriodNow().In(time.Local))
 	if err != nil {
 		return limits, err
 	}
-	limits.BaseDailyQuota = values["user_daily"]
+	limits.BaseDailyQuota = int(values["user_daily"])
 	limits.EffectiveDailyQuota = limits.BaseDailyQuota
 	var override *model.ChannelUserLimitOverride
 	if policy.Revision > 0 {
@@ -173,11 +173,11 @@ func ReplaceChannelUserLimitOverride(ctx context.Context, channel *model.Channel
 	if err != nil {
 		return err
 	}
-	values, _, _, _, err := resolveChannelPeriodSources(policy.Config, channel.GetUserDailyQuotaLimit(), channelPeriodNow().In(time.Local))
+	values, _, _, _, err := resolveChannelPeriodSources(policy.Config, int64(channel.GetUserDailyQuotaLimit()), channelPeriodNow().In(time.Local))
 	if err != nil {
 		return err
 	}
-	if err := validateChannelUserLimitOverrideValue("每日额度", values["user_daily"], input.UserDailyQuotaLimit, common.MaxQuota); err != nil {
+	if err := validateChannelUserLimitOverrideValue("每日额度", int(values["user_daily"]), input.UserDailyQuotaLimit, common.MaxQuota); err != nil {
 		return err
 	}
 	if err := validateChannelUserLimitOverrideValue("每周额度", channel.GetUserWeeklyQuotaLimit(), input.UserWeeklyQuotaLimit, common.MaxQuota); err != nil {

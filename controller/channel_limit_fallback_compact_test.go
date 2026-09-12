@@ -89,7 +89,7 @@ func TestChannelLimitFallbackPreservesCompactPassthrough(t *testing.T) {
 				require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "gpt-6-astra", ChannelId: target.Id, Enabled: true}).Error)
 				require.NoError(t, db.Create(&model.User{Id: 77, Username: "compact-user", Quota: 1000000}).Error)
 				require.NoError(t, db.Create(&model.Token{Id: 78, UserId: 77, Key: "compact-token", RemainQuota: 1000000}).Error)
-				limit := 1000000
+				limit := int64(1000000)
 				if state == "额度耗尽" {
 					limit = 1
 				}
