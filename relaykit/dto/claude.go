@@ -118,9 +118,12 @@ type ClaudeMessageSource struct {
 	Url       string `json:"url,omitempty"`
 }
 
+// ClaudeMessage 表示 Claude Messages API 中的一条消息。
 type ClaudeMessage struct {
 	Role    string `json:"role"`
 	Content any    `json:"content"`
+	// 压缩后的空 system 消息可仅携带思考强度，转发时必须保留其输出配置。
+	OutputConfig json.RawMessage `json:"output_config,omitempty"`
 }
 
 func (c *ClaudeMessage) IsStringContent() bool {
