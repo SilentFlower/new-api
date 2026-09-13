@@ -101,6 +101,27 @@ func TestChannelPeriodPolicyManagementContract(t *testing.T) {
 	assert.Equal(t, saved.Data.Config.Budgets[3].ID, status.Data.PeriodLimits.Metrics[4].BudgetID)
 	assert.NotContains(t, statusRecorder.Body.String(), "must-not-leak")
 
+	summaryContext, summaryRecorder := newChannelUserLimitTestContext(http.MethodGet, "/api/channel/80/budgets/usage-summary", "", params)
+	GetChannelBudgetUsageSummary(summaryContext)
+	var summary struct {
+		Success bool                              `json:"success"`
+		Data    dto.ChannelBudgetUsageSummaryView `json:"data"`
+	}
+	require.NoError(t, common.Unmarshal(summaryRecorder.Body.Bytes(), &summary))
+	require.True(t, summary.Success, summaryRecorder.Body.String())
+	// 摘要覆盖全部已保存行且顺序与策略一致；个人整段行返回用量最高用户及其生效上限。
+	require.Len(t, summary.Data.Items, 5)
+	for i, item := range summary.Data.Items {
+		assert.Equal(t, saved.Data.Config.Budgets[i].ID, item.BudgetID)
+	}
+	require.NotNil(t, summary.Data.Items[3].TopUser)
+	assert.Equal(t, 77, summary.Data.Items[3].TopUser.UserID)
+	assert.Equal(t, "period-user", summary.Data.Items[3].TopUser.Username)
+	assert.Equal(t, int64(1250000), summary.Data.Items[3].UsedQuota)
+	assert.Equal(t, int64(15000000), summary.Data.Items[3].TopUser.EffectiveLimit)
+	assert.Equal(t, int64(1250000), summary.Data.Items[0].UsedQuota)
+	assert.NotContains(t, summaryRecorder.Body.String(), "must-not-leak")
+
 	targetsContext, targetsRecorder := newChannelUserLimitTestContext(http.MethodGet, "/api/channel/80/period-policy/targets", "", params)
 	GetChannelPeriodPolicyTargets(targetsContext)
 	var targets struct {
@@ -119,7 +140,7 @@ func TestChannelPeriodPolicyManagementContract(t *testing.T) {
 	assert.True(t, selfSeen)
 	// 导出真实 Controller 响应给两仓合同测试；不为线上流量生成测试文件。
 	if output := os.Getenv("CHANNEL_PERIOD_CONTRACT_OUTPUT"); output != "" {
-		fixture, err := common.Marshal(map[string]any{"policy": saved.Data, "preview": commonValueFromJSON(t, previewRecorder.Body.Bytes()), "status": status.Data, "targets": commonValueFromJSON(t, targetsRecorder.Body.Bytes())})
+		fixture, err := common.Marshal(map[string]any{"policy": saved.Data, "preview": commonValueFromJSON(t, previewRecorder.Body.Bytes()), "status": status.Data, "targets": commonValueFromJSON(t, targetsRecorder.Body.Bytes()), "usage_summary": summary.Data})
 		require.NoError(t, err)
 		require.NoError(t, os.WriteFile(output, fixture, 0600))
 	}

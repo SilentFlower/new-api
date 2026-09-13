@@ -21,16 +21,14 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
-import { Field, FieldGroup, FieldLabel, FieldSet } from '@/components/ui/field'
-import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
+import { FieldGroup, FieldSet } from '@/components/ui/field'
 import { formatQuota, formatTimestampToDate } from '@/lib/format'
 
-import { channelPeriodMetricLabel } from '../../lib/channel-period-label'
 import {
   channelPeriodErrorKey,
   getChannelBudgetUsage,
-  getChannelPeriodPolicy,
   setChannelBudgetUsage,
 } from '../../period-api'
 import type { ChannelBudgetRow } from '../../period-types'
@@ -53,6 +51,7 @@ export function ChannelBudgetUsagePanel(props: {
     label: string
   } | null>(null)
   const [amount, setAmount] = useState<number | null>(null)
+  const [confirmAdjust, setConfirmAdjust] = useState(false)
   const [error, setError] = useState('')
   const scope = props.row.scope
   const queryKey = [
@@ -235,15 +234,30 @@ export function ChannelBudgetUsagePanel(props: {
               <Button
                 type='button'
                 disabled={amount === null || Number.isNaN(amount) || amount < 0}
-                onClick={() =>
+                onClick={() => setConfirmAdjust(true)}
+              >
+                {t('Confirm')}
+              </Button>
+              <ConfirmDialog
+                open={confirmAdjust}
+                onOpenChange={setConfirmAdjust}
+                title={t('Adjust used amount?')}
+                desc={t(
+                  'Sets the current window usage of {{target}} to {{amount}}. Other budgets and billing are unaffected; the change is audited.',
+                  {
+                    target: target.label,
+                    amount: formatQuota(amount ?? 0),
+                  }
+                )}
+                confirmText={t('Adjust')}
+                handleConfirm={() => {
+                  setConfirmAdjust(false)
                   mutation.mutate({
                     user_id: target.userId,
                     used_quota: amount ?? 0,
                   })
-                }
-              >
-                {t('Confirm')}
-              </Button>
+                }}
+              />
               <Button
                 type='button'
                 variant='outline'
@@ -259,73 +273,5 @@ export function ChannelBudgetUsagePanel(props: {
         </FieldGroup>
       )}
     </section>
-  )
-}
-
-/** @param props 渠道与操作权限。 @returns 先按行选择预算，再展示该行当前窗口用量的页签内容。 */
-export function ChannelBudgetUsageTab(props: {
-  channelId: number
-  canOperate: boolean
-}) {
-  const { t } = useTranslation()
-  const [budgetId, setBudgetId] = useState('')
-  const query = useQuery({
-    queryKey: ['channels', props.channelId, 'period-policy'],
-    queryFn: () => getChannelPeriodPolicy(props.channelId),
-    retry: false,
-  })
-  const rows = query.data?.config.budgets ?? []
-  const row = rows.find((item) => item.id === budgetId)
-  return (
-    <div className='space-y-3'>
-      {query.isPending && <p role='status'>{t('Loading...')}</p>}
-      {query.isError && (
-        <p role='alert' className='text-destructive text-sm'>
-          {t(channelPeriodErrorKey(query.error))}
-        </p>
-      )}
-      {query.data && rows.length === 0 && (
-        <p className='text-muted-foreground text-sm'>
-          {t('No budgets configured.')}
-        </p>
-      )}
-      {rows.length > 0 && (
-        <Field>
-          <FieldLabel className='grid gap-1 text-sm'>
-            {t('Budget')}
-            <NativeSelect
-              value={budgetId}
-              onChange={(event) => setBudgetId(event.target.value)}
-            >
-              <NativeSelectOption value=''>
-                {t('Select a budget')}
-              </NativeSelectOption>
-              {rows.map((item) => (
-                <NativeSelectOption key={item.id} value={item.id}>
-                  {channelPeriodMetricLabel(
-                    {
-                      budget_name: item.name,
-                      scope: item.scope,
-                      period: item.window,
-                      models: item.models,
-                    },
-                    t
-                  )}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </FieldLabel>
-        </Field>
-      )}
-      {row && (
-        <ChannelBudgetUsagePanel
-          key={row.id}
-          channelId={props.channelId}
-          row={row}
-          canOperate={props.canOperate}
-          onClose={() => setBudgetId('')}
-        />
-      )}
-    </div>
   )
 }

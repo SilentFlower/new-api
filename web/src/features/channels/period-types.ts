@@ -177,3 +177,31 @@ export interface ChannelBudgetUserOverrideItem {
   limit: number
   expires_at: number
 }
+/** 个人预算行当前窗口用量最高的用户及其生效上限。 */
+export interface ChannelBudgetUsageTopUser {
+  user_id: number
+  username: string
+  display_name: string
+  used_quota: number
+  effective_limit: number
+  override: boolean
+}
+/** 一条已保存预算行的当前窗口用量摘要；个人行 used_quota 为最高用量用户的已用，pool_used_quota 为同计数身份的池子汇总。 */
+export interface ChannelBudgetUsageSummaryItem {
+  budget_id: string
+  scope: 'user' | 'pool'
+  window_start: number
+  window_end: number
+  tracking_since: number
+  used_quota: number
+  pool_used_quota: number
+  top_user?: ChannelBudgetUsageTopUser
+}
+/** 渠道全部已保存预算行的当前窗口用量，一次加载。 */
+export interface ChannelBudgetUsageSummaryView {
+  channel_id: number
+  revision: number
+  storage_mode: 'memory' | 'redis'
+  now: number
+  items: ChannelBudgetUsageSummaryItem[]
+}

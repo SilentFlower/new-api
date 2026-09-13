@@ -30,18 +30,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Dialog } from '@/components/dialog'
 import { Alert, AlertDescription } from '@/components/ui/alert'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
 import { Button } from '@/components/ui/button'
 import {
   Empty,
@@ -51,6 +42,14 @@ import {
 } from '@/components/ui/empty'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
 import { Switch } from '@/components/ui/switch'
 import {
   Table,
@@ -91,14 +90,15 @@ import { channelsQueryKeys } from '../../lib'
 import {
   channelPeriodErrorKey,
   getChannelBudgetUserOverrides,
+  saveChannelBudgetOverride,
 } from '../../period-api'
 import type {
   Channel,
   ChannelUserLimitStatus,
   ChannelUserLimitUser,
 } from '../../types'
-import { ChannelBudgetUsageTab } from './channel-budget-usage'
-import { ChannelPeriodOverrideEditor } from './channel-period-override-editor'
+import { BudgetOverrideSheet } from './budget/budget-override-sheet'
+import { ChannelBudgetUsageTab } from './budget/budget-usage-tab'
 import { ChannelPeriodPolicyPanel } from './channel-period-policy-panel'
 
 const PAGE_SIZE = 20
@@ -258,7 +258,20 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const currentUser = useAuthStore((state) => state.auth.user)
-  const [activeTab, setActiveTab] = useState('budget-usage')
+  const [activeTab, setActiveTab] = useState('budgets')
+  const [policyDirty, setPolicyDirty] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
+  const [confirmRevokeConcurrency, setConfirmRevokeConcurrency] =
+    useState(false)
+  const [budgetOverrideTarget, setBudgetOverrideTarget] = useState<{
+    user: ChannelUserLimitUser | null
+    budget: { id: string; name: string; limit: number } | null
+  } | null>(null)
+  const [revokeTarget, setRevokeTarget] = useState<{
+    user: ChannelUserLimitUser
+    budget_id: string
+    budget_name: string
+  } | null>(null)
   const [concurrencyPage, setConcurrencyPage] = useState(1)
   const [overridePage, setOverridePage] = useState(1)
   const [budgetOverridePage, setBudgetOverridePage] = useState(1)
@@ -282,7 +295,11 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
       setOverrideUser(null)
       return
     }
-    setActiveTab('budget-usage')
+    setActiveTab('budgets')
+    setPolicyDirty(false)
+    setConfirmRevokeConcurrency(false)
+    setBudgetOverrideTarget(null)
+    setRevokeTarget(null)
     setConcurrencyPage(1)
     setOverridePage(1)
     setBudgetOverridePage(1)
@@ -487,6 +504,17 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
     },
   })
 
+  const revokeBudgetOverride = useMutation({
+    mutationFn: (item: { user: ChannelUserLimitUser; budget_id: string }) =>
+      saveChannelBudgetOverride(channelId, item.budget_id, item.user.id, null),
+    onSuccess: () => {
+      toast.success(t('Budget override revoked'))
+      void budgetOverridesQuery.refetch()
+      void queryClient.invalidateQueries({ queryKey: ['channels', channelId] })
+    },
+    onError: (reason) => toast.error(t(channelPeriodErrorKey(reason))),
+  })
+
   const openOverride = (user: ChannelUserLimitUser) => {
     setOverrideUser(user)
     setConcurrencyOverride('')
@@ -514,7 +542,7 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
           onClick={() => openOverride(user)}
         >
           <UserRoundCog className='size-4' />
-          {t('Temporarily increase')}
+          {t('Concurrency override')}
         </Button>
       </TooltipTrigger>
       {!canOperate ? (
@@ -529,7 +557,13 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
     <>
       <Dialog
         open={props.open}
-        onOpenChange={props.onOpenChange}
+        onOpenChange={(open) => {
+          if (!open && policyDirty) {
+            setConfirmClose(true)
+            return
+          }
+          props.onOpenChange(open)
+        }}
         title={t('User limit status')}
         description={
           props.channel
@@ -545,28 +579,35 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
           onValueChange={setActiveTab}
           className='h-full gap-3'
         >
-          <TabsList className='grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4'>
-            <TabsTrigger value='period-policy'>
-              {t('Period policy')}
-            </TabsTrigger>
-            <TabsTrigger value='budget-usage'>{t('Budget usage')}</TabsTrigger>
-            <TabsTrigger value='concurrency'>
-              {t('Current concurrency')}
-            </TabsTrigger>
+          <TabsList className='grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-5'>
+            <TabsTrigger value='budgets'>{t('Budgets')}</TabsTrigger>
+            <TabsTrigger value='schedules'>{t('Schedules')}</TabsTrigger>
+            <TabsTrigger value='budget-usage'>{t('Usage')}</TabsTrigger>
             <TabsTrigger value='overrides'>
               {t('Personal overrides')}
             </TabsTrigger>
+            <TabsTrigger value='concurrency'>
+              {t('Current concurrency')}
+            </TabsTrigger>
           </TabsList>
 
-          <TabsContent value='period-policy' className='min-h-0'>
-            {props.open && activeTab === 'period-policy' && channelId > 0 && (
+          {/* 预算与时段共用同一份草稿：策略面板只挂载一次，按页签切换展示区块并保留未保存改动。 */}
+          <div
+            role='tabpanel'
+            aria-label={t('Period policy')}
+            hidden={activeTab !== 'budgets' && activeTab !== 'schedules'}
+            className='min-h-0 flex-1 text-sm outline-none'
+          >
+            {props.open && channelId > 0 && (
               <ChannelPeriodPolicyPanel
                 key={channelId}
                 channelId={channelId}
+                section={activeTab === 'schedules' ? 'schedules' : 'budgets'}
                 canOperate={canOperate}
+                onDirtyChange={setPolicyDirty}
               />
             )}
-          </TabsContent>
+          </div>
           <TabsContent value='budget-usage' className='min-h-0'>
             {props.open && activeTab === 'budget-usage' && channelId > 0 && (
               <ChannelBudgetUsageTab
@@ -705,7 +746,19 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
                           username={user.username}
                           displayName={user.display_name}
                         />
-                        {renderOperateButton(user)}
+                        <div className='flex flex-wrap justify-end gap-2'>
+                          <Button
+                            variant='outline'
+                            size='sm'
+                            disabled={!canOperate}
+                            onClick={() =>
+                              setBudgetOverrideTarget({ user, budget: null })
+                            }
+                          >
+                            {t('Budget override')}
+                          </Button>
+                          {renderOperateButton(user)}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -716,156 +769,226 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
                 )}
               </div>
             ) : null}
-            <div className='flex items-center justify-between gap-3'>
-              <div className='text-sm font-medium'>
-                {t('Concurrency overrides')}
-              </div>
-              <RefreshButton
-                loading={overridesQuery.isFetching}
-                onClick={() => void overridesQuery.refetch()}
-              />
-            </div>
-            {overridesQuery.isLoading ? (
-              <LoadingState />
-            ) : overridesQuery.isError ? (
-              <ErrorState
-                message={
-                  overridesQuery.error instanceof Error
-                    ? t(overridesQuery.error.message)
-                    : t('Unknown error')
-                }
-                onRetry={() => void overridesQuery.refetch()}
-              />
-            ) : overridesQuery.data?.items.length ? (
-              <>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('User')}</TableHead>
-                      <TableHead>{t('Concurrency')}</TableHead>
-                      <TableHead>{t('Expiration')}</TableHead>
-                      <TableHead className='text-right'>
-                        {t('Actions')}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {overridesQuery.data.items.map((item) => (
-                      <TableRow key={item.user.id}>
-                        <TableCell>
-                          <UserIdentity
-                            userId={item.user.id}
-                            username={item.user.username}
-                            displayName={item.user.display_name}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {item.user_concurrency_limit ?? '-'}
-                        </TableCell>
-                        <TableCell>
-                          {item.expires_at > 0
-                            ? formatTimestampToDate(item.expires_at)
-                            : t('No expiration')}
-                        </TableCell>
-                        <TableCell className='text-right'>
-                          {renderOperateButton(item.user)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                <Pagination
-                  page={overridePage}
-                  total={overridesQuery.data.total}
-                  loading={overridesQuery.isFetching}
-                  onChange={setOverridePage}
-                />
-              </>
-            ) : (
-              <Empty className='min-h-40'>
-                <EmptyHeader>
-                  <EmptyTitle>{t('No active overrides')}</EmptyTitle>
-                  <EmptyDescription>
+            <section className='space-y-3' aria-label={t('Budget overrides')}>
+              <div className='flex items-center justify-between gap-3'>
+                <div>
+                  <div className='text-sm font-medium'>
+                    {t('Budget overrides')}
+                  </div>
+                  <p className='text-muted-foreground text-xs'>
                     {t(
-                      'Search for any user to configure an override in advance.'
+                      'Only per-user budgets can be raised; the amount must exceed the base limit.'
                     )}
-                  </EmptyDescription>
-                </EmptyHeader>
-              </Empty>
-            )}
-            <div className='flex items-center justify-between gap-3'>
-              <div className='text-sm font-medium'>{t('Budget overrides')}</div>
-              <RefreshButton
-                loading={budgetOverridesQuery.isFetching}
-                onClick={() => void budgetOverridesQuery.refetch()}
-              />
-            </div>
-            {budgetOverridesQuery.isLoading ? (
-              <LoadingState />
-            ) : budgetOverridesQuery.isError ? (
-              <ErrorState
-                message={t(channelPeriodErrorKey(budgetOverridesQuery.error))}
-                onRetry={() => void budgetOverridesQuery.refetch()}
-              />
-            ) : budgetOverridesQuery.data?.items.length ? (
-              <>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>{t('User')}</TableHead>
-                      <TableHead>{t('Budget')}</TableHead>
-                      <TableHead>{t('Default')}</TableHead>
-                      <TableHead>{t('Override amount')}</TableHead>
-                      <TableHead>{t('Expiration')}</TableHead>
-                      <TableHead className='text-right'>
-                        {t('Actions')}
-                      </TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {budgetOverridesQuery.data.items.map((item) => (
-                      <TableRow key={`${item.user.id}:${item.budget_id}`}>
-                        <TableCell>
-                          <UserIdentity
-                            userId={item.user.id}
-                            username={item.user.username}
-                            displayName={item.user.display_name}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          {item.budget_name || item.budget_id}
-                        </TableCell>
-                        <TableCell>{formatQuota(item.base_limit)}</TableCell>
-                        <TableCell>{formatQuota(item.limit)}</TableCell>
-                        <TableCell>
-                          {item.expires_at > 0
-                            ? formatTimestampToDate(item.expires_at)
-                            : t('No expiration')}
-                        </TableCell>
-                        <TableCell className='text-right'>
-                          {renderOperateButton(item.user)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                <Pagination
-                  page={budgetOverridePage}
-                  total={budgetOverridesQuery.data.total}
-                  loading={budgetOverridesQuery.isFetching}
-                  onChange={setBudgetOverridePage}
+                  </p>
+                </div>
+                <div className='flex items-center gap-2'>
+                  <Button
+                    variant='outline'
+                    size='sm'
+                    disabled={!canOperate}
+                    onClick={() =>
+                      setBudgetOverrideTarget({ user: null, budget: null })
+                    }
+                  >
+                    {t('Add budget override')}
+                  </Button>
+                  <RefreshButton
+                    loading={budgetOverridesQuery.isFetching}
+                    onClick={() => void budgetOverridesQuery.refetch()}
+                  />
+                </div>
+              </div>
+              {budgetOverridesQuery.isLoading ? (
+                <LoadingState />
+              ) : budgetOverridesQuery.isError ? (
+                <ErrorState
+                  message={t(channelPeriodErrorKey(budgetOverridesQuery.error))}
+                  onRetry={() => void budgetOverridesQuery.refetch()}
                 />
-              </>
-            ) : (
-              <p className='text-muted-foreground text-sm'>
-                {t('No budget overrides are active.')}
-              </p>
-            )}
+              ) : budgetOverridesQuery.data?.items.length ? (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t('User')}</TableHead>
+                        <TableHead>{t('Budget')}</TableHead>
+                        <TableHead>{t('Default')}</TableHead>
+                        <TableHead>{t('Override amount')}</TableHead>
+                        <TableHead>{t('Expiration')}</TableHead>
+                        <TableHead className='text-right'>
+                          {t('Actions')}
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {budgetOverridesQuery.data.items.map((item) => (
+                        <TableRow key={`${item.user.id}:${item.budget_id}`}>
+                          <TableCell>
+                            <UserIdentity
+                              userId={item.user.id}
+                              username={item.user.username}
+                              displayName={item.user.display_name}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            {item.budget_name || item.budget_id}
+                          </TableCell>
+                          <TableCell>{formatQuota(item.base_limit)}</TableCell>
+                          <TableCell>{formatQuota(item.limit)}</TableCell>
+                          <TableCell>
+                            {item.expires_at > 0
+                              ? formatTimestampToDate(item.expires_at)
+                              : t('No expiration')}
+                          </TableCell>
+                          <TableCell className='text-right'>
+                            <div className='flex justify-end gap-2'>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                disabled={!canOperate}
+                                onClick={() =>
+                                  setBudgetOverrideTarget({
+                                    user: item.user,
+                                    budget: {
+                                      id: item.budget_id,
+                                      name: item.budget_name,
+                                      limit: item.base_limit,
+                                    },
+                                  })
+                                }
+                              >
+                                {t('Edit')}
+                              </Button>
+                              <Button
+                                variant='outline'
+                                size='sm'
+                                className='text-destructive'
+                                disabled={
+                                  !canOperate || revokeBudgetOverride.isPending
+                                }
+                                onClick={() =>
+                                  setRevokeTarget({
+                                    user: item.user,
+                                    budget_id: item.budget_id,
+                                    budget_name: item.budget_name,
+                                  })
+                                }
+                              >
+                                {t('Revoke')}
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <Pagination
+                    page={budgetOverridePage}
+                    total={budgetOverridesQuery.data.total}
+                    loading={budgetOverridesQuery.isFetching}
+                    onChange={setBudgetOverridePage}
+                  />
+                </>
+              ) : (
+                <p className='text-muted-foreground text-sm'>
+                  {t('No budget overrides are active.')}
+                </p>
+              )}
+            </section>
+            <section
+              className='space-y-3'
+              aria-label={t('Concurrency overrides')}
+            >
+              <div className='flex items-center justify-between gap-3'>
+                <div>
+                  <div className='text-sm font-medium'>
+                    {t('Concurrency overrides')}
+                  </div>
+                  <p className='text-muted-foreground text-xs'>
+                    {t(
+                      'Raises the per-user concurrency limit of this channel; unrelated to budgets.'
+                    )}
+                  </p>
+                </div>
+                <RefreshButton
+                  loading={overridesQuery.isFetching}
+                  onClick={() => void overridesQuery.refetch()}
+                />
+              </div>
+              {overridesQuery.isLoading ? (
+                <LoadingState />
+              ) : overridesQuery.isError ? (
+                <ErrorState
+                  message={
+                    overridesQuery.error instanceof Error
+                      ? t(overridesQuery.error.message)
+                      : t('Unknown error')
+                  }
+                  onRetry={() => void overridesQuery.refetch()}
+                />
+              ) : overridesQuery.data?.items.length ? (
+                <>
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>{t('User')}</TableHead>
+                        <TableHead>{t('Concurrency')}</TableHead>
+                        <TableHead>{t('Expiration')}</TableHead>
+                        <TableHead className='text-right'>
+                          {t('Actions')}
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {overridesQuery.data.items.map((item) => (
+                        <TableRow key={item.user.id}>
+                          <TableCell>
+                            <UserIdentity
+                              userId={item.user.id}
+                              username={item.user.username}
+                              displayName={item.user.display_name}
+                            />
+                          </TableCell>
+                          <TableCell>
+                            {item.user_concurrency_limit ?? '-'}
+                          </TableCell>
+                          <TableCell>
+                            {item.expires_at > 0
+                              ? formatTimestampToDate(item.expires_at)
+                              : t('No expiration')}
+                          </TableCell>
+                          <TableCell className='text-right'>
+                            {renderOperateButton(item.user)}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                  <Pagination
+                    page={overridePage}
+                    total={overridesQuery.data.total}
+                    loading={overridesQuery.isFetching}
+                    onChange={setOverridePage}
+                  />
+                </>
+              ) : (
+                <Empty className='min-h-40'>
+                  <EmptyHeader>
+                    <EmptyTitle>{t('No active overrides')}</EmptyTitle>
+                    <EmptyDescription>
+                      {t(
+                        'Search for any user to configure an override in advance.'
+                      )}
+                    </EmptyDescription>
+                  </EmptyHeader>
+                </Empty>
+              )}
+            </section>
           </TabsContent>
         </Tabs>
       </Dialog>
 
-      <AlertDialog
+      <Sheet
         open={overrideUser !== null}
         onOpenChange={(nextOpen) => {
           if (
@@ -877,105 +1000,182 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
           }
         }}
       >
-        <AlertDialogContent className='max-h-[90dvh] overflow-y-auto sm:max-w-2xl'>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('Personal limit override')}</AlertDialogTitle>
-            <AlertDialogDescription>
+        <SheetContent
+          className='visible-scrollbar w-full overflow-y-auto sm:max-w-xl'
+          aria-label={t('Concurrency override')}
+        >
+          <SheetHeader>
+            <SheetTitle>{t('Concurrency override')}</SheetTitle>
+            <SheetDescription>
               {t(
                 'Overrides take effect immediately and may only increase channel defaults.'
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {overrideUser ? (
-            <UserIdentity
-              userId={overrideUser.id}
-              username={overrideUser.username}
-              displayName={overrideUser.display_name}
-            />
-          ) : null}
-          {overrideStatusQuery.isLoading ? (
-            <LoadingState />
-          ) : overrideStatusQuery.isError ? (
-            <ErrorState
-              message={
-                overrideStatusQuery.error instanceof Error
-                  ? t(overrideStatusQuery.error.message)
-                  : t('Unknown error')
-              }
-              onRetry={() => void overrideStatusQuery.refetch()}
-            />
-          ) : overrideStatusQuery.data ? (
-            <OverrideEditor
-              status={overrideStatusQuery.data}
-              concurrencyValue={concurrencyOverride}
-              hasExpiration={hasExpiration}
-              expirationValue={expirationInput}
-              onConcurrencyChange={setConcurrencyOverride}
-              onExpirationToggle={setHasExpiration}
-              onExpirationChange={setExpirationInput}
-            />
-          ) : null}
-          {overrideStatusQuery.data && overrideUser && (
-            <ChannelPeriodOverrideEditor
-              key={`${channelId}:${overrideUser.id}`}
-              status={overrideStatusQuery.data}
-              canOperate={canOperate}
-              onChanged={() => {
-                void overrideStatusQuery.refetch()
-                void queryClient.invalidateQueries({
-                  queryKey: channelsQueryKeys.detail(channelId),
-                })
-              }}
-            />
-          )}
-          {overridePayload === null && overrideStatusQuery.data ? (
-            <p className='text-destructive text-sm'>
-              {t(
-                'The concurrency override must be above the channel default and within the allowed range.'
-              )}
-            </p>
-          ) : null}
-          <AlertDialogFooter className='sm:justify-between'>
+            </SheetDescription>
+          </SheetHeader>
+          <div className='space-y-4 px-4'>
+            {overrideUser ? (
+              <UserIdentity
+                userId={overrideUser.id}
+                username={overrideUser.username}
+                displayName={overrideUser.display_name}
+              />
+            ) : null}
+            {overrideStatusQuery.isLoading ? (
+              <LoadingState />
+            ) : overrideStatusQuery.isError ? (
+              <ErrorState
+                message={
+                  overrideStatusQuery.error instanceof Error
+                    ? t(overrideStatusQuery.error.message)
+                    : t('Unknown error')
+                }
+                onRetry={() => void overrideStatusQuery.refetch()}
+              />
+            ) : overrideStatusQuery.data ? (
+              <OverrideEditor
+                status={overrideStatusQuery.data}
+                concurrencyValue={concurrencyOverride}
+                hasExpiration={hasExpiration}
+                expirationValue={expirationInput}
+                onConcurrencyChange={setConcurrencyOverride}
+                onExpirationToggle={setHasExpiration}
+                onExpirationChange={setExpirationInput}
+              />
+            ) : null}
+            {overridePayload === null && overrideStatusQuery.data ? (
+              <p className='text-destructive text-sm'>
+                {t(
+                  'The concurrency override must be above the channel default and within the allowed range.'
+                )}
+              </p>
+            ) : null}
+          </div>
+          <SheetFooter className='flex-row flex-wrap items-center gap-2'>
             <Button
+              type='button'
               variant='destructive'
               disabled={
                 !overrideStatusQuery.data?.override_active ||
                 deleteOverrideMutation.isPending ||
                 !canOperate
               }
-              onClick={() => deleteOverrideMutation.mutate()}
+              onClick={() => setConfirmRevokeConcurrency(true)}
             >
               <Trash2 className='size-4' />
               {t('Revoke override')}
             </Button>
-            <div className='flex justify-end gap-2'>
-              <AlertDialogCancel
-                disabled={
-                  overrideMutation.isPending || deleteOverrideMutation.isPending
+            <span className='flex-1' />
+            <Button
+              type='button'
+              variant='outline'
+              disabled={
+                overrideMutation.isPending || deleteOverrideMutation.isPending
+              }
+              onClick={() => setOverrideUser(null)}
+            >
+              {t('Cancel')}
+            </Button>
+            <Button
+              type='button'
+              disabled={
+                !canOperate ||
+                overridePayload === null ||
+                overrideMutation.isPending
+              }
+              onClick={() => overrideMutation.mutate()}
+            >
+              {overrideMutation.isPending ? (
+                <Loader2 className='size-4 animate-spin' />
+              ) : null}
+              {t('Save override')}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
+      <ConfirmDialog
+        open={confirmRevokeConcurrency}
+        onOpenChange={setConfirmRevokeConcurrency}
+        title={t('Revoke this concurrency override?')}
+        desc={
+          overrideUser
+            ? t(
+                '{{user}} returns to the channel default concurrency immediately.',
+                {
+                  user:
+                    overrideUser.display_name ||
+                    overrideUser.username ||
+                    `#${overrideUser.id}`,
                 }
-              >
-                {t('Cancel')}
-              </AlertDialogCancel>
-              <AlertDialogAction
-                disabled={
-                  !canOperate ||
-                  overridePayload === null ||
-                  overrideMutation.isPending
+              )
+            : ''
+        }
+        confirmText={t('Revoke')}
+        destructive
+        isLoading={deleteOverrideMutation.isPending}
+        handleConfirm={() => {
+          setConfirmRevokeConcurrency(false)
+          deleteOverrideMutation.mutate()
+        }}
+      />
+      <BudgetOverrideSheet
+        channelId={channelId}
+        open={budgetOverrideTarget !== null}
+        budget={budgetOverrideTarget?.budget ?? null}
+        user={budgetOverrideTarget?.user ?? null}
+        canOperate={canOperate}
+        onClose={() => setBudgetOverrideTarget(null)}
+        onChanged={() => {
+          void budgetOverridesQuery.refetch()
+          void queryClient.invalidateQueries({
+            queryKey: ['channels', channelId],
+          })
+        }}
+      />
+      <ConfirmDialog
+        open={revokeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setRevokeTarget(null)
+        }}
+        title={t('Revoke this override?')}
+        desc={
+          revokeTarget
+            ? t(
+                '{{user}} returns to the base limit of {{budget}} immediately; usage already counted is kept.',
+                {
+                  user:
+                    revokeTarget.user.display_name ||
+                    revokeTarget.user.username ||
+                    `#${revokeTarget.user.id}`,
+                  budget: revokeTarget.budget_name || revokeTarget.budget_id,
                 }
-                onClick={(event) => {
-                  event.preventDefault()
-                  overrideMutation.mutate()
-                }}
-              >
-                {overrideMutation.isPending ? (
-                  <Loader2 className='size-4 animate-spin' />
-                ) : null}
-                {t('Save override')}
-              </AlertDialogAction>
-            </div>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+              )
+            : ''
+        }
+        confirmText={t('Revoke')}
+        destructive
+        isLoading={revokeBudgetOverride.isPending}
+        handleConfirm={() => {
+          if (!revokeTarget) return
+          const target = revokeTarget
+          setRevokeTarget(null)
+          revokeBudgetOverride.mutate(target)
+        }}
+      />
+      <ConfirmDialog
+        open={confirmClose}
+        onOpenChange={setConfirmClose}
+        title={t('Discard unsaved changes?')}
+        desc={t(
+          'The period policy draft has unsaved changes. Closing will discard them.'
+        )}
+        confirmText={t('Discard')}
+        destructive
+        handleConfirm={() => {
+          setConfirmClose(false)
+          setPolicyDirty(false)
+          props.onOpenChange(false)
+        }}
+      />
     </>
   )
 }

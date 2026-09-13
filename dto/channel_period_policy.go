@@ -174,3 +174,35 @@ type ChannelBudgetUsageView struct {
 	Total         int                      `json:"total"`
 	Items         []ChannelBudgetUsageItem `json:"items"`
 }
+
+// ChannelBudgetUsageTopUser 是个人预算行当前窗口内用量最高的用户及其生效上限。
+type ChannelBudgetUsageTopUser struct {
+	UserID         int    `json:"user_id"`
+	Username       string `json:"username"`
+	DisplayName    string `json:"display_name"`
+	UsedQuota      int64  `json:"used_quota"`
+	EffectiveLimit int64  `json:"effective_limit"`
+	Override       bool   `json:"override"`
+}
+
+// ChannelBudgetUsageSummaryItem 是一条已保存预算行的当前窗口用量摘要。
+// 池子行 UsedQuota 为池子汇总；个人行 UsedQuota 为用量最高用户的已用额度，PoolUsedQuota 为同计数身份的池子汇总。
+type ChannelBudgetUsageSummaryItem struct {
+	BudgetID      string                     `json:"budget_id"`
+	Scope         string                     `json:"scope"`
+	WindowStart   int64                      `json:"window_start"`
+	WindowEnd     int64                      `json:"window_end"`
+	TrackingSince int64                      `json:"tracking_since"`
+	UsedQuota     int64                      `json:"used_quota"`
+	PoolUsedQuota int64                      `json:"pool_used_quota"`
+	TopUser       *ChannelBudgetUsageTopUser `json:"top_user,omitempty"`
+}
+
+// ChannelBudgetUsageSummaryView 一次返回渠道全部已保存预算行的当前窗口用量，供预算表与用量页签单次加载。
+type ChannelBudgetUsageSummaryView struct {
+	ChannelID   int                             `json:"channel_id"`
+	Revision    int                             `json:"revision"`
+	StorageMode string                          `json:"storage_mode"`
+	Now         int64                           `json:"now"`
+	Items       []ChannelBudgetUsageSummaryItem `json:"items"`
+}

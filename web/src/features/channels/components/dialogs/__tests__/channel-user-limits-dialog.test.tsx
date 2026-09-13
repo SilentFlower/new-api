@@ -278,6 +278,28 @@ function findButton(text: string): HTMLButtonElement {
   return button
 }
 
+/** @param text 页签文案。 @returns 顶部页签触发器，避免与表格内同名按钮混淆。 */
+function findTab(text: string): HTMLButtonElement {
+  const tab = [
+    ...document.querySelectorAll<HTMLButtonElement>('[role="tab"]'),
+  ].find((candidate) => candidate.textContent?.trim() === text)
+  assert.ok(tab, `Expected tab "${text}"`)
+  return tab
+}
+
+/** @param element 弹窗内已聚焦的元素。 @returns 在其上按下 Escape，触发 Dialog 关闭请求。 */
+async function pressEscape(element: HTMLElement) {
+  await act(async () => {
+    element.focus()
+    element.dispatchEvent(
+      new domWindow.KeyboardEvent('keydown', {
+        key: 'Escape',
+        bubbles: true,
+      }) as unknown as Event
+    )
+  })
+}
+
 async function changeInput(input: HTMLInputElement, value: string) {
   await act(async () => {
     const valueSetter = Object.getOwnPropertyDescriptor(
@@ -293,24 +315,78 @@ async function changeInput(input: HTMLInputElement, value: string) {
 }
 
 /** @param budgetId 预算行 id。 @returns 在用量页签的预算选择器里选中该行。 */
+/** @param budgetId 预算行；用量页签里个人行按钮为 User details，池子行为 Adjust。 @returns 从聚合列表打开该行的用量抽屉。 */
 async function selectBudget(budgetId: string) {
+  await act(async () => findTab('Usage').click())
+  const label = budgetId === 'b-user' ? 'User details' : 'Adjust'
   await waitForCondition(
-    () => document.querySelector('select[data-slot="native-select"]') !== null,
-    '预算选择器未加载'
+    () =>
+      [...document.querySelectorAll('button')].some(
+        (item) => item.textContent?.trim() === label
+      ),
+    '聚合用量列表未加载'
   )
-  const select = document.querySelector<HTMLSelectElement>(
-    'select[data-slot="native-select"]'
-  )
-  assert.ok(select)
-  await act(async () => {
-    select.value = budgetId
-    select.dispatchEvent(
-      new domWindow.Event('change', { bubbles: true }) as unknown as Event
-    )
-  })
+  await act(async () => findButton(label).click())
+}
+/** @returns 聚合用量视图：两行各有用量，个人行含最高用量用户。 */
+function usageSummary() {
+  return {
+    channel_id: testChannel.id,
+    revision: 2,
+    storage_mode: 'memory',
+    now: 1_787_100_000,
+    items: [
+      {
+        budget_id: 'b-user',
+        scope: 'user',
+        window_start: 1_787_075_200,
+        window_end: 1_787_161_600,
+        tracking_since: 0,
+        used_quota: 1000,
+        pool_used_quota: 1000,
+        top_user: {
+          user_id: 81,
+          username: 'alice',
+          display_name: 'Alice',
+          used_quota: 1000,
+          effective_limit: 500_000,
+          override: false,
+        },
+      },
+      {
+        budget_id: 'b-pool',
+        scope: 'pool',
+        window_start: 1_787_075_200,
+        window_end: 1_787_161_600,
+        tracking_since: 0,
+        used_quota: 1000,
+        pool_used_quota: 1000,
+      },
+    ],
+  }
+}
+/** @param input 请求。 @returns 把策略预览 POST 回显为每行生效的预览结果。 */
+function previewEcho(input: { method: string; data?: unknown }) {
+  const config = (input.data as { config?: unknown })?.config
+  return {
+    data: {
+      success: true,
+      data: {
+        config,
+        revision: 2,
+        timezone: 'Asia/Shanghai',
+        now: 0,
+        next_change_at: 0,
+        rows: [],
+      },
+    },
+  }
 }
 
-async function renderChannelUserLimitsDialog(open = true) {
+async function renderChannelUserLimitsDialog(
+  open = true,
+  onOpenChange: (open: boolean) => void = () => undefined
+) {
   const host = document.createElement('div')
   document.body.append(host)
   const root = createRoot(host)
@@ -327,7 +403,7 @@ async function renderChannelUserLimitsDialog(open = true) {
           <I18nextProvider i18n={i18n}>
             <ChannelUserLimitsDialog
               open={nextOpen}
-              onOpenChange={() => undefined}
+              onOpenChange={onOpenChange}
               channel={testChannel}
             />
           </I18nextProvider>
@@ -368,6 +444,10 @@ test('按行用量页签选中预算后展示用户用量，并按行提交目�
   setOperator(true)
   const requests: Array<{ method: string; url: string; data?: unknown }> = []
   apiClient.get = async (url) => {
+    if (url.includes('/targets')) return { data: { success: true, data: [] } }
+    if (url.includes('/usage-summary')) {
+      return { data: { success: true, data: usageSummary() } }
+    }
     if (url.includes('/usage')) {
       return {
         data: {
@@ -390,6 +470,7 @@ test('按行用量页签选中预算后展示用户用量，并按行提交目�
     return { data: { success: true, data: policyView() } }
   }
   apiClient.request = async (input) => {
+    if (input.method !== 'PUT') return previewEcho(input)
     requests.push({ method: input.method, url: input.url, data: input.data })
     return { data: { success: true, data: { used_quota: 0 } } }
   }
@@ -415,6 +496,21 @@ test('按行用量页签选中预算后展示用户用量，并按行提交目�
   assert.ok(input)
   await changeInput(input, '0')
   await act(async () => findButton('Confirm').click())
+  await waitForCondition(
+    () =>
+      [...document.querySelectorAll('[role="alertdialog"] button')].some(
+        (item) => item.textContent?.trim() === 'Adjust'
+      ),
+    '调整确认框未打开'
+  )
+  assert.equal(requests.length, 0)
+  const adjust = [
+    ...document.querySelectorAll('[role="alertdialog"] button'),
+  ].find((item) => item.textContent?.trim() === 'Adjust') as
+    | HTMLButtonElement
+    | undefined
+  assert.ok(adjust)
+  await act(async () => adjust.click())
   await waitForCondition(() => requests.length === 1, '调整请求未提交')
   assert.deepEqual(requests[0], {
     method: 'PUT',
@@ -425,7 +521,12 @@ test('按行用量页签选中预算后展示用户用量，并按行提交目�
 
 test('缺少渠道运行权限时禁用按行用量调整', async () => {
   setOperator(false)
+  apiClient.request = async (input) => previewEcho(input)
   apiClient.get = async (url) => {
+    if (url.includes('/targets')) return { data: { success: true, data: [] } }
+    if (url.includes('/usage-summary')) {
+      return { data: { success: true, data: usageSummary() } }
+    }
     if (url.includes('/usage')) {
       return {
         data: {
@@ -491,7 +592,7 @@ test('刷新后总数收缩时从空的末页自动回到有效页', async () =>
   }
 
   await renderChannelUserLimitsDialog()
-  await act(async () => findButton('Personal overrides').click())
+  await act(async () => findTab('Personal overrides').click())
   await waitForCondition(
     () => document.body.textContent?.includes('Page 1 of 2') === true,
     '第一页分页状态未加载'
@@ -503,7 +604,7 @@ test('刷新后总数收缩时从空的末页自动回到有效页', async () =>
   )
 
   const refreshButton = document.querySelector<HTMLButtonElement>(
-    'button[aria-label="Refresh"]'
+    '[aria-label="Concurrency overrides"] button[aria-label="Refresh"]'
   )
   assert.ok(refreshButton)
   await act(async () => refreshButton.click())
@@ -562,7 +663,7 @@ test('当前并发仅在对应页签打开时轮询，Dialog 关闭后停止', a
   await flushAsyncWork()
   assert.equal(concurrencyRequests, 0)
 
-  await act(async () => findButton('Current concurrency').click())
+  await act(async () => findTab('Current concurrency').click())
   await waitForCondition(
     () => concurrencyRequests === 1,
     '切换到并发页签后未发起查询'
@@ -595,7 +696,7 @@ test('查询失败时使用国际化后的兜底文案', async () => {
     '预算策略查询失败文案未经过国际化'
   )
 
-  await act(async () => findButton('Current concurrency').click())
+  await act(async () => findTab('Current concurrency').click())
   await waitForCondition(
     () =>
       document.body.textContent?.includes(
@@ -690,7 +791,7 @@ test('无请求记录的用户可通过搜索提前配置并发覆盖，行级�
   }
 
   await renderChannelUserLimitsDialog()
-  await act(async () => findButton('Personal overrides').click())
+  await act(async () => findTab('Personal overrides').click())
   await waitForCondition(
     () => document.body.textContent?.includes('Raised') === true,
     '行级提额列表未加载'
@@ -707,10 +808,17 @@ test('无请求记录的用户可通过搜索提前配置并发覆盖，行级�
     () => document.body.textContent?.includes('Future User') === true,
     '用户搜索结果未出现'
   )
-  await act(async () => findButton('Temporarily increase').click())
+  await act(async () => findButton('Concurrency override').click())
   await waitForCondition(
     () => document.querySelector('#personal-concurrency') !== null,
     '个人覆盖编辑器未打开'
+  )
+  // 并发覆盖表单在右侧抽屉里，不再是确认框套表单。
+  assert.equal(document.querySelector('[role="alertdialog"]'), null)
+  assert.ok(
+    document.querySelector(
+      '[role="dialog"][aria-label="Concurrency override"] #personal-concurrency'
+    )
   )
   assert.equal(document.querySelector('#personal-daily'), null)
   const concurrencyInput = document.querySelector<HTMLInputElement>(
@@ -724,4 +832,119 @@ test('无请求记录的用户可通过搜索提前配置并发覆盖，行级�
     url: '/api/channel/77/user-limit-overrides/91',
     data: { user_concurrency_limit: 5, expires_at: 0 },
   })
+})
+
+test('页签顺序为预算、时段、用量、个人覆盖、并发，时段页签的改动切回预算页签后仍保留', async () => {
+  setOperator(true)
+  apiClient.get = async (url) => {
+    if (url.includes('/targets')) return { data: { success: true, data: [] } }
+    if (url.includes('/usage-summary')) {
+      return { data: { success: true, data: usageSummary() } }
+    }
+    return { data: { success: true, data: policyView() } }
+  }
+  apiClient.request = async (input) => previewEcho(input)
+
+  await renderChannelUserLimitsDialog()
+  assert.deepEqual(
+    [...document.querySelectorAll('[role="tab"]')].map((item) =>
+      item.textContent?.trim()
+    ),
+    [
+      'Budgets',
+      'Schedules',
+      'Usage',
+      'Personal overrides',
+      'Current concurrency',
+    ]
+  )
+  await waitForCondition(
+    () => document.querySelector('[aria-label="Budgets"]') !== null,
+    '预算表未加载'
+  )
+  assert.equal(
+    document.querySelector('[aria-label="Budgets"]')?.closest('[hidden]'),
+    null
+  )
+  assert.ok(
+    document.querySelector('[aria-label="Schedules"]')?.closest('[hidden]')
+  )
+
+  await act(async () => findTab('Schedules').click())
+  await waitForCondition(
+    () =>
+      document
+        .querySelector('[aria-label="Schedules"]')
+        ?.closest('[hidden]') === null,
+    '时段页签未显示'
+  )
+  assert.ok(
+    document.querySelector('[aria-label="Budgets"]')?.closest('[hidden]')
+  )
+  await act(async () => findButton('Add schedule').click())
+  await waitForCondition(
+    () => document.querySelector('[aria-label="Unsaved changes"]') !== null,
+    '时段页签的改动未出现保存栏'
+  )
+
+  await act(async () => findTab('Budgets').click())
+  await flushAsyncWork()
+  assert.equal(
+    document.querySelector('[aria-label="Budgets"]')?.closest('[hidden]'),
+    null
+  )
+  assert.match(
+    document.querySelector('[aria-label="Unsaved changes"]')?.textContent ?? '',
+    /1 unsaved changes/
+  )
+})
+
+test('预算草稿未保存时关闭弹窗先弹出放弃确认，确认后才通知关闭', async () => {
+  setOperator(true)
+  const closes: boolean[] = []
+  apiClient.get = async (url) => {
+    if (url.includes('/targets')) return { data: { success: true, data: [] } }
+    if (url.includes('/usage-summary')) {
+      return { data: { success: true, data: usageSummary() } }
+    }
+    return { data: { success: true, data: policyView() } }
+  }
+  apiClient.request = async (input) => previewEcho(input)
+
+  await renderChannelUserLimitsDialog(true, (open) => closes.push(open))
+  await waitForCondition(
+    () =>
+      document.querySelector(
+        '[role="switch"][aria-label="Enable User daily"]'
+      ) !== null,
+    '预算表未加载'
+  )
+  const toggle = document.querySelector<HTMLButtonElement>(
+    '[role="switch"][aria-label="Enable User daily"]'
+  )
+  assert.ok(toggle)
+  await act(async () => toggle.click())
+  await waitForCondition(
+    () => document.querySelector('[aria-label="Unsaved changes"]') !== null,
+    '保存栏未出现'
+  )
+
+  await pressEscape(toggle)
+  await waitForCondition(
+    () =>
+      [...document.querySelectorAll('[role="alertdialog"] button')].some(
+        (item) => item.textContent?.trim() === 'Discard'
+      ),
+    '关闭确认框未打开'
+  )
+  assert.deepEqual(closes, [])
+  const discard = [
+    ...document.querySelectorAll('[role="alertdialog"] button'),
+  ].find((item) => item.textContent?.trim() === 'Discard') as
+    | HTMLButtonElement
+    | undefined
+  assert.ok(discard)
+  await act(async () => discard.click())
+  await waitForCondition(() => closes.length === 1, '确认后未通知关闭')
+  assert.deepEqual(closes, [false])
 })

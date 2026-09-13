@@ -22,6 +22,8 @@
 - GET/PUT `/api/channel/:id/period-policy`，POST `/period-policy/preview`，GET `/period-policy/targets`；GET/preview 为 ChannelRead，PUT 为 ChannelOperate。
 - GET/PUT `/api/channel/:id/budgets/:budget_id/usage`，分别为 ChannelRead / ChannelOperate；PUT/DELETE `/api/channel/:id/budgets/:budget_id/user-overrides/:user_id` 为 ChannelOperate；GET `/api/channel/:id/budget-user-overrides` 为 ChannelRead。
 - `GetChannelBudgetUsage(ctx, channelID, budgetID, scope, offset, limit)` / `SetChannelBudgetUsage(ctx, channelID, budgetID, input)`；`ReplaceChannelUserBudgetOverride(ctx, channelID, userID, budgetID, input, updatedBy)` / `DeleteChannelUserBudgetOverride(ctx, channelID, userID, budgetID)`。
+- GET `/api/channel/:id/budgets/usage-summary` 为 ChannelRead（`controller/channel_budget_usage_summary.go`）；`service.GetChannelBudgetUsageSummary(ctx, channel *model.Channel) (dto.ChannelBudgetUsageSummaryView, error)` 复用 `resolveChannelBudgetRows` / `readChannelBudgetCounter` / `listChannelBudgetUsage` / `GetChannelPeriodStatus`，不新增存储访问路径；DTO 为 `ChannelBudgetUsageSummaryView` / `ChannelBudgetUsageSummaryItem` / `ChannelBudgetUsageTopUser`。
+- 前端纯函数（`web/src/features/channels/lib/`）：`channel-budget-status.ts` 的 `deriveChannelBudgetStatus` / `groupChannelBudgetCounters` / `channelBudgetEffectiveLimit`；`channel-schedule-state.ts` 的 `resolveChannelScheduleStates(schedules, previewRows, now, timezone)`；`channel-policy-error-rows.ts` 的 `matchChannelPolicyErrorRows(message, rows)` / `channelPolicyErrorDetail(message)`。
 - `MigrateChannelBudgetPolicies(ctx)` 在主节点数据库迁移完成后执行；`model.MigrateChannelUserOverridesToBudgets(ctx, now)` 按唯一键只插入缺失覆盖。
 - 模型累计扩展仍使用上述 v2 API：`ChannelPeriodPolicyConfig.ModelUsageTrackingEnabled *bool`、`ModelUsageTracking *ChannelModelUsageTracking` 与 `ChannelBudgetRow.CounterSource string` 均可缺省。`service/channel_model_usage.go` 负责来源归一化、原始事实与聚合读取；`channel_model_usage_adjustment.go` 的 `setChannelModelBudgetUsage(ctx, counter, scope, userID, used, now)` 保存绝对用量调整快照。
 
@@ -48,11 +50,15 @@
 - 策略缓存的进程级锁只保护本地 map 读取和发布，不跨 Redis GET/Lua 或数据库查询、保存。锁外查询可能迟到，本地发布也必须比较 revision；缓存仍持有更高版本时返回该版本，不覆盖为旧值。数据库保存继续以 revision CAS 防止并发编辑覆盖。
 - 统一状态保留并发与 v2 `period_limits`，移除旧日/周状态块；period_limits 含 schema_version/revision/timezone/storage_mode/next_change_at/fallback_enabled/blocked/metrics。指标含 budget_id/budget_name/models、scope、period（daily/weekly/occurrence）、limit/used/remaining（不限为 null）、reset_at/tracking_since/coverage/enforced/source/base_limit，可选 override_limit；时段身份在 source.schedule_id/schedule_name。
 - 用量 GET 接受 `scope=user|pool` 和 `p`/page_size，分页使用 common.GetPageQuery（page_size 兼容 ps/size，上限 100）；user 返回 items 的 user_id/username/display_name/used_quota 及分页信息，按用量降序、同值按用户 ID 升序；pool 返回独立汇总 used_quota，均含 window_start/window_end/tracking_since/storage_mode。PUT 为 `{scope,user_id,used_quota}`，设置绝对目标而非增量；只调整选定计数身份的用户字段或池子汇总，不改 revision/资金。旧个人无模型日/周 used_quota 仍不得超过 common.MaxQuota，其他目标不得超过 common.MaxPeriodQuota。审计 `channel.budget_usage_set` 必须含 before/after，前值读取故障停止写入，不能伪记 0。
+- 聚合用量 GET 无参数，响应 `{channel_id,revision,storage_mode,now,items:[{budget_id,scope,window_start,window_end,tracking_since,used_quota,pool_used_quota,top_user?}]}`：只含已保存行（含停用行），顺序与策略 `budgets` 一致；池子行 `used_quota` 为池子汇总；个人行 `used_quota` 为当前窗口用量最高用户的已用（同值按用户 ID 升序），`pool_used_quota` 为同计数身份的池子汇总，`top_user` 为 `{user_id,username,display_name,used_quota,effective_limit,override}`，`effective_limit` 取该用户统一状态中该行的生效上限（含提额，`override` 标记是否有提额），无用户用量时省略 `top_user`。不改 revision、不写审计；预算表与用量页签只用此接口，行内明细才走按行用量接口。每个不同的最高用量用户各评估一次整份策略，规模上界为行数。
 - 提额 PUT 为 `{limit,expires_at}`，只允许 user 行，必须高于该行基础正额度且不超过 MaxPeriodQuota；expires_at=0 永久，正数必须在未来。PUT/DELETE 均不改策略 revision，审计 `channel.budget_user_override_set/delete` 含 before/after。撤销在新表写 quota_limit=0 的非生效记录，查询/分页排除它，重启迁移遇唯一键不覆盖，重新提额可替换；不得物理删除后让旧表数据重新导入。
 - 主节点启动迁移仅转换明确 schema_version=1 或真正无策略记录的旧列输入；v2 跳过，单渠道失败记录并继续，重复启动不提升已迁移 revision。未知/缺失版本、null、空正文的已存储策略不得改写或当成不限，读取返回错误。无策略记录仍可产生 revision=0 的旧列派生视图，保存 v2 后旧列不再参与判定。
 - 渠道日/周列和旧覆盖字段仅以 `json:"-"` 保留供迁移；普通创建/更新不再读写或校验。旧 user-daily-quota、user-weekly-quota、period-rules 特批端点返回 404；user-limit-overrides 仅保留并发与 expires_at，携带旧日/周字段返回 400。
 - 回滚需回退代码并恢复上线前的三张旧表备份（策略、日周覆盖、规则覆盖）；新预算覆盖表恢复到上线前状态，首次升级前不存在时移除迁移创建的新表。不能只回退代码读取 v2，也不能只用新代码的 v1 兼容读取证明旧版可用；演练必须实际编译旧版，验证恢复后预算内放行和到限拦截。两仓同版本发布，ai-fund 使用实际管理响应生成的 v2 fixture 对齐。
-- 预算表展示独立时段列及已用/剩余进度：池子为汇总，个人明确标注当前窗口最高用量用户，进度使用其统一状态中的有效额度。未保存临时行不查询用量，读取错误显示重试；编辑抽屉与父表共享草稿，关闭/Esc 保留值，模型输入保留原始文本，字段通过 form 属性关联父表单；策略级默认动作在表下方，整份策略先预览再按 revision 保存。
+- 「用户限制状态」弹窗页签固定为 预算 / 时段 / 用量 / 个人覆盖 / 当前并发，默认预算；策略面板只挂载一次，按页签切换预算表与时段列表，两者共用同一份 RHF 草稿与常驻保存栏，切页签不丢改动。预算表每行状态由前端推导，优先级 已停用 > 未到时段 > 已超限 > 接近上限（已用 ≥ 生效上限 85%）> 生效中；生效上限个人行取 `top_user.effective_limit`，池子行取 `limit`，0 显示不限不画进度；停用与未到时段行整体弱化。共用计数按 `(scope, window, occurrence 时的 schedule_id, 排序后的 models)` 分组，同组除创建最早的已保存行外显示「与「X」共用计数 · 当前 Y · 此行上限 Z」而非进度条。未保存临时行不查询用量，聚合读取失败显示重试。
+- 时段状态：优先取预览行 `source.start_at/end_at`（服务器时区的当前或下次出现区间）判断进行中/下次开始；无引用时指定日期按 `start_at/end_at`、每周按 `view.timezone` 在前端推算下次开始，时区名无法识别（未设置 TZ 时为 `Local`）退回浏览器时区；停用时段 `active=false`，指定日期结束后显示已结束。预算表时段列显示「下次 时间」，时段列表显示「未开始 · 时间」。
+- 保存动线：任何改动出现常驻保存栏（改动数与摘要、放弃、预览并保存），预览弹出逐字段 diff 与保存后生效结果，确认后按 revision 保存且 PUT body 与预览一致；放弃、重新加载、关闭弹窗在有脏草稿时确认。编辑、用量、提额从行上以 Sheet 打开，编辑抽屉关闭/Esc 保留草稿，行内校验名称必填、整段必须绑定时段、本渠道换模型要求本行指定模型，模型输入保留原始文本，字段通过 form 属性关联父表单；「本渠道换模型」前端写 `channel_id=0`，读取 0 或本渠道 id 均显示「本渠道」。策略级默认动作在工具栏。
+- 后端 400/409 的 message 原文追加在面板顶部提示后；400 按行名定位（后端行级文案固定为「<原因>：<行名>」「<行名> 的<原因>：…」或「<原因>：<A> / <B>」，前端先按分隔段精确匹配，无命中再子串匹配），命中行加 `data-error` 高亮并在名称下显示去掉哨兵前缀的原因，打开该行编辑抽屉时顶部同样显示；预览失败不锁定草稿，保存失败与 409 锁定并要求重新加载。个人覆盖页签拆为预算提额与并发覆盖两个区块，并发覆盖为独立 Sheet；撤销提额、撤销并发覆盖、调整用量均先确认。
 - “持续累计模型用量”开关属于渠道策略草稿，默认关闭、只读权限下禁用，变更后必须重新预览。类型层及两端表单保留来源与覆盖元数据；React 比较草稿和预览时须先经过同一 schema 归一化，不能仅因可选键插入顺序不同让有效预览消失。开关文案说明只从开启后累计，七语言同步维护。
 - 新计数始终说明 `since_tracking_start`；已知失败周期为 incomplete，不回填历史。Redis+DB 同时故障且进程丢失时未落盘缺口无法恢复；这不是财务对账或分布式事务。内存仅当前进程有效。
 - 每次超限只选择一个目标渠道+模型，默认拒绝，仅精确 HTTP Chat/Messages/Responses 三入口可降级一次，与 RetryTimes 无关。目标重新检查 Token 模型、固定渠道、有效组 Ability、启用、端点、全部适用预算、资金和并发。
@@ -78,6 +84,7 @@
 | 提额不高于基础正额度，或对 pool 行提额/撤销 | 400，不写覆盖或成功审计 |
 | used_quota 超过其计数支持上界 | 400，不调整计数 |
 | 调整前值读取失败 | 503，不调整计数、不写成功审计 |
+| 聚合用量的策略/计数不可读或用户状态评估失败 | 503 channel_period_policy_unavailable，不返回部分 items；用户摘要查询失败返回数据库错误 |
 | 撤销旧提额后重启迁移 | 提额保持撤销，分页不返回零额度占位；重新授权不被旧值覆盖 |
 | 池子或整段耗尽 | 429 channel_period_quota_exceeded，skipRetry；获准协调器可做一次额度降级 |
 | 个人日/周耗尽 | 保留旧错误码；相同一次降级规则 |
@@ -104,6 +111,9 @@
 - 边界：A 原始值 60、B 为 20，将 `{A,B}` 个人日用量设为 10 后，A 又消费 5，则该组合为 15；A 单模型为 65，B 为 20，池子原始总量为 85。关闭后再开启只保留确实记录的部分，不补算未记录时段。
 - 错误：为了让新组合预算有历史，直接把 A 的原始事实清零或把所有旧行切到 continuous_model。正确：新身份聚合原始事实，人工调整另存目标与原子快照，已有同身份行保持权威来源。
 - 错误：把所有非 v2 正文当成 v1，或把审计前值读取错误当作 0。正确：仅显式 v1 进入兼容转换，异常返回错误，保留原策略/计数并停止成功写入。
+- 正常：8 行策略打开预算页签只发 1 次 `GET /budgets/usage-summary`；个人日行上限 10 且最高用量用户已提额到 16，进度与剩余按 16 计算并标注「提额至 16」。
+- 错误：前端逐行调用 `/budgets/:budget_id/usage` 画进度，或把带时段的日行画成独立进度条；正确：只用聚合摘要，带时段的日/周行与同范围同模型的无时段主行共用计数并显示文字说明。
+- 错误：后端 400「预算引用的时段不存在：假期个人每日」只显示在顶部，或按子串把「假期个人」行一起标红；正确：先按分隔段精确匹配只高亮「假期个人每日」，行下与编辑抽屉显示去前缀原因。
 
 ### 6. Tests Required
 
@@ -122,8 +132,11 @@
 - `controller/relay_attempt_responses_test.go`：先向非 Qwen 模型转换，再从原请求向 Qwen 重试，验证出站过滤仍生效且显式零值、原始输入和指针/切片未被前次尝试污染。
 - `controller/channel_limit_fallback_compact_test.go`：只配置基础模型价格，完整 Relay 覆盖 V1 path、历史 body bridge、V2 HTTP 的正常透传、额度耗尽和能力关闭；断言原始请求/响应、唯一基础模型账单和钱包扣款，拒绝时零上游/消费且不调用备用渠道。
 - `controller/channel_limit_fallback_boundary_test.go`：完整 Relay 的 retry=0、一次/禁用/恢复/目标限制与权限/不可迁移/Compact、并发释放、阶梯预检；WebSocket 回合准备、任务和 Midjourney 在启用降级时仍因池子耗尽拒绝，上游调用和扣款均为零。
-- `controller/channel_period_policy_test.go`：实际管理响应合同与 400/409；ai-fund fixture 来自该响应。
+- `controller/channel_period_policy_test.go`：实际管理响应合同与 400/409；ai-fund fixture 来自该响应，`CHANNEL_PERIOD_CONTRACT_OUTPUT` 同时输出 `usage_summary`。
+- `controller/channel_budget_usage_summary_test.go` 与 `TestChannelPeriodPolicyManagementContract`：摘要覆盖全部已保存行且顺序与策略一致、个人行返回最高用量用户及含提额的 `effective_limit`、响应不泄露渠道 key；`router/channel_router_test.go` 断言该路由为 ChannelRead。
 - `controller/channel_limit_fallback_model_test.go`：真实 Relay → 模拟上游 → 结算/日志，覆盖按模型池子/个人日周、同渠道模型切换按目标价格扣费、目标个人限额阻断且不二跳。
 - `web/src/features/channels/components/dialogs/__tests__/channel-period-policy-panel.test.tsx`：预算表时段/进度、抽屉关闭和 Esc 保留草稿、提额后的个人进度、读取失败重试、新行不查用量、版本冲突与跨渠道迟到响应。
-- 同一 React 面板测试还须覆盖开关默认关闭、只读禁用、预览后保存与显式关闭，并断言可选键顺序变化不使预览失效。
+- 同一 React 面板测试还须覆盖开关默认关闭、只读禁用、预览后保存与显式关闭，并断言可选键顺序变化不使预览失效；以及保存栏出现与计数、diff 与 PUT body 一致、放弃草稿确认、共用计数说明只画一条进度条、本渠道换模型预览 body `on_exceed.channel_id === 0`、后端 400 行 `data-error` 高亮与抽屉 `role=alert` 原因、未到时段行显示「Next start」。
+- `web/src/features/channels/components/dialogs/__tests__/channel-user-limits-dialog.test.tsx`：页签顺序为 Budgets / Schedules / Usage / Personal overrides / Current concurrency、时段页签改动切回预算页签后保存栏仍在、脏草稿 Escape 关闭先弹确认且确认后才回调 `onOpenChange(false)`、并发覆盖表单位于 `[role=dialog][aria-label="Concurrency override"]` 而非 alertdialog、聚合用量列表按行打开明细并提交绝对目标。
+- `web/src/features/channels/lib/__tests__/`：`channel-budget-status.test.ts`（状态优先级、计数身份分组、生效上限）、`channel-schedule-state.test.ts`（指定日期起止、预览来源优先、每周跨周与本周下次开始、停用、时区回退）、`channel-policy-error-rows.test.ts`（三种后端文案格式精确匹配、子串回退、前缀剥离）。
 - React 渠道测试、Vue 真实挂载、Worker 全量；两端 build、NewAPI typecheck/lint/i18n；relaykit 独立 build/vet。

@@ -23,6 +23,7 @@ func TestChannelModelOptionsRouteUsesReadPermission(t *testing.T) {
 }
 
 func TestChannelUserLimitRoutesUseExpectedPermissions(t *testing.T) {
+	assertChannelRoutePermission(t, http.MethodGet, "/:id/budgets/usage-summary", authz.ChannelRead, controller.GetChannelBudgetUsageSummary)
 	assertChannelRoutePermission(t, http.MethodGet, "/:id/budgets/:budget_id/usage", authz.ChannelRead, controller.GetChannelBudgetUsage)
 	assertChannelRoutePermission(t, http.MethodPut, "/:id/budgets/:budget_id/usage", authz.ChannelOperate, controller.SetChannelBudgetUsage)
 	assertChannelRoutePermission(t, http.MethodPut, "/:id/budgets/:budget_id/user-overrides/:user_id", authz.ChannelOperate, controller.SetChannelUserBudgetOverride)

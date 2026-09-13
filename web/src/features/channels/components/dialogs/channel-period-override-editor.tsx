@@ -20,6 +20,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
+import { ConfirmDialog } from '@/components/confirm-dialog'
 import { Button } from '@/components/ui/button'
 import { Field, FieldGroup, FieldLabel, FieldSet } from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
@@ -32,6 +33,7 @@ import {
 
 import {
   channelPeriodErrorKey,
+  channelPeriodErrorMessage,
   getChannelPeriodPolicy,
   saveChannelBudgetOverride,
 } from '../../period-api'
@@ -45,6 +47,8 @@ export function ChannelPeriodOverrideEditor(props: {
   status: ChannelUserLimitStatus
   canOperate: boolean
   onChanged: () => void
+  /** 从预算行打开时固定的行 id；缺省时由用户选择。 */
+  defaultBudgetId?: string
 }) {
   const { t } = useTranslation()
   const channelId = props.status.channel_id
@@ -54,11 +58,21 @@ export function ChannelPeriodOverrideEditor(props: {
     queryFn: () => getChannelPeriodPolicy(channelId),
     retry: false,
   })
-  const [budgetId, setBudgetId] = useState('')
-  const [amount, setAmount] = useState<number | null>(null)
-  const [expires, setExpires] = useState('')
+  const defaultMetric = props.status.period_limits?.metrics.find(
+    (item) => item.budget_id === props.defaultBudgetId
+  )
+  const [budgetId, setBudgetId] = useState(props.defaultBudgetId ?? '')
+  const [amount, setAmount] = useState<number | null>(
+    defaultMetric?.override_limit ?? null
+  )
+  const [expires, setExpires] = useState(
+    defaultMetric?.source.expires_at
+      ? formatTimestampForInput(defaultMetric.source.expires_at)
+      : ''
+  )
   const [stale, setStale] = useState(false)
   const [error, setError] = useState('')
+  const [confirmRevoke, setConfirmRevoke] = useState(false)
   const rows =
     query.data?.config.budgets.filter(
       (row) => row.id && row.scope === 'user' && row.limit > 0
@@ -99,7 +113,12 @@ export function ChannelPeriodOverrideEditor(props: {
           void queryClient.invalidateQueries({ queryKey: ['channels'] })
         },
         onError: (reason) => {
-          setError(t(channelPeriodErrorKey(reason)))
+          const message = channelPeriodErrorMessage(reason)
+          setError(
+            message
+              ? `${t(channelPeriodErrorKey(reason))} ${message}`
+              : t(channelPeriodErrorKey(reason))
+          )
           setStale(true)
         },
       }
@@ -191,12 +210,26 @@ export function ChannelPeriodOverrideEditor(props: {
               type='button'
               variant='outline'
               disabled={!budgetId}
-              onClick={() => submit(true)}
+              onClick={() => setConfirmRevoke(true)}
             >
               {t('Revoke selected override')}
             </Button>
           </div>
         </FieldSet>
+        <ConfirmDialog
+          open={confirmRevoke}
+          onOpenChange={setConfirmRevoke}
+          title={t('Revoke this override?')}
+          desc={t(
+            'The limit returns to the budget base value immediately; usage already counted is kept.'
+          )}
+          confirmText={t('Revoke')}
+          destructive
+          handleConfirm={() => {
+            setConfirmRevoke(false)
+            submit(true)
+          }}
+        />
         {(stale || query.isError) && (
           <Button
             type='button'

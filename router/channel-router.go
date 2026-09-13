@@ -53,6 +53,7 @@ var channelPermissionRoutes = []permissionRoute{
 	{method: http.MethodPut, path: "/:id/period-policy", permission: authz.ChannelOperate, handler: controller.SetChannelPeriodPolicy},
 	{method: http.MethodPost, path: "/:id/period-policy/preview", permission: authz.ChannelRead, handler: controller.PreviewChannelPeriodPolicy},
 	{method: http.MethodGet, path: "/:id/period-policy/targets", permission: authz.ChannelRead, handler: controller.GetChannelPeriodPolicyTargets},
+	{method: http.MethodGet, path: "/:id/budgets/usage-summary", permission: authz.ChannelRead, handler: controller.GetChannelBudgetUsageSummary},
 	{method: http.MethodGet, path: "/:id/budgets/:budget_id/usage", permission: authz.ChannelRead, handler: controller.GetChannelBudgetUsage},
 	{method: http.MethodPut, path: "/:id/budgets/:budget_id/usage", permission: authz.ChannelOperate, handler: controller.SetChannelBudgetUsage},
 	{method: http.MethodPut, path: "/:id/budgets/:budget_id/user-overrides/:user_id", permission: authz.ChannelOperate, handler: controller.SetChannelUserBudgetOverride},

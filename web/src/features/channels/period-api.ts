@@ -22,6 +22,7 @@ import { api } from '@/lib/api'
 
 import type {
   ChannelBudgetPreview,
+  ChannelBudgetUsageSummaryView,
   ChannelBudgetUsageView,
   ChannelBudgetUserOverrideItem,
   ChannelPeriodConfig,
@@ -55,6 +56,21 @@ export function channelPeriodErrorKey(error: unknown): string {
     }
   }
   return unavailable
+}
+
+/**
+ * 取后端对 400/409 返回的原始说明（形如「…：<行名>」），供界面定位到具体行；其他情况返回空串。
+ * @param error 请求错误。
+ * @returns 后端 message 或空串。
+ */
+export function channelPeriodErrorMessage(error: unknown): string {
+  if (!isAxiosError(error)) return ''
+  const status = error.response?.status
+  const message = error.response?.data?.message
+  if ((status === 400 || status === 409) && typeof message === 'string') {
+    return message
+  }
+  return ''
 }
 
 async function unwrap<T>(
@@ -112,6 +128,15 @@ export function saveChannelPeriodPolicy(
       url: `/api/channel/${channelId}/period-policy`,
       data: { expected_revision: revision, config },
     })
+  )
+}
+
+/** @param channelId 渠道 ID。 @returns 全部已保存预算行的当前窗口用量摘要。 */
+export function getChannelBudgetUsageSummary(
+  channelId: number
+): Promise<ChannelBudgetUsageSummaryView> {
+  return unwrap(
+    api.get(`/api/channel/${channelId}/budgets/usage-summary`, requestConfig)
   )
 }
 
