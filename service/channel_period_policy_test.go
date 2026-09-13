@@ -387,3 +387,46 @@ func TestChannelPeriodPolicyLimitAboveInt32(t *testing.T) {
 	_, err = SaveChannelPeriodPolicy(ctx, channel.Id, dto.ChannelPeriodPolicyInput{ExpectedRevision: view.Revision, Config: next}, 1)
 	require.ErrorIs(t, err, ErrInvalidChannelPeriodPolicy)
 }
+
+// TestChannelPeriodStatusFallbackEnabledFollowsBlockingRow 保证 fallback_enabled 与请求期一致：
+// 拦截时按拦截行的有效动作（行级优先、inherit 回落策略默认）回答，未拦截时才沿用策略默认动作。
+func TestChannelPeriodStatusFallbackEnabledFollowsBlockingRow(t *testing.T) {
+	fallbackTo := func(channelID int, modelName string) dto.ChannelBudgetAction {
+		return dto.ChannelBudgetAction{Mode: channelBudgetActionFallback, ChannelID: channelID, Model: modelName}
+	}
+	cases := []struct {
+		name           string
+		defaultAction  dto.ChannelBudgetAction
+		rowAction      dto.ChannelBudgetAction
+		idleEnabled    bool
+		blockedEnabled bool
+	}{
+		{"row fallback beats default reject", dto.ChannelBudgetAction{Mode: channelBudgetActionReject}, fallbackTo(0, "gpt-6-mini"), false, true},
+		{"row reject beats default fallback", fallbackTo(81, "gpt-4o-mini"), dto.ChannelBudgetAction{Mode: channelBudgetActionReject}, true, false},
+		{"inherit follows default fallback", fallbackTo(81, "gpt-4o-mini"), dto.ChannelBudgetAction{Mode: channelBudgetActionInherit}, true, true},
+	}
+	for _, item := range cases {
+		t.Run(item.name, func(t *testing.T) {
+			now := time.Date(2031, 9, 16, 10, 0, 0, 0, time.Local)
+			channel := setupChannelPeriodTest(t, &now, false)
+			require.NoError(t, model.DB.Create(&model.Channel{Id: 81, Name: "备用渠道"}).Error)
+			overall := budgetRow("池子每日", channelBudgetScopePool, channelBudgetWindowDaily, "", 600)
+			modelRow := budgetRow("gpt-6-astra 个人每日", channelBudgetScopeUser, channelBudgetWindowDaily, "", 500)
+			modelRow.Models, modelRow.OnExceed = []string{"gpt-6-astra"}, item.rowAction
+			config := budgetConfig(nil, overall, modelRow)
+			config.DefaultOnExceed = item.defaultAction
+			_, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{Config: config}, 1)
+			require.NoError(t, err)
+			status, err := GetChannelPeriodStatus(t.Context(), channel, 7)
+			require.NoError(t, err)
+			assert.False(t, status.Blocked)
+			assert.Equal(t, item.idleEnabled, status.FallbackEnabled)
+			// 只耗尽按模型的个人行，整体池子行仍有余量，状态必须按真正拦截的那一行回答。
+			require.NoError(t, RecordChannelUserModelQuotaUsage(t.Context(), channel.Id, 7, 500, "gpt-6-astra"))
+			status, err = GetChannelPeriodStatus(t.Context(), channel, 7)
+			require.NoError(t, err)
+			assert.True(t, status.Blocked)
+			assert.Equal(t, item.blockedEnabled, status.FallbackEnabled)
+		})
+	}
+}

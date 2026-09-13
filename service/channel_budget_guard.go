@@ -60,7 +60,7 @@ func evaluateChannelBudgets(ctx context.Context, channel *model.Channel, userID 
 	if err != nil {
 		return status, nil, err
 	}
-	status.Revision, status.NextChangeAt, status.FallbackEnabled = policy.Revision, res.next, policy.Config.DefaultOnExceed.Mode == channelBudgetActionFallback
+	status.Revision, status.NextChangeAt = policy.Revision, res.next
 	overrides := make(map[string]model.ChannelUserBudgetOverride)
 	if len(plan.Rows) > 0 {
 		// 个人提额可能比时段行更严格或更宽，读取失败不能静默回落到基础额度。
@@ -170,8 +170,17 @@ func evaluateChannelBudgets(ctx context.Context, channel *model.Channel, userID 
 			metric.Remaining = &remaining
 			if metric.Enforced && metric.Used >= metric.Limit {
 				status.Blocked = true
+				// 请求期按"行级优先、策略默认兜底"选择目标；状态若只看策略默认动作，
+				// 仅在行上配置降级的模型会被误报为拒绝，门户就会显示"请求将被拒绝"。
+				if _, ok := SelectChannelLimitFallback(policy.Config, channel.Id, &ChannelPeriodBlock{Metric: *metric, row: rows[i]}); ok {
+					status.FallbackEnabled = true
+				}
 			}
 		}
+	}
+	if !status.Blocked {
+		// 没有拦截行时无法按行回答，沿用策略默认动作说明超限后的默认去向。
+		status.FallbackEnabled = policy.Config.DefaultOnExceed.Mode == channelBudgetActionFallback
 	}
 	return status, rows, nil
 }
