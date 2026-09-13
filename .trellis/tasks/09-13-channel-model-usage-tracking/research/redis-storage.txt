@@ -1,0 +1,32 @@
+goos: linux
+goarch: amd64
+pkg: github.com/QuantumNous/new-api/service
+cpu: AMD Ryzen 7 5800H with Radeon Graphics         
+BenchmarkChannelModelUsageStorage/enabled=false-16         	       1	2720470551 ns/op	         4.000 keys	      2762 redis-bytes
+--- BENCH: BenchmarkChannelModelUsageStorage/enabled=false-16
+    channel_model_usage_benchmark_test.go:131: # Commandstats
+        cmdstat_hincrby:calls=12000,usec=10652,usec_per_call=0.89,rejected_calls=0,failed_calls=0
+        cmdstat_config|resetstat:calls=1,usec=285,usec_per_call=285.00,rejected_calls=0,failed_calls=0
+        cmdstat_hget:calls=12000,usec=8516,usec_per_call=0.71,rejected_calls=0,failed_calls=0
+        cmdstat_hsetnx:calls=4000,usec=973,usec_per_call=0.24,rejected_calls=0,failed_calls=0
+        cmdstat_type:calls=8000,usec=3181,usec_per_call=0.40,rejected_calls=0,failed_calls=0
+        cmdstat_get:calls=2000,usec=3047,usec_per_call=1.52,rejected_calls=0,failed_calls=0
+        cmdstat_memory|usage:calls=4,usec=945,usec_per_call=236.25,rejected_calls=0,failed_calls=0
+        cmdstat_evalsha:calls=2000,usec=138258,usec_per_call=69.13,rejected_calls=0,failed_calls=0
+        cmdstat_expireat:calls=8000,usec=4779,usec_per_call=0.60,rejected_calls=0,failed_calls=0
+	... [output truncated]
+BenchmarkChannelModelUsageStorage/enabled=true-16          	       1	3040519055 ns/op	        44.00 keys	     29582 redis-bytes
+--- BENCH: BenchmarkChannelModelUsageStorage/enabled=true-16
+    channel_model_usage_benchmark_test.go:131: # Commandstats
+        cmdstat_hincrby:calls=20000,usec=19254,usec_per_call=0.96,rejected_calls=0,failed_calls=0
+        cmdstat_config|resetstat:calls=1,usec=131,usec_per_call=131.00,rejected_calls=0,failed_calls=0
+        cmdstat_hget:calls=20000,usec=13755,usec_per_call=0.69,rejected_calls=0,failed_calls=0
+        cmdstat_hsetnx:calls=8000,usec=2029,usec_per_call=0.25,rejected_calls=0,failed_calls=0
+        cmdstat_type:calls=12000,usec=5941,usec_per_call=0.50,rejected_calls=0,failed_calls=0
+        cmdstat_get:calls=2000,usec=4649,usec_per_call=2.32,rejected_calls=0,failed_calls=0
+        cmdstat_memory|usage:calls=44,usec=93,usec_per_call=2.11,rejected_calls=0,failed_calls=0
+        cmdstat_evalsha:calls=2000,usec=219253,usec_per_call=109.63,rejected_calls=0,failed_calls=0
+        cmdstat_expireat:calls=12000,usec=7512,usec_per_call=0.63,rejected_calls=0,failed_calls=0
+	... [output truncated]
+PASS
+ok  	github.com/QuantumNous/new-api/service	5.874s

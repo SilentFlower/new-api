@@ -1,0 +1,307 @@
+{
+  "id": "channel-model-usage-tracking",
+  "name": "channel-model-usage-tracking",
+  "title": "渠道可选模型用量持续累计",
+  "description": "为渠道增加默认关闭的模型用量持续累计开关；开启后模型个人与池子日周用量在添加预算前也累计，兼容既有预算与用量调整，并验证内存和性能影响。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-09-13",
+  "completedAt": "2026-09-13",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-12-channel-budget-unification",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-09-12T22:24:42Z",
+      "contextKey": "codex_01a095d6-67e7-7121-8f1d-98c0c7dff95d",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "ad8e96d4d21f05179298325f5ffb015b9432ba1a",
+        "status": [
+          {
+            "status": "??",
+            "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc"
+          },
+          {
+            "status": "??",
+            "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/check.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/design.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/task.json"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/brief.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/check.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/design.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/implement.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/implement.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/research/deployment-2026-09-13.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/brief.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/design.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/implement.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/task.json"
+          }
+        ],
+        "repositories": [
+          {
+            "root": ".",
+            "head": "ad8e96d4d21f05179298325f5ffb015b9432ba1a",
+            "status": [
+              {
+                "status": "??",
+                "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc"
+              },
+              {
+                "status": "??",
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/check.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/design.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/task.json"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/brief.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/check.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/design.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/implement.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/implement.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/deployment-2026-09-13.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/brief.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/design.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/implement.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/task.json"
+              }
+            ],
+            "worktreeDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "indexDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "untracked": [
+              {
+                "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc",
+                "sha256": "5b434c1f233e42c5db42aa2f50543cf78b17e0b3ee3532d478bb1990b398a730"
+              },
+              {
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc",
+                "sha256": "1d2f57c10c78999e9ad2e460dd6ef0801e3db602ee8e8faa48b90df176b98a57"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/check.jsonl",
+                "sha256": "3f5ec3d2b51f99c46c497d7ab01537c46fcbad0bc9a12b60f06887c8743aa685"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/design.md",
+                "sha256": "12ec2d20d6c21c33163d571f5cb49c65cc3ba5fb8334923ac882d6643ed40896"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.jsonl",
+                "sha256": "3f5ec3d2b51f99c46c497d7ab01537c46fcbad0bc9a12b60f06887c8743aa685"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.md",
+                "sha256": "7ea1e2034c419295ddda15b3767da21d171a7747f3527aae5afac4d91191139c"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/prd.md",
+                "sha256": "b01672876ec6187a957d9c4ff6e0d8b3b2afd48849af4765150775d3484cdd05"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/task.json",
+                "sha256": "71f7b6867148480ab253f18cf2fcad03ccb07c75b5bbb8a746d427aeb058b75d"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/brief.md",
+                "sha256": "2cb050985956602ee6e3f5f6261b4cec7b3ea314caa97418c8a3ecf99f44b4d6"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/check.jsonl",
+                "sha256": "3f5ec3d2b51f99c46c497d7ab01537c46fcbad0bc9a12b60f06887c8743aa685"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/design.md",
+                "sha256": "14513da711add1400d2e98ed43ba1b59258187c9e311941374f7dfca5331d98a"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/implement.jsonl",
+                "sha256": "3f5ec3d2b51f99c46c497d7ab01537c46fcbad0bc9a12b60f06887c8743aa685"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/implement.md",
+                "sha256": "b4b0ab6b0eae9eae3b31a1f0094941e4f11f206f52d50e87c60954a63dfae971"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/prd.md",
+                "sha256": "01a00e45a13d3e9965f4f1ecd6a610a220f3c417411350c5bae64f67468b0fa4"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/deployment-2026-09-13.md",
+                "sha256": "740ad3c25b755a6d209e37aff29422e9a6f2dfd33352cf0849dae68fc97c6ef2"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/brief.md",
+                "sha256": "c69e39b7f5a744185b1e9521444d72279dedb1c4f5e8d7e231c1515104ce53af"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/design.md",
+                "sha256": "c8946cbf474c3b6cab4540e3ae5fbfec7ea21edbe1edec492b0d8ce8a154999a"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/implement.md",
+                "sha256": "be34e32134dd05e3c8e1b9522ac8e4534ccb203ca87caaabf5fb2624661e8e46"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/prd.md",
+                "sha256": "4d2d827ed39b403a1ab319a4e5da5b98546ebbec293c223072b33b8b5915cd72"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/task.json",
+                "sha256": "d839995e57e9b63dd240be4c1d982e9b33476b37acebb43ab9f2fd8920fce860"
+              }
+            ],
+            "conflicts": [],
+            "integration": [],
+            "fingerprint": "81f82901e5327da70253060642c42e87471acb749c27969b037e2f0cb0af9628"
+          }
+        ],
+        "fingerprint": "6f0dc5b890e567acf7642431a2f8a0c93a0641de0033a6131500ca74778f4e69"
+      }
+    }
+  },
+  "progress": {
+    "completedSteps": [
+      "Phase 1：Brief 已获确认并激活任务",
+      "Phase 2.1：两仓实现及定向验证完成",
+      "Phase 2.2：Full Check-All 与修复重检通过",
+      "Phase 3.3：两仓模型累计规范已更新并校验",
+      "Phase 3.4：两仓业务变更已提交并推送"
+    ],
+    "partialStep": null,
+    "nextStep": "等待部署安排；本任务开发交付已完成。",
+    "notes": "默认关闭的渠道模型累计、旧预算兼容、调整隔离及两端开关已实现。Go 全量、race、三库、Web、Worker 594 测试、Vue 18 组件测试及 31 Node 测试通过；Redis 样本额外 26820 字节，结算写脚本次数不变。两仓权威规范已同步，旧任务记录及 hook 缓存保留。生产部署及开关未操作，后续须先更新全部 new-api 实例，再验证提前累计与新增预算读取。",
+    "updatedAt": "2026-09-13T00:50:02Z"
+  }
+}

@@ -1,0 +1,16 @@
+goos: linux
+goarch: amd64
+pkg: github.com/QuantumNous/new-api/service
+cpu: AMD Ryzen 7 5800H with Radeon Graphics         
+BenchmarkChannelModelUsageRecord/redis=false/enabled=false-16         	    8836	     26943 ns/op	    5749 B/op	      88 allocs/op
+BenchmarkChannelModelUsageRecord/redis=false/enabled=true-16          	    7064	     37335 ns/op	    7690 B/op	     123 allocs/op
+BenchmarkChannelModelUsageRecord/redis=true/enabled=false-16          	     152	   1665643 ns/op	    8395 B/op	     117 allocs/op
+BenchmarkChannelModelUsageRecord/redis=true/enabled=true-16           	     144	   1601208 ns/op	   10744 B/op	     159 allocs/op
+BenchmarkChannelModelUsageRead/redis=false/models=1-16                	  273354	       864.1 ns/op	     528 B/op	      10 allocs/op
+BenchmarkChannelModelUsageRead/redis=false/models=8-16                	   50580	      4602 ns/op	    3504 B/op	      38 allocs/op
+BenchmarkChannelModelUsageRead/redis=false/models=64-16               	    6135	     36898 ns/op	   25376 B/op	     261 allocs/op
+BenchmarkChannelModelUsageRead/redis=true/models=1-16                 	     334	    654090 ns/op	    1528 B/op	      49 allocs/op
+BenchmarkChannelModelUsageRead/redis=true/models=8-16                 	     343	    855719 ns/op	    6576 B/op	     175 allocs/op
+BenchmarkChannelModelUsageRead/redis=true/models=64-16                	     204	   1127928 ns/op	   45264 B/op	    1182 allocs/op
+PASS
+ok  	github.com/QuantumNous/new-api/service	4.601s
