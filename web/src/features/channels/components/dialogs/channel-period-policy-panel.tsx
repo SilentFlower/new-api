@@ -437,7 +437,8 @@ function ChannelPeriodPolicyForm(props: {
           {error}
         </p>
       )}
-      <fieldset disabled={disabled} className='space-y-5'>
+      {/* fieldset 默认 min-inline-size: min-content，会被预算表撑得比弹窗滚动区更宽并裁掉右侧；min-w-0 让它跟随容器宽度，表格在自己的 overflow-x-auto 内滚动。 */}
+      <fieldset disabled={disabled} className='min-w-0 space-y-5'>
         {/* 两个区块常驻挂载、按页签切换显隐，草稿、筛选与抽屉状态在切换页签时不丢失。 */}
         <div hidden={props.section !== 'budgets'} className='space-y-5'>
           <div className='flex items-start justify-between gap-3 rounded-lg border px-4 py-3'>
