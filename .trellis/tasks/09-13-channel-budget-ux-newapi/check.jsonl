@@ -1,0 +1,4 @@
+{"file": ".trellis/spec/backend/channel-period-budget-fallback.md", "reason": "核对界面行为与预算 v2 契约、计数身份、CAS 语义一致"}
+{"file": ".trellis/spec/frontend/i18n-merge-guidelines.md", "reason": "检查七语言同步与缺键扫描"}
+{"file": ".trellis/spec/frontend/base-ui-composition.md", "reason": "检查 Sheet/Dialog/Select 组合是否在正确上下文并通过交互验证"}
+{"file": ".trellis/tasks/09-13-channel-budget-ux-newapi/prd.md", "reason": "AC1–AC7 逐条验收"}

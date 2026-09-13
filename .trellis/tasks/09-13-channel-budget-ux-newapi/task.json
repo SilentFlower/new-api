@@ -1,0 +1,39 @@
+{
+  "id": "channel-budget-ux-newapi",
+  "name": "channel-budget-ux-newapi",
+  "title": "new-api 渠道限额界面改版（预算表、行上抽屉、常驻保存栏）",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-09-13",
+  "completedAt": "2026-09-13",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-13-channel-budget-ux",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "updatedAt": "2026-09-13T06:40:00Z",
+    "completedSteps": [
+      "后端聚合用量接口 GET /api/channel/:id/budgets/usage-summary、路由权限与契约测试",
+      "预算/时段/用量/个人覆盖/并发五页签、预算表状态徽标与行上抽屉",
+      "常驻保存栏与逐字段 diff 预览、脏草稿确认",
+      "Check-All CHK-001–006 修复并重检 strict pass",
+      "规范更新 channel-period-budget-fallback.md"
+    ],
+    "partialStep": null,
+    "nextStep": "两仓同版本发布并在预发环境确认 ai-fund 404 回退（上线后验证）；父任务集成验收 AC1–AC7",
+    "notes": ""
+  }
+}
