@@ -26,24 +26,36 @@ type ChannelBudgetSchedule struct {
 
 // ChannelBudgetRow 是一条预算行：范围 × 周期 × 模型 × 上限 × 超限动作。
 type ChannelBudgetRow struct {
-	ID         string              `json:"id"`
-	Name       string              `json:"name"`
-	Enabled    bool                `json:"enabled"`
-	Scope      string              `json:"scope"`
-	Window     string              `json:"window"`
-	ScheduleID string              `json:"schedule_id"`
-	Models     []string            `json:"models"`
-	Limit      int64               `json:"limit"`
-	OnExceed   ChannelBudgetAction `json:"on_exceed"`
-	CreatedAt  int64               `json:"created_at"`
+	ID            string              `json:"id"`
+	Name          string              `json:"name"`
+	Enabled       bool                `json:"enabled"`
+	Scope         string              `json:"scope"`
+	Window        string              `json:"window"`
+	ScheduleID    string              `json:"schedule_id"`
+	Models        []string            `json:"models"`
+	Limit         int64               `json:"limit"`
+	OnExceed      ChannelBudgetAction `json:"on_exceed"`
+	CreatedAt     int64               `json:"created_at"`
+	CounterSource string              `json:"counter_source,omitempty"`
 }
 
 // ChannelPeriodPolicyConfig 是 schema_version=2 的渠道预算策略：时段列表、预算行与策略级默认动作。
 type ChannelPeriodPolicyConfig struct {
-	SchemaVersion   int                     `json:"schema_version"`
-	DefaultOnExceed ChannelBudgetAction     `json:"default_on_exceed"`
-	Schedules       []ChannelBudgetSchedule `json:"schedules"`
-	Budgets         []ChannelBudgetRow      `json:"budgets"`
+	SchemaVersion             int                        `json:"schema_version"`
+	ModelUsageTrackingEnabled *bool                      `json:"model_usage_tracking_enabled,omitempty"`
+	ModelUsageTracking        *ChannelModelUsageTracking `json:"model_usage_tracking,omitempty"`
+	DefaultOnExceed           ChannelBudgetAction        `json:"default_on_exceed"`
+	Schedules                 []ChannelBudgetSchedule    `json:"schedules"`
+	Budgets                   []ChannelBudgetRow         `json:"budgets"`
+}
+
+// ChannelModelUsageTracking 保存服务端维护的累计覆盖边界，客户端只能原样往返。
+// @param FirstEnabledAt 首次开启时间；EnabledAt、DisabledAt 为最近切换时间。
+// @return 渠道模型累计历史元数据。
+type ChannelModelUsageTracking struct {
+	FirstEnabledAt int64 `json:"first_enabled_at"`
+	EnabledAt      int64 `json:"enabled_at"`
+	DisabledAt     int64 `json:"disabled_at"`
 }
 
 // ChannelLimitFallback 描述解析后的唯一降级目标。

@@ -49,6 +49,7 @@ type channelBudgetRow struct {
 
 // channelBudgetPlan 是一个渠道当前版本的全部时段与预算行。
 type channelBudgetPlan struct {
+	Tracking        *dto.ChannelModelUsageTracking
 	Revision        int
 	DefaultOnExceed dto.ChannelBudgetAction
 	Schedules       []channelBudgetSchedule
@@ -65,6 +66,7 @@ type channelBudgetScheduleState struct {
 
 // channelBudgetResolution 是计划在给定时刻、给定模型下的解析结果。
 type channelBudgetResolution struct {
+	tracking  *dto.ChannelModelUsageTracking
 	now       time.Time
 	modelName string
 	schedules map[string]channelBudgetScheduleState
@@ -79,7 +81,7 @@ type channelBudgetResolution struct {
 // @param view 当前权威策略。
 // @return 预算计划。
 func buildChannelBudgetPlan(view dto.ChannelPeriodPolicyView) channelBudgetPlan {
-	plan := channelBudgetPlan{Revision: view.Revision, DefaultOnExceed: view.Config.DefaultOnExceed}
+	plan := channelBudgetPlan{Tracking: view.Config.ModelUsageTracking, Revision: view.Revision, DefaultOnExceed: view.Config.DefaultOnExceed}
 	for _, item := range view.Config.Schedules {
 		plan.Schedules = append(plan.Schedules, channelBudgetSchedule{ID: item.ID, Name: item.Name, Enabled: item.Enabled, Kind: item.Kind, rule: item})
 	}
@@ -162,7 +164,7 @@ func (row channelBudgetRow) isChannelUserRow() bool {
 // @param modelName 请求原始模型名，空表示展示全部行。
 // @return 解析结果或时段解析错误。
 func resolveChannelBudgetRows(plan channelBudgetPlan, now time.Time, modelName string) (channelBudgetResolution, error) {
-	res := channelBudgetResolution{now: now, modelName: modelName, schedules: make(map[string]channelBudgetScheduleState, len(plan.Schedules)), effective: make(map[string]int)}
+	res := channelBudgetResolution{tracking: plan.Tracking, now: now, modelName: modelName, schedules: make(map[string]channelBudgetScheduleState, len(plan.Schedules)), effective: make(map[string]int)}
 	for _, kind := range []string{"weekly", "date_range"} {
 		for _, schedule := range plan.Schedules {
 			if schedule.Kind != kind {

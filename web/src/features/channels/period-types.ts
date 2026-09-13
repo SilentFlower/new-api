@@ -48,6 +48,7 @@ export const channelBudgetRowSchema = z.object({
   id: z.string(),
   name: z.string().trim().min(1).max(80),
   enabled: z.boolean(),
+  counter_source: z.literal('continuous_model').optional(),
   scope: z.enum(['user', 'pool']),
   window: z.enum(['daily', 'weekly', 'occurrence']),
   schedule_id: z.string(),
@@ -59,6 +60,14 @@ export const channelBudgetRowSchema = z.object({
 /** schema_version=2 的预算策略协议。 */
 export const channelPeriodConfigSchema = z.object({
   schema_version: z.literal(2),
+  model_usage_tracking_enabled: z.boolean().optional(),
+  model_usage_tracking: z
+    .object({
+      first_enabled_at: z.number().int().positive(),
+      enabled_at: z.number().int().positive(),
+      disabled_at: z.number().int().nonnegative(),
+    })
+    .optional(),
   default_on_exceed: channelBudgetActionSchema,
   schedules: z.array(channelBudgetScheduleSchema).max(64),
   budgets: z.array(channelBudgetRowSchema).max(128),

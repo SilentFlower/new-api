@@ -53,6 +53,9 @@ func normalizeChannelBudgetConfig(config, previous dto.ChannelPeriodPolicyConfig
 		return invalid("策略级降级必须指定目标渠道")
 	}
 	config.DefaultOnExceed = action
+	if err := normalizeChannelModelTracking(&config, previous, now); err != nil {
+		return invalid(err.Error())
+	}
 	scheduleIDs := make(map[string]string)
 	schedules, err := normalizeChannelBudgetSchedules(config.Schedules, previous.Schedules, now, scheduleIDs)
 	if err != nil {
@@ -157,6 +160,9 @@ func normalizeChannelBudgetConfig(config, previous dto.ChannelPeriodPolicyConfig
 			}
 		}
 		slots[key] = append(slots[key], row)
+	}
+	if err := normalizeChannelModelCounterSources(rows, previous.Budgets, config.ModelUsageTracking != nil); err != nil {
+		return invalid(err.Error())
 	}
 	config.Budgets = rows
 	return config, scheduleIDs, rowIDs, nil

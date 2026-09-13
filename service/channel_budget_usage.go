@@ -21,20 +21,23 @@ var channelPeriodUsageMemory = struct {
 }{values: make(map[string]*channelPeriodUsageBucket)}
 
 type channelPeriodUsageBucket struct {
-	values    map[string]int64
-	since     int64
-	expiresAt int64
+	adjustments map[string][]string
+	values      map[string]int64
+	since       int64
+	expiresAt   int64
 }
 
 // channelBudgetCounter 是一个计数身份在当前窗口的存储位置。
 // 遗留身份的个人字段与池子汇总位于不同 key，其余身份两者同 key。
 type channelBudgetCounter struct {
-	channelID  int
-	identity   string
-	userKey    string
-	poolKey    string
-	start, end int64
-	createdAt  int64
+	modelKeys   []string
+	trackingGap bool
+	channelID   int
+	identity    string
+	userKey     string
+	poolKey     string
+	start, end  int64
+	createdAt   int64
 	// legacy 表示 userKey 是旧个人日/周 Hash：无 __pool，读写走旧存储，过期沿用旧规则。
 	legacy         string
 	legacyExpireAt int64
@@ -119,6 +122,9 @@ func newChannelBudgetCounter(channelID int, row channelBudgetRow, res channelBud
 	}
 	counter.userKey = fmt.Sprintf("channel_budget:{%d}:%s:%d", channelID, row.identityHash(), counter.start)
 	counter.poolKey = counter.userKey
+	if row.CounterSource == channelModelCounterSource {
+		configureChannelModelCounter(&counter, row, res)
+	}
 	return counter
 }
 
@@ -166,9 +172,16 @@ func recordChannelBudgetUsage(ctx context.Context, channelID, userID, quota int,
 	if err != nil {
 		return err
 	}
+	if modelName == "" && policy.Config.ModelUsageTracking != nil {
+		// 无模型入口无法分配事实用量，保留旧计数并明确记录覆盖缺口。
+		recordChannelQuotaGap(ctx, channelID, now.Unix())
+	}
 	// 渠道级日/周身份始终累计，没有对应行时也保留历史，便于以后加行。
 	plan.Rows = append(channelBudgetBaseRows(), plan.Rows...)
-	counters := channelBudgetCounters(channelID, plan, res, res.counting)
+	counters := channelBudgetCounters(channelID, plan, res, func(row channelBudgetRow) bool {
+		return row.CounterSource != channelModelCounterSource && res.counting(row)
+	})
+	counters = append(counters, channelModelUsageCounters(channelID, policy.Config, res)...)
 	if common.RedisEnabled {
 		if common.RDB == nil {
 			return errors.New("周期额度 Redis 未初始化")
@@ -213,7 +226,7 @@ func recordChannelBudgetUsage(ctx context.Context, channelID, userID, quota int,
 			bucket = &channelPeriodUsageBucket{values: make(map[string]int64), since: channelBudgetTrackingStart(counter, now), expiresAt: counter.end + 86400}
 			channelPeriodUsageMemory.values[counter.poolKey] = bucket
 		}
-		if bucket.values[field] > math.MaxInt64-int64(quota) || bucket.values["__pool"] > math.MaxInt64-int64(quota) {
+		if bucket.values[field] < 0 || bucket.values["__pool"] < 0 || bucket.values[field] > math.MaxInt64-int64(quota) || bucket.values["__pool"] > math.MaxInt64-int64(quota) {
 			return errors.New("池子或时段额度累计溢出")
 		}
 	}
@@ -240,6 +253,9 @@ func recordChannelBudgetUsage(ctx context.Context, channelID, userID, quota int,
 // @param now 当前时刻。
 // @return 个人已用、池子已用、统计起点及存储错误。
 func readChannelBudgetCounter(ctx context.Context, counter channelBudgetCounter, userID int, now time.Time) (int64, int64, int64, error) {
+	if len(counter.modelKeys) > 0 {
+		return readChannelModelBudget(ctx, counter, userID, now)
+	}
 	userUsed, poolUsed, since, err := readChannelBudgetHash(ctx, counter, userID, now)
 	if err != nil || counter.legacy == "" {
 		return userUsed, poolUsed, since, err
@@ -301,6 +317,9 @@ func readChannelBudgetHash(ctx context.Context, counter channelBudgetCounter, us
 // @param counter 计数位置。
 // @return 用户 ID 到已用额度的映射及存储错误。
 func listChannelBudgetUsage(ctx context.Context, counter channelBudgetCounter) (map[int]int64, error) {
+	if len(counter.modelKeys) > 0 {
+		return listChannelModelBudgetUsage(ctx, counter)
+	}
 	switch counter.legacy {
 	case channelBudgetWindowDaily:
 		store, err := currentChannelUserDailyQuotaStore()
@@ -369,6 +388,9 @@ return 1
 // @param now 当前时刻。
 // @return 存储错误。
 func setChannelBudgetUsage(ctx context.Context, counter channelBudgetCounter, scope string, userID int, used int64, now time.Time) error {
+	if len(counter.modelKeys) > 0 {
+		return setChannelModelBudgetUsage(ctx, counter, scope, userID, used, now)
+	}
 	if scope == channelBudgetScopeUser && counter.legacy != "" {
 		// 渠道级个人日/周用量仍存放在旧个人 Hash，沿用其设置语义。
 		if used > common.MaxQuota {

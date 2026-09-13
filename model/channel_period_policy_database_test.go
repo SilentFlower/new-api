@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/dto"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -58,6 +60,18 @@ func TestChannelPeriodPolicyDatabaseContract(t *testing.T) {
 			require.NoError(t, ReplaceChannelPeriodPolicy(t.Context(), policy))
 			assert.Equal(t, 2, policy.Revision)
 			require.ErrorIs(t, ReplaceChannelPeriodPolicy(t.Context(), &ChannelPeriodPolicy{ChannelId: 80, Revision: 1, Config: `{}`}), ErrChannelPeriodPolicyConflict)
+			// JSON 可选扩展在三种 TEXT 存储中保留显式 false、时间及统计来源。
+			policy.Config = `{"schema_version":2,"default_on_exceed":{"mode":"reject","channel_id":0,"model":""},"schedules":[],"budgets":[{"id":"tracked","name":"模型预算","enabled":true,"scope":"user","window":"daily","schedule_id":"","models":["A"],"limit":100,"on_exceed":{"mode":"inherit","channel_id":0,"model":""},"created_at":100,"counter_source":"continuous_model"}],"model_usage_tracking_enabled":false,"model_usage_tracking":{"first_enabled_at":100,"enabled_at":100,"disabled_at":200}}`
+			require.NoError(t, ReplaceChannelPeriodPolicy(t.Context(), policy))
+			stored, err := GetChannelPeriodPolicy(t.Context(), 80)
+			require.NoError(t, err)
+			assert.Equal(t, policy.Config, stored.Config)
+			var config dto.ChannelPeriodPolicyConfig
+			require.NoError(t, common.UnmarshalJsonStr(stored.Config, &config))
+			require.NotNil(t, config.ModelUsageTrackingEnabled)
+			assert.False(t, *config.ModelUsageTrackingEnabled)
+			assert.Equal(t, int64(100), config.ModelUsageTracking.FirstEnabledAt)
+			assert.Equal(t, "continuous_model", config.Budgets[0].CounterSource)
 			rule := strings.Repeat("a", 32)
 			require.NoError(t, ReplaceChannelUserPeriodOverride(t.Context(), &ChannelUserPeriodOverride{ChannelId: 80, UserId: 7, RuleId: rule, UserPeriodQuotaLimit: 100, ExpiresAt: 200}))
 			require.NoError(t, ReplaceChannelUserPeriodOverride(t.Context(), &ChannelUserPeriodOverride{ChannelId: 80, UserId: 7, RuleId: rule, UserPeriodQuotaLimit: 200, ExpiresAt: 0}))

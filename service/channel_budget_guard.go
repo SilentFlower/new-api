@@ -110,6 +110,9 @@ func evaluateChannelBudgets(ctx context.Context, channel *model.Channel, userID 
 		} else {
 			metric.TrackingSince, metric.Coverage = value.since, channelBudgetCoverage(gap, value.since, value.counter.end)
 		}
+		if value.counter.trackingGap {
+			metric.Coverage = "incomplete"
+		}
 		if row.Scope == channelBudgetScopeUser {
 			// 个人提额作用于整个分组：任一行的提额都覆盖当前生效行。
 			for _, candidate := range plan.Rows {

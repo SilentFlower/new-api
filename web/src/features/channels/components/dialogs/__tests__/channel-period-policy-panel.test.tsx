@@ -572,3 +572,66 @@ test('个人预算摘要读取最高用量用户的提额，读取失败可重�
   )
   assert.ok(urls.every((url) => !url.includes('/budgets/new-')))
 })
+
+test('渠道模型累计默认关闭，预览保存保留开关和服务端来源，切换渠道恢复各自配置', async () => {
+  const policy = view()
+  policy.config.model_usage_tracking = {
+    first_enabled_at: 1900000000,
+    enabled_at: 1900000000,
+    disabled_at: 1900000001,
+  }
+  policy.config.budgets[0].models = ['A']
+  policy.config.budgets[0].counter_source = 'continuous_model'
+  transport.get = async (url) => ({
+    data: {
+      success: true,
+      data: url.endsWith('/targets')
+        ? []
+        : url.includes('/80/')
+          ? policy
+          : view(8),
+    },
+  })
+  const calls: RequestInput[] = []
+  transport.request = async (input) => {
+    calls.push(input)
+    const body = input.data as { config: ChannelPeriodConfig }
+    return {
+      data: {
+        success: true,
+        data:
+          input.method === 'PUT'
+            ? { ...view(4), config: body.config }
+            : previewOf(body.config),
+      },
+    }
+  }
+  await render()
+  await until(() => Boolean(document.querySelector('form')))
+  const toggle = document.querySelector<HTMLButtonElement>(
+    '[role="switch"][aria-label="Continuously track model usage"]'
+  )
+  assert.ok(toggle)
+  assert.equal(toggle.getAttribute('aria-checked'), 'false')
+  await act(async () => toggle.click())
+  await submit()
+  await until(() => Boolean(button('Confirm and save policy')))
+  const sent = (calls[0].data as { config: ChannelPeriodConfig }).config
+  assert.equal(sent.model_usage_tracking_enabled, true)
+  assert.deepEqual(
+    sent.model_usage_tracking,
+    policy.config.model_usage_tracking
+  )
+  assert.equal(sent.budgets[0].counter_source, 'continuous_model')
+  await act(async () => button('Confirm and save policy')?.click())
+  await until(() => calls.length === 2)
+  assert.deepEqual(calls[1].data, calls[0].data)
+  await render(false, 81)
+  await until(() => Boolean(document.querySelector('form')))
+  const readonly = document.querySelector<HTMLButtonElement>(
+    '[role="switch"][aria-label="Continuously track model usage"]'
+  )
+  assert.ok(readonly)
+  assert.equal(readonly.getAttribute('aria-checked'), 'false')
+  assert.equal(readonly.getAttribute('aria-disabled'), 'true')
+})

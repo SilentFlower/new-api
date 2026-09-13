@@ -29,7 +29,14 @@ import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 
 import { Button } from '@/components/ui/button'
-import { Field, FieldGroup, FieldLabel, FieldSet } from '@/components/ui/field'
+import {
+  Field,
+  FieldContent,
+  FieldDescription,
+  FieldGroup,
+  FieldLabel,
+  FieldSet,
+} from '@/components/ui/field'
 import { Input } from '@/components/ui/input'
 import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select'
 import {
@@ -260,6 +267,10 @@ function ChannelPeriodPolicyForm(props: {
         : `#${row.on_exceed.channel_id}`
     return `${modeLabels.fallback} · ${target} · ${row.on_exceed.model}`
   }
+  // Zod 会调整可选字段的键顺序；比较同样归一化的草稿，避免新开关使有效预览消失。
+  const previewMatchesDraft =
+    previewSnapshot ===
+    JSON.stringify(channelPeriodConfigSchema.safeParse(config).data)
   const editingRow = editing === null ? null : config.budgets[editing]
   return (
     <form id={formId} onSubmit={runPreview}>
@@ -285,6 +296,30 @@ function ChannelPeriodPolicyForm(props: {
           </p>
         )}
         <FieldSet disabled={disabled} className='space-y-4'>
+          <Field orientation='horizontal' data-disabled={disabled}>
+            <FieldContent>
+              <FieldLabel htmlFor={`${formId}-model-tracking`}>
+                {t('Continuously track model usage')}
+              </FieldLabel>
+              <FieldDescription>
+                {t(
+                  'Track daily and weekly usage for each user and the pool, even without model budgets. Uses additional storage. Disabling keeps existing budgets counting; untracked history is not backfilled.'
+                )}
+              </FieldDescription>
+            </FieldContent>
+            <Switch
+              id={`${formId}-model-tracking`}
+              aria-label={t('Continuously track model usage')}
+              checked={config.model_usage_tracking_enabled ?? false}
+              disabled={disabled}
+              onCheckedChange={(checked) =>
+                form.setValue('model_usage_tracking_enabled', checked, {
+                  shouldDirty: true,
+                })
+              }
+            />
+          </Field>
+
           <section className='space-y-3' aria-label={t('Schedules')}>
             <h4 className='font-medium'>{t('Schedules')}</h4>
             {schedules.fields.map((field, index) => {
@@ -827,7 +862,7 @@ function ChannelPeriodPolicyForm(props: {
                     </div>
                     <p className='text-muted-foreground text-xs'>
                       {t(
-                        'Zero means unlimited. Changing models starts a new counter; renaming or changing the limit keeps it.'
+                        'Zero means unlimited. Changing models uses the selected model history when available; renaming or changing the limit keeps usage.'
                       )}
                     </p>
                     <Button
@@ -975,7 +1010,7 @@ function ChannelPeriodPolicyForm(props: {
             onClose={() => setUsageRow(null)}
           />
         )}
-        {preview && previewSnapshot === JSON.stringify(config) && (
+        {preview && previewMatchesDraft && (
           <section
             className='space-y-2 rounded-lg border p-4'
             aria-label={t('Policy preview')}

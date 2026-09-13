@@ -24,7 +24,7 @@ import (
 	"gorm.io/gorm"
 )
 
-func setupChannelPeriodTest(t *testing.T, now *time.Time, useRedis bool) *model.Channel {
+func setupChannelPeriodTest(t testing.TB, now *time.Time, useRedis bool) *model.Channel {
 	t.Helper()
 	oldDB, oldRDB, oldEnabled, oldNow := model.DB, common.RDB, common.RedisEnabled, channelPeriodNow
 	oldDaily, oldWeekly, oldDailyNow, oldWeeklyNow := channelUserDailyQuotaMemory, channelUserWeeklyQuotaMemory, channelUserDailyQuotaNow, channelUserWeeklyQuotaNow
