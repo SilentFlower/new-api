@@ -88,6 +88,7 @@ func TestChannelLimitFallbackUsesIndependentRequestAndTargetPrice(t *testing.T) 
 				var request dto.Request = &dto.GeneralOpenAIRequest{}
 				format, mode := types.RelayFormatOpenAI, relayconstant.RelayModeChatCompletions
 				if path == "/v1/messages" {
+					body = fmt.Sprintf(`{"model":"gpt-4o-mini","stream":%t,"messages":[{"role":"assistant","content":[{"type":"redacted_thinking","data":"opaque-claude"}]},{"role":"user","content":"你好"}],"max_tokens":10}`, stream)
 					request = &dto.ClaudeRequest{}
 					format = types.RelayFormatClaude
 				}
@@ -95,7 +96,7 @@ func TestChannelLimitFallbackUsesIndependentRequestAndTargetPrice(t *testing.T) 
 					request = &dto.OpenAIResponsesRequest{}
 					format = types.RelayFormatOpenAIResponses
 					mode = relayconstant.RelayModeResponses
-					body = fmt.Sprintf(`{"model":"gpt-4o-mini","stream":%t,"input":"你好","max_output_tokens":10}`, stream)
+					body = fmt.Sprintf(`{"model":"gpt-4o-mini","stream":%t,"input":[{"type":"reasoning","id":"rs_1","encrypted_content":"opaque-codex","summary":[]},{"role":"user","content":[{"type":"input_text","text":"你好"}]}],"max_output_tokens":10}`, stream)
 				}
 				require.NoError(t, common.Unmarshal([]byte(body), request))
 				c, _ := gin.CreateTestContext(httptest.NewRecorder())
@@ -141,6 +142,13 @@ func TestChannelLimitFallbackUsesIndependentRequestAndTargetPrice(t *testing.T) 
 				require.Len(t, requests, 1)
 				assert.Contains(t, requests[0], "Bearer test-target")
 				assert.Contains(t, requests[0], `"model":"gpt-4o"`)
+				if path == "/v1/messages" {
+					assert.Contains(t, requests[0], `"redacted_thinking"`)
+					assert.Contains(t, requests[0], `"data":"opaque-claude"`)
+				}
+				if path == "/v1/responses" {
+					assert.Contains(t, requests[0], `"encrypted_content":"opaque-codex"`)
+				}
 				var logs []model.Log
 				require.NoError(t, db.Where("type = ?", model.LogTypeConsume).Find(&logs).Error)
 				require.Len(t, logs, 1)
@@ -166,17 +174,6 @@ func TestChannelLimitFallbackUsesIndependentRequestAndTargetPrice(t *testing.T) 
 			})
 		}
 	}
-}
-
-func TestChannelLimitFallbackRejectsUpstreamState(t *testing.T) {
-	for _, body := range []string{
-		`{"previous_response_id":"resp_1"}`, `{"input":[{"type":"item_reference","id":"item_1"}]}`,
-		`{"messages":[{"content":[{"type":"document","source":{"file_id":"file_1"}}]}]}`,
-		`{"conversation":{"id":"conv_1"}}`, `{"container":"container_1"}`,
-	} {
-		assert.False(t, service.ChannelLimitFallbackRequestPortable([]byte(body)), body)
-	}
-	assert.True(t, service.ChannelLimitFallbackRequestPortable([]byte(`{"messages":[{"role":"user","content":"请解释 previous_response_id"}]}`)))
 }
 
 // 模拟三种协议的完整成功响应，流式用显式终止事件结束。

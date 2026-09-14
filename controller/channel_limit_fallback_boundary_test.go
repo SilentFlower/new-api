@@ -49,7 +49,7 @@ func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
 		{"target_disabled", 403, 0, 0}, {"unknown_field_still_falls_back", 200, 1, 0},
 		{"compact_no_fallback", 429, 0, 0},
 		{"disabled_fallback", 429, 0, 0}, {"upstream_started", 429, 0, 0},
-		{"opaque_state", 429, 0, 0}, {"tiered_preflight", 429, 0, 0},
+		{"opaque_state_still_falls_back", 200, 1, 0}, {"tiered_preflight", 429, 0, 0},
 		{"websocket_no_fallback", 429, 0, 0}, {"task_no_fallback", 429, 0, 0},
 		{"midjourney_no_fallback", 429, 0, 0},
 	} {
@@ -136,7 +136,7 @@ func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
 				require.NoError(t, service.RecordChannelUserQuotaUsage(t.Context(), target.Id, 77, 1))
 			}
 			body := `{"model":"gpt-4o-mini","messages":[{"role":"user","content":"你好"}],"max_tokens":10}`
-			if scenario.name == "opaque_state" {
+			if scenario.name == "opaque_state_still_falls_back" {
 				body = strings.TrimSuffix(body, "}") + `,"previous_response_id":"opaque"}`
 			}
 			path := "/v1/chat/completions"

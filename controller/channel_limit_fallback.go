@@ -91,8 +91,9 @@ func prepareChannelLimitFallback(c *gin.Context, info *relaycommon.RelayInfo, so
 	if err != nil {
 		return source, apiErr
 	}
+	// 管理员配置的唯一降级目标接收原始上游状态，由目标判断跨模型或渠道是否兼容。
 	body, err := storage.Bytes()
-	if err != nil || !service.ChannelLimitFallbackRequestPortable(body) {
+	if err != nil {
 		return source, apiErr
 	}
 	target, targetErr := service.ResolveChannelLimitFallbackTarget(c, selected)
