@@ -1269,3 +1269,24 @@
 ### Status
 
 [OK] **Completed**
+
+
+## Session 41: 完成 Compact 同渠道额度降级兼容
+
+**Date**: 2026-09-14
+**Task**: 完成 Compact 同渠道额度降级兼容
+**Branch**: `build-bak`
+
+### Summary
+
+实现 HTTP Responses Compact 同渠道模型降级，修正降级后的目标模型计费与预算归属，完成全量验证、规格同步和 build 触发。
+
+### Git Commits
+
+| Hash | Message |
+|------|---------|
+| `071481ecd` | (see git log) |
+
+### Status
+
+[OK] **Completed**

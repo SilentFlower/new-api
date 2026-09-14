@@ -8,8 +8,8 @@
 
 <!-- @@@auto:current-status -->
 - **Active File**: `journal-1.md`
-- **Total Sessions**: 40
-- **Last Active**: 2026-09-11
+- **Total Sessions**: 41
+- **Last Active**: 2026-09-14
 <!-- @@@/auto:current-status -->
 
 ---
@@ -19,7 +19,7 @@
 <!-- @@@auto:active-documents -->
 | File | Lines | Status |
 |------|-------|--------|
-| `journal-1.md` | ~1271 | Active |
+| `journal-1.md` | ~1292 | Active |
 <!-- @@@/auto:active-documents -->
 
 ---
@@ -29,6 +29,7 @@
 <!-- @@@auto:session-history -->
 | # | Date | Title | Commits | Branch |
 |---|------|-------|---------|--------|
+| 41 | 2026-09-14 | 完成 Compact 同渠道额度降级兼容 | `071481ecd` | `build-bak` |
 | 40 | 2026-09-11 | 号池降级展示推送与周期额度任务归档 | `45dc87b`, `0bb0c1489`, `34e7869b9` | `build-bak` |
 | 39 | 2026-08-28 | 完成 Relay 流式保活任务归档 | `1bec63851` | `build-bak` |
 | 38 | 2026-08-20 | 完成用户限额与 ai-fund 升级 | `b9af4ba00` | `build-bak` |
