@@ -1,0 +1,486 @@
+{
+  "id": "compact-same-channel-fallback",
+  "name": "compact-same-channel-fallback",
+  "title": "同渠道 Responses Compact 额度降级兼容",
+  "description": "当渠道周期预算触发同渠道换模型时，让 HTTP Responses Compact 保持原始协议与请求字段，使用目标模型完成远程压缩，并保持计费与审计正确；不扩展跨渠道或本地压缩。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-09-14",
+  "completedAt": "2026-09-14",
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-09-14T08:52:19Z",
+      "contextKey": "codex_01a09ecf-a534-79d1-822c-f7ef0064c3d0",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "0b4cad055154738a68f6683981eaaf4cdfd26d2e",
+        "status": [
+          {
+            "status": "??",
+            "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc"
+          },
+          {
+            "status": "??",
+            "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/check.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/design.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-ai-fund/task.json"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/brief.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/check.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/design.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/implement.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/implement.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/research/deployment-2026-09-13.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/brief.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/design.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/implement.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-12-channel-budget-unification/task.json"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/check.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/implement.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/task.json"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux/check.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux/design.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux/implement.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux/implement.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux/research/ai-fund-redesign.html"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux/research/ai-fund-ui-audit.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux/research/channel-budget-redesign.html"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux/research/newapi-ui-audit.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux/research/newapi-visual-walkthrough.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-13-channel-budget-ux/task.json"
+          }
+        ],
+        "repositories": [
+          {
+            "root": ".",
+            "head": "0b4cad055154738a68f6683981eaaf4cdfd26d2e",
+            "status": [
+              {
+                "status": "??",
+                "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc"
+              },
+              {
+                "status": "??",
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/check.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/design.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/task.json"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/brief.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/check.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/design.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/implement.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/implement.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/deployment-2026-09-13.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/brief.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/design.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/implement.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-12-channel-budget-unification/task.json"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/check.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/implement.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/task.json"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux/check.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux/design.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux/implement.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux/implement.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux/research/ai-fund-redesign.html"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux/research/ai-fund-ui-audit.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux/research/channel-budget-redesign.html"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux/research/newapi-ui-audit.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux/research/newapi-visual-walkthrough.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-13-channel-budget-ux/task.json"
+              }
+            ],
+            "worktreeDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "indexDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "untracked": [
+              {
+                "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc",
+                "sha256": "5b434c1f233e42c5db42aa2f50543cf78b17e0b3ee3532d478bb1990b398a730"
+              },
+              {
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc",
+                "sha256": "1d2f57c10c78999e9ad2e460dd6ef0801e3db602ee8e8faa48b90df176b98a57"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/check.jsonl",
+                "sha256": "3f5ec3d2b51f99c46c497d7ab01537c46fcbad0bc9a12b60f06887c8743aa685"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/design.md",
+                "sha256": "12ec2d20d6c21c33163d571f5cb49c65cc3ba5fb8334923ac882d6643ed40896"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.jsonl",
+                "sha256": "3f5ec3d2b51f99c46c497d7ab01537c46fcbad0bc9a12b60f06887c8743aa685"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/implement.md",
+                "sha256": "7ea1e2034c419295ddda15b3767da21d171a7747f3527aae5afac4d91191139c"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/prd.md",
+                "sha256": "b01672876ec6187a957d9c4ff6e0d8b3b2afd48849af4765150775d3484cdd05"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-ai-fund/task.json",
+                "sha256": "71f7b6867148480ab253f18cf2fcad03ccb07c75b5bbb8a746d427aeb058b75d"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/brief.md",
+                "sha256": "2cb050985956602ee6e3f5f6261b4cec7b3ea314caa97418c8a3ecf99f44b4d6"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/check.jsonl",
+                "sha256": "3f5ec3d2b51f99c46c497d7ab01537c46fcbad0bc9a12b60f06887c8743aa685"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/design.md",
+                "sha256": "14513da711add1400d2e98ed43ba1b59258187c9e311941374f7dfca5331d98a"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/implement.jsonl",
+                "sha256": "3f5ec3d2b51f99c46c497d7ab01537c46fcbad0bc9a12b60f06887c8743aa685"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/implement.md",
+                "sha256": "b4b0ab6b0eae9eae3b31a1f0094941e4f11f206f52d50e87c60954a63dfae971"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/prd.md",
+                "sha256": "01a00e45a13d3e9965f4f1ecd6a610a220f3c417411350c5bae64f67468b0fa4"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/deployment-2026-09-13.md",
+                "sha256": "740ad3c25b755a6d209e37aff29422e9a6f2dfd33352cf0849dae68fc97c6ef2"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/brief.md",
+                "sha256": "c69e39b7f5a744185b1e9521444d72279dedb1c4f5e8d7e231c1515104ce53af"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/design.md",
+                "sha256": "c8946cbf474c3b6cab4540e3ae5fbfec7ea21edbe1edec492b0d8ce8a154999a"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/implement.md",
+                "sha256": "be34e32134dd05e3c8e1b9522ac8e4534ccb203ca87caaabf5fb2624661e8e46"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/research/legacy-09-11/prd.md",
+                "sha256": "4d2d827ed39b403a1ab319a4e5da5b98546ebbec293c223072b33b8b5915cd72"
+              },
+              {
+                "path": ".trellis/tasks/09-12-channel-budget-unification/task.json",
+                "sha256": "22ede9f2b3bf8499b114b67369f12c4e096642c638b951d775096d42ed20a74c"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/check.jsonl",
+                "sha256": "40dabff4b3e0949c79f6dbbbec55ba4d8eb31ab989ba5c77786bf2c951c88b92"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/implement.jsonl",
+                "sha256": "40dabff4b3e0949c79f6dbbbec55ba4d8eb31ab989ba5c77786bf2c951c88b92"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/prd.md",
+                "sha256": "ec3b06256dc3ceff53d336ba7899bff36adc6135d3a2b15132ba98830e33aa48"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux-aifund/task.json",
+                "sha256": "e11016d09eb36938d6a1abf6811b6e7dc31e14ae15d7b9cb94fbf50134fc0430"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux/check.jsonl",
+                "sha256": "e1b72181270e3c1aa2eb28e42902ac54e183be3a9b9065f41aec03bb28e3b6ca"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux/design.md",
+                "sha256": "eff1dba06cff5a4d3377ebfe3986a5238ffb2ebabf26fab25f0cf65bcb74cebd"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux/implement.jsonl",
+                "sha256": "536c03e18b78e773b90cede789faf7c5a100536c8107a06edf4e522259e7a5e7"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux/implement.md",
+                "sha256": "dc8fdd84c5f89666091bfcd78fe97ba39586b0ac272e2b705712859a490d9409"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux/prd.md",
+                "sha256": "862038550cd50a3e10cfe1671277803056d4cec352ffad6af9e4c96d495a153d"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux/research/ai-fund-redesign.html",
+                "sha256": "5b517f49ae7b9327d1069bd083ec3e9e6c14803e4866cee8e8b9ea1381b807f8"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux/research/ai-fund-ui-audit.md",
+                "sha256": "ae404060da1c620caae7a8081c66562d901dbe630e25d6177b1f76567faacbe0"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux/research/channel-budget-redesign.html",
+                "sha256": "53bd4e06cd35cc083b91fb2661806550078b58e5626073c3c911fa7d60660722"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux/research/newapi-ui-audit.md",
+                "sha256": "1cd1c62dc8551ec25bda55f6510f4cc6eb08d961d68821c881ea043dfc87c713"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux/research/newapi-visual-walkthrough.md",
+                "sha256": "d52ca58863c333e7e41897742d2acb9ca38517ad352a957c03f5610fca732d47"
+              },
+              {
+                "path": ".trellis/tasks/09-13-channel-budget-ux/task.json",
+                "sha256": "b3cbe6dd344a088170c43617f4117ca8ecbdffd1dd6aec41d6d32b75230d10b9"
+              }
+            ],
+            "conflicts": [],
+            "integration": [],
+            "fingerprint": "8d8d55733590ffd7ca8caa494136721727a0ef5fea094891c3f531dcd6df81a5"
+          }
+        ],
+        "fingerprint": "8358e840e37f25ca7e4beb8796d4f248ebb3321af41076462adde8c23474712c"
+      }
+    }
+  },
+  "progress": {
+    "updatedAt": "2026-09-14T17:53:48+08:00",
+    "completedSteps": [
+      "实现 HTTP Responses Compact 同渠道模型降级",
+      "将 HTTP 降级模型预算归属到目标路由模型",
+      "完成回归测试、Check-All 与规格同步",
+      "提交并推送业务变更"
+    ],
+    "partialStep": null,
+    "nextStep": "任务已完成",
+    "notes": "全仓 Go 测试、相关 vet 与 diff 检查通过。"
+  }
+}
