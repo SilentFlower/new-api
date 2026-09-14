@@ -6,9 +6,9 @@
 
 ### 1. Scope / Trigger
 
-- Trigger: 修改 `use_upstream_model_for_billing`、模型映射后的价格查询、`RelayInfo` 计费模型字段或方法、预扣/结算/退款、任务计费上下文、消费日志模型名，或 Compact 临时查价。
+- Trigger: 修改 `use_upstream_model_for_billing`、模型映射或额度降级后的价格查询、`RelayInfo` 路由/计费模型字段或方法、预扣/结算/退款、任务计费上下文、消费日志模型名，或 Compact 临时查价。
 - 适用范围: 普通文本、音频/实时、图片、异步任务、Alpha Search 和 Responses Compact 等读取 `RelayInfo` 计费模型的路径。
-- 风险背景: `OriginModelName`、`UpstreamModelName` 和实际计费模型承担不同语义。价格阶段未冻结或调用方重新推导模型，会让预扣、结算、退款、任务和日志使用不同价格来源；跨渠道重试复用旧快照还会把前一渠道映射带入下一渠道。
+- 风险背景: `OriginModelName`、`RoutingModelName`、`UpstreamModelName` 和实际计费模型承担不同语义。价格阶段未冻结或调用方重新推导模型，会让预扣、结算、退款、任务和日志使用不同价格来源；跨渠道重试复用旧快照还会把前一渠道映射带入下一渠道。
 
 ### 2. Signatures
 
@@ -20,7 +20,8 @@ type ChannelSettings struct {
 }
 
 type RelayInfo struct {
-	OriginModelName         string
+	OriginModelName          string
+	RoutingModelName         string
 	ResolvedBillingModelName string
 	*ChannelMeta
 }
@@ -30,6 +31,7 @@ type RelayInfo struct {
 
 ```go
 func (info *RelayInfo) ShouldUseUpstreamModelForBilling() bool
+func (info *RelayInfo) RoutingModel() string
 func (info *RelayInfo) ResolveBillingModelName() string
 func (info *RelayInfo) FreezeBillingModelName(modelName string)
 func (info *RelayInfo) ClearBillingModelName()
@@ -55,6 +57,7 @@ type TaskBillingContext struct {
   - 仓内调用方不得直接读写 `ResolvedBillingModelName`；需要保存当前冻结值时调用 `FrozenBillingModelName()`，写入或恢复时调用 `FreezeBillingModelName()`。
 - 模型语义：
   - `OriginModelName` 始终表示用户请求的原始模型，不能被覆盖成计费模型。
+  - `RoutingModelName` 只表示额度降级选择的目标模型；`RoutingModel()` 优先返回该目标，未降级时回退 `OriginModelName`。
   - `UpstreamModelName` 表示模型映射后的最终上游模型。
   - `ResolveBillingModelName()` 只解析当前渠道尝试：开关开启、`IsModelMapped=true` 且上游模型非空时使用上游模型，否则使用 `RoutingModel()`（无降级等于原始模型，降级等于目标配置模型），详见 [周期预算与降级契约](./channel-period-budget-fallback.md)。
   - 原始模型带 `-openai-compact` 后缀且选择上游模型计费时，计费模型必须通过 `ratio_setting.WithCompactModelSuffix` 保留后缀。
@@ -65,7 +68,7 @@ type TaskBillingContext struct {
 - 重试与临时查价：
   - 每次主渠道尝试开始必须调用 `ClearBillingModelName()`，让新渠道按自身映射和开关重新解析；成功查价后重新冻结。
   - Responses Compact 兼容路径临时重新查价时，必须用 `FrozenBillingModelName()` 保存原值，并在成功和错误返回前通过 `FreezeBillingModelName()` 恢复。
-  - Compact 原始透传使用基础模型冻结计费，`use_upstream_model_for_billing` 不得改变其基础模型契约。
+  - Compact 原始透传使用当前 `RoutingModel()` 冻结计费：未降级时是客户端基础模型，同渠道额度降级后是目标模型；`use_upstream_model_for_billing` 不得把它改成渠道映射别名。
 - 消费方：
   - 预扣、文本/音频/实时结算、工具费、违规费、BillingSession、渠道测试和日志统一调用 `BillingModelName()`，不得重新判断渠道开关或映射状态。
   - 消费日志主模型字段和消息审计 finalize 必须共用 `ConsumeLogModelName()`；该函数以 `BillingModelName()` 为输入，仅保留既有 `gpt-4-gizmo*`、`gpt-4o-gizmo*` 通配展示兼容。计费查价仍直接使用 `BillingModelName()`，不得使用展示归一化值。
@@ -79,10 +82,11 @@ type TaskBillingContext struct {
 
 | 条件 | 计费模型行为 |
 | --- | --- |
-| 开关关闭，模型发生映射 | 使用 `OriginModelName` |
-| 开关开启，但未发生映射 | 使用 `OriginModelName` |
+| 开关关闭，模型发生映射 | 使用 `RoutingModel()`；未降级时等于 `OriginModelName` |
+| 开关开启，但未发生映射 | 使用 `RoutingModel()`；额度降级后等于目标模型 |
 | 开关开启且发生映射 | 使用最终 `UpstreamModelName` |
-| 上游模型为空 | 回退 `OriginModelName` |
+| 上游模型为空 | 回退 `RoutingModel()` |
+| HTTP Compact 同渠道额度降级 | `OriginModelName` 保留客户端模型，按目标 `RoutingModel()` 冻结计费 |
 | 原始模型带 Compact 后缀且映射 | 上游模型附加同一 Compact 后缀 |
 | 价格阶段冻结后上游模型字段变化 | `BillingModelName()` 仍返回冻结值 |
 | 新渠道重试开始 | 清空旧冻结值，按新渠道重新解析并冻结 |
@@ -95,14 +99,17 @@ type TaskBillingContext struct {
 ### 5. Good/Base/Bad Cases
 
 - Good: 用户请求 `gpt-4o`，渠道映射到 `gpt-4o-mini` 且开启开关；价格、预扣、结算、任务和日志统一使用冻结的 `gpt-4o-mini`。
+- Good: 用户请求 `gpt-6-astra` 的 HTTP Compact，额度降级到同渠道 `gpt-5.6-sol`；原始模型继续用于审计，价格、预扣、结算和消费日志统一冻结为 Sol。
 - Good: 第一次渠道映射到模型 A 后失败；第二次渠道开始时清空快照并映射到模型 B，最终所有费用和日志使用 B。
 - Good: 上游响应把模型名改成资源路径；结算继续读取预扣阶段冻结模型，不重新查价。
 - Good: 模型映射后消费日志和消息审计都调用 `ConsumeLogModelName()`，管理员按请求 ID 对照时模型名一致。
 - Base: 历史渠道缺少开关字段；零值为 false，继续按原始模型计费。
+- Base: 没有额度降级时 `RoutingModel()` 回退 `OriginModelName`，普通未映射请求的计费结果不变。
 - Base: 历史任务没有 `billing_model_name`；轮询结算按保存的原始模型兼容执行。
 - Bad: 在 `service/quota.go`、任务或日志层重复判断 `UseUpstreamModelForBilling`，导致不同路径语义漂移。
 - Bad: 结算阶段直接读取当前 `UpstreamModelName` 或重新调用价格配置，绕过预扣阶段冻结。
 - Bad: Responses handler 直接保存和恢复 `ResolvedBillingModelName` 字段，使快照语义泄漏到领域外。
+- Bad: Compact 准备重新把 `OriginModelName` 写成目标模型；这会丢失客户端意图，并让降级审计无法区分来源与目标。
 - Bad: 消息审计重新实现模型映射或 gizmo 判断，导致与消费日志展示漂移。
 
 ### 6. Tests Required
@@ -115,6 +122,7 @@ type TaskBillingContext struct {
 - service 测试覆盖普通冻结模型和两类 gizmo 归一化，断言消费日志与消息审计使用相同结果。
 - 任务测试覆盖提交时保存 `BillingModelName`、消费日志追溯字段和历史任务回退。
 - 重试测试覆盖每次渠道尝试清理旧快照、成功渠道重新冻结。
+- `controller/channel_limit_fallback_compact_test.go` 覆盖三种 HTTP Compact 同渠道降级，断言消费日志按目标模型计费一次且 `channel_limit_fallback.original_model` 仍为客户端模型。
 - 回归命令：
   - `go test ./relay/common ./relay/helper ./relay ./service ./controller -count=1`
   - `go test -race ./relay/common ./relay/helper ./service -run 'BillingModel|MappedUpstreamModel|TaskBilling|TextQuotaSummary' -count=1`

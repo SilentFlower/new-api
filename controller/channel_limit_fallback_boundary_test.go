@@ -47,7 +47,7 @@ func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
 		{"source_recovery", 200, 0, 1}, {"target_exhausted", 429, 0, 0},
 		{"pinned", 429, 0, 0}, {"token_model_denied", 403, 0, 0}, {"group_denied", 403, 0, 0},
 		{"target_disabled", 403, 0, 0}, {"unknown_field_still_falls_back", 200, 1, 0},
-		{"compact_no_fallback", 429, 0, 0},
+		{"compact_cross_channel_no_fallback", 429, 0, 0},
 		{"disabled_fallback", 429, 0, 0}, {"upstream_started", 429, 0, 0},
 		{"opaque_state_still_falls_back", 200, 1, 0}, {"tiered_preflight", 429, 0, 0},
 		{"websocket_no_fallback", 429, 0, 0}, {"task_no_fallback", 429, 0, 0},
@@ -105,7 +105,7 @@ func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
 				source.Type = constant.ChannelTypeMidjourney
 				source.Models = "mj_imagine"
 			}
-			if scenario.name == "compact_no_fallback" {
+			if scenario.name == "compact_cross_channel_no_fallback" {
 				setting := `{"responses_compact_passthrough_enabled":true}`
 				source.Setting = &setting
 			}
@@ -144,7 +144,7 @@ func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
 			if scenario.name == "unknown_field_still_falls_back" {
 				body = strings.TrimSuffix(body, "}") + `,"unknown_capability":true}`
 			}
-			if scenario.name == "compact_no_fallback" {
+			if scenario.name == "compact_cross_channel_no_fallback" {
 				path = "/v1/responses/compact"
 				format = types.RelayFormatOpenAIResponses
 				body = `{"model":"gpt-4o-mini","input":"你好"}`

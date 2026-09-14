@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/dto"
 	"github.com/QuantumNous/new-api/model"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -20,6 +21,49 @@ func modelUsageRow(scope, window string, models ...string) dto.ChannelBudgetRow 
 	row := budgetRow("模型预算", scope, window, "", 100)
 	row.Models = models
 	return row
+}
+
+// TestRecordRelayChannelUserQuotaUsageUsesRoutingModel 验证降级按目标路由模型累计，普通模型映射仍按原始路由模型累计。
+// @param t 测试上下文。
+func TestRecordRelayChannelUserQuotaUsageUsesRoutingModel(t *testing.T) {
+	for index, test := range []struct {
+		name         string
+		routingModel string
+		expected     map[string]int64
+	}{
+		{name: "额度降级", routingModel: "B", expected: map[string]int64{"A": 0, "B": 7, "provider-alias": 0}},
+		{name: "普通模型映射", routingModel: "", expected: map[string]int64{"A": 7, "B": 0, "provider-alias": 0}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			now := time.Date(2031, 9, 16+index, 10, 0, 0, 0, time.Local)
+			channel := setupChannelPeriodTest(t, &now, false)
+			config := budgetConfig(nil,
+				modelUsageRow("pool", "daily", "A"),
+				modelUsageRow("pool", "daily", "B"),
+				modelUsageRow("pool", "daily", "provider-alias"),
+			)
+			view, err := SaveChannelPeriodPolicy(t.Context(), channel.Id, dto.ChannelPeriodPolicyInput{Config: config}, 1)
+			require.NoError(t, err)
+			info := &relaycommon.RelayInfo{
+				UserId:           7,
+				OriginModelName:  "A",
+				RoutingModelName: test.routingModel,
+				ChannelMeta:      &relaycommon.ChannelMeta{ChannelId: channel.Id, UpstreamModelName: "provider-alias", IsModelMapped: true},
+			}
+			RecordRelayChannelUserQuotaUsage(t.Context(), info, 7)
+			actual := make(map[string]int64)
+			for _, row := range view.Config.Budgets {
+				if len(row.Models) == 0 {
+					continue
+				}
+				require.Len(t, row.Models, 1)
+				usage, err := GetChannelBudgetUsage(t.Context(), channel.Id, row.ID, "pool", 0, 20)
+				require.NoError(t, err)
+				actual[row.Models[0]] = usage.UsedQuota
+			}
+			assert.Equal(t, test.expected, actual)
+		})
+	}
 }
 
 func TestChannelModelUsageBeforeBudgetAndAdjustmentIsolation(t *testing.T) {

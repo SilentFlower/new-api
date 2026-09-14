@@ -54,3 +54,20 @@ func TestResponsesRetryPreservesOriginalParameters(t *testing.T) {
 	assert.Equal(t, float64(0), *preserved.Temperature)
 	assert.False(t, *preserved.Stream)
 }
+
+// TestResponsesCompactionCloneIsolatesModelAndRawFields 验证 Compact 预检副本不会污染正式请求的模型和原始字段。
+// @param t 测试上下文。
+func TestResponsesCompactionCloneIsolatesModelAndRawFields(t *testing.T) {
+	var request dto.OpenAIResponsesCompactionRequest
+	require.NoError(t, common.Unmarshal([]byte(`{"model":"gpt-6-astra","input":{"count":0,"enabled":false},"prompt_cache_key":"opaque"}`), &request))
+	cloned, err := cloneRelayRequest(&request)
+	require.NoError(t, err)
+	compaction := cloned.(*dto.OpenAIResponsesCompactionRequest)
+	compaction.SetModelName("gpt-5.6-sol")
+	compaction.Input[2] = 'X'
+	compaction.PromptCacheKey[1] = 'Y'
+
+	assert.Equal(t, "gpt-6-astra", request.Model)
+	assert.JSONEq(t, `{"count":0,"enabled":false}`, string(request.Input))
+	assert.Equal(t, `"opaque"`, string(request.PromptCacheKey))
+}

@@ -20,13 +20,13 @@ func RecordChannelUserQuotaUsage(ctx context.Context, channelID int, userID int,
 	return RecordChannelUserModelQuotaUsage(ctx, channelID, userID, quota, "")
 }
 
-// RecordChannelUserModelQuotaUsage 记录带原始模型名的正向额度，按模型的预算行据此累计。
+// RecordChannelUserModelQuotaUsage 记录带预算匹配模型名的正向额度，按模型的预算行据此累计。
 //
 // @param ctx 请求上下文。
 // @param channelID 实际记账的渠道 ID。
 // @param userID 实际消费的用户 ID。
 // @param quota 本次新增的正向额度。
-// @param modelName 客户端原始模型名，空表示不按模型匹配。
+// @param modelName 预算匹配使用的路由模型名，空表示不按模型匹配。
 // @return error 任一周期状态写入失败时返回错误。
 func RecordChannelUserModelQuotaUsage(ctx context.Context, channelID int, userID int, quota int, modelName string) error {
 	err := recordChannelBudgetUsage(ctx, channelID, userID, quota, modelName)
@@ -49,7 +49,7 @@ func RecordRelayChannelUserQuotaUsage(ctx context.Context, relayInfo *relaycommo
 	if relayInfo == nil || relayInfo.ChannelMeta == nil || quota <= 0 {
 		return
 	}
-	if err := RecordChannelUserModelQuotaUsage(ctx, relayInfo.ChannelId, relayInfo.UserId, quota, relayInfo.OriginModelName); err != nil {
+	if err := RecordChannelUserModelQuotaUsage(ctx, relayInfo.ChannelId, relayInfo.UserId, quota, relayInfo.RoutingModel()); err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf(
 			"记录渠道单用户周期额度失败: channel_id=%d user_id=%d quota=%d error=%s",
 			relayInfo.ChannelId,

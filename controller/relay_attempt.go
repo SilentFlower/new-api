@@ -85,6 +85,16 @@ func cloneRelayRequest(request dto.Request) (dto.Request, error) {
 			return nil, err
 		}
 		return &cloned, nil
+	case *dto.OpenAIResponsesCompactionRequest:
+		data, err := common.Marshal(req)
+		if err != nil {
+			return nil, err
+		}
+		var cloned dto.OpenAIResponsesCompactionRequest
+		if err := common.Unmarshal(data, &cloned); err != nil {
+			return nil, err
+		}
+		return &cloned, nil
 	case *dto.AlphaSearchRequest:
 		cloned := *req
 		return &cloned, nil

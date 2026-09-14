@@ -150,7 +150,7 @@ for key, values := range c.Request.URL.Query() {
 
 ### 1. Scope / Trigger
 
-- Trigger：修改 `POST /v1/responses/compact`、`POST /v1/responses`、`GET /v1/responses`、管理端 Compact 渠道测试，或修改 Compact 检测、渠道选择、渠道 `setting`、HTTP/WS 原始透传、usage 结算、重试、亲和性和审计日志。
+- Trigger：修改 `POST /v1/responses/compact`、`POST /v1/responses`、`GET /v1/responses`、管理端 Compact 渠道测试，或修改 Compact 检测、渠道选择、渠道 `setting`、HTTP 同渠道额度降级、HTTP/WS 原始透传、usage 结算、重试、亲和性和审计日志。
 - new-api 只承接 Compact 协议透传、渠道能力门禁和基础模型计费；sub2api 负责历史 body bridge 的协议提升与 SSE 合成。
 - build 分支实现必须遵循 `../guides/build-upstream-friendly-customization.md`：核心逻辑放在独立新文件，原有 Relay、WebSocket 和前端大表单只保留最薄分派或挂载。
 
@@ -171,6 +171,8 @@ func ShouldHandleResponsesCompactPassthrough(info *relaycommon.RelayInfo) bool
 func PrepareResponsesCompactPassthrough(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError
 func ResponsesCompactPassthroughHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError
 func ParseResponsesCompactPassthroughUsage(raw json.RawMessage) (*dto.Usage, bool)
+func (info *RelayInfo) RoutingModel() string
+func RecordRelayChannelUserQuotaUsage(ctx context.Context, relayInfo *relaycommon.RelayInfo, quota int)
 
 func SelectResponsesWebSocketChannel(c *gin.Context, modelName string) (*model.Channel, *types.NewAPIError)
 func ValidateResponsesWebSocketModelAccess(c *gin.Context, modelName string) *types.NewAPIError
@@ -196,10 +198,17 @@ responses_compact_passthrough_enabled: boolean
 - 开关关闭返回 `503 responses_compact_passthrough_disabled`，同时设置 `skipRetry` 和 `noRecordErrorLog`；不得换渠、清理亲和性、auto-ban、发起上游请求或预扣。
 - 只有门禁通过后的真实上游错误继续服从现有状态码映射、渠道处理和重试语义。
 
+#### HTTP 同渠道额度降级
+
+- V1 path、历史 body bridge 和 V2 HTTP 均参与周期预算预检；V2 WebSocket 不进入该自动降级入口。
+- 来源预算 429 解析出的目标必须是同一物理渠道。行级 `channel_id=0` 或归一后的本渠道 ID 可以切换目标模型；跨渠道目标保持来源预算 429，不调用目标渠道。
+- 来源与目标分别按当时的 `RoutingModel()` 执行 Token 模型权限、分组能力、渠道状态、Compact 能力、价格和周期预算预检。目标任一检查失败时必须在 BillingSession 和上游调用前返回，且不得继续第三跳。
+- Compact 目标预检复用 `PrepareResponsesCompactPassthrough`，不调用 `ModelMappedHelper` 或普通请求 converter。目标成功后 `OriginModelName` 保留客户端基础模型，`RoutingModelName`、`UpstreamModelName`、冻结计费模型和消费日志主模型使用目标模型。
+
 #### 原始请求与路径
 
-- Compact 跳过 `ModelMappedHelper`、Param Override、disabled fields 和请求 DTO 重组；HTTP 从原始 `BodyStorage` 读取，WebSocket 返回原始 frame 副本。未知字段、显式 `0` / `false`、加密内容和字段顺序不得被本地重组丢失。
-- 基础模型同时写入 `OriginModelName`、`UpstreamModelName` 和计费快照；`IsModelMapped=false`，渠道 `use_upstream_model_for_billing` 对 Compact 透传不生效。
+- Compact 跳过 `ModelMappedHelper`、Param Override、disabled fields 和请求 DTO 重组；HTTP 从原始 `BodyStorage` 读取，WebSocket 返回原始 frame 副本。未知字段、显式 `0` / `false`、加密内容和字段顺序不得被本地重组丢失。同渠道额度降级是唯一例外：使用 `sjson.SetBytes` 只替换 HTTP 原始正文的顶层 `model`，嵌套同名字段不得变化。
+- `OriginModelName` 始终保存客户端基础模型；`RoutingModel()` 在未降级时返回基础模型、降级后返回目标模型，并同步到 `UpstreamModelName` 和计费快照。`IsModelMapped=false`，渠道 `use_upstream_model_for_billing` 对 Compact 透传不生效。
 - 路径矩阵：
   - V1 path：OpenAI-compatible `/v1/responses/compact`；Codex/sub2api `/backend-api/codex/responses/compact`。
   - 历史 body bridge：保持普通 `/responses`；Codex/sub2api `/backend-api/codex/responses`，由 sub2api 提升协议并生成 SSE。
@@ -212,7 +221,8 @@ responses_compact_passthrough_enabled: boolean
 - JSON 响应写回原始字节；SSE 按读到的原始行字节写回并及时 flush；WebSocket text/binary payload 按原始 frame 写回。旁路 observer 只能读取终态、usage 和工具计数，不能修改 payload。
 - 只有成功终态和完整合法 usage 才能调用 `PostTextConsumeQuota`。合法 usage 必须同时包含数字 `input_tokens`、`output_tokens`、`total_tokens`，数值非负、不超过 `common.MaxQuota`，且 `input_tokens + output_tokens == total_tokens`；cache token 也必须非负且不超过上限。
 - usage 缺失、null、字段不完整、负数、溢出、总数不一致，或请求失败、取消、断连、流不完整时，必须调用 BillingSession `Refund`；不得按输出文本估算，也不得补零后收费。
-- Compact 价格、预扣、结算和消费日志主模型均使用基础模型；不新增 Compact 工具价格、固定调用费或独立计费体系。已有真实 WebSearch 等工具调用仍按现有工具规则统计。
+- Compact 价格、预扣、结算和消费日志主模型均使用本次 `RoutingModel()`：未降级时是客户端基础模型，同渠道降级后是目标模型；不新增 Compact 工具价格、固定调用费或独立计费体系。已有真实 WebSearch 等工具调用仍按现有工具规则统计。
+- HTTP Compact 正向结算后的渠道模型预算也按 `RoutingModel()` 累计；降级成功后来源模型不再新增，目标模型按本次正向结算额度增加。已写入当前周期的历史计数不迁移，到期后按既有周期自然重置。
 - `ChannelSettings` 缺失新字段时默认 `false`，不需要数据库迁移。Default/Classic 保存 `setting` 时必须保留未知 JSON 字段。
 
 #### Responses WebSocket 生命周期
@@ -242,6 +252,9 @@ responses_compact_passthrough_enabled: boolean
 | 普通 HTTP/WS Responses 不满足 Compact 信号 | mode=`none`，普通路径、映射、计费和重试不变 |
 | 未配置任何 `*-openai-compact` 模型或价格 | 使用基础模型完成权限、亲和选渠、预扣和结算 |
 | 已选渠道关闭 Compact 透传 | `503 responses_compact_passthrough_disabled`；不换渠、不清亲和性、不 auto-ban、不预扣、不记上游错误日志 |
+| HTTP Compact 来源模型预算超限，同渠道目标可用 | 顶层 `model` 改为目标模型后原生透传；按目标模型计费、记日志和累计预算一次 |
+| HTTP Compact 来源模型预算超限，目标为其他渠道 | 保持来源预算 429；目标调用、预扣、消费日志均为 0 |
+| HTTP Compact 目标模型预算、权限或能力预检失败 | 返回目标预检错误；上游调用、预扣、消费日志均为 0，且不第三跳 |
 | V1 path 使用 Codex/sub2api | 上游 `/backend-api/codex/responses/compact` |
 | 历史 bridge 或 V2 使用 Codex/sub2api | 上游 `/backend-api/codex/responses` |
 | Compact 请求含模型映射、Param Override 或 disabled fields | 全部跳过，原始请求体/frame 保持不变 |
@@ -263,16 +276,19 @@ responses_compact_passthrough_enabled: boolean
 ### 5. Good / Base / Bad Cases
 
 - Good：亲和性命中 sub2api 渠道，渠道只配置 `gpt-5.6-sol` 且开启能力；V1 到 `/backend-api/codex/responses/compact`，V2/历史 bridge 到 `/backend-api/codex/responses`，全程按 `gpt-5.6-sol` 计费。
+- Good：客户端用 `gpt-6-astra` 发起 HTTP Compact，来源预算耗尽并配置同渠道 `gpt-5.6-sol`；上游只看到顶层模型切换，账单、消费日志和新增模型预算归 Sol，审计仍保留 Astra 原始模型。
 - Good：请求含未知字段、`false` 和 `0`；上游收到的 HTTP body/WS frame 与下游原始字节一致，响应中的 `encrypted_content` 和未来字段原样返回。
 - Good：所选亲和渠道关闭能力；立即返回专用 503，未调用上游、未预扣、未重选或清理亲和性。
 - Good：WS 亲和性命中一个不支持 `/v1/responses` 的 Advanced Custom 渠道；独立选渠逻辑清理失效亲和性，并回落到支持基础模型的普通渠道。
 - Good：管理端用基础模型测试 OpenAI、Codex 或 Advanced Custom 原生 Compact route；即使渠道配置模型映射和 Param Override，上游仍收到基础模型合成 body。
 - Base：旧渠道没有新字段；开关默认为 false，普通 Responses 不受影响。
+- Base：HTTP Compact 未触发额度降级；`RoutingModel()` 回退客户端基础模型，请求、计费和预算归属保持既有行为。
 - Base：完整 usage 的三个 token 字段显式为零；视为结构合法并按零实际额度结算，不能误判为字段缺失。
 - Base：旧渠道的默认测试模型仍带 `-openai-compact`；选择 Compact 端点时归一为基础模型，选择普通端点时保持原值以避免扩大兼容变更。
 - Bad：给基础模型追加 `-openai-compact` 后再做 Token 权限、选渠、模型映射或计费。
 - Bad：历史 bridge 发到 `/responses/compact` 后由 new-api 把 unary JSON 重组为 SSE。
 - Bad：能力开关参与候选渠道过滤，导致亲和渠道被静默替换。
+- Bad：Compact 来源超限后直接使用跨渠道目标，或把 `OriginModelName` 覆盖成目标模型；前者破坏原生渠道能力边界，后者丢失客户端审计身份。
 - Bad：为了让 WS 复用 HTTP 选渠而把 `Distribute` 主体抽成通用 helper，导致上游核心文件被大面积重排。
 - Bad：completed 缺 usage 时按本地 tokenizer 估算收费，或补零 usage 后记录为正常成功计费。
 - Bad：生产 Compact 已走原始透传，但管理端渠道测试仍追加后缀并调用 converter，导致测试结果与真实请求语义相反。
@@ -280,7 +296,8 @@ responses_compact_passthrough_enabled: boolean
 ### 6. Tests Required
 
 - detector：覆盖 V1 path、历史 bridge、V2 HTTP、V2 WS、普通 Responses、多 header value、逗号 token 和 substring 误匹配。
-- 分发与门禁：断言四种 Compact 模式使用基础模型；关闭能力返回专用 503、`skipRetry`、`noRecordErrorLog`，且 Billing 未创建/预扣。
+- 分发与门禁：断言四种 Compact 模式初始使用基础模型；关闭能力返回专用 503、`skipRetry`、`noRecordErrorLog`，且 Billing 未创建/预扣。
+- HTTP 同渠道降级：三种 HTTP Compact 模式覆盖来源超限后切换目标成功、跨渠道保持来源 429、目标预算耗尽和能力关闭；断言只有顶层 `model` 改变，目标模型唯一计费和累计，失败时零上游、零扣费、零消费日志且不第三跳。
 - HTTP：使用真实 `httptest` 上游断言 OpenAI/Codex 路径矩阵、原始 body、Channel Authorization、客户端 Cookie/Authorization 过滤、JSON/SSE 原始响应和安全响应头。
 - usage：覆盖完整非零、完整显式零、缺失/null、不完整、负数、超过 `common.MaxQuota`、总数不一致、失败终态和不完整流；断言只结算一次或退款。
 - WebSocket：覆盖原始 frame、基础模型计费、开关关闭不 failover、多 turn 普通/Compact 交替、completed 非法 usage 退款、失败/取消/断连退款。
@@ -334,6 +351,13 @@ channel, apiErr := SelectAndSetupChannel(c, request, true)
 ```go
 // 所有 Compact 模式先按基础模型完成普通分发和亲和性选择。
 selectionModel = modelName
+```
+
+```go
+// 正式准备按当前路由模型工作；未降级时自然回退客户端基础模型。
+baseModel := strings.TrimSpace(info.RoutingModel())
+info.UpstreamModelName = baseModel
+info.IsModelMapped = false
 ```
 
 ```go

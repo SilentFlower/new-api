@@ -15,7 +15,7 @@
 - `model/channel_user_budget_override.go`：`ChannelUserBudgetOverride` 唯一 `(channel_id,user_id,budget_id)`，额度为 `quota_limit bigint`，另含 expires_at/updated_by/created_at/updated_at；旧日周和规则覆盖表仅供迁移及回滚保留。
 - `model/channel_quota_tracking.go`：渠道最近一次计数缺口时间，无金额副本。预算覆盖表与策略、缺口表都必须进入普通和快速迁移。
 - `GetChannelPeriodStatus(ctx, channel, userID)` 返回权威指标；`CheckSelectedChannelPeriodLimits(c)` 由 Controller 与 Relay 旧统一检查点调用。
-- `RecordChannelUserQuotaUsage(ctx, channelID, userID, quota)` 原子累计限额计数；`RecordChannelUserModelQuotaUsage(ctx, channelID, userID, quota, modelName)` 带客户端原始模型名累计，前者委托后者并传空模型名。relay 入口 `RecordRelayChannelUserQuotaUsage` 传 `relayInfo.OriginModelName`，任务结算传 `task.Properties.OriginModelName`。
+- `RecordChannelUserQuotaUsage(ctx, channelID, userID, quota)` 原子累计限额计数；`RecordChannelUserModelQuotaUsage(ctx, channelID, userID, quota, modelName)` 按预算匹配模型累计，前者委托后者并传空模型名。HTTP Relay 入口 `RecordRelayChannelUserQuotaUsage` 传 `relayInfo.RoutingModel()`，任务结算仍传 `task.Properties.OriginModelName`。
 - 内核（`service/channel_budget_plan.go` / `channel_budget_usage.go` / `channel_budget_guard.go`）：`buildChannelBudgetPlan(view) channelBudgetPlan` 直接消费 v2；`resolveChannelBudgetRows(plan, now, modelName)` 解析时段状态、下一切换点与每组生效行；`newChannelBudgetCounter(channelID, row, res)` 把行映射到计数 key；`evaluateChannelBudgets(ctx, channel, userID, modelName)` 产出指标及对应行；`SelectChannelLimitFallback(config, sourceChannelID, block) (dto.ChannelLimitFallback, bool)` 选择降级目标。v1 投影 `resolveChannelPeriodSources` 已删除，预览使用 `PreviewChannelBudgetPolicy`。
 - `GetChannelPeriodPolicy(ctx, channelID)` / `SaveChannelPeriodPolicy(ctx, channelID, input, updatedBy)` 读取或按版本保存策略；本地缓存发布由 `cacheChannelPeriodPolicy(key, data, revision) []byte` 返回选定版本。
 - `controller/relay_attempt.go` 的 `cloneRelayRequest(request dto.Request)` 隔离每次尝试；额度降级不在本地判断原始请求中的上游状态是否可移植。
@@ -31,17 +31,17 @@
 
 - 写入为 `{expected_revision,config}`；config 完整显式包含 `{schema_version:2,default_on_exceed,schedules,budgets}`。`default_on_exceed` 为 `{mode:reject|fallback,channel_id,model}`；行级动作额外允许 inherit。额度为 int64，`limit` 为 `0..common.MaxPeriodQuota`（10^15，保持在 2^53 内）；0 表示不限，不提供零额度封禁。null 不再表示行额度继承。
 - config 额外允许 `model_usage_tracking_enabled:boolean` 和 `model_usage_tracking:{first_enabled_at,enabled_at,disabled_at}`，预算行额外允许 `counter_source:"continuous_model"`；均不是旧 v2 的必填字段。无历史配置默认关闭，旧客户端保存时省略开关须保留服务端旧值，显式 false 才表示关闭。切换时间与来源由服务端根据旧配置确定，客户端不能用回传元数据改写历史；持久化仍用原 TEXT 配置，无新增表或环境变量。
-- 时段只描述日期/每周区间，额度均由预算行承载；`models` 去空白、去重、排序，空数组匹配所有模型，非空按原始模型名精确匹配。行名 1..80 字；最多 128 行、64 个时段（均含停用）；daily/weekly 可引用时段，occurrence 必须引用存在的时段。
+- 时段只描述日期/每周区间，额度均由预算行承载；`models` 去空白、去重、排序，空数组匹配所有模型，非空按本次预算匹配模型精确匹配。HTTP Relay 未降级时该模型等于客户端原始模型，额度降级后等于目标路由模型，普通渠道模型映射的上游别名不参与匹配。行名 1..80 字；最多 128 行、64 个时段（均含停用）；daily/weekly 可引用时段，occurrence 必须引用存在的时段。
 - 分组键 `(scope,window,models)` 内按 date_range > weekly > 无时段行解析，再应用个人覆盖。日/周个人提额可覆盖同分组的当前生效行，按计划行顺序取第一个有效提额；occurrence 提额只作用匹配 budget_id。其他分组及池子上限继续约束。
 - date_range 使用服务器 time.Local 解释 start_local/end_local，保存 start_at/end_at；weekly 用周一=0 的星期和 HH:mm，支持跨周。区间 `[start,end)`，DST 不存在/歧义边界拒绝；同级同指标相交拒绝。
 - ID/created_at 由服务端建立；新行和时段可携带 `new-` 临时 ID，同一请求的引用由服务端归一化。名称/额度修改不换计数身份；模型、窗口或 occurrence 时段身份变化时更新行 created_at，新身份尚无计数时据此计算 tracking_since，已有共享计数仍复用其起点。正在计量的时段边界不得修改；停用、遮盖期间仍累计，已保存行/时段从提交列表删除会转为停用，预览不持久化身份。
 - Redis key 保留旧个人日/周结构，新增池子日/周与规则 occurrence Hash 使用相同渠道 hash tag。Lua 预检所有类型与 int64 溢出后 HINCRBY；内存锁顺序固定为新增计数→个人日→个人周。Redis 故障不得改走内存。
 - 预算行完整字段为 `{id,name,enabled,scope:user|pool,window:daily|weekly|occurrence,schedule_id,models,limit,on_exceed:{mode,channel_id,model},created_at}`。迁移派生 ID 固定为 `legacy-user-daily` / `legacy-user-weekly` / `legacy-pool-daily` / `legacy-pool-weekly` 与 `rule-<ruleID>-{user,pool}-{daily,occurrence}`；v1 未填写的规则额度不生成行。计数身份 `(window, occurrence 时的 schedule_id, models)`：无模型的 daily/weekly 身份个人字段在旧 `channel_user_{daily,weekly}_quota` key、`__pool` 在 `channel_pool_{daily,weekly}_quota` key；无模型 occurrence 身份两者同为 `channel_period_quota:{cid}:{ruleID}:{occStart}`；其余身份为 `channel_budget:{cid}:{sha1(window|schedule|models) 前 12 位}:{windowStart}`。同身份行共享计数，范围或额度不同不意味着新计数。
-- 累计脚本 ARGV 固定为 `(userID, delta, now)`，其后每个 KEY 依次携带 `(expireAt, since, poolFlag)`；`poolFlag=1` 时同时累加 `__pool` 并 `HSETNX __since`。停用规则的 occurrence 仍计数但不展示、不拦截；请求前检查只解析命中原始模型名的行，管理端展示传空模型名取全部行。
-- 以上为既有预算计数语义。开启持续累计后，每次正向结算按客户端原始模型名同时记录个人与池子的日、周事实，即使没有模型预算。关闭后仅停止尚无预算需求的模型/周期；已保存的 `continuous_model` 行（包括停用行）所需事实继续累计。旧预算身份保留原来源及人工值；首次开启后新建的非空模型日/周身份使用 continuous_model，同身份跨 scope/日周时段继续复用来源。全模型及 occurrence 仍走原计数。
+- 累计脚本 ARGV 固定为 `(userID, delta, now)`，其后每个 KEY 依次携带 `(expireAt, since, poolFlag)`；`poolFlag=1` 时同时累加 `__pool` 并 `HSETNX __since`。停用规则的 occurrence 仍计数但不展示、不拦截；请求前检查只解析命中预算匹配模型的行，管理端展示传空模型名取全部行。
+- 以上为既有预算计数语义。开启持续累计后，每次正向结算按调用方传入的预算匹配模型同时记录个人与池子的日、周事实，即使没有模型预算。HTTP Relay 使用 `RoutingModel()`：无降级时仍是客户端原始模型，降级后改为目标模型；任务等未接入 HTTP 额度降级的入口继续使用各自保存的原始模型。关闭后仅停止尚无预算需求的模型/周期；已保存的 `continuous_model` 行（包括停用行）所需事实继续累计。旧预算身份保留原来源及人工值；首次开启后新建的非空模型日/周身份使用 continuous_model，同身份跨 scope/日周时段继续复用来源。全模型及 occurrence 仍走原计数。
 - 原始事实 key 为 `channel_model_usage:{cid}:{daily|weekly}:{完整 SHA-256 模型摘要}:{windowStart}`，Hash 字段为用户 ID、`__pool`、`__since`；与旧计数一并进入同一次累计 Lua，最多追加两个 key，不增加结算写往返。事实与调整均在窗口结束后 86400 秒过期；内存调整附在既有周期桶上并复用清理与锁顺序，不能另建无界历史表。
 - continuous_model 人工调整不改原始事实：`channel_model_adjustment:{cid}:{原计数身份摘要}:{windowStart}` 按用户 ID 或 `__pool` 保存十进制字符串数组 `[绝对目标,各模型当时原始值...]`，后续用量为目标加各模型快照后的增量。调整只影响同计数身份及所选字段，不影响其他模型集合、其他用户或另一 scope。一个 Lua 原子读取全部选中模型及调整；请求检查只读当前用户、池子和起点，管理列表才用 HGETALL。金额预检与聚合必须保留 int64 精度，禁止 Lua tonumber/浮点求和造成精度丢失或负数。
-- 开启前及关闭缺口不回填；重新开启可复用当前窗口保留的事实。新来源行即使创建较晚，也从事实起点读取；缺少事实时以当前可证明的累计起点为准。最近关闭区段与窗口相交时保守标记 incomplete，包括跨日/周关闭；已有持续预算可能仍被保守提示缺口。空原始模型名继续旧计数并记录缺口，不创建空模型事实。内存重启不能声称恢复了历史，Redis 已存事实的起点不因进程重启后移。
+- 开启前及关闭缺口不回填；重新开启可复用当前窗口保留的事实。新来源行即使创建较晚，也从事实起点读取；缺少事实时以当前可证明的累计起点为准。最近关闭区段与窗口相交时保守标记 incomplete，包括跨日/周关闭；已有持续预算可能仍被保守提示缺口。空预算匹配模型名继续旧计数并记录缺口，不创建空模型事实。内存重启不能声称恢复了历史，Redis 已存事实的起点不因进程重启后移。
 - 发布累计功能时先更新全部 new-api 实例，再开放开关及配套前端，避免旧实例把新来源读成旧计数。关闭开关不等于代码回滚；回退到不认识新来源的程序须配套恢复发布前策略与对应计数，不能仅关闭开关后直接回退。
 - 旧错误码只属于 `scope=user` 且 `models` 为空的行（daily → `channel_user_daily_quota_exceeded`，weekly → `channel_user_weekly_quota_exceeded`）；按模型的行超限统一返回 `channel_period_quota_exceeded`。行级 `on_exceed` 优先，inherit 回落 `default_on_exceed`；行级 `channel_id=0` 表示同渠道换模型，仅允许 models 非空且目标不在该模型集合内。保存时显式指向来源渠道的行级目标也归一为 0；策略级禁止指向自身。
 - `CheckSelectedChannelPeriodLimits` 不再按 revision=0 早返回，不回写旧日周上下文键；Controller/Relay 的统一入口及降级目标预检始终使用预算判定。旧日周独立检查、RelayInfo 日周快照字段与对应上下文键已删除。
@@ -66,9 +66,9 @@
 - 原始请求和每次尝试的 Responses 克隆不得调用其带业务过滤的 `MarshalJSON`：模型映射前的别名不能决定是否删除 `thinking_budget`。克隆使用无该方法的局部定义类型后进行 JSON 深复制；最终出站仍按映射后模型过滤。显式零值和切片、指针的尝试隔离必须保留，包括未配置降级的普通请求。
 - 适配器转换和最终出站 JSON 都必须保留全部客户端字段，例外仅顶层 model 和 false stream 省略。原生结构不一致或目标接口无法转换时仍在目标准备阶段拒绝，不靠厂商或模型名猜测兼容性。
 - 管理员配置额度降级即授权网关将原请求原样交给唯一目标尝试，除顶层 model 外不得因 `previous_response_id`、文件、容器、`encrypted_content`、Claude `redacted_thinking` 等状态字段提前拒绝；状态能否跨模型或渠道复用由目标上游判定。目标上游拒绝时返回该次真实错误且不再第三跳。
-- OriginModelName 保持原始审计值，RoutingModelName 表示目标，价格仍经 Resolve/FreezeBillingModelName；目标映射计费开关生效。Advanced Custom 的预检转换和实际发送都使用 `info.RoutingModel()` 匹配模型路由，不能重新按来源模型匹配。阶梯表达式留到真实输入估算阶段，纯预检只判断分组免费语义。
-- WebSocket/任务/MJ/Compact 等执行同一额度检查，不自动降级。成功日志 `other.admin_info.channel_limit_fallback` 保留来源、目标与原因；亲和性不把备用误记成原路由成功。
-- 降级预检必须先用 `relay.ShouldHandleResponsesCompactPassthrough(info)` 排除全部 Compact 模式，再查询策略或执行模型映射/查价。历史 body bridge 与 V2 HTTP 也使用 `/v1/responses`，只按 URL 排除 `/v1/responses/compact` 会误查旧的 `*-openai-compact` 价格；这些请求继续由独立 Compact 准备和 `prepareMainRelayBilling` 执行基础模型计费、能力及额度门禁。
+- OriginModelName 保持原始审计值，RoutingModelName 表示目标，价格仍经 Resolve/FreezeBillingModelName；目标映射计费开关生效。Advanced Custom 的预检转换和实际发送都使用 `info.RoutingModel()` 匹配模型路由，不能重新按来源模型匹配；正向结算后的模型预算累计也必须使用同一个 `RoutingModel()`，不能把目标费用继续写入来源模型卡片。阶梯表达式留到真实输入估算阶段，纯预检只判断分组免费语义。
+- WebSocket、任务和 MJ 执行同一额度检查但不自动降级；HTTP Responses Compact 仅允许同一物理渠道内换模型，跨渠道目标仍返回来源预算 429。成功日志 `other.admin_info.channel_limit_fallback` 保留来源、目标与原因；亲和性不把备用误记成原路由成功。
+- 降级预检必须用 `relay.ShouldHandleResponsesCompactPassthrough(info)` 识别全部 Compact 模式。Compact 来源与同渠道目标均通过 `PrepareResponsesCompactPassthrough` 按当前 `RoutingModel()` 完成能力、价格和预算检查，跳过普通模型映射与请求转换；历史 body bridge 与 V2 HTTP 也使用 `/v1/responses`，不能只按 URL 识别。目标预检成功后只局部替换原始 body 的顶层 `model`，不得重组未知字段、显式零值或加密内容。
 
 ### 4. Validation & Error Matrix
 
@@ -93,6 +93,9 @@
 | 无法保留目标请求字段 | 400 channel_limit_fallback_unavailable，上游调用 0 |
 | 仅工具 Schema 或业务参数含引用同名字段 | 不得仅凭字段名拒绝降级，继续目标权限、接口及字段保留校验 |
 | 请求含真实上游会话、文件或加密引用 | 原样调用唯一目标；目标拒绝时返回真实错误且不再第三跳 |
+| HTTP Compact 来源超限，同渠道目标模型可用 | 只替换顶层 `model` 后调用同一渠道，按目标模型计费和累计一次 |
+| HTTP Compact 来源超限，配置跨渠道目标 | 保持来源预算 429；不调用目标渠道、不预扣、不写消费日志 |
+| HTTP Compact 目标预算耗尽、权限拒绝或能力关闭 | 返回目标预检错误；零上游、零扣费、零消费日志且不再第三跳 |
 | 锁外旧查询恢复时缓存已有更高版本 | 返回缓存选定的新版本，不发布旧策略覆盖新策略 |
 | 财务成功、计数失败 | 保留业务响应、记录缺口和安全告警，不重试不重复扣费 |
 
@@ -105,6 +108,8 @@
 - 错误：改 OriginModelName 或删除 skipRetry 实现降级；正确：副作用前一次协调，保留原始模型并重新冻结目标价格。
 - 错误：别名 `alias-model` 的 Responses 请求先调用原 DTO 的序列化方法克隆，导致映射到 `qwen3-32b` 前丢失 `thinking_budget:0`；正确：克隆保留该值，最终发送时按映射后模型处理。
 - 正常：来源 `gpt-4o-mini` 超限后，按目标 `gpt-4o` 匹配 Advanced Custom 路由，唯一账单归目标；工具参数名为 `prompt` 或 `file_id` 时也可在全部校验通过后降级。
+- 正常：`gpt-6-astra` 的 HTTP Compact 超限后，同渠道切到 `gpt-5.6-sol`；`OriginModelName` 仍为 Astra，上游正文、账单、消费日志和新增模型预算均使用 Sol，Astra 卡片不再增长。
+- 错误：让 HTTP Compact 使用跨渠道降级，或在同渠道降级时把正向额度继续累计到 `OriginModelName`。正确：跨渠道保持来源 429；同渠道成功后按 `RoutingModel()` 计入目标模型。
 - 正常：基础日预算 100，`PUT /api/channel/80/budgets/legacy-user-daily/user-overrides/77` 提交 `{"limit":200,"expires_at":0}` 后显示 200；DELETE 后回到当前组基础值，重启仍保持撤销。
 - 边界：Astra 行更换为此前未计数的 Mini 模型集合，用量从新身份读取且 tracking_since 不早于变更时间；只改名或调额继续使用原起点。
 - 正常：先开启累计，用户已消费模型 A 60，再新增 A 日预算 100，新来源预算显示已用 60、剩余 40；旧来源身份继续保留原用量，不能自动迁移以覆盖人工调整。
@@ -118,7 +123,7 @@
 ### 6. Tests Required
 
 - `service/channel_period_policy_test.go`：两种存储、假期/跨周/到期/遮盖/停用、140 软超额、人工调整隔离、整数原子性、缺口、缓存损坏/迟到发布、结算失败不累计。
-- `service/channel_model_usage_test.go`：内存/Redis 的预算前累计、默认关闭、渠道隔离、旧来源保留、关闭/重开与跨周缺口、正向结算、组合/用户/池子调整隔离、原子失败、并发调整、精度/损坏及读取失败；相关并发用例执行 race。`service/channel_model_usage_benchmark_test.go` 仅在隔离 Redis 测量开关写开销与多模型读取，不用耗时阈值充当正确性断言。
+- `service/channel_model_usage_test.go`：内存/Redis 的预算前累计、默认关闭、渠道隔离、旧来源保留、关闭/重开与跨周缺口、正向结算、组合/用户/池子调整隔离、原子失败、并发调整、精度/损坏及读取失败；`TestRecordRelayChannelUserQuotaUsageUsesRoutingModel` 额外断言额度降级记目标模型、普通模型映射不记上游别名；相关并发用例执行 race。`service/channel_model_usage_benchmark_test.go` 仅在隔离 Redis 测量开关写开销与多模型读取，不用耗时阈值充当正确性断言。
 - `controller/channel_model_usage_test.go`：真实 API 验证提前累计、非法扩展值、旧客户端保存保留开关/时间/来源，输出 `worker/src/fixtures/channel-model-usage-contract.json` 供 ai-fund 两层和 Vue 使用；数据库合同测试覆盖 SQLite/MySQL/PostgreSQL 的 false、切换时间和来源 TEXT 往返。
 - `service/channel_budget_plan_test.go`：无模型身份的 userKey/poolKey 与旧 key 一致、时段日限与无时段日限共享计数、同组优先级与 next 切换点；模型精确匹配且与整体预算并行；降级 inherit/reject/同渠道/指定渠道；内存与 Redis 指标一致。`service/channel_budget_migrate_test.go` 保护派生 ID、归一化和 v2 校验矩阵。
 - `service/channel_period_policy_concurrency_test.go`：用显式屏障暂停存储访问，验证不同渠道 Redis 读取不互相阻塞；内存/Redis 均验证旧数据库快照恢复后返回新版且不覆盖新版缓存，并执行 race 检查。
@@ -129,8 +134,8 @@
 - `controller/channel_limit_fallback_test.go`：三协议 × 流/非流实际模拟上游、目标价格、唯一日志/钱包扣费、原始 DTO 不污染；Responses `encrypted_content` 与 Claude `redacted_thinking` 原样到达目标。
 - `controller/channel_limit_fallback_preflight_test.go`：完整 Relay 覆盖 Responses 别名的预算正值/零值/缺省及已配置但未触发降级；自定义目标直接访问与降级访问的实际路径、模型、唯一账单、钱包扣费，以及工具同名参数完整保留。
 - `controller/relay_attempt_responses_test.go`：先向非 Qwen 模型转换，再从原请求向 Qwen 重试，验证出站过滤仍生效且显式零值、原始输入和指针/切片未被前次尝试污染。
-- `controller/channel_limit_fallback_compact_test.go`：只配置基础模型价格，完整 Relay 覆盖 V1 path、历史 body bridge、V2 HTTP 的正常透传、额度耗尽和能力关闭；断言原始请求/响应、唯一基础模型账单和钱包扣款，拒绝时零上游/消费且不调用备用渠道。
-- `controller/channel_limit_fallback_boundary_test.go`：完整 Relay 的 retry=0、一次/禁用/恢复/目标限制与权限/上游状态原样转发/Compact、并发释放、阶梯预检；WebSocket 回合准备、任务和 Midjourney 在启用降级时仍因池子耗尽拒绝，上游调用和扣款均为零。
+- `controller/channel_limit_fallback_compact_test.go`：完整 Relay 覆盖 V1 path、历史 body bridge、V2 HTTP 的正常透传、同渠道目标模型降级、目标额度耗尽和能力关闭；断言只替换顶层模型、未知/零值/加密字段保留、唯一目标模型账单与预算累计，拒绝时零上游/消费且不再第三跳。
+- `controller/channel_limit_fallback_boundary_test.go`：完整 Relay 的 retry=0、一次/禁用/恢复/目标限制与权限/上游状态原样转发/Compact 跨渠道拒绝、并发释放、阶梯预检；WebSocket 回合准备、任务和 Midjourney 在启用降级时仍因池子耗尽拒绝，上游调用和扣款均为零。
 - `controller/channel_period_policy_test.go`：实际管理响应合同与 400/409；ai-fund fixture 来自该响应，`CHANNEL_PERIOD_CONTRACT_OUTPUT` 同时输出 `usage_summary`。
 - `controller/channel_budget_usage_summary_test.go` 与 `TestChannelPeriodPolicyManagementContract`：摘要覆盖全部已保存行且顺序与策略一致、个人行返回最高用量用户及含提额的 `effective_limit`、响应不泄露渠道 key；`router/channel_router_test.go` 断言该路由为 ChannelRead。
 - `controller/channel_limit_fallback_model_test.go`：真实 Relay → 模拟上游 → 结算/日志，覆盖按模型池子/个人日周、同渠道模型切换按目标价格扣费、目标个人限额阻断且不二跳。

@@ -3,6 +3,7 @@ package controller
 import (
 	"net/http"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -15,9 +16,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestChannelPeriodPolicyManagementContract 验证渠道周期策略的预览、保存、状态、汇总和降级目标契约。
+// @param t 测试上下文。
 func TestChannelPeriodPolicyManagementContract(t *testing.T) {
+	const channelID = 68200
+	channelIDText := strconv.Itoa(channelID)
 	db := setupChannelUserLimitsTestDB(t)
-	channel := model.Channel{Id: 80, Name: "合同渠道", Key: "must-not-leak", Status: common.ChannelStatusEnabled, Models: "gpt-6-astra,gpt-6-mini", Group: "default"}
+	channel := model.Channel{Id: channelID, Name: "合同渠道", Key: "must-not-leak", Status: common.ChannelStatusEnabled, Models: "gpt-6-astra,gpt-6-mini", Group: "default"}
 	require.NoError(t, db.Create(&channel).Error)
 	require.NoError(t, db.Create(&model.User{Id: 77, Username: "period-user", DisplayName: "周期用户"}).Error)
 	now := time.Now().In(time.Local)
@@ -31,12 +36,12 @@ func TestChannelPeriodPolicyManagementContract(t *testing.T) {
 			row("池子每周", "pool", "weekly", "", 100000000),
 			row("假期个人每日", "user", "daily", "new-holiday", 5000000),
 			row("假期个人整段", "user", "occurrence", "new-holiday", 15000000),
-			{Name: "gpt-6-astra 每日", Enabled: true, Scope: "pool", Window: "daily", Models: []string{"gpt-6-astra"}, Limit: 4000000, OnExceed: dto.ChannelBudgetAction{Mode: "fallback", ChannelID: 80, Model: "gpt-6-mini"}},
+			{Name: "gpt-6-astra 每日", Enabled: true, Scope: "pool", Window: "daily", Models: []string{"gpt-6-astra"}, Limit: 4000000, OnExceed: dto.ChannelBudgetAction{Mode: "fallback", ChannelID: channelID, Model: "gpt-6-mini"}},
 		}}}
 	body, err := common.Marshal(input)
 	require.NoError(t, err)
-	params := gin.Params{{Key: "id", Value: "80"}}
-	previewContext, previewRecorder := newChannelUserLimitTestContext(http.MethodPost, "/api/channel/80/period-policy/preview", string(body), params)
+	params := gin.Params{{Key: "id", Value: channelIDText}}
+	previewContext, previewRecorder := newChannelUserLimitTestContext(http.MethodPost, "/api/channel/"+channelIDText+"/period-policy/preview", string(body), params)
 	PreviewChannelPeriodPolicy(previewContext)
 	require.Equal(t, http.StatusOK, previewRecorder.Code, previewRecorder.Body.String())
 	var preview struct {
@@ -59,7 +64,7 @@ func TestChannelPeriodPolicyManagementContract(t *testing.T) {
 	input.Config = preview.Data.Config
 	body, err = common.Marshal(input)
 	require.NoError(t, err)
-	saveContext, saveRecorder := newChannelUserLimitTestContext(http.MethodPut, "/api/channel/80/period-policy", string(body), params)
+	saveContext, saveRecorder := newChannelUserLimitTestContext(http.MethodPut, "/api/channel/"+channelIDText+"/period-policy", string(body), params)
 	SetChannelPeriodPolicy(saveContext)
 	require.Equal(t, http.StatusOK, saveRecorder.Code, saveRecorder.Body.String())
 	var saved struct {
@@ -76,16 +81,16 @@ func TestChannelPeriodPolicyManagementContract(t *testing.T) {
 	}
 	assert.Equal(t, saved.Data.Config.Schedules[0].ID, saved.Data.Config.Budgets[2].ScheduleID)
 
-	conflictContext, conflictRecorder := newChannelUserLimitTestContext(http.MethodPut, "/api/channel/80/period-policy", string(body), params)
+	conflictContext, conflictRecorder := newChannelUserLimitTestContext(http.MethodPut, "/api/channel/"+channelIDText+"/period-policy", string(body), params)
 	SetChannelPeriodPolicy(conflictContext)
 	assert.Equal(t, http.StatusConflict, conflictRecorder.Code)
 	for _, invalid := range []string{`{"expected_revision":1}`, `{"expected_revision":null,"config":null}`, `{"config":{},"unexpected":true}`, `{"expected_revision":1,"config":{"schema_version":1,"pool_daily_quota_limit":1,"pool_weekly_quota_limit":0,"rules":[],"fallback":{"enabled":false,"channel_id":0,"model":""}}}`} {
-		c, recorder := newChannelUserLimitTestContext(http.MethodPut, "/api/channel/80/period-policy", invalid, params)
+		c, recorder := newChannelUserLimitTestContext(http.MethodPut, "/api/channel/"+channelIDText+"/period-policy", invalid, params)
 		SetChannelPeriodPolicy(c)
 		assert.Equal(t, http.StatusBadRequest, recorder.Code, invalid)
 	}
-	require.NoError(t, service.RecordChannelUserQuotaUsage(t.Context(), 80, 77, 1250000))
-	statusContext, statusRecorder := newChannelUserLimitTestContext(http.MethodGet, "/api/channel/80/user-limit-status/77", "", append(params, gin.Param{Key: "user_id", Value: "77"}))
+	require.NoError(t, service.RecordChannelUserQuotaUsage(t.Context(), channelID, 77, 1250000))
+	statusContext, statusRecorder := newChannelUserLimitTestContext(http.MethodGet, "/api/channel/"+channelIDText+"/user-limit-status/77", "", append(params, gin.Param{Key: "user_id", Value: "77"}))
 	GetChannelUserLimitStatus(statusContext)
 	var status struct {
 		Success bool                           `json:"success"`
@@ -101,7 +106,7 @@ func TestChannelPeriodPolicyManagementContract(t *testing.T) {
 	assert.Equal(t, saved.Data.Config.Budgets[3].ID, status.Data.PeriodLimits.Metrics[4].BudgetID)
 	assert.NotContains(t, statusRecorder.Body.String(), "must-not-leak")
 
-	summaryContext, summaryRecorder := newChannelUserLimitTestContext(http.MethodGet, "/api/channel/80/budgets/usage-summary", "", params)
+	summaryContext, summaryRecorder := newChannelUserLimitTestContext(http.MethodGet, "/api/channel/"+channelIDText+"/budgets/usage-summary", "", params)
 	GetChannelBudgetUsageSummary(summaryContext)
 	var summary struct {
 		Success bool                              `json:"success"`
@@ -122,7 +127,7 @@ func TestChannelPeriodPolicyManagementContract(t *testing.T) {
 	assert.Equal(t, int64(1250000), summary.Data.Items[0].UsedQuota)
 	assert.NotContains(t, summaryRecorder.Body.String(), "must-not-leak")
 
-	targetsContext, targetsRecorder := newChannelUserLimitTestContext(http.MethodGet, "/api/channel/80/period-policy/targets", "", params)
+	targetsContext, targetsRecorder := newChannelUserLimitTestContext(http.MethodGet, "/api/channel/"+channelIDText+"/period-policy/targets", "", params)
 	GetChannelPeriodPolicyTargets(targetsContext)
 	var targets struct {
 		Success bool `json:"success"`
@@ -135,7 +140,7 @@ func TestChannelPeriodPolicyManagementContract(t *testing.T) {
 	require.True(t, targets.Success)
 	selfSeen := false
 	for _, item := range targets.Data {
-		selfSeen = selfSeen || (item.ID == 80 && item.Self)
+		selfSeen = selfSeen || (item.ID == channelID && item.Self)
 	}
 	assert.True(t, selfSeen)
 	// 导出真实 Controller 响应给两仓合同测试；不为线上流量生成测试文件。

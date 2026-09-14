@@ -174,7 +174,10 @@ func TestChannelLimitFallbackModelBudgetsFullRelay(t *testing.T) {
 func TestChannelLimitFallbackSameChannelModelBilling(t *testing.T) {
 	f := newChannelBudgetRelayFixture(t, 71100)
 	config := budgetPoolDailyConfig(600, 0, "")
-	config.Budgets = append(config.Budgets, appdto.ChannelBudgetRow{Name: "Astra 日预算", Enabled: true, Scope: "pool", Window: "daily", Models: []string{"gpt-6-astra"}, Limit: 500, OnExceed: appdto.ChannelBudgetAction{Mode: "fallback", ChannelID: f.channel.Id, Model: "gpt-6-mini"}})
+	config.Budgets = append(config.Budgets,
+		appdto.ChannelBudgetRow{Name: "Astra 日预算", Enabled: true, Scope: "pool", Window: "daily", Models: []string{"gpt-6-astra"}, Limit: 500, OnExceed: appdto.ChannelBudgetAction{Mode: "fallback", ChannelID: f.channel.Id, Model: "gpt-6-mini"}},
+		appdto.ChannelBudgetRow{Name: "Mini 日预算", Enabled: true, Scope: "pool", Window: "daily", Models: []string{"gpt-6-mini"}, Limit: 500, OnExceed: appdto.ChannelBudgetAction{Mode: "reject"}},
+	)
 	view, err := service.SaveChannelPeriodPolicy(t.Context(), f.channel.Id, appdto.ChannelPeriodPolicyInput{Config: config}, 1)
 	require.NoError(t, err)
 	require.NoError(t, service.RecordChannelUserModelQuotaUsage(t.Context(), f.channel.Id, 77, 500, "gpt-6-astra"))
@@ -202,6 +205,12 @@ func TestChannelLimitFallbackSameChannelModelBilling(t *testing.T) {
 	var token model.Token
 	require.NoError(t, f.db.First(&token, 77).Error)
 	assert.Equal(t, 1000000-24, token.RemainQuota)
+	astraUsage, err := service.GetChannelBudgetUsage(t.Context(), f.channel.Id, view.Config.Budgets[1].ID, "pool", 0, 20)
+	require.NoError(t, err)
+	assert.Equal(t, int64(500), astraUsage.UsedQuota)
+	miniUsage, err := service.GetChannelBudgetUsage(t.Context(), f.channel.Id, view.Config.Budgets[2].ID, "pool", 0, 20)
+	require.NoError(t, err)
+	assert.Equal(t, int64(logs[0].Quota), miniUsage.UsedQuota)
 	require.NoError(t, service.SetChannelBudgetUsage(t.Context(), f.channel.Id, view.Config.Budgets[0].ID, appdto.ChannelBudgetUsageInput{Scope: "pool", UsedQuota: 600}))
 	response = f.request(t, 77, "gpt-6-astra")
 	assert.Equal(t, http.StatusTooManyRequests, response.Code, response.Body.String())

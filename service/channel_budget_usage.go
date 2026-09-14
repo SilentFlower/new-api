@@ -151,7 +151,7 @@ func channelBudgetTrackingStart(counter channelBudgetCounter, now time.Time) int
 // @param channelID 渠道 ID。
 // @param userID 用户 ID。
 // @param quota 正向额度。
-// @param modelName 客户端原始模型名，空表示不按模型匹配。
+// @param modelName 预算匹配使用的路由模型名，空表示不按模型匹配。
 // @return 参数、策略或存储错误。
 func recordChannelBudgetUsage(ctx context.Context, channelID, userID, quota int, modelName string) error {
 	if quota <= 0 {

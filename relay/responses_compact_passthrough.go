@@ -82,7 +82,7 @@ func ShouldHandleResponsesCompactPassthrough(info *relaycommon.RelayInfo) bool {
 	return info != nil && info.IsResponsesCompact()
 }
 
-// PrepareResponsesCompactPassthrough 在渠道选定后执行能力门禁并固定基础模型计费上下文。
+// PrepareResponsesCompactPassthrough 在渠道选定后执行能力门禁并固定本次路由模型计费上下文。
 // @param c 当前 Gin 请求上下文。
 // @param info 当前 Relay 请求信息。
 // @return 渠道未开启透传或请求上下文非法时返回不可重试错误，否则返回 nil。
@@ -102,7 +102,7 @@ func PrepareResponsesCompactPassthrough(c *gin.Context, info *relaycommon.RelayI
 		)
 	}
 
-	baseModel := strings.TrimSpace(info.OriginModelName)
+	baseModel := strings.TrimSpace(info.RoutingModel())
 	if baseModel == "" {
 		return types.NewErrorWithStatusCode(
 			errors.New("Responses Compact model is required"),
@@ -111,7 +111,6 @@ func PrepareResponsesCompactPassthrough(c *gin.Context, info *relaycommon.RelayI
 			types.ErrOptionWithSkipRetry(),
 		)
 	}
-	info.OriginModelName = baseModel
 	info.UpstreamModelName = baseModel
 	info.IsModelMapped = false
 	info.ClearBillingModelName()
