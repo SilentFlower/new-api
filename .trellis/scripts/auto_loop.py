@@ -19,7 +19,7 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from decision_log import DecisionLogError, append_decision
+from decision_log import DecisionLogError, append_decision, load_events
 from git_evidence import GitEvidenceError, discover_git_repositories, parse_porcelain_z
 
 SCHEMA_VERSION = 2
@@ -282,109 +282,49 @@ def _current_pointer(repo_root: Path) -> Path:
     return _auto_dir(repo_root) / "current.json"
 
 
-def _read_route_prefs(repo_root: Path) -> dict[str, str]:
-    """读取个人 route 默认配置，用于 start gate 判断是否需要 JSONL context。"""
-    path = repo_root / ".trellis/.route-prefs.tmp"
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return {}
-
-    prefs: dict[str, str] = {}
-    for raw in lines:
-        if "=" not in raw:
-            continue
-        key, value = raw.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if key == "implement" and value in VALID_IMPLEMENT_ROUTES:
-            prefs[key] = value
-        elif key == "check" and value in VALID_CHECK_ROUTES:
-            prefs[key] = value
-    return prefs
-
-
 def _route_state_helper(repo_root: Path) -> Path | None:
     """返回本地 trellis-route helper 路径，缺失时返回 None。"""
     candidates = [
         repo_root / ".agents/skills/trellis-route/scripts/route_state.py",
         repo_root / ".claude/skills/trellis-route/scripts/route_state.py",
     ]
+    # 其它平台把同一 helper 投影到各自原生 skill root；不能因为没有
+    # .agents/.claude 就把已安装的路由能力当作缺失。
+    candidates.extend(sorted(repo_root.glob(".*/skills/trellis-route/scripts/route_state.py")))
     for path in candidates:
-        if path.is_file():
+        if path.is_file() and path.resolve().is_relative_to(repo_root.resolve()):
             return path
     return None
 
 
-def _current_task_ref(repo_root: Path) -> str | None:
-    """读取当前活动任务路径，失败时返回 None。"""
-    result = subprocess.run(
-        ["python3", str(repo_root / ".trellis/scripts/task.py"), "current"],
-        cwd=repo_root,
-        check=False,
-        text=True,
-        capture_output=True,
-    )
-    for raw in result.stdout.splitlines():
-        line = raw.strip()
-        if line.startswith(".trellis/tasks/"):
-            return line
-        if "Current task:" in line:
-            value = line.split("Current task:", 1)[1].strip()
-            if value.startswith(".trellis/tasks/"):
-                return value
-    return None
-
-
-def _resolve_existing_route(repo_root: Path, task_ref: str, target: str) -> str | None:
-    """通过 trellis-route helper 解析已有 runtime/prefs route，失败时不阻断。"""
+def _effective_route_authorization(repo_root: Path, task_ref: str, route_authorization: Any) -> dict[str, str]:
+    """通过唯一 route helper 只读解析预检模式，缺失证据时保守要求上下文。"""
     helper = _route_state_helper(repo_root)
     if helper is None:
-        return None
-    if _current_task_ref(repo_root) != task_ref:
-        return None
-    result = subprocess.run(
-        ["python3", str(helper), "resolve", "--target", target],
-        cwd=repo_root,
-        check=False,
-        text=True,
-        capture_output=True,
-    )
-    try:
-        data = json.loads(result.stdout)
-    except json.JSONDecodeError:
-        return None
-    if not isinstance(data, dict) or data.get("status") != "hit":
-        return None
-    if data.get("task") != task_ref:
-        return None
-    mode = data.get("mode")
-    if target == "implement" and mode in VALID_IMPLEMENT_ROUTES:
-        return str(mode)
-    if target == "check" and mode in VALID_CHECK_ROUTES:
-        return str(mode)
-    return None
-
-
-def _effective_route_authorization(repo_root: Path, task_ref: str, route_authorization: Any) -> dict[str, str]:
-    """按 route 优先级估算 start gate 需要的 context 类型。"""
+        return {}
+    authorization = route_authorization if isinstance(route_authorization, dict) else {}
     effective: dict[str, str] = {}
-    if isinstance(route_authorization, dict):
-        implement = route_authorization.get("implement")
-        check = route_authorization.get("check")
-        if implement in VALID_IMPLEMENT_ROUTES:
-            effective["implement"] = str(implement)
-        if check in VALID_CHECK_ROUTES:
-            effective["check"] = str(check)
-
-    # 个人默认优先于 auto 临时授权；start gate 的 JSONL 判断也要遵守同一优先级，
-    # 否则可能在个人 subagent 默认下误放行，或在个人 inline 默认下误阻塞。
-    effective.update(_read_route_prefs(repo_root))
-    for target in ("implement", "check"):
-        if target not in effective:
-            mode = _resolve_existing_route(repo_root, task_ref, target)
-            if mode:
-                effective[target] = mode
+    for target, valid_modes in (("implement", VALID_IMPLEMENT_ROUTES), ("check", VALID_CHECK_ROUTES)):
+        command = [
+            "python3", str(helper), "resolve", "--target", target,
+            "--read-only", "--task", task_ref,
+        ]
+        mode = authorization.get(target)
+        if mode in valid_modes:
+            command.extend(["--auto-mode", str(mode)])
+        result = subprocess.run(command, cwd=repo_root, check=False, text=True, capture_output=True)
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError:
+            continue
+        if (
+            result.returncode == 0
+            and isinstance(data, dict)
+            and data.get("status") == "hit"
+            and data.get("task") == task_ref
+            and data.get("mode") in valid_modes
+        ):
+            effective[target] = str(data["mode"])
     return effective
 
 
@@ -1819,6 +1759,8 @@ def _compact_summary(state: dict[str, Any]) -> dict[str, Any]:
             "decision_count": sum(int(item.get("decision_count") or 0) for item in _queue_items(state)),
             "queue_reordered": bool(state.get("queue_reordered")),
         })
+        if current and current.get("artifact_recovery"):
+            summary["artifact_recovery"] = _recovery_summary(state, current)
     handoff = _pending_archive_handoff(state)
     if handoff:
         summary["task_lifecycle_note"] = handoff["note"]
@@ -2247,6 +2189,34 @@ def _current_artifact_hashes(repo_root: Path, item: dict[str, Any]) -> tuple[str
     return planning_hash, handoff_hash
 
 
+def _issue_running_action(
+    repo_root: Path, item: dict[str, Any], payload: dict[str, Any],
+    artifact_sha256: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """为 schema 2 新 action 固定载荷与基线，跨查询不再重新采样。"""
+    result = _remember_action(item, payload, artifact_sha256 if artifact_sha256 is not None else _task_artifact_hashes(repo_root, item))
+    item["action_generation"] = int(item.get("action_generation", 0)) + 1
+    item["last_action"]["generation"] = item["action_generation"]
+    item["last_action"]["payload"] = dict(payload)
+    item.pop("artifact_recovery", None)
+    return result
+
+
+def _replay_action(state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    """重放原 action；旧状态仅重建展示，不改原身份和基线。"""
+    last = item["last_action"]
+    if isinstance(last.get("payload"), dict):
+        return dict(last["payload"])
+    action = str(last["action"])
+    extra = {}
+    if action in CHECK_ACTIONS:
+        extra = {
+            "requested_check_depth": _requested_check_depth(state),
+            "minimum_check_depth": _minimum_check_depth(item, action),
+        }
+    return _action(action, item, extra)
+
+
 def _next_running_v2(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """按冻结 manifest 调度 schema 2 running 队列。"""
     queue = _queue_items(state)
@@ -2271,6 +2241,13 @@ def _next_running_v2(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, 
         if task_status not in ALLOWED_TASK_STATUSES:
             _block_item(item, "task-status-drift", f"任务状态已变化:{task_status}")
             continue
+        if _outstanding_action_name(item):
+            recovery = _inspect_action_artifacts(repo_root, state, item, "next")
+            if recovery is not None:
+                if item.get("status") == "blocked":
+                    continue
+                return item, recovery
+            return item, _replay_action(state, item)
         if item.get("planning_sha256"):
             try:
                 planning_hash, handoff_hash = _current_artifact_hashes(repo_root, item)
@@ -2296,12 +2273,12 @@ def _next_running_v2(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, 
 
         step = item.get("current_step") or ("start_task" if task_status == "planning" else "implement")
         if task_status == "planning" and step == "start_task":
-            return item, _remember_action(item, _action("start_task", item))
+            return item, _issue_running_action(repo_root, item, _action("start_task", item))
         if step in {"start_task", "implement"}:
             item["current_step"] = "implement"
-            return item, _remember_action(item, _action("run_implement", item))
+            return item, _issue_running_action(repo_root, item, _action("run_implement", item))
         if step == "check":
-            return item, _remember_action(item, _action("run_check_all", item, {
+            return item, _issue_running_action(repo_root, item, _action("run_check_all", item, {
                 "requested_check_depth": _requested_check_depth(state),
                 "minimum_check_depth": _minimum_check_depth(item, "run_check_all"),
             }), _task_artifact_hashes(repo_root, item))
@@ -2310,19 +2287,19 @@ def _next_running_v2(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, 
             if attempts > MAX_FIX_RECHECK:
                 _block_item(item, "retry-budget-exhausted", "fix/recheck 已达到默认 3 轮预算")
                 continue
-            return item, _remember_action(item, _action("run_fix", item, {
+            return item, _issue_running_action(repo_root, item, _action("run_fix", item, {
                 "attempt": attempts,
                 "max_attempts": MAX_FIX_RECHECK,
             }))
         if step == "recheck":
-            return item, _remember_action(item, _action("run_recheck", item, {
+            return item, _issue_running_action(repo_root, item, _action("run_recheck", item, {
                 "requested_check_depth": _requested_check_depth(state),
                 "minimum_check_depth": _minimum_check_depth(item, "run_recheck"),
             }), _task_artifact_hashes(repo_root, item))
         if step == "spec_update":
-            return item, _remember_action(item, _action("run_spec_update", item))
+            return item, _issue_running_action(repo_root, item, _action("run_spec_update", item))
         if step == "commit_only":
-            return item, _remember_action(item, _action("commit_only", item))
+            return item, _issue_running_action(repo_root, item, _action("commit_only", item))
         _block_item(item, "unknown-step", f"未知 current_step:{step}")
 
     state["status"] = _terminal_status(queue)
@@ -3502,7 +3479,7 @@ def _record_artifact_drift(
     detail: dict[str, Any],
 ) -> int:
     """按 action 风险和预算记录 artifact drift。"""
-    if action not in CHECK_ACTIONS or (
+    if action not in CHECK_ACTIONS or int((item.get("artifact_recovery") or {}).get("attempts", 0)) or (
         args.result == "blocked" and args.failure_type == "artifact-drift"
     ):
         item["last_action"] = None
@@ -3714,6 +3691,11 @@ def cmd_record(args: argparse.Namespace) -> int:
                 "current_step": item.get("current_step"),
                 "summary": _format_summary(state, args),
             })
+        recovery = item.get("artifact_recovery")
+        if recovery and not recovery.get("resolved") and not (args.result == "blocked" and args.failure_type == "artifact-drift"):
+            inspection = _inspect_action_artifacts(repo_root, state, item, "record")
+            _write_state(path, state)
+            return _print(inspection or _recovery_response(state, item))
         doc_rebind = _consume_check_doc_remediation(
             repo_root,
             state,
@@ -3724,6 +3706,15 @@ def cmd_record(args: argparse.Namespace) -> int:
         if isinstance(doc_rebind, dict) and doc_rebind.get("status") == "error":
             doc_rebind.update({"task": item.get("task"), "action": action})
             return _print(doc_rebind)
+        if action not in CHECK_ACTIONS and not (args.result == "blocked" and args.failure_type == "artifact-drift"):
+            inspection = _inspect_action_artifacts(repo_root, state, item, "record")
+            if inspection is not None:
+                _write_state(path, state)
+                if item.get("status") == "blocked":
+                    return _print({"status": "recorded", "run_id": state["run_id"], "task": item["task"],
+                                   "item_status": "blocked", "current_step": item["current_step"],
+                                   "summary": _format_summary(state, args)})
+                return _print(inspection)
         artifact_rebind = _consume_pending_artifact_decision(repo_root, state, item)
         if isinstance(artifact_rebind, dict) and artifact_rebind.get("unauthorized"):
             return _record_artifact_drift(
@@ -3878,6 +3869,326 @@ def cmd_stop(args: argparse.Namespace) -> int:
     return _print({"status": "stopped", "run_id": state.get("run_id"), "path": _rel_path(repo_root, path), "reason": args.reason})
 
 
+TASK_ARTIFACT_NAMES = {"prd.md", "design.md", "implement.md", "brief.md"}
+
+
+def _validate_decision_file(repo_root: Path, state: dict[str, Any], key: str) -> None:
+    """校验登记文件的仓库、路径及软链边界；允许尚未创建的代码文件。"""
+    repository, relative = key.split("::", 1)
+    registered = {".", *(str(entry.get("root") or ".") for entry in state.get("repositories", []))}
+    if repository not in registered:
+        raise ValueError(f"未登记仓库:{repository}")
+    path = Path(relative)
+    if not relative or path.is_absolute() or ".." in path.parts or "\\" in relative or path.as_posix() != relative:
+        raise ValueError(f"非法文件路径:{key}")
+    root = (repo_root / repository).resolve()
+    target = root / path
+    if not target.resolve().is_relative_to(root):
+        raise ValueError(f"文件越过仓库边界:{key}")
+    if any(part.is_symlink() for part in [target, *target.parents] if part != root and part.is_relative_to(root)):
+        raise ValueError(f"不接受软链文件或父目录:{key}")
+    if target.exists() and not target.is_file():
+        raise ValueError(f"目标不是普通文件:{key}")
+    if _protected_path_conflicts(state, [key]):
+        raise ValueError(f"protected-path-conflict:{key}")
+
+
+def _basename_candidates(
+    repo_root: Path, state: dict[str, Any], item: dict[str, Any], files: list[str],
+) -> dict[str, str]:
+    """只为根目录不存在的当前任务同名四文档生成确定映射。"""
+    candidates = {}
+    for key in files:
+        _validate_decision_file(repo_root, state, key)
+        repository, name = key.split("::", 1)
+        if repository != "." or name not in TASK_ARTIFACT_NAMES:
+            continue
+        target = f".::{item['task']}/{name}"
+        _validate_decision_file(repo_root, state, target)
+        if not (repo_root / item["task"] / name).is_file():
+            continue
+        if (repo_root / name).exists():
+            raise ValueError(f"根目录存在同名文件，不能推断任务目标:{key}")
+        candidates[key] = target
+    return candidates
+
+
+def _protected_drift_present(repo_root: Path, state: dict[str, Any]) -> bool:
+    """只读核对受保护基线，不消费漂移或移动 retained 基线。"""
+    return any(
+        _file_sha256(repo_root / str(repository.get("root") or ".") / entry["path"])
+        != str(entry.get("current_sha256") or entry.get("sha256") or "")
+        for repository in state.get("repositories", [])
+        for entry in repository.get("protected_retained", [])
+    )
+
+
+def _pending_event(
+    repo_root: Path, state: dict[str, Any], item: dict[str, Any],
+) -> dict[str, Any] | None:
+    """将 pending 与原决策及冻结版本核对，拒绝漂移后补造的基线。"""
+    pending = item.get("pending_artifact_decision")
+    if not isinstance(pending, dict):
+        return None
+    baseline = pending.get("artifact_sha256")
+    if not isinstance(baseline, dict) or set(baseline) != set(_task_artifact_hashes(repo_root, item)):
+        return None
+    if any(pending.get(key) != item.get(key) for key in ("planning_sha256", "handoff_sha256")):
+        return None
+    try:
+        event = next((event for event in load_events(_task_dir(repo_root, item["task"]))
+                      if event.get("decision_id") == pending.get("decision_id")), None)
+    except DecisionLogError:
+        return None
+    if not event or event.get("run_id") != state.get("run_id") or event.get("files") != pending.get("files"):
+        return None
+    if any(event.get(key) != pending.get(key) for key in ("planning_sha256", "handoff_sha256")):
+        return None
+    last_baseline = (item.get("last_action") or {}).get("artifact_sha256")
+    if last_baseline is not None and last_baseline != baseline:
+        return None
+    if pending.get("action") is not None and pending["action"] != _action_identity(item):
+        return None
+    return event
+
+
+def _recovery_summary(state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    """默认只展示纠正必需上下文，完整回执留在 runtime。"""
+    recovery = item["artifact_recovery"]
+    summary = {key: value for key, value in recovery.items() if key != "receipts"}
+    if recovery.get("resolved"):
+        summary["instruction"] = "纠正已完成；原登记被拒绝时先重试 decide，否则继续原 action 并真实 record。不要重放纠正来推进阶段。"
+        return summary
+    summary["command"] = ["python3", "./.trellis/scripts/auto_loop.py", "reconcile",
+                          "--run-id", state["run_id"], "--task", item["task"],
+                          "--recovery-id", recovery["recovery_id"], "--attempt-id", "<本次唯一ID>",
+                          "--result", "<ok|failed|blocked>", "--summary", "<纠正结论>"]
+    return summary
+
+
+def _recovery_response(state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    """返回当前纠正上下文，持久状态仍为 running。"""
+    return {
+        "status": "retryable", "reason": "artifact-recovery-required",
+        "run_id": state["run_id"], "task": item["task"],
+        "action": _outstanding_action_name(item), "recovery": _recovery_summary(state, item),
+        "instruction": "同轮读取原决策与实际 diff，核实归属后纠正；使用 reconcile --recovery-id 和唯一 --attempt-id 回写。不要跳阶段或要求用户继续；无法安全归因时回写 blocked。",
+    }
+
+
+def _action_identity(item: dict[str, Any]) -> dict[str, Any]:
+    """用原发行时刻和代次标识 action，避免同秒重发时误复用纠正回执。"""
+    last = item["last_action"]
+    return {key: last.get(key) for key in ("action", "current_step", "issued_at", "generation")}
+
+
+def _diagnose_recovery(
+    state: dict[str, Any], item: dict[str, Any], source: str,
+    baseline: dict[str, str], candidates: dict[str, str], changed: list[str],
+) -> dict[str, Any]:
+    """把诊断绑定到原 action；重新观察不会重置实际纠正预算。"""
+    identity = _action_identity(item)
+    binding = {"run_id": state["run_id"], "task": item["task"], "action": identity, "baseline": baseline}
+    recovery_id = hashlib.sha256(json.dumps(binding, sort_keys=True).encode()).hexdigest()[:24]
+    recovery = item.get("artifact_recovery")
+    if not isinstance(recovery, dict) or recovery.get("action") != identity:
+        recovery = {"recovery_id": recovery_id, "action": identity, "baseline": baseline,
+                    "attempts": 0, "max_attempts": 3, "receipts": []}
+        item["artifact_recovery"] = recovery
+    recovery.update({"source": source, "candidates": candidates, "changed": changed,
+                     "decision_id": (item.get("pending_artifact_decision") or {}).get("decision_id"),
+                     "resolved": False})
+    if recovery["attempts"] >= recovery["max_attempts"]:
+        _block_item(item, "artifact-drift", "原 action 的实际纠正预算已耗尽",
+                    {"recovery_id": recovery["recovery_id"], "attempt": recovery["attempts"], "max_attempts": 3, "exhausted": True})
+        return {"status": "blocked", "reason": "artifact-drift", "recovery": recovery}
+    return _recovery_response(state, item)
+
+
+def _inspect_action_artifacts(
+    repo_root: Path, state: dict[str, Any], item: dict[str, Any], source: str,
+) -> dict[str, Any] | None:
+    """在 next/非 Check record 校验原 action；只诊断，不接受文档或消费决策。"""
+    if _protected_drift_present(repo_root, state):
+        _block_item(item, "protected-baseline-drift", "受保护文件已变化，恢复查询不消费基线")
+        return {"status": "blocked", "reason": "protected-baseline-drift"}
+    last = item["last_action"]
+    pending = item.get("pending_artifact_decision")
+    recovery = item.get("artifact_recovery")
+    current = _task_artifact_hashes(repo_root, item)
+    baseline = pending.get("artifact_sha256") if isinstance(pending, dict) else last.get("artifact_sha256")
+    hashes = _current_artifact_hashes(repo_root, item)
+    drift = bool(item.get("planning_sha256")) and hashes != (item.get("planning_sha256"), item.get("handoff_sha256"))
+    changed = sorted(key for key in current if isinstance(baseline, dict) and current[key] != baseline.get(key))
+    if last["action"] in CHECK_ACTIONS and int(item.get("attempts", {}).get("artifact_reconcile", 0)):
+        result = _replay_action(state, item)
+        result.update({"status": "retryable", "reason": "artifact-drift",
+                       "attempt": item["attempts"]["artifact_reconcile"], "max_attempts": MAX_ARTIFACT_RECONCILE,
+                       "instruction": "继续原 Check artifact-drift 自纠并重新 record；不要调用 next 或 reconcile，不重置原基线与预算。"})
+        return result
+    if isinstance(pending, dict):
+        if not _pending_event(repo_root, state, item):
+            _block_item(item, "artifact-drift", "pending 决策缺少可信原始基线或日志")
+            return {"status": "blocked", "reason": "artifact-drift"}
+        try:
+            files = pending["files"]
+            candidates = _basename_candidates(repo_root, state, item, files)
+        except ValueError as exc:
+            _block_item(item, "artifact-drift", str(exc))
+            return {"status": "blocked", "reason": "artifact-drift"}
+        if candidates:
+            return _diagnose_recovery(state, item, source, baseline, candidates, changed)
+        if set(changed) <= set(files):
+            if recovery and not recovery.get("resolved"):
+                return _recovery_response(state, item)
+            return None
+    elif recovery and not recovery.get("resolved"):
+        recovery["changed"] = changed
+        return _recovery_response(state, item)
+    elif last["action"] in CHECK_ACTIONS and isinstance(baseline, dict):
+        allowed = {f".::{item['task']}/{name}" for name in ("implement.md", "brief.md")}
+        if set(changed) <= allowed:
+            result = _replay_action(state, item)
+            if changed:
+                result["instruction"] += " 保留原基线；先审查 DOC 资格，再用 --doc-remediation-file 精确申报真实修改。"
+            return result
+    if drift or changed:
+        _block_item(item, "artifact-drift", "planning/handoff artifacts 存在未授权变化或缺少可信恢复证据")
+        return {"status": "blocked", "reason": "artifact-drift"}
+    return None
+
+
+def _recovery_observation(repo_root: Path, state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
+    """绑定回执到文件、决策和原 action 的观察值，避免缓存成功掩盖新变化。"""
+    recovery = item["artifact_recovery"]
+    try:
+        candidates = _basename_candidates(repo_root, state, item, list(recovery["candidates"]))
+    except ValueError as exc:
+        candidates = {"invalid": str(exc)}
+    return {"artifacts": _task_artifact_hashes(repo_root, item), "candidates": candidates,
+            "pending": item.get("pending_artifact_decision"), "last_action": item.get("last_action"),
+            "decision_log_sha256": _file_sha256(_task_dir(repo_root, item["task"]) / "decisions.jsonl")}
+
+
+def cmd_reconcile(args: argparse.Namespace) -> int:
+    """校验一次 action 内纠正，成功后仍由原 record 推进。
+
+    Args:
+        args: 含恢复标识、尝试标识、结果及精确文件映射的命令参数。
+
+    Returns:
+        JSON 命令输出的退出码。
+    """
+    repo_root = _repo_root()
+    if repo_root is None:
+        return _print({"status": "error", "reason": "not-trellis-project"})
+    path, state = _load_current_state(repo_root, args.run_id)
+    task_ref = _normalize_task_ref(repo_root, args.task)
+    item = next((entry for entry in _queue_items(state) if entry.get("task") == task_ref), None)
+    if _schema_version(state) != SCHEMA_VERSION or not item:
+        return _print({"status": "error", "reason": "recovery-not-found"})
+    recovery = item.get("artifact_recovery")
+    if not recovery or recovery.get("recovery_id") != args.recovery_id:
+        return _print({"status": "error", "reason": "recovery-id-mismatch"})
+    request = {"result": args.result, "summary": args.summary, "evidence": args.evidence, "file_map": args.file_map}
+    request_hash = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
+    receipt = next((entry for entry in recovery["receipts"] if entry["attempt_id"] == args.attempt_id), None)
+    if receipt:
+        if receipt["request_hash"] != request_hash:
+            return _print({"status": "error", "reason": "attempt-id-conflict"})
+        if receipt["response"]["status"] != "blocked" and (state.get("status") != "running" or item.get("status") != "running"):
+            return _print({"status": "error", "reason": "recovery-action-not-running"})
+        if receipt["observation"] != _recovery_observation(repo_root, state, item) or _protected_drift_present(repo_root, state):
+            return _print({"status": "error", "reason": "recovery-observation-changed", "instruction": "状态已变化；调用 next 重新诊断，不重复消费旧尝试。"})
+        return _print(receipt["response"])
+    if state.get("status") != "running" or item.get("status") != "running" or not item.get("last_action"):
+        return _print({"status": "error", "reason": "recovery-action-not-running"})
+    if any(item["last_action"].get(key) != value for key, value in recovery["action"].items()):
+        return _print({"status": "error", "reason": "recovery-action-mismatch"})
+    if int(item.get("attempts", {}).get("artifact_reconcile", 0)):
+        return _print({"status": "error", "reason": "check-retry-owns-recovery"})
+    if recovery.get("resolved") or recovery["attempts"] >= 3:
+        return _print({"status": "error", "reason": "recovery-already-resolved"})
+    prefix = f"auto-loop-reconcile:{args.recovery_id}:{args.attempt_id}:"
+    marker = prefix + request_hash
+    events = load_events(_task_dir(repo_root, task_ref))
+    corrected = next((entry for entry in events if any(value.startswith(prefix) for value in entry.get("evidence", []))), None)
+    if corrected is not None and marker not in corrected["evidence"]:
+        return _print({"status": "error", "reason": "attempt-id-conflict"})
+    failure = "" if args.result == "ok" else args.summary or "agent 纠正未完成"
+    terminal = args.result == "blocked"
+    pending = item.get("pending_artifact_decision")
+    event = None
+    mapping = {}
+    try:
+        if _protected_drift_present(repo_root, state):
+            terminal = True
+            raise ValueError("protected-baseline-drift")
+        if args.result != "ok":
+            raise ValueError(failure)
+        for raw in args.file_map:
+            old, separator, new = raw.partition("=")
+            if not separator or old in mapping:
+                raise ValueError("file-map 必须为不重复的旧键=新键")
+            mapping[old] = new
+        candidates = _basename_candidates(repo_root, state, item, list(recovery["candidates"]))
+        if candidates != recovery["candidates"] or mapping != candidates:
+            raise ValueError("映射必须精确匹配已诊断的当前任务同名文档")
+        current = _task_artifact_hashes(repo_root, item)
+        changed = {key for key in current if current[key] != recovery["baseline"].get(key)}
+        if pending:
+            event = _pending_event(repo_root, state, item)
+            if event is None or pending["decision_id"] != recovery["decision_id"]:
+                terminal = True
+                raise ValueError("原决策或基线证据已失效")
+            corrected_files = [mapping.get(key, key) for key in pending["files"]]
+            if not changed <= set(corrected_files):
+                raise ValueError("仍有超出原决策范围的变化；只能保全并撤回已证明属于本 action 的误改")
+        elif changed:
+            raise ValueError("登记成功前文档必须恢复原 action 基线")
+    except ValueError as exc:
+        failure = str(exc)
+    if not failure and event is not None:
+        # 日志先落盘；若随后 runtime 写失败，用尝试标记找回同一事件，避免双写重复。
+        if corrected is not None and (
+            marker not in corrected["evidence"] or corrected["files"] != corrected_files
+            or any(corrected.get(key) != event.get(key) for key in
+                   ("run_id", "topic", "options", "choice", "summary", "risk", "confidence", "requirements", "planning_sha256", "handoff_sha256"))
+        ):
+            return _print({"status": "error", "reason": "attempt-id-conflict"})
+        if corrected is None:
+            corrected = append_decision(
+                _task_dir(repo_root, task_ref), run_id=state["run_id"],
+                topic=event["topic"], options=event["options"], choice=event["choice"], summary=event["summary"],
+                evidence=[*event["evidence"], marker, f"original-decision:{event['decision_id']}",
+                          json.dumps(mapping, sort_keys=True, ensure_ascii=False), args.summary, *args.evidence],
+                risk=event["risk"], confidence=event["confidence"], requirements=event["requirements"],
+                files=corrected_files, planning_sha256=pending["planning_sha256"],
+                handoff_sha256=pending["handoff_sha256"], verification=event.get("verification", ""),
+            )
+        pending["decision_id"] = corrected["decision_id"]
+        pending["files"] = corrected["files"]
+        item.setdefault("decision_ids", []).append(corrected["decision_id"])
+        item["decision_count"] = int(item.get("decision_count") or 0) + 1
+    recovery["attempts"] += 1
+    recovery["resolved"] = not failure
+    response = {"status": "reconciled", "run_id": state["run_id"], "task": task_ref,
+                "action": _outstanding_action_name(item), "recovery_id": args.recovery_id,
+                "attempt_id": args.attempt_id, "attempt": recovery["attempts"], "max_attempts": 3,
+                "instruction": "同轮继续原 action 并提交真实 record；pending 仅在 record 消费。" if pending else "同轮用 --task-file 或完整路径重新调用原 decide，登记成功后再编辑。"}
+    if failure:
+        response.update({"status": "retryable", "reason": "artifact-recovery-failed", "message": failure,
+                         "instruction": "读取失败证据，同轮完成下一次安全纠正，再用新的 attempt-id 提交 reconcile；无法归因则 blocked。"})
+        if terminal or recovery["attempts"] >= 3:
+            _block_item(item, "artifact-drift", failure, {"attempt": recovery["attempts"], "max_attempts": 3,
+                                                        "recovery_id": args.recovery_id, "exhausted": recovery["attempts"] >= 3})
+            response.update({"status": "blocked", "reason": "artifact-drift", "instruction": "本任务已阻塞；next 按原规则处理依赖和独立任务。"})
+    recovery["receipts"].append({"attempt_id": args.attempt_id, "request_hash": request_hash,
+                                "observation": _recovery_observation(repo_root, state, item), "response": response})
+    _write_state(path, state)
+    return _print(response)
+
+
 def cmd_decide(args: argparse.Namespace) -> int:
     """记录 AI 在 run 授权边界内作出的低/中风险决策。"""
     repo_root = _repo_root()
@@ -3911,6 +4222,43 @@ def cmd_decide(args: argparse.Namespace) -> int:
             "reason": "protected-path-conflict",
             "files": conflicts,
         })
+
+    try:
+        for name in args.task_file:
+            if name not in TASK_ARTIFACT_NAMES:
+                raise ValueError(f"--task-file 只接受当前任务四文档名:{name}")
+            key = f".::{task_ref}/{name}"
+            _validate_decision_file(repo_root, state, key)
+            if not (repo_root / task_ref / name).is_file():
+                raise ValueError(f"任务文档不存在:{name}")
+            decision_files.append(key)
+        decision_files = list(dict.fromkeys(decision_files))
+        candidates = _basename_candidates(repo_root, state, item, decision_files)
+    except ValueError as exc:
+        return _print({"status": "error", "reason": "invalid-decision-file", "message": str(exc)})
+    if candidates:
+        last = item.get("last_action") or {}
+        baseline = last.get("artifact_sha256")
+        if last.get("action") in CHECK_ACTIONS and int(item.get("attempts", {}).get("artifact_reconcile", 0)):
+            return _print({"status": "error", "reason": "check-retry-owns-recovery",
+                           "instruction": "保留原 Check 自纠预算；按原 artifact-drift 指令修正并重新 record。"})
+        if state.get("status") == "running" and item.get("status") == "running" and isinstance(baseline, dict):
+            if _protected_drift_present(repo_root, state) or baseline != _task_artifact_hashes(repo_root, item):
+                return _print({"status": "error", "reason": "decision-baseline-drift"})
+            response = _diagnose_recovery(state, item, "decide", baseline, candidates, [])
+            _write_state(path, state)
+            return _print(response)
+        return _print({"status": "error", "reason": "ambiguous-task-artifact-path", "candidates": candidates,
+                       "instruction": "使用 --task-file <name> 或完整任务文件键重新登记。"})
+    if state.get("status") == "running" and item.get("last_action"):
+        baseline = item["last_action"].get("artifact_sha256")
+        if isinstance(baseline, dict) and baseline != _task_artifact_hashes(repo_root, item):
+            return _print({"status": "error", "reason": "decision-baseline-drift",
+                           "instruction": "先处理原 action 的实际漂移；不得在编辑后补登记并重取基线。"})
+        inspection = _inspect_action_artifacts(repo_root, state, item, "decide")
+        if inspection is not None and inspection.get("status") != "action":
+            _write_state(path, state)
+            return _print(inspection)
 
     task_dir = _task_dir(repo_root, task_ref)
     planning_hash = ""
@@ -3956,6 +4304,7 @@ def cmd_decide(args: argparse.Namespace) -> int:
             "planning_sha256": planning_hash,
             "handoff_sha256": handoff_hash,
             "recorded_at": event["recorded_at"],
+            "action": _action_identity(item) if item.get("last_action") else None,
         }
     _write_state(path, state)
     return _print({
@@ -4044,8 +4393,20 @@ def build_parser() -> argparse.ArgumentParser:
     decide.add_argument("--confidence", choices=("low", "medium", "high"), required=True)
     decide.add_argument("--requirement", action="append", default=[])
     decide.add_argument("--file", action="append", default=[])
+    decide.add_argument("--task-file", action="append", default=[])
     decide.add_argument("--verification")
     decide.set_defaults(func=cmd_decide)
+
+    reconcile = subparsers.add_parser("reconcile", help="verify an action-local artifact correction")
+    reconcile.add_argument("--run-id")
+    reconcile.add_argument("--task", required=True)
+    reconcile.add_argument("--recovery-id", required=True)
+    reconcile.add_argument("--attempt-id", required=True)
+    reconcile.add_argument("--result", choices=("ok", "failed", "blocked"), required=True)
+    reconcile.add_argument("--summary", required=True)
+    reconcile.add_argument("--evidence", action="append", default=[])
+    reconcile.add_argument("--file-map", action="append", default=[])
+    reconcile.set_defaults(func=cmd_reconcile)
 
     return parser
 
@@ -4060,6 +4421,8 @@ def main() -> int:
         return _print({"status": "error", "reason": "invalid-input", "message": str(exc)})
     except OSError as exc:
         return _print({"status": "error", "reason": "runtime-io-error", "message": str(exc)})
+    except DecisionLogError as exc:
+        return _print({"status": "error", "reason": "decision-log-error", "message": str(exc)})
 
 
 if __name__ == "__main__":

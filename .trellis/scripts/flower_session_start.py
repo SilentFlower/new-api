@@ -24,10 +24,11 @@ ASTRA_HINT_MAX_BYTES = 2048
 ASTRA_WORKFLOW_HINT = """<trellis-astra-workflow-hint model="gpt-6-astra" version="1">
 Applies only while the active model is gpt-6-astra; it does not apply after switching models. Perform checks internally, without a routine checklist report. Keep ordinary answers brief.
 When executing the current task:
-- Treat required steps, required references, phase boundaries, and output templates in applicable SKILL and WORKFLOW instructions as execution and delivery checks.
+- Act autonomously within applicable SKILL and WORKFLOW steps. Do not waive required steps, references, review gates or templates because work seems simple, a check seems redundant, or fewer interruptions are preferred.
 - Before a step, review its rules and required references. Reuse material already read in full and unchanged; search matches are not full reads.
 - Preserve required heading levels, section order, and conditional sections in specified templates. General brevity or no-heading preferences apply to ordinary prose and do not justify flattening, shortening, or reshaping a specified template.
-- Resolve conflicts by instruction hierarchy. Follow the owning workflow's phase-transition and review requirements, checking the scope of prior authorization; do not infer approval of the final plan from permission to begin planning.
+- Resolve conflicts by instruction hierarchy. Follow the owning workflow's phase-transition and review requirements. Permission to begin planning does not approve the final plan.
+- Where the workflow requires review of a displayed plan, a generic request such as "commit and push" starts that workflow; it does not itself confirm a plan produced afterward. Reuse approval of the same plan or an explicit waiver within its scope, including valid auto-loop preauthorization. Otherwise, display the plan and wait for the user's confirmation before acting. Verify the actual user reply; displaying a plan or saying "executing as authorized" is not confirmation.
 - Before claiming "read", "checked", or "complete", verify actual tool records and artifacts. Successful reading and compliant execution are separate facts.
 - When corrected, review the applicable rules, execution records, and actual result before repairing it. If evidence is missing, state uncertainty. Do not invent causes such as "not read", "forgot", or "file missing", or consult unrelated rules in place of the relevant ones.
 </trellis-astra-workflow-hint>"""

@@ -75,6 +75,8 @@ helper 只接受当前 session 或唯一 session fallback 的 `.trellis/.runtime
 
 helper 默认输出为精简 JSON，只包含 route 执行必需的 `status`、`origin`、`mode`、`source`/`reason` 等字段。需要排查完整 `decision`、session 文件、context key、任务路径、个人配置路径或写回标记时，在同一命令末尾加 `--verbose`；不要为了诊断信息额外读取 runtime 文件。
 
+auto-loop prepare 使用同一个 `resolve --target <implement|check> --read-only --task <repository-relative-task-path> [--auto-mode <runner-candidate>]` 预检。它仍按匹配任务的 runtime → prefs → runner 临时候选解析，但不写 session、不绑定任务、不扫描其它 run 借用授权；`--task` 只接受项目 `.trellis/tasks/` 内明确存在的非软链任务路径。预检结果不是实际执行决策；执行时仍通过普通 route 恢复并持久化。缺少 helper 或合法模式时 runner 保守要求相应 JSONL context。
+
 输出 `status=miss`、文件缺失、JSON 损坏、任务不匹配、source/mode 不合法、prefs 缺失或 prefs 值不合法时，忽略已有状态并继续 Step 2。不要删除不匹配 runtime 文件，避免误伤其他窗口。
 
 ---

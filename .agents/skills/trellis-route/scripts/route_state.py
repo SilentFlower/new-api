@@ -463,18 +463,50 @@ def read_runtime(args: argparse.Namespace) -> int:
 
 
 def resolve_route(args: argparse.Namespace) -> int:
-    """按 runtime → prefs → auto-loop 的优先级解析 route 决策。"""
+    """按相同优先级解析执行路由或只读预检，不在预检时切换任务。
+
+    Args:
+        args: 路由目标、只读任务路径和 runner 提供的临时候选模式。
+
+    Returns:
+        JSON 输出的退出码；缺失或非法上下文通过结构化状态表达。
+    """
     repo_root = _repo_root()
     if repo_root is None:
         return _print({"status": "miss", "reason": "not-trellis-project"})
 
-    current_task, _, context_key, miss = _current_context_or_miss(repo_root)
-    if miss:
-        return _print(miss)
-    assert current_task is not None and context_key is not None
+    read_only = getattr(args, "read_only", False)
+    task_ref = getattr(args, "task", None)
+    fallback_mode = getattr(args, "auto_mode", None)
+    if (task_ref or fallback_mode) and not read_only:
+        return _print({"status": "error", "reason": "preview-requires-read-only"})
+    if fallback_mode is not None:
+        fallback_mode = _normalize_mode(args.target, fallback_mode)
+        if fallback_mode is None:
+            return _print({"status": "error", "reason": "invalid-auto-route-mode"})
 
-    path = _session_path(repo_root, context_key)
-    context_result = _read_json_result(path)
+    current_task, _, context_key, miss = _current_context_or_miss(repo_root)
+    if read_only and task_ref:
+        # 只接受项目内明确的任务路径，避免预检把任意目录当作任务或跟随软链。
+        relative = Path(task_ref)
+        task_path = repo_root / relative
+        if (
+            relative.is_absolute()
+            or ".." in relative.parts
+            or relative.parts[:2] != (".trellis", "tasks")
+            or len(relative.parts) < 3
+            or any(path.is_symlink() for path in (task_path, *task_path.parents) if path != repo_root)
+            or not (task_path / "task.json").is_file()
+            or (task_path / "task.json").is_symlink()
+        ):
+            return _print({"status": "error", "reason": "invalid-task-path"})
+        current_task = relative.as_posix()
+    elif miss:
+        return _print(miss)
+    assert current_task is not None
+
+    path = _session_path(repo_root, context_key) if context_key else None
+    context_result = _read_json_result(path) if path else {"status": "missing", "data": None}
     if context_result["status"] in {"corrupt", "io_error"}:
         return _output(
             args,
@@ -482,11 +514,12 @@ def resolve_route(args: argparse.Namespace) -> int:
             {"path": _rel_path(repo_root, path), "error": context_result.get("error")},
         )
     context = context_result["data"] if isinstance(context_result.get("data"), dict) else {}
-    decision = context.get("route_decisions", {}).get(args.target)
+    decisions = context.get("route_decisions")
+    decision = decisions.get(args.target) if isinstance(decisions, dict) else None
     normalized = _normalized_decision(decision, args.target, current_task)
     if normalized is not None:
         written_path = path
-        if normalized.get("mode") != decision.get("mode"):
+        if not read_only and normalized.get("mode") != decision.get("mode"):
             written_path, normalized = _write_runtime_decision(
                 repo_root,
                 context_key,
@@ -504,7 +537,7 @@ def resolve_route(args: argparse.Namespace) -> int:
             },
             {
                 "decision": normalized,
-                "path": _rel_path(repo_root, written_path),
+                "path": _rel_path(repo_root, written_path) if written_path else None,
                 "context_key": context_key,
                 "task": current_task,
                 "normalized_legacy_mode": normalized.get("mode") != decision.get("mode"),
@@ -514,14 +547,16 @@ def resolve_route(args: argparse.Namespace) -> int:
     prefs = _read_prefs(repo_root)
     pref_mode = prefs.get(args.target)
     if pref_mode in PREF_MODES[args.target]:
-        written_path, pref_decision = _write_runtime_decision(
-            repo_root,
-            context_key,
-            current_task,
-            args.target,
-            pref_mode,
-            "route-prefs",
-        )
+        written_path, pref_decision = path, _decision(args.target, pref_mode, "route-prefs", current_task)
+        if not read_only:
+            written_path, pref_decision = _write_runtime_decision(
+                repo_root,
+                context_key,
+                current_task,
+                args.target,
+                pref_mode,
+                "route-prefs",
+            )
         return _output(
             args,
             {
@@ -531,29 +566,35 @@ def resolve_route(args: argparse.Namespace) -> int:
             },
             {
                 "decision": pref_decision,
-                "path": _rel_path(repo_root, written_path),
+                "path": _rel_path(repo_root, written_path) if written_path else None,
                 "pref_path": _rel_path(repo_root, _pref_path(repo_root)),
                 "context_key": context_key,
                 "task": current_task,
-                "wrote_runtime": True,
+                "wrote_runtime": not read_only,
             }
         )
 
-    auto_mode, auto_path, auto_reason = _auto_route_mode(
-        repo_root,
-        context_key,
-        current_task,
-        args.target,
-    )
-    if auto_mode in PREF_MODES[args.target]:
-        written_path, auto_decision = _write_runtime_decision(
+    # prepare 尚未进入 running；只读模式只使用 runner 显式传入的候选，
+    # 不扫描其它 run 借用授权，也不把预检结果持久化为真实执行决策。
+    auto_mode, auto_path, auto_reason = fallback_mode, None, "no-route-authorization"
+    if not read_only:
+        auto_mode, auto_path, auto_reason = _auto_route_mode(
             repo_root,
             context_key,
             current_task,
             args.target,
-            auto_mode,
-            "auto-loop",
         )
+    if auto_mode in PREF_MODES[args.target]:
+        written_path, auto_decision = path, _decision(args.target, auto_mode, "auto-loop", current_task)
+        if not read_only:
+            written_path, auto_decision = _write_runtime_decision(
+                repo_root,
+                context_key,
+                current_task,
+                args.target,
+                auto_mode,
+                "auto-loop",
+            )
         return _output(
             args,
             {
@@ -563,12 +604,12 @@ def resolve_route(args: argparse.Namespace) -> int:
             },
             {
                 "decision": auto_decision,
-                "path": _rel_path(repo_root, written_path),
+                "path": _rel_path(repo_root, written_path) if written_path else None,
                 "auto_path": _rel_path(repo_root, auto_path) if auto_path else None,
                 "pref_path": _rel_path(repo_root, _pref_path(repo_root)),
                 "context_key": context_key,
                 "task": current_task,
-                "wrote_runtime": True,
+                "wrote_runtime": not read_only,
             }
         )
 
@@ -579,7 +620,7 @@ def resolve_route(args: argparse.Namespace) -> int:
             "reason": "no-valid-decision-pref-or-auto",
         },
         {
-            "path": _rel_path(repo_root, path),
+            "path": _rel_path(repo_root, path) if path else None,
             "pref_path": _rel_path(repo_root, _pref_path(repo_root)),
             "auto_reason": auto_reason,
             "auto_path": _rel_path(repo_root, auto_path) if auto_path else None,
@@ -753,6 +794,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     resolve_parser = subparsers.add_parser("resolve", help="resolve route from runtime then prefs")
     resolve_parser.add_argument("--target", choices=sorted(VALID_MODES), required=True)
+    resolve_parser.add_argument("--read-only", action="store_true", help="preview without writing session state")
+    resolve_parser.add_argument("--task", help="explicit repository-relative task path for read-only preview")
+    resolve_parser.add_argument("--auto-mode", help="runner candidate used only after runtime and prefs in read-only preview")
     resolve_parser.add_argument("--verbose", action="store_true", help="include diagnostic paths and session metadata")
     resolve_parser.set_defaults(func=resolve_route)
 

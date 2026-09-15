@@ -30,7 +30,7 @@ description: "统一 Check-All：按 requested/effective depth 路由 light/full
 1. **默认 audit-only collect-all**：可读取、搜索和运行无业务写入的验证；普通代码、配置、测试和任务规格语义不得直接修复。
 2. **唯一自修例外**：低风险事实漂移进入 `DOC-*` 通道，按 `references/document-drift-auto-remediation.md` 的白名单、黑名单和写入时机处理。
 3. **分类先于严重度**：读取 `references/fallback-findings.md`；主路径错误和非兜底契约违背进入 `CHK-*`，fail-closed、异常输入、失败降级和防御性保护缺口进入 `FBK-*`。契约证据影响严重度，不改变兜底根因归属。
-4. **处置只确认一次**：统一报告后选择 `CHK-*` / `FBK-*` 修复范围或接受风险；`修复全部` 覆盖两类，接受风险不得隐藏发现。
+4. **处置只确认一次**：统一报告后选择 `CHK-*` / `FBK-*` 修复范围或接受风险；`修复全部` 覆盖两类。接受后按 reporting reference 简短确认，保留发现记录，不重复展开未变化的已接受问题。
 5. **共享验证**：两个 profile 共用 `references/verification.md`；同一追踪与有效验证证据跨维度复用，检查保持只读。
 6. **真正阻塞才中途暂停**：业务规划冲突、前提失效，或当前结论必需验证涉及未授权生产/外部/破坏性副作用时暂停；发布后验收只记 `[上线后验证]`，不执行、不阻断。
 
@@ -85,7 +85,7 @@ untracked helper 只存游标：findings 或新编辑回 `implement`；通过且
 
 ### Step 4：统一报告与分流
 
-读取 `references/reporting-and-disposition.md`，按其完整模板与分流规则在对话中输出报告；默认不新建报告文件，落盘例外由该 reference 定义。
+读取 `references/reporting-and-disposition.md`，按其首次报告、接受后增量展示与分流规则输出；默认不新建报告文件，落盘例外由该 reference 定义。
 
 ---
 

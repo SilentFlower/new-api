@@ -12,8 +12,8 @@ description: "启动、恢复和推进 Trellis 自动任务循环。用于用户
 - 仅在用户明确要求 auto-loop、自动跑到底、goal-like 或继续既有 run 时使用；普通实现请求不能自动升级。
 - 用户发出启动指令即授权本次 `commit-only` run。prepare 完成后不再确认 manifest，也不逐任务执行 `confirm_brief`。
 - 新 run 先 prepare 全部显式任务，Open Questions 全部收敛后才进入 running。running 中不再询问 route、planning 或普通 Check-All 停止边界。
-- 每个 action 完成后，必须用同名 `record --action ...` 精确回写并立即 `next`。不得根据聊天摘要手改 runtime 或跳步。
-- `record` 返回 `status=retryable` 时保留的是同一个 outstanding Check action：不得运行 `next`，必须先按返回指令消解漂移并重录。
+- 每个 action 完成后，必须用同名 `record --action ...` 精确回写；record 成功后立即 `next`。不得根据聊天摘要手改 runtime 或跳步。
+- `record` 返回 `status=retryable` 时不得运行 `next`，必须按返回指令在同一个 outstanding action 内纠正并重录；恢复诊断的 owner 见下方 Action 内恢复。
 - 本地提交是自动终点。不得 push、merge、release、deploy、finish-work 或 archive；runner 在 item 本地提交成功后把该任务写入本地完成态（`status=completed` + `completedAt`），归档仍需用户显式执行。
 - 任务顺序只决定稳定调度顺序，不隐含依赖。依赖必须通过 `--depends-on dependent=dependency` 明确传入或由 planning artifacts 明确声明。
 - 任务级失败只阻塞自身及显式依赖项；独立任务继续。fix/recheck、planning repair 与安全的 commit-only repair 各最多 3 轮，队列结束后不自动执行第二遍恢复扫描。
@@ -67,7 +67,7 @@ readiness 的 `repairable` 仅适用于不改变目标、可由仓库证据确�
 
 ## Autonomous Decisions
 
-满足任务目标内、仅影响本地代码、可逆且可验证时，AI可自主选择推荐方案。作出选择后必须先记录，再继续修改或 record；会修改 planning/handoff 时，`--file` 必须列出全部目标 artifact：
+满足任务目标内、仅影响本地代码、可逆且可验证时，AI可自主选择推荐方案。作出选择后必须先记录，再继续修改或 record；会修改 planning/handoff 时，`--task-file` 或完整 `--file` 必须列出全部目标 artifact：
 
 ```bash
 python3 ./.trellis/scripts/auto_loop.py decide \
@@ -79,11 +79,11 @@ python3 ./.trellis/scripts/auto_loop.py decide \
   [--evidence "<证据>" ...] \
   --risk low|medium \
   --confidence low|medium|high \
-  [--requirement <id> ...] [--file <repository>::<path> ...] \
+  [--requirement <id> ...] [--task-file <name> ...] [--file <repository>::<path> ...] \
   [--verification "<验证摘要>"]
 ```
 
-决策写入 runtime 摘要和任务 `decisions.jsonl`，只保存结论与证据，不保存思维链。下一次同任务 action record 会消费该决策：列明的 planning/handoff 变化生成绑定 decision ID 的 manifest revision；Check record 中其它变化进入有限自纠，其它 action 仍按 `artifact-drift` 阻塞。
+决策写入 runtime 摘要和任务 `decisions.jsonl`，只保存结论与证据，不保存思维链。下一次同任务 action record 会消费该决策：列明的 planning/handoff 变化生成绑定 decision ID 的 manifest revision；Check record 中其它变化进入有限自纠，其它 action 的确定路径错误先进入恢复诊断，未知或越界漂移仍按 `artifact-drift` 阻塞。
 
 以下事项不得用 `decide`，必须 blocked：
 
@@ -94,6 +94,10 @@ python3 ./.trellis/scripts/auto_loop.py decide \
 - push、merge、release、deploy、finish-work、archive。
 - 明显改变任务目标或业务规则且仓库没有倾向证据。
 - `Open Questions` 中人工保留的任何选择。
+
+## Action 内恢复
+
+`next` 保留原 action 和文档基线，不消费 pending。收到 `artifact-recovery-required` 或 `artifact-recovery-failed` 时，必须读取 [恢复协议](references/artifact-recovery.md)，同轮完成诊断、纠正、`reconcile` 校验并继续原 action。初次诊断不计数，最多三次实际纠正，第三次仍可成功；不要求用户回复“继续”。
 
 ## Running Actions
 
@@ -161,7 +165,7 @@ python3 ./.trellis/scripts/auto_loop.py status [--verbose]
 python3 ./.trellis/scripts/auto_loop.py stop --reason "<原因>"
 ```
 
-默认使用紧凑输出；只有诊断 manifest、dirty、漂移、依赖链或决策详情时加 `--verbose`。`retryable` 不是终态，由 agent 在同一 outstanding Check action 内立即自纠；`completed_with_blocked` 才是本次 run 的可审计终态，后续恢复由用户显式调用 `retry-blocked`。
+默认使用紧凑输出；只有诊断 manifest、dirty、漂移、依赖链或决策详情时加 `--verbose`。`retryable` 不是终态，由 agent 按对应通道在同一 outstanding action 内立即自纠；`completed_with_blocked` 才是本次 run 的可审计终态，后续恢复由用户显式调用 `retry-blocked`。
 
 ## Run 收尾交接
 
