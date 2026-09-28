@@ -3,10 +3,10 @@ components:
     deploy:
       replicas: 1
       resources:
-        cpu_request: "100m"
-        cpu_limit: "1000m"
-        mem_request: "512Mi"
-        mem_limit: "1Gi"
+        cpu_request: "250m"
+        cpu_limit: "2000m"
+        mem_request: "1Gi"
+        mem_limit: "2Gi"
       env:
         APP_ENV_PORT: "3000"
         APP_ENV_TZ: "Asia/Shanghai"

@@ -12,7 +12,7 @@ project:
   kubernetes:
     prod:
       provider: ack
-      namespace: xhgj-new-api-prod
+      namespace: ai-newapi
       release_gateway:
         function_name: aliyun-ack-releaser
         alias: prod
