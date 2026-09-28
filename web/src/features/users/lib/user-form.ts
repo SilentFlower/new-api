@@ -16,6 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
+import type { TFunction } from 'i18next'
 import { z } from 'zod'
 
 import {
@@ -24,6 +25,10 @@ import {
   normalizeAdminPermissions,
 } from '@/lib/admin-permissions'
 import { quotaUnitsToDollars } from '@/lib/format'
+import {
+  ACCOUNT_NAME_MAX_CODE_POINTS,
+  isAccountNameWithinLimit,
+} from '@/lib/name-limit'
 import { ROLE } from '@/lib/roles'
 
 import { DEFAULT_GROUP } from '../constants'
@@ -33,20 +38,37 @@ import type { UserFormData, User } from '../types'
 // Form Schema
 // ============================================================================
 
-export const userFormSchema = z.object({
-  username: z.string().min(1, 'Username is required'),
-  display_name: z.string().optional(),
-  password: z.string().optional(),
-  role: z.number().optional(),
-  quota_dollars: z.number().min(0).optional(),
-  group: z.string().optional(),
-  remark: z.string().optional(),
-  admin_permissions: z
-    .record(z.string(), z.record(z.string(), z.boolean()))
-    .optional(),
-})
+/**
+ * 生成用户表单校验规则，并按当前语言展示名称长度错误。
+ * @param t 当前语言的翻译函数。
+ * @returns 用户表单的 Zod schema。
+ */
+export function getUserFormSchema(t: TFunction) {
+  const nameLengthMessage = t('Name must be between {{min}} and {{max}} characters', {
+    min: 1,
+    max: ACCOUNT_NAME_MAX_CODE_POINTS,
+  })
+  return z.object({
+    username: z
+      .string()
+      .min(1, 'Username is required')
+      .refine(isAccountNameWithinLimit, nameLengthMessage),
+    display_name: z
+      .string()
+      .refine(isAccountNameWithinLimit, nameLengthMessage)
+      .optional(),
+    password: z.string().optional(),
+    role: z.number().optional(),
+    quota_dollars: z.number().min(0).optional(),
+    group: z.string().optional(),
+    remark: z.string().optional(),
+    admin_permissions: z
+      .record(z.string(), z.record(z.string(), z.boolean()))
+      .optional(),
+  })
+}
 
-export type UserFormValues = z.infer<typeof userFormSchema>
+export type UserFormValues = z.infer<ReturnType<typeof getUserFormSchema>>
 
 // ============================================================================
 // Form Defaults

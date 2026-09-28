@@ -35,6 +35,7 @@
 | [代码质量标准](./quality-guidelines.md) | 禁止模式、必需模式、测试、构建流程 | 已完成 |
 | [日志规范](./logging-guidelines.md) | 日志层级、格式、敏感数据处理 | 已完成 |
 | [远程令牌运维 SOP](./remote-token-operations-sop.md) | 远程批量令牌创建、IP 记录修正、Cloudflare D1 同步流程 | 已完成 |
+| [工作流独立账号与令牌契约](./workflow-account-tokens.md) | 显式迁移目标、有效归属核验、单工作流轮换与开通门禁 | 已完成 |
 
 ---
 
@@ -61,6 +62,7 @@
 ### 涉及远程令牌运维或外部 Key 同步
 
 - [远程令牌运维 SOP](./remote-token-operations-sop.md) — 批量创建 token、quota 换算、迁移后 IP 记录、D1 同步
+- [工作流独立账号与令牌契约](./workflow-account-tokens.md) — 工作流账号开通、缓存归属核验与单令牌轮换
 
 ### 涉及 Relay 视觉辅助
 

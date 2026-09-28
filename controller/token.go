@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -288,7 +289,7 @@ func AddToken(c *gin.Context) {
 		return
 	}
 	token := request.Token
-	if len(token.Name) > 50 {
+	if utf8.RuneCountInString(token.Name) > model.TokenNameMaxLength {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}
@@ -383,7 +384,7 @@ func UpdateToken(c *gin.Context) {
 		return
 	}
 	token := request.Token
-	if len(token.Name) > 50 {
+	if utf8.RuneCountInString(token.Name) > model.TokenNameMaxLength {
 		common.ApiErrorI18n(c, i18n.MsgTokenNameTooLong)
 		return
 	}

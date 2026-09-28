@@ -62,8 +62,8 @@ type Log struct {
 	CreatedAt         int64  `json:"created_at" gorm:"bigint;index:idx_created_at_id,priority:1;index:idx_created_at_type;index:idx_logs_token_created_at,priority:2;index:idx_logs_token_type_created_at,priority:3"`
 	Type              int    `json:"type" gorm:"index:idx_created_at_type;index:idx_logs_token_type_created_at,priority:2"`
 	Content           string `json:"content"`
-	Username          string `json:"username" gorm:"index;index:index_username_model_name,priority:2;default:''"`
-	TokenName         string `json:"token_name" gorm:"index;default:''"`
+	Username          string `json:"username" gorm:"size:64;index;index:index_username_model_name,priority:2;default:''"`
+	TokenName         string `json:"token_name" gorm:"size:64;index;default:''"`
 	ModelName         string `json:"model_name" gorm:"index;index:index_username_model_name,priority:1;default:''"`
 	Quota             int    `json:"quota" gorm:"default:0"`
 	PromptTokens      int    `json:"prompt_tokens" gorm:"default:0"`

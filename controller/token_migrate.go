@@ -29,7 +29,6 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 
-	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
 )
@@ -39,10 +38,10 @@ import (
 const MigrateTokensBatchMaxSize = 100
 
 // migrateTokensRequest 迁移接口请求体。
-// 仅接受 token_ids，新用户 role / status / quota / group 等敏感字段一律由后端推导，
-// 不接受前端传入，防止越权构造。
+// targets 可选；缺席时保持原有自动命名与额度继承行为。
 type migrateTokensRequest struct {
-	TokenIds []int `json:"token_ids"`
+	TokenIds []int                `json:"token_ids"`
+	Targets  []migrateTokenTarget `json:"targets,omitempty"`
 }
 
 // migrateTokenResult 单个令牌迁移完成后的结果项，用于响应给前端。
@@ -84,6 +83,11 @@ func MigrateTokensToAccounts(c *gin.Context) {
 	}
 	if len(req.TokenIds) > MigrateTokensBatchMaxSize {
 		common.ApiErrorI18n(c, i18n.MsgTokenMigrateBatchTooMany, map[string]any{"Max": MigrateTokensBatchMaxSize})
+		return
+	}
+	targetById, err := validateMigrateTargets(req.TokenIds, req.Targets)
+	if err != nil {
+		common.ApiError(c, err)
 		return
 	}
 
@@ -132,7 +136,12 @@ func MigrateTokensToAccounts(c *gin.Context) {
 			continue
 		}
 
-		newUsername, newUserId, migrateErr := migrateSingleTokenInTx(c, srcUser, tk, assigned)
+		var target *migrateTokenTarget
+		if targetById != nil {
+			selected := targetById[tokenId]
+			target = &selected
+		}
+		newUsername, newUserId, migrateErr := migrateSingleTokenInTx(c, srcUser, tk, assigned, target)
 		if migrateErr != nil {
 			// 单令牌失败：默认把底层错误原样透传给超管（多为中文）；
 			// 对已知的 sentinel 错误（如用户名冲突）替换为 i18n 翻译，照顾英文用户。
@@ -152,15 +161,18 @@ func MigrateTokensToAccounts(c *gin.Context) {
 		// 单令牌成功：把新用户名锁进 assigned，避免后续令牌重名。
 		assigned[newUsername] = true
 
-		// 异步刷新令牌 Redis 缓存，注意此时 token 的 UserId 已是 newUserId。
-		// 复制一份 Token 值再传进 goroutine，避免后续循环修改原指针造成竞态。
+		// 迁移成功须等缓存归属刷新完成，避免脚本提前发布仍指向 root 的 Key。
 		updatedToken := *tk
 		updatedToken.UserId = newUserId
-		gopool.Go(func() {
+		if common.RedisEnabled {
 			if err := refreshMigratedTokenCache(updatedToken); err != nil {
-				common.SysLog(fmt.Sprintf("failed to refresh token cache after migration: %v", err))
+				results = append(results, migrateTokenResult{
+					TokenId: tk.Id, TokenName: tk.Name, NewUsername: newUsername, NewUserId: newUserId,
+					Status: "failed", Error: fmt.Sprintf("账号已迁移，但令牌缓存刷新失败，需先核验归属: %v", err),
+				})
+				continue
 			}
-		})
+		}
 
 		// 写审计日志：仅记录令牌名 / id / 新用户名 / 新用户 id，不含密码。
 		model.RecordLog(srcUserId, model.LogTypeManage,
@@ -188,7 +200,7 @@ func MigrateTokensToAccounts(c *gin.Context) {
 //     避免出现「新用户存在但 token 没切」或「token 切了但 user 还没建」的不一致状态。
 //   - 不修改令牌 key / group / remain_quota / used_quota / status 等任何字段。
 //   - 不返回 password；password 仅入库（bcrypt 哈希），由超管事后通过用户管理 → 编辑用户重置。
-func migrateSingleTokenInTx(c *gin.Context, srcUser *model.User, tk *model.Token, assigned map[string]bool) (newUsername string, newUserId int, err error) {
+func migrateSingleTokenInTx(c *gin.Context, srcUser *model.User, tk *model.Token, assigned map[string]bool, target *migrateTokenTarget) (newUsername string, newUserId int, err error) {
 	// 计算新用户的 group：token.Group 为空或 "auto" 时回退为源用户的 group，
 	// 因为 "auto" 是渠道路由用语义，不应当作普通组直接落到 user.group。
 	newGroup := tk.Group
@@ -205,13 +217,22 @@ func migrateSingleTokenInTx(c *gin.Context, srcUser *model.User, tk *model.Token
 	} else {
 		newQuota = tk.RemainQuota
 	}
+	if target != nil {
+		newQuota = *target.UserQuota
+	}
 
 	// 生成 16 字节随机密码。仅入库 bcrypt 哈希，绝不返回 / 写日志。
 	rawPassword := common.GetRandomString(16)
 
 	txErr := model.DB.Transaction(func(tx *gorm.DB) error {
 		// (a) 在事务内生成 username（DB 查重 + 本批次 assigned 查重）
-		uname, buildErr := model.BuildMigratedUsername(tx, tk.Name, tk.Id, assigned)
+		var uname string
+		var buildErr error
+		if target == nil {
+			uname, buildErr = model.BuildMigratedUsername(tx, tk.Name, tk.Id, assigned)
+		} else {
+			uname, buildErr = model.BuildExplicitMigratedUsername(tx, target.Username, assigned)
+		}
 		if buildErr != nil {
 			return buildErr
 		}
@@ -257,11 +278,9 @@ func migrateSingleTokenInTx(c *gin.Context, srcUser *model.User, tk *model.Token
 	return newUsername, newUserId, nil
 }
 
-// refreshMigratedTokenCache 在事务提交后异步刷新 Redis 令牌缓存。
-//
-// 缓存刷新通过 model 包导出的 RefreshTokenCache 完成（model 包内部仍然走
-// 原 cacheSetToken 实现）。如果缓存层失败，仅记 SysLog，不影响业务结果，
-// 因为 DB 已经是最新状态，缓存最终会因 TTL 自然过期。
+// refreshMigratedTokenCache 在事务提交后同步刷新 Redis 令牌缓存。
+// @param token 已更新 UserId 的令牌副本。
+// @return 缓存刷新错误；调用方不得将错误当作可立即发布凭证的成功结果。
 func refreshMigratedTokenCache(token model.Token) error {
 	return model.RefreshTokenCache(token)
 }

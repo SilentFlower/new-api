@@ -11,12 +11,15 @@ import (
 	"gorm.io/gorm"
 )
 
+// TokenNameMaxLength 是令牌名称允许的最大 Unicode 码点数。
+const TokenNameMaxLength = 64
+
 type Token struct {
 	Id                 int            `json:"id"`
 	UserId             int            `json:"user_id" gorm:"index"`
 	Key                string         `json:"key" gorm:"type:varchar(128);uniqueIndex"`
 	Status             int            `json:"status" gorm:"default:1"`
-	Name               string         `json:"name" gorm:"index" `
+	Name               string         `json:"name" gorm:"type:varchar(64);index" `
 	CreatedTime        int64          `json:"created_time" gorm:"bigint"`
 	AccessedTime       int64          `json:"accessed_time" gorm:"bigint"`
 	ExpiredTime        int64          `json:"expired_time" gorm:"bigint;default:-1"` // -1 means never expired
@@ -218,10 +221,21 @@ func SearchUserTokens(userId int, keyword string, token string, offset int, limi
 }
 
 func ValidateUserToken(key string) (token *Token, err error) {
+	return validateUserToken(key, false)
+}
+
+// ValidateUserTokenFromDB 绕过令牌缓存校验当前数据库归属。
+// @param key 令牌原始 Key。
+// @return 当前有效令牌；无效或查询失败时返回错误。
+func ValidateUserTokenFromDB(key string) (token *Token, err error) {
+	return validateUserToken(key, true)
+}
+
+func validateUserToken(key string, fromDB bool) (token *Token, err error) {
 	if key == "" {
 		return nil, ErrTokenNotProvided
 	}
-	token, err = GetTokenByKey(key, false)
+	token, err = GetTokenByKey(key, fromDB)
 	if err == nil {
 		if token.Status == common.TokenStatusExhausted ||
 			token.Status == common.TokenStatusExpired ||

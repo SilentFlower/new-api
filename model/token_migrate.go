@@ -30,8 +30,8 @@ import (
 
 // 令牌迁移到独立账号相关的 model 层工具函数
 
-// MaxMigratedUsernameRunes 限制新用户用户名最大 rune 数（与 User.Username 的 validate:"max=20" 对齐）。
-const MaxMigratedUsernameRunes = 20
+// MaxMigratedUsernameRunes 限制自动生成用户名的最大 Unicode 码点数。
+const MaxMigratedUsernameRunes = UserNameMaxLength
 
 // MaxMigratedUsernameRetry 单个令牌生成 username 时最多允许的冲突重试次数。
 // 超过该次数仍冲突则该令牌迁移失败上报，由超管修改令牌名后重试。

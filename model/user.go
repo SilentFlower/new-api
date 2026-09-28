@@ -17,7 +17,8 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const UserNameMaxLength = 20
+// UserNameMaxLength 是用户名和显示名允许的最大 Unicode 码点数。
+const UserNameMaxLength = 64
 
 var userSortColumns = map[string]string{
 	"id":            "id",
@@ -78,10 +79,10 @@ func resolveUserSortOptions(sortOptions []UserSortOptions) UserSortOptions {
 // Otherwise, the sensitive information will be saved on local storage in plain text!
 type User struct {
 	Id               int                        `json:"id"`
-	Username         string                     `json:"username" gorm:"unique;index" validate:"max=20"`
+	Username         string                     `json:"username" gorm:"type:varchar(64);unique;index" validate:"max=64"`
 	Password         string                     `json:"password" gorm:"not null;" validate:"min=8,max=20"`
 	OriginalPassword string                     `json:"original_password" gorm:"-:all"` // this field is only for Password change verification, don't save it to database!
-	DisplayName      string                     `json:"display_name" gorm:"index" validate:"max=20"`
+	DisplayName      string                     `json:"display_name" gorm:"type:varchar(64);index" validate:"max=64"`
 	Role             int                        `json:"role" gorm:"type:int;default:1"`   // admin, common
 	Status           int                        `json:"status" gorm:"type:int;default:1"` // enabled, disabled
 	Email            string                     `json:"email" gorm:"index" validate:"max=50"`

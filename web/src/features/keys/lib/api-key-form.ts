@@ -20,6 +20,10 @@ import type { TFunction } from 'i18next'
 import { z } from 'zod'
 
 import { parseQuotaFromDollars, quotaUnitsToDollars } from '@/lib/format'
+import {
+  ACCOUNT_NAME_MAX_CODE_POINTS,
+  isAccountNameWithinLimit,
+} from '@/lib/name-limit'
 
 import { DEFAULT_GROUP } from '../constants'
 import type { ApiKey, ApiKeyFormData } from '../types'
@@ -34,7 +38,16 @@ export function getApiKeyFormSchema(t: TFunction, maxAutoGroups = 5) {
 
   return z
     .object({
-      name: z.string().min(1, t('Please enter a name')),
+      name: z
+        .string()
+        .min(1, t('Please enter a name'))
+        .refine(
+          isAccountNameWithinLimit,
+          t('Name must be between {{min}} and {{max}} characters', {
+            min: 1,
+            max: ACCOUNT_NAME_MAX_CODE_POINTS,
+          })
+        ),
       remain_quota_dollars: z.number().optional(),
       expired_time: z.date().optional(),
       unlimited_quota: z.boolean(),

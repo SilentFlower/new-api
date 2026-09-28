@@ -75,7 +75,7 @@ func TestMigrateSingleTokenInTxEnablesRecordIpLogForNewUser(t *testing.T) {
 	}
 	require.NoError(t, db.Create(token).Error)
 
-	newUsername, newUserId, err := migrateSingleTokenInTx(nil, srcUser, token, map[string]bool{})
+	newUsername, newUserId, err := migrateSingleTokenInTx(nil, srcUser, token, map[string]bool{}, nil)
 	require.NoError(t, err)
 	require.Equal(t, "alice-cop", newUsername)
 	require.NotZero(t, newUserId)

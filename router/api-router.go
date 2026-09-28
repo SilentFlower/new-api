@@ -251,6 +251,9 @@ func SetApiRouter(router *gin.Engine) {
 			// 注意：此路由继承 tokenRoute 上的 UserAuth()，再叠加 RootAuth() 做权限收紧；
 			// 中间件按声明顺序执行，无副作用。
 			tokenRoute.POST("/migrate", middleware.RootAuth(), middleware.CriticalRateLimit(), controller.MigrateTokensToAccounts)
+			tokenRoute.POST("/workflow/issue", middleware.RootAuth(), middleware.CriticalRateLimit(), middleware.DisableCache(), controller.IssueWorkflowToken)
+			tokenRoute.POST("/workflow/retire", middleware.RootAuth(), middleware.CriticalRateLimit(), controller.RetireWorkflowTokenHandler)
+			tokenRoute.GET("/workflow/status", middleware.RootAuth(), controller.GetWorkflowAccountStatusHandler)
 		}
 
 		usageRoute := apiRouter.Group("/usage")

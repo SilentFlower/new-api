@@ -333,6 +333,28 @@ func TokenAuthReadOnly() func(c *gin.Context) {
 			c.Abort()
 			return
 		}
+		if userCache.Role == common.RoleRootUser {
+			// root 迁出的令牌可能仍有旧缓存，日志查询也应使用当前归属。
+			token, err = model.GetTokenByKey(key, true)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"success": false,
+					"message": common.TranslateMessage(c, i18n.MsgDatabaseError)})
+				return
+			}
+			if token.Status == common.TokenStatusDisabled {
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"success": false,
+					"message": common.TranslateMessage(c, i18n.MsgTokenStatusUnavailable)})
+				return
+			}
+			if token.UserId != userCache.Id {
+				userCache, err = model.GetUserCache(token.UserId)
+				if err != nil {
+					c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"success": false,
+						"message": common.TranslateMessage(c, i18n.MsgDatabaseError)})
+					return
+				}
+			}
+		}
 		if userCache.Status != common.UserStatusEnabled {
 			c.JSON(http.StatusForbidden, gin.H{
 				"success": false,
@@ -446,6 +468,25 @@ func TokenAuth() func(c *gin.Context) {
 			abortWithOpenAiMessage(c, http.StatusInternalServerError,
 				common.TranslateMessage(c, i18n.MsgDatabaseError))
 			return
+		}
+		if userCache.Role == common.RoleRootUser {
+			// 工作流令牌由 root 迁出；旧 Redis 快照不能决定后续账单归属。
+			token, err = model.ValidateUserTokenFromDB(key)
+			if err != nil {
+				if errors.Is(err, model.ErrDatabase) {
+					abortWithOpenAiMessage(c, http.StatusInternalServerError, common.TranslateMessage(c, i18n.MsgDatabaseError))
+				} else {
+					abortWithOpenAiMessage(c, http.StatusUnauthorized, common.TranslateMessage(c, i18n.MsgTokenInvalid))
+				}
+				return
+			}
+			if token.UserId != userCache.Id {
+				userCache, err = model.GetUserCache(token.UserId)
+				if err != nil {
+					abortWithOpenAiMessage(c, http.StatusInternalServerError, common.TranslateMessage(c, i18n.MsgDatabaseError))
+					return
+				}
+			}
 		}
 		userEnabled := userCache.Status == common.UserStatusEnabled
 		if !userEnabled {

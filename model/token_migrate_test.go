@@ -105,34 +105,30 @@ func TestBuildMigratedUsername_AllWhitespaceFallback(t *testing.T) {
 	assert.Equal(t, "token_7", got)
 }
 
-// 5) 超长 ASCII 主体按 rune 截断到 ≤ 20。
+// 5) 超长 ASCII 主体按 rune 截断到 64。
 func TestBuildMigratedUsername_TruncatesLongAsciiByRune(t *testing.T) {
 	truncateUsers(t)
 
-	long := strings.Repeat("a", 50)
+	long := strings.Repeat("a", 75)
 	assigned := map[string]bool{}
 	got, err := BuildMigratedUsername(DB, long, 1, assigned)
 	require.NoError(t, err)
-	// 主体被截到 20 个 rune
-	assert.Equal(t, 20, utf8.RuneCountInString(got))
-	assert.Equal(t, strings.Repeat("a", 20), got)
+	assert.Equal(t, 64, utf8.RuneCountInString(got))
+	assert.Equal(t, strings.Repeat("a", 64), got)
 }
 
-// 6) 中文名按 rune 截断（不会把多字节字符切坏）。
-//    生成 25 个中文字符（每个 3 字节），截断后应剩 20 个 rune（60 字节），
-//    而不是按 byte 截到 20 字节（约 6.67 个字符，会切坏中文）。
+//  6. 中文名按 rune 截断（不会把多字节字符切坏）。
+//     生成 70 个中文字符，截断后应剩 64 个码点，且不会切坏 UTF-8。
 func TestBuildMigratedUsername_TruncatesChineseByRune(t *testing.T) {
 	truncateUsers(t)
 
-	// 用「测」字（U+6D4B，UTF-8 占 3 字节）拼出 25 个 rune
-	long := strings.Repeat("测", 25)
+	long := strings.Repeat("测", 70)
 	assigned := map[string]bool{}
 	got, err := BuildMigratedUsername(DB, long, 1, assigned)
 	require.NoError(t, err)
-	assert.Equal(t, 20, utf8.RuneCountInString(got))
-	assert.Equal(t, strings.Repeat("测", 20), got)
-	// 验证字节数也符合 rune 截断（20 个 3 字节字符 = 60 字节）
-	assert.Equal(t, 60, len(got))
+	assert.Equal(t, 64, utf8.RuneCountInString(got))
+	assert.Equal(t, strings.Repeat("测", 64), got)
+	assert.Equal(t, 192, len(got))
 	// 验证 UTF-8 仍然有效（无切坏）
 	assert.True(t, utf8.ValidString(got))
 }
@@ -170,21 +166,18 @@ func TestBuildMigratedUsername_MultipleConflictsIncrement(t *testing.T) {
 	assert.Equal(t, "eve_3", got)
 }
 
-// 10) 主体已经接近 20 rune，加后缀时主体被进一步压缩，保证最终 ≤ 20。
+// 10) 主体已经接近 64 rune，加后缀时主体被进一步压缩。
 func TestBuildMigratedUsername_TruncateBaseWhenAddingSuffix(t *testing.T) {
 	truncateUsers(t)
 
-	// 19 个 'a' 主体，DB 已占用整名，需要加 _2 -> 总长 21 rune > 20
-	// 算法应压缩主体到 18 rune，最终 "aaaa..._2" 共 20 rune
-	base := strings.Repeat("a", 19)
+	// 63 个 'a' 主体，DB 已占用整名；追加 _2 时压缩主体。
+	base := strings.Repeat("a", 63)
 	seedUserForUsername(t, base)
 
 	assigned := map[string]bool{}
 	got, err := BuildMigratedUsername(DB, base, 1, assigned)
 	require.NoError(t, err)
-	assert.LessOrEqual(t, utf8.RuneCountInString(got), MaxMigratedUsernameRunes)
-	// 后缀必须保留完整
-	assert.True(t, strings.HasSuffix(got, "_2"))
+	assert.Equal(t, strings.Repeat("a", 62)+"_2", got)
 }
 
 // 11) 跨「DB + assigned」混合冲突也能正确推进。
@@ -199,7 +192,7 @@ func TestBuildMigratedUsername_MixedConflict(t *testing.T) {
 	assert.Equal(t, "frank_3", got)
 }
 
-// 12) BuildMigratedUsername 不应自动把成功的 username 写回 assigned，
+//  12. BuildMigratedUsername 不应自动把成功的 username 写回 assigned，
 //     调用方需要在事务提交后自行加入。
 func TestBuildMigratedUsername_DoesNotMutateAssigned(t *testing.T) {
 	truncateUsers(t)
@@ -210,7 +203,7 @@ func TestBuildMigratedUsername_DoesNotMutateAssigned(t *testing.T) {
 	assert.Empty(t, assigned, "BuildMigratedUsername 不应自动写回 assigned")
 }
 
-// 13) 重试次数耗尽时返回的错误必须可以被 errors.Is 识别为
+//  13. 重试次数耗尽时返回的错误必须可以被 errors.Is 识别为
 //     ErrUsernameConflictRetryExceeded（controller 层据此映射 i18n 文案）。
 func TestBuildMigratedUsername_ErrorIsSentinel(t *testing.T) {
 	truncateUsers(t)

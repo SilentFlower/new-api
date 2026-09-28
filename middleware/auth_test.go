@@ -13,8 +13,10 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/service"
+	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
+	"github.com/go-redis/redis/v8"
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -163,6 +165,47 @@ func TestTokenAuthReadOnlyAllowsAIKeyLogQuery(t *testing.T) {
 	require.NoError(t, common.Unmarshal(response.Body.Bytes(), &body))
 	assert.Equal(t, user.Id, body.UserID)
 	assert.Equal(t, token.Id, body.TokenID)
+}
+
+func TestMigratedRootTokenUsesCurrentOwnerDespiteStaleCache(t *testing.T) {
+	setupDashboardAuthMiddlewareTest(t)
+	server := miniredis.RunT(t)
+	previousRDB := common.RDB
+	common.RDB = redis.NewClient(&redis.Options{Addr: server.Addr()})
+	common.RedisEnabled = true
+	t.Cleanup(func() {
+		_ = common.RDB.Close()
+		common.RDB = previousRDB
+	})
+
+	root := &model.User{Username: "root-migration", Role: common.RoleRootUser,
+		Status: common.UserStatusEnabled, Group: "default", AffCode: "root-migration-aff"}
+	workflow := &model.User{Username: "迁移工作流", Role: common.RoleCommonUser,
+		Status: common.UserStatusEnabled, Group: "default", AffCode: "workflow-migration-aff"}
+	require.NoError(t, model.DB.Create(root).Error)
+	require.NoError(t, model.DB.Create(workflow).Error)
+	token := &model.Token{UserId: root.Id, Key: "migrationcachekey", Name: "workflow-original",
+		Status: common.TokenStatusEnabled, ExpiredTime: -1, UnlimitedQuota: true, Group: "default"}
+	require.NoError(t, model.DB.Create(token).Error)
+	require.NoError(t, model.RefreshTokenCache(*token))
+	require.NoError(t, model.DB.Model(token).Update("user_id", workflow.Id).Error)
+
+	router := gin.New()
+	router.GET("/relay", TokenAuth(), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"user_id": c.GetInt("id")})
+	})
+	router.GET("/logs", TokenAuthReadOnly(), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"user_id": c.GetInt("id")})
+	})
+	for _, path := range []string{"/relay", "/logs"} {
+		require.NoError(t, model.RefreshTokenCache(*token))
+		request := httptest.NewRequest(http.MethodGet, path, nil)
+		request.Header.Set("Authorization", "Bearer sk-"+token.Key)
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		require.Equal(t, http.StatusOK, response.Code, response.Body.String())
+		assert.Contains(t, response.Body.String(), fmt.Sprintf(`"user_id":%d`, workflow.Id))
+	}
 }
 
 func TestUserAuthNeverFallsBackForRecognizedInvalidInternalJWT(t *testing.T) {
