@@ -1,0 +1,8 @@
+{"file": ".trellis/spec/backend/channel-period-budget-fallback.md", "reason": "预算 v2 配置、按行用量/提额接口、计数身份与两仓合同，界面改动不得偏离"}
+{"file": ".trellis/spec/frontend/base-ui-composition.md", "reason": "Sheet、Drawer、菜单、选择器的组合上下文与交互验证要求"}
+{"file": ".trellis/spec/frontend/i18n-merge-guidelines.md", "reason": "七语言写入与源码缺键扫描门禁"}
+{"file": ".trellis/spec/guides/build-upstream-friendly-customization.md", "reason": "build 分支定制逻辑独立、最薄接入，降低上游同步冲突"}
+{"file": ".trellis/tasks/09-13-channel-budget-ux/research/channel-budget-redesign.html", "reason": "new-api 界面原型，即设计规格"}
+{"file": ".trellis/tasks/09-13-channel-budget-ux/research/ai-fund-redesign.html", "reason": "ai-fund 界面原型（管理弹窗 + 本人面板），即设计规格"}
+{"file": ".trellis/tasks/09-13-channel-budget-ux/research/newapi-ui-audit.md", "reason": "new-api 现状结构、问题清单、可用组件与测试锚点"}
+{"file": ".trellis/tasks/09-13-channel-budget-ux/research/ai-fund-ui-audit.md", "reason": "ai-fund 现状结构、问题清单、样式体系与测试锚点"}

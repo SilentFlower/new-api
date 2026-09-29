@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>渠道预算改版原型</title>
+<style>
+  :root {
+    --ground: #f5f6f8;
+    --surface: #ffffff;
+    --surface-2: #f8f9fb;
+    --surface-3: #eef1f5;
+    --border: #e3e6eb;
+    --border-strong: #cfd4dc;
+    --text: #151a21;
+    --text-2: #4b5563;
+    --muted: #7b8494;
+    --accent: #2f6fed;
+    --accent-soft: #e8efff;
+    --accent-text: #1f56c9;
+    --ok: #1a8a4a;      --ok-soft: #e4f5ea;
+    --warn: #b7690a;    --warn-soft: #fff1dc;
+    --crit: #c8322b;    --crit-soft: #fde7e5;
+    --neutral-soft: #eceff3;
+    --overlay: rgba(21, 26, 33, .38);
+    --shadow: 0 12px 40px rgba(21, 26, 33, .14);
+    --radius: 8px;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0f1216; --surface: #171b21; --surface-2: #1c2129; --surface-3: #222833;
+      --border: #2a313b; --border-strong: #3a4350;
+      --text: #e8ebf0; --text-2: #b6bdc8; --muted: #8b95a5;
+      --accent: #6b98f5; --accent-soft: #1d2a45; --accent-text: #9ab8ff;
+      --ok: #4cc47f; --ok-soft: #14301f;
+      --warn: #e5a33a; --warn-soft: #3a2a10;
+      --crit: #f0665e; --crit-soft: #3c1a18;
+      --neutral-soft: #262d38;
+      --overlay: rgba(0,0,0,.55); --shadow: 0 12px 40px rgba(0,0,0,.5);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0f1216; --surface: #171b21; --surface-2: #1c2129; --surface-3: #222833;
+    --border: #2a313b; --border-strong: #3a4350;
+    --text: #e8ebf0; --text-2: #b6bdc8; --muted: #8b95a5;
+    --accent: #6b98f5; --accent-soft: #1d2a45; --accent-text: #9ab8ff;
+    --ok: #4cc47f; --ok-soft: #14301f;
+    --warn: #e5a33a; --warn-soft: #3a2a10;
+    --crit: #f0665e; --crit-soft: #3c1a18;
+    --neutral-soft: #262d38;
+    --overlay: rgba(0,0,0,.55); --shadow: 0 12px 40px rgba(0,0,0,.5);
+    color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--ground); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  button, input, select, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  .num { font-variant-numeric: tabular-nums; }
+  .mono { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; }
+  h1, h2, h3 { margin: 0; text-wrap: balance; }
+  h1 { font-size: 17px; font-weight: 600; }
+  h2 { font-size: 14px; font-weight: 600; }
+  h3 { font-size: 12px; font-weight: 600; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+  p { margin: 0; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- console frame ---------- */
+  .frame { min-height: 100vh; display: flex; flex-direction: column; }
+  .topbar {
+    height: 44px; display: flex; align-items: center; gap: 14px; padding: 0 20px;
+    background: var(--surface); border-bottom: 1px solid var(--border); color: var(--text-2); font-size: 13px;
+  }
+  .topbar .brand { display: flex; align-items: center; gap: 8px; color: var(--text); font-weight: 600; }
+  .topbar .brand i { width: 18px; height: 18px; border-radius: 5px; background: var(--accent); display: inline-block; }
+  .topbar .crumb { display: flex; gap: 8px; align-items: center; }
+  .topbar .crumb span + span::before { content: "/"; margin-right: 8px; color: var(--muted); }
+  .topbar .proto { margin-left: auto; font-size: 12px; color: var(--accent-text); background: var(--accent-soft); padding: 3px 9px; border-radius: 999px; }
+
+  .note {
+    margin: 16px 20px 0; padding: 10px 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+    display: flex; gap: 14px; align-items: flex-start; font-size: 13px; color: var(--text-2);
+  }
+  .note strong { color: var(--text); }
+  .note ul { margin: 4px 0 0; padding-left: 18px; columns: 2; column-gap: 28px; }
+  .note li { break-inside: avoid; margin: 2px 0; }
+  .note .close { margin-left: auto; flex: none; }
+
+  /* ---------- dialog ---------- */
+  .dialog {
+    position: relative; margin: 16px 20px 24px; background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column;
+    height: calc(100vh - 44px - 40px - 16px - 24px); min-height: 640px;
+  }
+  .dialog-head { display: flex; align-items: flex-start; gap: 16px; padding: 18px 22px 0; }
+  .dialog-head .sub { color: var(--muted); font-size: 12.5px; margin-top: 3px; display: flex; gap: 10px; flex-wrap: wrap; }
+  .dialog-head .sub b { color: var(--text-2); font-weight: 500; }
+  .head-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+  .tabs { display: flex; gap: 2px; padding: 14px 22px 0; border-bottom: 1px solid var(--border); }
+  .tab {
+    background: none; border: 0; padding: 8px 12px 10px; color: var(--muted); border-bottom: 2px solid transparent; margin-bottom: -1px; font-weight: 500;
+    display: flex; gap: 6px; align-items: center;
+  }
+  .tab:hover { color: var(--text); }
+  .tab[aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+  .tab .count { font-size: 11px; color: var(--muted); background: var(--neutral-soft); border-radius: 999px; padding: 0 6px; }
+
+  .dialog-body { flex: 1; overflow: auto; padding: 18px 22px 28px; }
+  .panel[hidden] { display: none; }
+
+  /* toolbar */
+  .toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+  .toolbar .spacer { flex: 1; }
+  .chips { display: flex; gap: 6px; }
+  .chip {
+    border: 1px solid var(--border); background: var(--surface); border-radius: 999px; padding: 3px 11px; font-size: 12.5px; color: var(--text-2);
+  }
+  .chip[aria-pressed="true"] { background: var(--text); color: var(--surface); border-color: var(--text); }
+  .chip .n { color: inherit; opacity: .7; margin-left: 4px; }
+  .inline-field { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-2); }
+
+  /* buttons */
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--border-strong);
+    background: var(--surface); color: var(--text); font-weight: 500; white-space: nowrap;
+  }
+  .btn:hover { background: var(--surface-2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.primary:hover { filter: brightness(1.06); }
+  .btn.danger { color: var(--crit); }
+  .btn.ghost { border-color: transparent; }
+  .btn.sm { height: 26px; padding: 0 9px; font-size: 12.5px; }
+  .btn.icon { width: 32px; padding: 0; justify-content: center; }
+  .btn[disabled] { opacity: .5; cursor: not-allowed; }
+
+  /* switch */
+  .switch { position: relative; width: 34px; height: 20px; border-radius: 999px; background: var(--border-strong); border: 0; padding: 0; flex: none; transition: background .15s; }
+  .switch::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .switch[aria-checked="true"] { background: var(--accent); }
+  .switch[aria-checked="true"]::after { transform: translateX(14px); }
+
+  /* badges */
+  .badge { display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 8px; border-radius: 999px; font-size: 11.5px; font-weight: 500; white-space: nowrap; }
+  .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .badge.ok { background: var(--ok-soft); color: var(--ok); }
+  .badge.warn { background: var(--warn-soft); color: var(--warn); }
+  .badge.crit { background: var(--crit-soft); color: var(--crit); }
+  .badge.off { background: var(--neutral-soft); color: var(--muted); }
+  .badge.info { background: var(--accent-soft); color: var(--accent-text); }
+  .badge.plain::before { display: none; }
+
+  .tag { display: inline-block; padding: 1px 7px; border-radius: 5px; background: var(--surface-3); color: var(--text-2); font-size: 12px; margin: 1px 3px 1px 0; }
+  .tag.all { background: transparent; color: var(--muted); padding-left: 0; }
+
+  /* table */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: 500; color: var(--muted); font-size: 12px; padding: 9px 12px; background: var(--surface-2); border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 11px 12px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tbody tr:last-child td { border-bottom: 0; }
+  tbody tr:hover td { background: var(--surface-2); }
+  tbody tr.off td { color: var(--muted); }
+  tbody tr.off .name { color: var(--text-2); }
+  tbody tr.changed td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+  td.actions { text-align: right; white-space: nowrap; }
+  td.actions .btn { margin-left: 4px; }
+  .name { font-weight: 500; color: var(--text); }
+  .sub { color: var(--muted); font-size: 12px; }
+  .stack { display: flex; flex-direction: column; gap: 3px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+
+  .progress { position: relative; height: 5px; border-radius: 3px; background: var(--surface-3); overflow: hidden; width: 150px; }
+  .progress > i { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 3px; }
+  .progress.warn > i { background: var(--warn); }
+  .progress.crit > i { background: var(--crit); }
+  .usage { min-width: 190px; }
+  .usage .line { display: flex; justify-content: space-between; font-size: 12.5px; }
+  .usage .line b { font-weight: 500; }
+
+  .empty { padding: 36px 16px; text-align: center; color: var(--muted); }
+  .empty b { display: block; color: var(--text-2); margin-bottom: 4px; font-weight: 500; }
+
+  /* summary strip */
+  .summary { display: flex; gap: 18px; align-items: center; margin-bottom: 14px; padding: 10px 14px; background: var(--surface-2); border-radius: var(--radius); font-size: 13px; color: var(--text-2); flex-wrap: wrap; }
+  .summary .stat { display: flex; align-items: center; gap: 8px; }
+  .summary .stat b { font-size: 16px; color: var(--text); font-weight: 600; }
+  .summary .sep { width: 1px; height: 18px; background: var(--border-strong); }
+  .summary .next { margin-left: auto; color: var(--muted); }
+
+  /* ---------- save bar ---------- */
+  .savebar {
+    display: flex; align-items: center; gap: 14px; padding: 12px 22px; border-top: 1px solid var(--border);
+    background: var(--surface); box-shadow: 0 -8px 24px rgba(21,26,33,.06);
+  }
+  .savebar[hidden] { display: none; }
+  .savebar .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+  .savebar .what { color: var(--text-2); font-size: 13px; }
+  .savebar .what b { color: var(--text); font-weight: 600; }
+  .savebar .grow { flex: 1; }
+
+  /* ---------- drawers ---------- */
+  .scrim { position: absolute; inset: 0; background: var(--overlay); z-index: 5; }
+  .scrim[hidden] { display: none; }
+  .drawer {
+    position: absolute; top: 0; right: 0; bottom: 0; width: min(520px, 100%); background: var(--surface); border-left: 1px solid var(--border);
+    box-shadow: var(--shadow); z-index: 6; display: flex; flex-direction: column; transform: translateX(0); transition: transform .18s ease;
+  }
+  .drawer[hidden] { display: none; }
+  .drawer-head { padding: 18px 22px 12px; border-bottom: 1px solid var(--border); display: flex; gap: 12px; align-items: flex-start; }
+  .drawer-head .sub { margin-top: 3px; }
+  .drawer-body { flex: 1; overflow: auto; padding: 6px 22px 22px; }
+  .drawer-foot { padding: 12px 22px; border-top: 1px solid var(--border); display: flex; gap: 8px; align-items: center; }
+  .drawer-foot .grow { flex: 1; }
+  @media (prefers-reduced-motion: reduce) { .drawer, .switch, .switch::after { transition: none; } }
+
+  .group { padding: 16px 0; border-bottom: 1px solid var(--border); }
+  .group:last-child { border-bottom: 0; }
+  .group h3 { margin-bottom: 10px; }
+  .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+  .field:last-child { margin-bottom: 0; }
+  .field label { font-size: 13px; font-weight: 500; }
+  .field .hint { font-size: 12px; color: var(--muted); }
+  .field .err { font-size: 12px; color: var(--crit); }
+  .field.invalid .input, .field.invalid select { border-color: var(--crit); }
+  .input, select.input {
+    height: 34px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 7px; background: var(--surface); width: 100%;
+  }
+  .input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .prefix { position: relative; }
+  .prefix > span { position: absolute; left: 10px; top: 0; height: 34px; display: flex; align-items: center; color: var(--muted); }
+  .prefix > .input { padding-left: 24px; }
+
+  .seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 7px; overflow: hidden; }
+  .seg button { border: 0; background: var(--surface); padding: 0 12px; height: 32px; color: var(--text-2); border-right: 1px solid var(--border); }
+  .seg button:last-child { border-right: 0; }
+  .seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent-text); font-weight: 500; }
+  .seg-help { font-size: 12px; color: var(--muted); margin-top: 6px; min-height: 18px; }
+
+  .model-pick { display: flex; flex-wrap: wrap; gap: 6px; }
+  .model-pick button { border: 1px solid var(--border-strong); background: var(--surface); border-radius: 999px; padding: 3px 11px; font-size: 12.5px; color: var(--text-2); }
+  .model-pick button[aria-pressed="true"] { background: var(--text); color: var(--surface); border-color: var(--text); }
+
+  .kv { display: grid; grid-template-columns: 96px 1fr; row-gap: 6px; column-gap: 12px; font-size: 13px; }
+  .kv dt { color: var(--muted); }
+  .kv dd { margin: 0; }
+  .bignum { display: flex; align-items: baseline; gap: 8px; margin: 14px 0 8px; }
+  .bignum b { font-size: 28px; font-weight: 600; letter-spacing: -.01em; }
+  .bignum span { color: var(--muted); }
+  .adjust { display: none; gap: 8px; align-items: center; margin-top: 10px; }
+  .adjust.open { display: flex; }
+
+  /* preview modal */
+  .modal { position: absolute; inset: 0; z-index: 7; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .modal[hidden] { display: none; }
+  .modal .box { width: min(760px, 100%); max-height: 100%; background: var(--surface); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; border: 1px solid var(--border); }
+  .modal .box > header { padding: 18px 22px 12px; border-bottom: 1px solid var(--border); }
+  .modal .box > .body { padding: 16px 22px; overflow: auto; }
+  .modal .box > footer { padding: 12px 22px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; align-items: center; }
+  .diff td.old { color: var(--muted); text-decoration: line-through; }
+  .diff td.new { color: var(--text); font-weight: 500; }
+  .callout { padding: 10px 12px; border-radius: 7px; background: var(--warn-soft); color: var(--warn); font-size: 13px; display: flex; gap: 8px; align-items: flex-start; margin-bottom: 14px; }
+  .callout.info { background: var(--accent-soft); color: var(--accent-text); }
+
+  /* schedules list */
+  .list { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .item { border-bottom: 1px solid var(--border); }
+  .item:last-child { border-bottom: 0; }
+  .item > .head { display: grid; grid-template-columns: 22px 1.2fr 1.6fr 1fr auto; gap: 14px; align-items: center; padding: 12px 14px; cursor: pointer; }
+  .item > .head:hover { background: var(--surface-2); }
+  .item .chev { color: var(--muted); transition: transform .15s; }
+  .item[open] .chev { transform: rotate(90deg); }
+  .item > .detail { display: none; padding: 4px 14px 16px 50px; background: var(--surface-2); border-top: 1px solid var(--border); }
+  .item[open] > .detail { display: block; }
+  .refs { display: flex; gap: 4px; flex-wrap: wrap; }
+
+  /* overrides two blocks */
+  .blocks { display: grid; grid-template-columns: 1fr; gap: 20px; }
+  .block > .bh { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .block > .bh p { color: var(--muted); font-size: 12.5px; }
+  .block > .bh .btn { margin-left: auto; }
+  .search { display: flex; gap: 8px; margin-bottom: 14px; max-width: 520px; }
+
+  /* confirm + toast */
+  .confirm .box { width: min(420px, 100%); }
+  .toast {
+    position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(20px); opacity: 0; background: var(--text); color: var(--surface);
+    padding: 9px 14px; border-radius: 8px; font-size: 13px; box-shadow: var(--shadow); transition: all .18s; pointer-events: none; z-index: 20;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (max-width: 860px) {
+    .note ul { columns: 1; }
+    .dialog { margin: 12px; height: auto; min-height: 0; }
+    .dialog-body { padding: 14px; }
+    .summary .next { margin-left: 0; width: 100%; }
+    .grid2 { grid-template-columns: 1fr; }
+    .item > .head { grid-template-columns: 22px 1fr auto; }
+    .item > .head .col-range, .item > .head .col-refs { display: none; }
+  }
+</style>
+
+<div class="frame">
+  <div class="topbar">
+    <div class="brand"><i></i>New API</div>
+    <div class="crumb"><span>渠道</span><span>演示渠道-OpenAI</span><span>限额</span></div>
+    <span class="proto">改版原型 · 示例数据</span>
+  </div>
+
+  <div class="note" id="note">
+    <div>
+      <strong>这页可以点。</strong>改动点都做进了交互里，对照现状看：
+      <ul>
+        <li>行状态徽标：生效中 / 接近上限 / 已超限 / 未到时段 / 已停用，停用行整体弱化</li>
+        <li>共用计数的行不再画一条满进度条，改成文字说明</li>
+        <li>切开关或编辑后底部出现常驻保存栏，「预览并保存」一步完成，预览是逐字段 diff</li>
+        <li>「编辑」「用量」「提额」都从行上打开右侧抽屉，不再滚到页底</li>
+        <li>时段改成折叠列表并显示被谁引用；个人覆盖拆成预算提额与并发覆盖两块</li>
+        <li>用量页一次拉全部行；撤销、清零、放弃草稿都有确认</li>
+      </ul>
+    </div>
+    <button class="btn sm ghost close" onclick="document.getElementById('note').hidden = true">收起</button>
+  </div>
+
+  <section class="dialog" id="dialog">
+    <div class="dialog-head">
+      <div>
+        <h1>渠道限额</h1>
+        <div class="sub"><span>演示渠道-OpenAI · <span class="mono">#1</span></span><span>服务器时区 <b>Local</b></span><span>策略版本 <b id="rev" class="num">1</b></span><span>存储 <b>Redis</b></span></div>
+      </div>
+      <div class="head-actions">
+        <button class="btn" onclick="reload()">重新加载</button>
+        <button class="btn icon" aria-label="关闭" onclick="toast('原型里关闭不做事')">✕</button>
+      </div>
+    </div>
+
+    <nav class="tabs" role="tablist" id="tabs">
+      <button class="tab" role="tab" aria-selected="true" data-tab="budgets">预算 <span class="count" id="cnt-budgets">8</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="schedules">时段 <span class="count">2</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="usage">用量</button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="overrides">个人覆盖 <span class="count">1</span></button>
+      <button class="tab" role="tab" aria-selected="false" data-tab="concurrency">并发</button>
+    </nav>
+
+    <div class="dialog-body">
+      <!-- ===== 预算 ===== -->
+      <section class="panel" id="panel-budgets" role="tabpanel">
+        <div class="summary" id="summary"></div>
+        <div class="toolbar">
+          <div class="chips" id="filters">
+            <button class="chip" aria-pressed="true" data-f="all">全部<span class="n" id="n-all"></span></button>
+            <button class="chip" aria-pressed="false" data-f="active">生效中<span class="n" id="n-active"></span></button>
+            <button class="chip" aria-pressed="false" data-f="attention">需关注<span class="n" id="n-attention"></span></button>
+            <button class="chip" aria-pressed="false" data-f="off">已停用<span class="n" id="n-off"></span></button>
+          </div>
+          <div class="spacer"></div>
+          <div class="inline-field">超限默认动作
+            <select class="input" style="width:auto;height:30px" id="default-action" onchange="markDirty('默认动作','default_on_exceed', this.value)">
+              <option value="reject">拒绝请求</option>
+              <option value="fallback">降级到其他渠道</option>
+            </select>
+          </div>
+          <button class="btn primary" onclick="openEdit(null)">添加预算</button>
+        </div>
+        <div class="table-wrap">
+          <table id="budget-table">
+            <thead><tr>
+              <th style="width:44px">启用</th><th>预算</th><th>状态</th><th>范围 · 周期</th><th>时段</th><th class="num">上限</th><th>当前用量</th><th>超限时</th><th></th>
+            </tr></thead>
+            <tbody id="budget-rows"></tbody>
+          </table>
+        </div>
+        <p class="sub" style="margin-top:10px">用量按客户端原始模型名精确累计。日/周窗口的计数不区分时段，所以带时段的日/周预算会与同范围的无时段预算共用一份计数，表里会直接标出来。</p>
+      </section>
+
+      <!-- ===== 时段 ===== -->
+      <section class="panel" id="panel-schedules" role="tabpanel" hidden>
+        <div class="toolbar">
+          <p class="sub">时段只是「什么时候生效」，不带额度；额度写在引用它的预算行上。已开始计量的时段不能改起止，只能停用后新建。</p>
+          <div class="spacer"></div>
+          <button class="btn primary" onclick="toast('原型：新增时段会在列表末尾展开一张空表单')">添加时段</button>
+        </div>
+        <div class="list" id="schedule-list"></div>
+      </section>
+
+      <!-- ===== 用量 ===== -->
+      <section class="panel" id="panel-usage" role="tabpanel" hidden>
+        <div class="toolbar">
+          <p class="sub">所有预算行的当前窗口用量，一次请求拉取，30 秒自动刷新。点某一行可以看用户明细或直接调整。</p>
+          <div class="spacer"></div>
+          <span class="sub num">上次刷新 12 秒前</span>
+          <button class="btn sm" onclick="toast('已刷新')">刷新</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>预算</th><th>窗口</th><th class="num">上限</th><th>已用</th><th class="num">剩余</th><th>重置</th><th></th></tr></thead>
+            <tbody id="usage-rows"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ===== 个人覆盖 ===== -->
+      <section class="panel" id="panel-overrides" role="tabpanel" hidden>
+        <div class="search">
+          <input class="input" placeholder="搜索用户名、邮箱或 ID，回车搜索" aria-label="搜索用户" onkeydown="if(event.key==='Enter') toast('原型：搜索结果会出现在下方，可直接为该用户新增提额或并发覆盖')">
+          <button class="btn" onclick="toast('原型：搜索结果会出现在下方')">搜索</button>
+        </div>
+        <div class="blocks">
+          <div class="block">
+            <div class="bh"><h2>预算提额</h2><p>只对「单用户」范围的预算行有效，金额须高于该行基础上限。</p><button class="btn sm" onclick="openOverride(null)">新增提额</button></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>用户</th><th>预算</th><th class="num">基础上限</th><th class="num">提额后</th><th>到期</th><th>当前用量</th><th></th></tr></thead>
+              <tbody id="override-rows"></tbody>
+            </table></div>
+          </div>
+          <div class="block">
+            <div class="bh"><h2>并发覆盖</h2><p>覆盖渠道的个人并发上限，与预算无关。</p><button class="btn sm" onclick="toast('原型：并发覆盖用同一种抽屉，只有一个并发数字段')">新增覆盖</button></div>
+            <div class="table-wrap"><table>
+              <thead><tr><th>用户</th><th class="num">渠道默认</th><th class="num">覆盖为</th><th>到期</th><th></th></tr></thead>
+              <tbody><tr><td colspan="5"><div class="empty"><b>暂无并发覆盖</b>渠道默认个人并发上限为 4。</div></td></tr></tbody>
+            </table></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 并发 ===== -->
+      <section class="panel" id="panel-concurrency" role="tabpanel" hidden>
+        <div class="toolbar">
+          <div class="inline-field">渠道个人并发上限 <input class="input num" style="width:80px;height:30px" value="4" onchange="markDirty('并发上限','user_concurrency_limit', this.value)"></div>
+          <div class="spacer"></div>
+          <span class="sub">每 5 秒刷新</span>
+        </div>
+        <div class="table-wrap"><table>
+          <thead><tr><th>用户</th><th class="num">活跃请求</th><th class="num">上限</th><th>最近请求</th></tr></thead>
+          <tbody>
+            <tr><td><span class="name">Root User</span> <span class="sub mono">#1</span></td><td class="num">2</td><td class="num">4</td><td class="sub">3 秒前 · gpt-6-astra</td></tr>
+            <tr><td><span class="name">alice</span> <span class="sub mono">#12</span></td><td class="num">1</td><td class="num">4</td><td class="sub">41 秒前 · gpt-5</td></tr>
+          </tbody>
+        </table></div>
+      </section>
+    </div>
+
+    <!-- ===== 保存栏 ===== -->
+    <footer class="savebar" id="savebar" hidden>
+      <span class="dot"></span>
+      <span class="what"><b id="dirty-count">0</b> 处未保存改动 · <span id="dirty-list"></span></span>
+      <span class="grow"></span>
+      <button class="btn" onclick="discard()">放弃</button>
+      <button class="btn primary" onclick="openPreview()">预览并保存</button>
+    </footer>
+
+    <!-- ===== 抽屉与弹层 ===== -->
+    <div class="scrim" id="scrim" hidden onclick="closeAll()"></div>
+
+    <aside class="drawer" id="drawer-edit" hidden aria-label="预算编辑">
+      <div class="drawer-head">
+        <div><h2 id="edit-title">编辑预算</h2><p class="sub" id="edit-sub"></p></div>
+        <span class="grow" style="flex:1"></span>
+        <button class="btn icon ghost" aria-label="关闭" onclick="closeAll()">✕</button>
+      </div>
+      <div class="drawer-body" id="edit-body"></div>
+      <div class="drawer-foot">
+        <button class="btn ghost" id="edit-toggle" onclick="editToggle()">停用</button>
+        <button class="btn ghost" onclick="toast('原型：复制会新建一行并打开编辑')">复制</button>
+        <span class="grow"></span>
+        <button class="btn primary" onclick="editDone()">完成</button>
+      </div>
+    </aside>
+
+    <aside class="drawer" id="drawer-usage" hidden aria-label="预算用量">
+      <div class="drawer-head">
+        <div><h2 id="usage-title">用量</h2><p class="sub" id="usage-sub"></p></div>
+        <span style="flex:1"></span>
+        <button class="btn icon ghost" aria-label="关闭" onclick="closeAll()">✕</button>
+      </div>
+      <div class="drawer-body" id="usage-body"></div>
+    </aside>
+
+    <aside class="drawer" id="drawer-override" hidden aria-label="个人提额">
+      <div class="drawer-head">
+        <div><h2>个人提额</h2><p class="sub" id="override-sub"></p></div>
+        <span style="flex:1"></span>
+        <button class="btn icon ghost" aria-label="关闭" onclick="closeAll()">✕</button>
+      </div>
+      <div class="drawer-body" id="override-body"></div>
+      <div class="drawer-foot">
+        <button class="btn ghost danger" id="override-revoke" onclick="confirmBox('撤销这条提额？', 'Root User 在「个人每日」的上限会立刻回到基础值 $10，今天已用的 $8.4 不变。', '撤销', () => { closeAll(); toast('已撤销提额'); })">撤销提额</button>
+        <span class="grow"></span>
+        <button class="btn primary" onclick="closeAll(); toast('提额已保存，立即生效')">保存提额</button>
+      </div>
+    </aside>
+
+    <div class="modal" id="preview" hidden>
+      <div class="box">
+        <header><h2>预览并保存</h2><p class="sub">基于版本 <b class="num" id="pv-rev">1</b>。保存后版本 +1，其他管理员的未保存草稿会被要求重新加载。</p></header>
+        <div class="body" id="preview-body"></div>
+        <footer><button class="btn" onclick="document.getElementById('preview').hidden = true">返回修改</button><button class="btn primary" onclick="save()">确认保存</button></footer>
+      </div>
+    </div>
+
+    <div class="modal confirm" id="confirm" hidden>
+      <div class="box">
+        <header><h2 id="cf-title"></h2></header>
+        <div class="body sub" id="cf-body" style="color:var(--text-2)"></div>
+        <footer><button class="btn" onclick="document.getElementById('confirm').hidden = true">取消</button><button class="btn danger" id="cf-ok"></button></footer>
+      </div>
+    </div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+  // ---------- 示例数据（与本地实例预置的策略一致，金额 = quota / 500000） ----------
+  const CHANNEL_MODELS = ['gpt-6-astra', 'gpt-6-mini', 'gpt-5', 'claude-sonnet-5'];
+  const schedules = [
+    { id: 's-holiday', name: '中秋假期', kind: 'date_range', enabled: true, start: '2026-09-13 00:00', end: '2026-09-20 00:00', active: true, started: true },
+    { id: 's-weekend', name: '周末低峰', kind: 'weekly', enabled: true, start: '周五 18:00', end: '周六 23:30', active: false, started: true, next: '今天 18:00' },
+  ];
+  const seed = [
+    { id: 'b1', name: '池子每日总额', enabled: true, scope: 'pool', window: 'daily', schedule: '', models: [], limit: 100, used: 62.5, on: { mode: 'inherit' } },
+    { id: 'b2', name: '池子每周总额', enabled: true, scope: 'pool', window: 'weekly', schedule: '', models: [], limit: 400, used: 196, on: { mode: 'inherit' } },
+    { id: 'b3', name: '个人每日', enabled: true, scope: 'user', window: 'daily', schedule: '', models: [], limit: 10, used: 8.4, topUser: 'Root User', effective: 16, on: { mode: 'inherit' } },
+    { id: 'b4', name: 'astra 池子每日', enabled: true, scope: 'pool', window: 'daily', schedule: '', models: ['gpt-6-astra'], limit: 20, used: 19.6, on: { mode: 'fallback', channel: 0, model: 'gpt-6-mini' } },
+    { id: 'b5', name: 'astra 个人每周', enabled: true, scope: 'user', window: 'weekly', schedule: '', models: ['gpt-6-astra', 'claude-sonnet-5'], limit: 4, used: 0, topUser: '', on: { mode: 'reject' } },
+    { id: 'b6', name: 'gpt-5 池子每日', enabled: true, scope: 'pool', window: 'daily', schedule: '', models: ['gpt-5'], limit: 5, used: 5, on: { mode: 'reject' } },
+    { id: 'b7', name: '假期个人整段', enabled: true, scope: 'user', window: 'occurrence', schedule: 's-holiday', models: [], limit: 30, used: 0, topUser: '', on: { mode: 'inherit' } },
+    { id: 'b8', name: '周末池子每日', enabled: false, scope: 'pool', window: 'daily', schedule: 's-weekend', models: [], limit: 40, used: 62.5, sharedWith: 'b1', on: { mode: 'inherit' } },
+  ];
+  let budgets = JSON.parse(JSON.stringify(seed));
+  let original = JSON.parse(JSON.stringify(seed));
+  let revision = 1;
+  const dirty = new Map(); // key -> {label, from, to}
+  let filter = 'all';
+
+  const SCOPE = { user: '单用户', pool: '池子' };
+  const WINDOW = { daily: '每天', weekly: '每周', occurrence: '整段' };
+  const fmt = (n) => '$' + (Number.isInteger(n) ? n : n.toFixed(n < 10 ? 2 : 1).replace(/\.?0+$/, ''));
+  const schedById = (id) => schedules.find((s) => s.id === id);
+
+  // 状态由数据推导：已停用 > 未到时段 > 已超限 > 接近上限 > 生效中
+  function statusOf(b) {
+    if (!b.enabled) return { key: 'off', cls: 'off', text: '已停用' };
+    const s = b.schedule ? schedById(b.schedule) : null;
+    if (s && !s.active) return { key: 'pending', cls: 'info', text: '未到时段' };
+    const lim = b.effective || b.limit;
+    if (lim > 0 && b.used >= lim) return { key: 'exceeded', cls: 'crit', text: '已超限' };
+    if (lim > 0 && b.used / lim >= 0.85) return { key: 'near', cls: 'warn', text: '接近上限' };
+    return { key: 'active', cls: 'ok', text: '生效中' };
+  }
+  function actionText(b) {
+    if (b.on.mode === 'inherit') return '<span class="sub">沿用默认（拒绝）</span>';
+    if (b.on.mode === 'reject') return '拒绝';
+    const where = b.on.channel === 0 ? '本渠道' : '#' + b.on.channel;
+    return '降级 → ' + where + ' · <span class="mono">' + b.on.model + '</span>';
+  }
+  function modelsHtml(b) {
+    if (!b.models.length) return '<span class="tag all">全部模型</span>';
+    return b.models.map((m) => '<span class="tag mono">' + m + '</span>').join('');
+  }
+  function usageHtml(b) {
+    const st = statusOf(b);
+    if (b.sharedWith) {
+      const other = budgets.find((x) => x.id === b.sharedWith);
+      return '<div class="usage"><span class="sub">与「' + other.name + '」共用计数</span><br><span class="sub num">当前 ' + fmt(b.used) + '，此行上限 ' + fmt(b.limit) + '</span></div>';
+    }
+    const lim = b.effective || b.limit;
+    if (lim === 0) return '<div class="usage"><span class="sub">不限 · 已用 ' + fmt(b.used) + '</span></div>';
+    const pct = Math.min(100, Math.round((b.used / lim) * 100));
+    const cls = st.key === 'exceeded' ? 'crit' : st.key === 'near' ? 'warn' : '';
+    const who = b.scope === 'user' ? (b.topUser ? '<span class="sub">最高 · ' + b.topUser + (b.effective ? ' · 提额至 ' + fmt(b.effective) : '') + '</span>' : '<span class="sub">今日尚无用户用量</span>') : '';
+    return '<div class="usage stack"><div class="line num"><b>' + fmt(b.used) + '</b><span class="sub">剩 ' + fmt(Math.max(0, lim - b.used)) + ' · ' + pct + '%</span></div><div class="progress ' + cls + '" role="progressbar" aria-valuenow="' + pct + '"><i style="width:' + pct + '%"></i></div>' + who + '</div>';
+  }
+
+  function renderBudgets() {
+    const tb = document.getElementById('budget-rows');
+    const counts = { all: 0, active: 0, attention: 0, off: 0 };
+    const rows = budgets.filter((b) => {
+      const st = statusOf(b);
+      counts.all++;
+      if (st.key === 'active' || st.key === 'pending') counts.active++;
+      if (st.key === 'exceeded' || st.key === 'near') counts.attention++;
+      if (st.key === 'off') counts.off++;
+      if (filter === 'all') return true;
+      if (filter === 'active') return st.key === 'active' || st.key === 'pending';
+      if (filter === 'attention') return st.key === 'exceeded' || st.key === 'near';
+      return st.key === 'off';
+    });
+    Object.keys(counts).forEach((k) => (document.getElementById('n-' + k).textContent = counts[k]));
+    document.getElementById('cnt-budgets').textContent = counts.all;
+    if (!rows.length) { tb.innerHTML = '<tr><td colspan="9"><div class="empty"><b>没有符合筛选的预算</b>换个筛选，或添加一条预算。</div></td></tr>'; return; }
+    tb.innerHTML = rows.map((b) => {
+      const st = statusOf(b);
+      const sch = b.schedule ? schedById(b.schedule) : null;
+      const changed = original.find((o) => o.id === b.id) && JSON.stringify(original.find((o) => o.id === b.id)) !== JSON.stringify(b);
+      const isNew = !original.find((o) => o.id === b.id);
+      return '<tr class="' + (st.key === 'off' ? 'off ' : '') + (changed || isNew ? 'changed' : '') + '">' +
+        '<td><button class="switch" role="switch" aria-checked="' + b.enabled + '" aria-label="启用 ' + b.name + '" onclick="toggle(\'' + b.id + '\')"></button></td>' +
+        '<td><div class="stack"><span class="name">' + b.name + (isNew ? ' <span class="badge info plain">新</span>' : '') + '</span><span>' + modelsHtml(b) + '</span></div></td>' +
+        '<td><span class="badge ' + st.cls + '">' + st.text + '</span></td>' +
+        '<td>' + SCOPE[b.scope] + ' · ' + WINDOW[b.window] + '</td>' +
+        '<td>' + (sch ? sch.name + '<br><span class="sub">' + (sch.active ? '进行中' : '下次 ' + sch.next) + '</span>' : '<span class="sub">不限</span>') + '</td>' +
+        '<td class="num">' + (b.limit === 0 ? '<span class="sub">不限</span>' : fmt(b.limit)) + '</td>' +
+        '<td>' + usageHtml(b) + '</td>' +
+        '<td>' + actionText(b) + '</td>' +
+        '<td class="actions"><button class="btn sm" onclick="openEdit(\'' + b.id + '\')">编辑</button><button class="btn sm" ' + (isNew ? 'disabled title="保存后可查看"' : '') + ' onclick="openUsage(\'' + b.id + '\')">用量</button>' + (b.scope === 'user' ? '<button class="btn sm" ' + (isNew ? 'disabled' : '') + ' onclick="openOverride(\'' + b.id + '\')">提额</button>' : '') + '</td>' +
+      '</tr>';
+    }).join('');
+    const s = { active: 0, near: 0, exceeded: 0, off: 0 };
+    budgets.forEach((b) => { const k = statusOf(b).key; if (k === 'pending') s.active++; else s[k]++; });
+    document.getElementById('summary').innerHTML =
+      '<span class="stat"><b class="num">' + s.active + '</b>生效中</span><span class="sep"></span>' +
+      '<span class="stat"><span class="badge warn plain">' + s.near + '</span>接近上限</span>' +
+      '<span class="stat"><span class="badge crit plain">' + s.exceeded + '</span>已超限</span>' +
+      '<span class="stat"><span class="badge off plain">' + s.off + '</span>已停用</span>' +
+      '<span class="next">下次时段切换 <b class="num">今天 18:00</b> · 周末低峰 开始</span>';
+  }
+
+  function renderSchedules() {
+    document.getElementById('schedule-list').innerHTML = schedules.map((s) => {
+      const refs = budgets.filter((b) => b.schedule === s.id);
+      const state = !s.enabled ? '<span class="badge off">已停用</span>' : s.active ? '<span class="badge ok">进行中</span>' : '<span class="badge info">未开始 · ' + s.next + '</span>';
+      return '<details class="item"><summary class="head" style="list-style:none">' +
+        '<span class="chev">▸</span>' +
+        '<span class="stack"><span class="name">' + s.name + '</span><span class="sub">' + (s.kind === 'date_range' ? '指定日期' : '每周重复') + '</span></span>' +
+        '<span class="col-range num">' + s.start + ' → ' + s.end + '</span>' +
+        '<span class="col-refs refs">' + (refs.length ? refs.map((b) => '<span class="tag">' + b.name + '</span>').join('') : '<span class="sub">未被引用</span>') + '</span>' +
+        state + '</summary>' +
+        '<div class="detail"><div class="grid2" style="margin-top:12px"><div class="field"><label>时段名称</label><input class="input" value="' + s.name + '"></div><div class="field"><label>类型</label><input class="input" value="' + (s.kind === 'date_range' ? '指定日期' : '每周重复') + '" disabled><span class="hint">保存后类型不可更改</span></div>' +
+        '<div class="field"><label>开始</label><input class="input num" value="' + s.start + '" ' + (s.started ? 'disabled' : '') + '></div><div class="field"><label>结束</label><input class="input num" value="' + s.end + '" ' + (s.started ? 'disabled' : '') + '></div></div>' +
+        (s.started ? '<div class="callout info">这个时段已经开始计量，起止不能再改。要调整边界请停用它并新建一个。</div>' : '') +
+        '<div class="row"><button class="btn sm ghost">' + (s.enabled ? '停用时段' : '启用时段') + '</button><span class="sub">停用后引用它的 ' + refs.length + ' 条预算会一起标为「未生效」。</span></div></div></details>';
+    }).join('');
+  }
+
+  function renderUsage() {
+    const resetOf = (b) => b.window === 'daily' ? '明天 00:00' : b.window === 'weekly' ? '周一 00:00' : '09-20 00:00';
+    document.getElementById('usage-rows').innerHTML = budgets.filter((b) => original.find((o) => o.id === b.id)).map((b) => {
+      const lim = b.effective || b.limit; const pct = lim ? Math.min(100, Math.round(b.used / lim * 100)) : 0; const st = statusOf(b);
+      return '<tr class="' + (st.key === 'off' ? 'off' : '') + '"><td><div class="stack"><span class="name">' + b.name + '</span><span class="sub">' + SCOPE[b.scope] + ' · ' + modelsHtml(b) + '</span></div></td>' +
+        '<td>' + WINDOW[b.window] + (b.schedule ? ' · ' + schedById(b.schedule).name : '') + '</td><td class="num">' + (b.limit ? fmt(b.limit) : '不限') + '</td>' +
+        '<td>' + (b.sharedWith ? '<span class="sub">同「' + budgets.find((x) => x.id === b.sharedWith).name + '」</span>' : '<div class="row"><div class="progress ' + (st.key === 'exceeded' ? 'crit' : st.key === 'near' ? 'warn' : '') + '"><i style="width:' + pct + '%"></i></div><span class="num">' + fmt(b.used) + '</span></div>') + '</td>' +
+        '<td class="num">' + (lim ? fmt(Math.max(0, lim - b.used)) : '—') + '</td><td class="sub">' + resetOf(b) + '</td>' +
+        '<td class="actions"><button class="btn sm" onclick="openUsage(\'' + b.id + '\')">' + (b.scope === 'user' ? '用户明细' : '调整') + '</button></td></tr>';
+    }).join('');
+  }
+
+  function renderOverrides() {
+    document.getElementById('override-rows').innerHTML =
+      '<tr><td><span class="name">Root User</span> <span class="sub mono">#1</span></td><td>个人每日</td><td class="num">$10</td><td class="num"><b>$16</b></td><td>长期有效</td>' +
+      '<td><div class="row"><div class="progress" style="width:90px"><i style="width:53%"></i></div><span class="num sub">$8.4 / $16</span></div></td>' +
+      '<td class="actions"><button class="btn sm" onclick="openOverride(\'b3\')">编辑</button><button class="btn sm danger" onclick="confirmBox(\'撤销这条提额？\', \'Root User 在「个人每日」的上限会立刻回到基础值 $10，今天已用的 $8.4 不变。\', \'撤销\', () => toast(\'已撤销提额\'))">撤销</button></td></tr>';
+  }
+
+  // ---------- 交互 ----------
+  function toggle(id) {
+    const b = budgets.find((x) => x.id === id); b.enabled = !b.enabled;
+    markDirty(b.name + ' · 启用', id + '.enabled', b.enabled ? '启用' : '停用', b.enabled ? '停用' : '启用');
+    renderBudgets();
+  }
+  function markDirty(label, key, to, from) {
+    const o = original.find((x) => key.startsWith(x.id + '.'));
+    const field = key.split('.')[1];
+    const fromVal = from !== undefined ? from : o ? String(o[field]) : '';
+    if (o && String(o[field]) === String(to)) dirty.delete(key); else dirty.set(key, { label, from: fromVal, to: String(to) });
+    const bar = document.getElementById('savebar');
+    bar.hidden = dirty.size === 0;
+    document.getElementById('dirty-count').textContent = dirty.size;
+    document.getElementById('dirty-list').textContent = [...dirty.values()].map((d) => d.label).slice(0, 3).join('，') + (dirty.size > 3 ? ' 等' : '');
+  }
+  function discard() {
+    confirmBox('放弃未保存的改动？', '会丢掉 ' + dirty.size + ' 处修改，恢复到版本 ' + revision + '。', '放弃', () => {
+      budgets = JSON.parse(JSON.stringify(original)); dirty.clear(); document.getElementById('savebar').hidden = true; document.getElementById('default-action').value = 'reject'; renderBudgets(); renderSchedules(); toast('已恢复');
+    });
+  }
+  function reload() { if (dirty.size) discard(); else toast('已是最新，版本 ' + revision); }
+
+  function openPreview() {
+    document.getElementById('pv-rev').textContent = revision;
+    const rows = [...dirty.entries()].map(([k, d]) => '<tr><td>' + d.label.split(' · ')[0] + '</td><td class="sub">' + (d.label.split(' · ')[1] || d.label) + '</td><td class="old">' + (d.from || '—') + '</td><td class="new">' + d.to + '</td></tr>').join('');
+    const after = budgets.map((b) => { const st = statusOf(b); return '<tr class="' + (st.key === 'off' ? 'off' : '') + '"><td>' + b.name + '</td><td><span class="badge ' + st.cls + '">' + st.text + '</span></td><td class="num">' + (b.limit ? fmt(b.limit) : '不限') + '</td><td>' + (b.schedule ? schedById(b.schedule).name : '<span class="sub">不限</span>') + '</td></tr>'; }).join('');
+    const warn = budgets.some((b) => !b.enabled && original.find((o) => o.id === b.id && o.enabled)) ? '<div class="callout">停用的行会保留计数，重新启用后继续累计，不会归零。</div>' : '';
+    document.getElementById('preview-body').innerHTML = warn +
+      '<h3 style="margin-bottom:8px">改动</h3><div class="table-wrap" style="margin-bottom:18px"><table class="diff"><thead><tr><th>预算</th><th>字段</th><th>原值</th><th>新值</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+      '<h3 style="margin-bottom:8px">保存后生效结果</h3><div class="table-wrap"><table><thead><tr><th>预算</th><th>状态</th><th class="num">上限</th><th>时段</th></tr></thead><tbody>' + after + '</tbody></table></div>';
+    document.getElementById('preview').hidden = false;
+  }
+  function save() {
+    revision++; document.getElementById('rev').textContent = revision;
+    original = JSON.parse(JSON.stringify(budgets)); dirty.clear();
+    document.getElementById('savebar').hidden = true; document.getElementById('preview').hidden = true;
+    renderBudgets(); renderSchedules(); renderUsage(); toast('已保存 · 策略版本 ' + revision);
+  }
+
+  // 编辑抽屉
+  let editing = null;
+  function openEdit(id) {
+    if (id) editing = budgets.find((x) => x.id === id);
+    else { editing = { id: 'new-' + Date.now(), name: '', enabled: true, scope: 'pool', window: 'daily', schedule: '', models: [], limit: 0, used: 0, on: { mode: 'inherit' } }; budgets.push(editing); markDirty('新预算', editing.id + '.name', '', ''); }
+    document.getElementById('edit-title').textContent = id ? '编辑预算' : '添加预算';
+    document.getElementById('edit-sub').textContent = id ? statusOf(editing).text + ' · 计数自 2026-09-13 09:59 起' : '保存策略后开始计数';
+    document.getElementById('edit-toggle').textContent = editing.enabled ? '停用' : '启用';
+    renderEditForm();
+    show('drawer-edit');
+  }
+  function renderEditForm() {
+    const b = editing;
+    const scopeHelp = { user: '每个用户各自一份额度，可单独提额。', pool: '所有用户合计一份额度，耗尽后整个渠道对该范围的请求受限。' };
+    const winHelp = { daily: '每天 00:00 重置（服务器时区）。', weekly: '每周一 00:00 重置。', occurrence: '按所选时段的每次出现累计，时段结束才重置。' };
+    const needSchedule = b.window === 'occurrence' && !b.schedule;
+    document.getElementById('edit-body').innerHTML =
+      '<div class="group"><div class="field ' + (!b.name ? 'invalid' : '') + '"><label>名称</label><input class="input" value="' + b.name + '" placeholder="例如：astra 池子每日" oninput="editSet(\'name\', this.value)">' + (!b.name ? '<span class="err">名称不能为空</span>' : '<span class="hint">只用于展示，改名不影响计数。</span>') + '</div></div>' +
+      '<div class="group"><h3>范围与周期</h3><div class="grid2"><div class="field"><label>范围</label><div class="seg"><button aria-pressed="' + (b.scope === 'user') + '" onclick="editSet(\'scope\',\'user\')">单用户</button><button aria-pressed="' + (b.scope === 'pool') + '" onclick="editSet(\'scope\',\'pool\')">池子</button></div><div class="seg-help">' + scopeHelp[b.scope] + '</div></div>' +
+      '<div class="field"><label>周期</label><div class="seg"><button aria-pressed="' + (b.window === 'daily') + '" onclick="editSet(\'window\',\'daily\')">每天</button><button aria-pressed="' + (b.window === 'weekly') + '" onclick="editSet(\'window\',\'weekly\')">每周</button><button aria-pressed="' + (b.window === 'occurrence') + '" onclick="editSet(\'window\',\'occurrence\')">整段</button></div><div class="seg-help">' + winHelp[b.window] + '</div></div></div>' +
+      '<div class="field ' + (needSchedule ? 'invalid' : '') + '"><label>时段</label><select class="input" onchange="editSet(\'schedule\', this.value)"><option value="">' + (b.window === 'occurrence' ? '请选择时段' : '不限时段，一直生效') + '</option>' + schedules.map((s) => '<option value="' + s.id + '" ' + (b.schedule === s.id ? 'selected' : '') + '>' + s.name + ' · ' + (s.kind === 'date_range' ? '指定日期' : '每周重复') + '</option>').join('') + '</select>' +
+      (needSchedule ? '<span class="err">整段预算必须绑定一个时段</span>' : b.schedule && b.window !== 'occurrence' ? '<span class="hint">日/周计数不区分时段，这一行会与同范围、同模型的无时段预算共用计数。</span>' : '<span class="hint">选择时段后，只在时段内生效。</span>') + '</div></div>' +
+      '<div class="group"><h3>模型</h3><div class="field"><div class="model-pick">' + CHANNEL_MODELS.map((m) => '<button aria-pressed="' + b.models.includes(m) + '" onclick="editModel(\'' + m + '\')" class="mono">' + m + '</button>').join('') + '</div><span class="hint">' + (b.models.length ? '按客户端请求的原始模型名精确匹配。' : '未选择 = 该渠道全部模型。') + '</span></div></div>' +
+      '<div class="group"><h3>上限</h3><div class="grid2"><div class="field"><label>金额</label><div class="prefix"><span>$</span><input class="input num" type="number" min="0" step="0.5" value="' + b.limit + '" oninput="editSet(\'limit\', Number(this.value))"></div><span class="hint">' + (b.limit === 0 ? '0 表示不限额，只累计不拦截。' : '相当于 ' + (b.limit * 500000).toLocaleString() + ' quota。') + '</span></div></div></div>' +
+      '<div class="group"><h3>超限时</h3><div class="field"><div class="seg"><button aria-pressed="' + (b.on.mode === 'inherit') + '" onclick="editAction(\'inherit\')">沿用默认</button><button aria-pressed="' + (b.on.mode === 'reject') + '" onclick="editAction(\'reject\')">拒绝请求</button><button aria-pressed="' + (b.on.mode === 'fallback') + '" onclick="editAction(\'fallback\')">降级</button></div>' +
+      (b.on.mode === 'fallback' ? '<div class="grid2" style="margin-top:10px"><div class="field"><label>目标渠道</label><select class="input"><option ' + (b.on.channel === 0 ? 'selected' : '') + '>本渠道（换模型）</option><option>#80 合同渠道</option></select>' + (!b.models.length ? '<span class="err">只有指定了模型的预算才能在本渠道内换模型</span>' : '') + '</div><div class="field"><label>目标模型</label><select class="input">' + CHANNEL_MODELS.filter((m) => !b.models.includes(m)).map((m) => '<option ' + (b.on.model === m ? 'selected' : '') + '>' + m + '</option>').join('') + '</select><span class="hint">按目标模型计费，目标自身预算耗尽则直接拒绝，不二跳。</span></div></div>' : '<div class="seg-help">' + (b.on.mode === 'inherit' ? '当前默认动作：拒绝请求。' : '超过上限的请求返回 429。') + '</div>') + '</div></div>';
+  }
+  function editSet(k, v) { editing[k] = v; markDirty(editing.name + ' · ' + ({ name: '名称', scope: '范围', window: '周期', schedule: '时段', limit: '上限' })[k], editing.id + '.' + k, k === 'limit' ? fmt(v) : k === 'scope' ? SCOPE[v] : k === 'window' ? WINDOW[v] : k === 'schedule' ? (v ? schedById(v).name : '不限') : v); if (k !== 'name' && k !== 'limit') renderEditForm(); renderBudgets(); }
+  function editModel(m) { const i = editing.models.indexOf(m); if (i >= 0) editing.models.splice(i, 1); else editing.models.push(m); markDirty(editing.name + ' · 模型', editing.id + '.models', editing.models.join(', ') || '全部'); renderEditForm(); renderBudgets(); }
+  function editAction(mode) { editing.on = mode === 'fallback' ? { mode, channel: 0, model: CHANNEL_MODELS.find((m) => !editing.models.includes(m)) } : { mode }; markDirty(editing.name + ' · 超限动作', editing.id + '.on', mode === 'inherit' ? '沿用默认' : mode === 'reject' ? '拒绝' : '降级'); renderEditForm(); renderBudgets(); }
+  function editToggle() { editing.enabled = !editing.enabled; document.getElementById('edit-toggle').textContent = editing.enabled ? '停用' : '启用'; markDirty(editing.name + ' · 启用', editing.id + '.enabled', editing.enabled ? '启用' : '停用', editing.enabled ? '停用' : '启用'); renderBudgets(); }
+  function editDone() {
+    if (!editing.name) { renderEditForm(); toast('请先填写名称'); return; }
+    if (editing.window === 'occurrence' && !editing.schedule) { renderEditForm(); toast('整段预算必须绑定时段'); return; }
+    closeAll(); renderBudgets();
+  }
+
+  // 用量抽屉
+  function openUsage(id) {
+    const b = budgets.find((x) => x.id === id); const lim = b.effective || b.limit;
+    document.getElementById('usage-title').textContent = '用量 · ' + b.name;
+    document.getElementById('usage-sub').textContent = SCOPE[b.scope] + ' · ' + WINDOW[b.window] + ' · ' + (b.models.length ? b.models.join(', ') : '全部模型');
+    const win = '<dl class="kv"><dt>当前窗口</dt><dd class="num">2026-09-13 00:00 → 09-14 00:00</dd><dt>计数起点</dt><dd class="num">2026-09-13 09:59（策略创建时）</dd><dt>存储</dt><dd>Redis · 与内存一致</dd></dl>';
+    let body;
+    if (b.scope === 'pool') {
+      body = win + '<div class="bignum"><b class="num">' + fmt(b.used) + '</b><span>/ ' + (lim ? fmt(lim) : '不限') + '</span></div>' + (lim ? '<div class="progress" style="width:100%"><i style="width:' + Math.min(100, b.used / lim * 100) + '%"></i></div>' : '') +
+        (b.sharedWith ? '<div class="callout info" style="margin-top:12px">这份计数与「' + budgets.find((x) => x.id === b.sharedWith).name + '」共用，调整会同时影响两行。</div>' : '') +
+        '<div class="row" style="margin-top:14px"><button class="btn sm" onclick="this.parentNode.nextElementSibling.classList.add(\'open\')">调整已用金额</button><span class="sub">直接改写当前窗口的池子计数，会记审计日志。</span></div>' +
+        '<div class="adjust"><div class="prefix" style="width:140px"><span>$</span><input class="input num" type="number" value="' + b.used + '"></div><button class="btn sm primary" onclick="confirmBox(\'确认调整？\', \'「' + b.name + '」当前窗口已用金额将从 ' + fmt(b.used) + ' 改为输入值，不影响其他行。\', \'确认调整\', () => { closeAll(); toast(\'用量已更新\'); })">确认</button><button class="btn sm ghost" onclick="this.parentNode.classList.remove(\'open\')">取消</button></div>';
+    } else {
+      const users = b.topUser ? [['Root User', '#1', b.used, b.effective ? b.effective : b.limit, !!b.effective], ['alice', '#12', 1.2, b.limit, false]] : [];
+      body = win + '<h3 style="margin:16px 0 8px">用户用量 · 本窗口</h3>' + (users.length ? '<div class="table-wrap"><table><thead><tr><th>用户</th><th>已用</th><th class="num">上限</th><th></th></tr></thead><tbody>' + users.map((u) => '<tr><td><span class="name">' + u[0] + '</span> <span class="sub mono">' + u[1] + '</span></td><td><div class="row"><div class="progress" style="width:80px"><i style="width:' + Math.min(100, u[2] / u[3] * 100) + '%"></i></div><span class="num">' + fmt(u[2]) + '</span></div></td><td class="num">' + fmt(u[3]) + (u[4] ? ' <span class="badge info plain">提额</span>' : '') + '</td><td class="actions"><button class="btn sm" onclick="toast(\'原型：在行内展开一个金额输入，确认后写入\')">调整</button></td></tr>').join('') + '</tbody></table></div>' : '<div class="empty"><b>本窗口还没有用户产生用量</b>有请求命中后会出现在这里。</div>');
+    }
+    document.getElementById('usage-body').innerHTML = body;
+    show('drawer-usage');
+  }
+
+  // 提额抽屉
+  function openOverride(id) {
+    const b = id ? budgets.find((x) => x.id === id) : budgets.find((x) => x.id === 'b3');
+    const isEdit = b.id === 'b3';
+    document.getElementById('override-sub').textContent = isEdit ? 'Root User · 修改已有提额' : '为用户临时提高某一条个人预算的上限';
+    document.getElementById('override-revoke').hidden = !isEdit;
+    document.getElementById('override-body').innerHTML =
+      '<div class="group"><div class="field"><label>用户</label><input class="input" value="' + (isEdit ? 'Root User (#1)' : '') + '" placeholder="搜索用户名或 ID"></div></div>' +
+      '<div class="group"><div class="field"><label>预算</label><select class="input">' + budgets.filter((x) => x.scope === 'user' && x.limit > 0).map((x) => '<option ' + (x.id === b.id ? 'selected' : '') + '>' + x.name + ' · 基础 ' + fmt(x.limit) + '</option>').join('') + '</select><span class="hint">只列出「单用户」范围且设置了上限的预算。</span></div>' +
+      '<dl class="kv" style="margin-top:4px"><dt>基础上限</dt><dd class="num">' + fmt(b.limit) + '</dd><dt>今日已用</dt><dd class="num">' + fmt(b.used) + '</dd></dl></div>' +
+      '<div class="group"><div class="grid2"><div class="field"><label>提额至</label><div class="prefix"><span>$</span><input class="input num" type="number" value="' + (isEdit ? 16 : '') + '" placeholder="高于 ' + fmt(b.limit) + '"></div><span class="hint">替换该行的上限，必须高于基础上限。</span></div>' +
+      '<div class="field"><label>到期</label><select class="input"><option>长期有效</option><option>今天结束</option><option>本周结束</option><option>自定义时间</option></select></div></div></div>';
+    show('drawer-override');
+  }
+
+  // 通用
+  function show(id) { document.getElementById('scrim').hidden = false; document.getElementById(id).hidden = false; }
+  function closeAll() { ['drawer-edit', 'drawer-usage', 'drawer-override', 'scrim'].forEach((i) => (document.getElementById(i).hidden = true)); }
+  function confirmBox(title, body, ok, fn) {
+    document.getElementById('cf-title').textContent = title; document.getElementById('cf-body').textContent = body;
+    const b = document.getElementById('cf-ok'); b.textContent = ok; b.onclick = () => { document.getElementById('confirm').hidden = true; fn(); };
+    document.getElementById('confirm').hidden = false;
+  }
+  let toastTimer;
+  function toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 2200); }
+
+  document.getElementById('tabs').addEventListener('click', (e) => {
+    const tab = e.target.closest('.tab'); if (!tab) return;
+    document.querySelectorAll('.tab').forEach((t) => t.setAttribute('aria-selected', t === tab));
+    document.querySelectorAll('.panel').forEach((p) => (p.hidden = p.id !== 'panel-' + tab.dataset.tab));
+  });
+  document.getElementById('filters').addEventListener('click', (e) => {
+    const c = e.target.closest('.chip'); if (!c) return; filter = c.dataset.f;
+    document.querySelectorAll('#filters .chip').forEach((x) => x.setAttribute('aria-pressed', x === c)); renderBudgets();
+  });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeAll(); document.getElementById('preview').hidden = true; document.getElementById('confirm').hidden = true; } });
+
+  renderBudgets(); renderSchedules(); renderUsage(); renderOverrides();
+</script>

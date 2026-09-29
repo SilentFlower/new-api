@@ -1,0 +1,40 @@
+{
+  "id": "channel-budget-ai-fund",
+  "name": "channel-budget-ai-fund",
+  "title": "ai-fund 迁移到预算 v2 契约",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-09-12",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": "09-12-channel-budget-unification",
+  "relatedFiles": [],
+  "notes": "2026-09-12 用户确认：本任务的业务实现由 /root/project/ai-fund/.trellis/tasks/09-12-channel-budget-v2 执行 auto-loop；此处保留父任务关联与集成跟踪。",
+  "meta": {
+    "executionTask": "/root/project/ai-fund/.trellis/tasks/09-12-channel-budget-v2"
+  },
+  "progress": {
+    "updatedAt": "2026-09-12T15:03:33Z",
+    "completedSteps": [],
+    "partialStep": "auto-loop blocked: planning-readiness",
+    "nextStep": "auto-loop 已阻断；确认后运行 python3 ./.trellis/scripts/auto_loop.py retry-blocked --run-id auto-20260912150021 --task .trellis/tasks/09-12-channel-budget-ai-fund",
+    "notes": "run_id=auto-20260912150021; task=.trellis/tasks/09-12-channel-budget-ai-fund; status=completed_with_blocked; reason=planning-readiness; summary=任务规划指定 /root/project/ai-fund 为唯一业务仓库，但本 run 的 repositories 仅包含 new-api。git_evidence.discover_git_repositories 拒绝项目根外的 Git package，commit_only 也拒绝未登记仓库提交；当前任务布局无法形成可审计的本地提交闭环。需先将执行任务归属与 ai-fund 仓库对齐，保留 new-api 的父任务与集成验收关系；未开始业务实现。"
+  },
+  "closeout": {
+    "status": "pending",
+    "closedAt": null,
+    "blockers": []
+  }
+}

@@ -1,9 +1,9 @@
 {
-  "id": "channel-model-usage-tracking",
-  "name": "channel-model-usage-tracking",
-  "title": "渠道可选模型用量持续累计",
-  "description": "为渠道增加默认关闭的模型用量持续累计开关；开启后模型个人与池子日周用量在添加预算前也累计，兼容既有预算与用量调整，并验证内存和性能影响。",
-  "status": "completed",
+  "id": "channel-budget-ux",
+  "name": "channel-budget-ux",
+  "title": "预算 v2 号池限制管理 UI/UX 优化（new-api + ai-fund）",
+  "description": "优化预算 v2 管理界面的信息架构与交互：new-api 渠道用户限制状态弹窗（周期策略/预算用量/个人覆盖）与 ai-fund 号池限制管理弹窗及本人面板。",
+  "status": "planning",
   "dev_type": null,
   "scope": null,
   "package": null,
@@ -11,25 +11,28 @@
   "creator": "silentflower",
   "assignee": "silentflower",
   "createdAt": "2026-09-13",
-  "completedAt": "2026-09-13",
+  "completedAt": null,
   "branch": null,
   "base_branch": "main",
   "worktree_path": null,
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [],
+  "children": [
+    "09-13-channel-budget-ux-newapi",
+    "09-13-channel-budget-ux-aifund"
+  ],
   "parent": "09-12-channel-budget-unification",
   "relatedFiles": [],
   "notes": "",
   "meta": {
     "intentRouting": {
       "autoCreated": true,
-      "createdAt": "2026-09-12T22:24:42Z",
-      "contextKey": "codex_01a095d6-67e7-7121-8f1d-98c0c7dff95d",
+      "createdAt": "2026-09-13T02:07:45Z",
+      "contextKey": "claude_e823e318-df6c-423e-a30d-f3a12cfc71c0",
       "implementationStarted": false,
       "baseline": {
-        "head": "ad8e96d4d21f05179298325f5ffb015b9432ba1a",
+        "head": "9ba0882e8521c93d5c8b8db6a1a6b7918a9ca784",
         "status": [
           {
             "status": "??",
@@ -115,7 +118,7 @@
         "repositories": [
           {
             "root": ".",
-            "head": "ad8e96d4d21f05179298325f5ffb015b9432ba1a",
+            "head": "9ba0882e8521c93d5c8b8db6a1a6b7918a9ca784",
             "status": [
               {
                 "status": "??",
@@ -279,34 +282,21 @@
               },
               {
                 "path": ".trellis/tasks/09-12-channel-budget-unification/task.json",
-                "sha256": "d839995e57e9b63dd240be4c1d982e9b33476b37acebb43ab9f2fd8920fce860"
+                "sha256": "1aab3d31730753ce668c2c47ad001686d3f70b1e0f0b22c2c4abe5b3722cf71e"
               }
             ],
             "conflicts": [],
             "integration": [],
-            "fingerprint": "81f82901e5327da70253060642c42e87471acb749c27969b037e2f0cb0af9628"
+            "fingerprint": "24251d7ff725e16611314cad5d701690811a83ed5d4d066087e10aaf71e4eb29"
           }
         ],
-        "fingerprint": "6f0dc5b890e567acf7642431a2f8a0c93a0641de0033a6131500ca74778f4e69"
+        "fingerprint": "3832ffd8a25f5fa8293d89cff1a79c758b928f78a94fd9a3b3827d7eb13ac8fe"
       }
     }
   },
-  "progress": {
-    "completedSteps": [
-      "Phase 1：Brief 已获确认并激活任务",
-      "Phase 2.1：两仓实现及定向验证完成",
-      "Phase 2.2：Full Check-All 与修复重检通过",
-      "Phase 3.3：两仓模型累计规范已更新并校验",
-      "Phase 3.4：两仓业务变更已提交并推送"
-    ],
-    "partialStep": null,
-    "nextStep": "等待部署安排；本任务开发交付已完成。",
-    "notes": "默认关闭的渠道模型累计、旧预算兼容、调整隔离及两端开关已实现。Go 全量、race、三库、Web、Worker 594 测试、Vue 18 组件测试及 31 Node 测试通过；Redis 样本额外 26820 字节，结算写脚本次数不变。两仓权威规范已同步，旧任务记录及 hook 缓存保留。生产部署及开关未操作，后续须先更新全部 new-api 实例，再验证提前累计与新增预算读取。",
-    "updatedAt": "2026-09-13T00:50:02Z"
-  },
   "closeout": {
-    "status": "closed",
-    "closedAt": "2026-09-29T02:49:13Z",
+    "status": "pending",
+    "closedAt": null,
     "blockers": []
   }
 }

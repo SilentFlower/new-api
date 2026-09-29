@@ -1,0 +1,293 @@
+{
+  "id": "channel-budget-unification",
+  "name": "channel-budget-unification",
+  "title": "渠道限额重构：统一预算列表（含按模型日/周预算、统一覆盖与用量调整）",
+  "description": "把渠道级个人日/周限、池子日/周限、时间规则额度、按模型日/周额度统一为一种预算实体（scope × window × model 选择器 × limit × on_exceed）。第一步：内核收敛，策略 v1 读取时转为预算列表，判定/计数/降级选择改为基于列表，对外契约不变，并以按模型日/周池子预算作为首个使用场景。第二步：暴露 v2 契约（一张预算表 UI、统一覆盖表、统一用量调整接口），ai-fund 跟进。替代 09-11-channel-pool-model-budget-override 任务。",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-09-12",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-12-channel-budget-core",
+    "09-12-channel-budget-v2-contract",
+    "09-12-channel-budget-ai-fund",
+    "09-13-channel-model-usage-tracking",
+    "09-13-channel-budget-ux"
+  ],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-09-12T03:48:50Z",
+      "contextKey": "claude_0518ec6a-e831-49b2-a6c2-5603d19f5f73",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "3d2d3b2ca8705cd2a1bb1dea9abd7a86726c7094",
+        "status": [
+          {
+            "status": "??",
+            "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc"
+          },
+          {
+            "status": "??",
+            "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/spec/backend/channel-period-budget-fallback.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/brief.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/check.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/design.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/implement.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/implement.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/task.json"
+          },
+          {
+            "status": " M",
+            "path": "common/quota_math.go"
+          },
+          {
+            "status": " M",
+            "path": "controller/channel_limit_fallback_compact_test.go"
+          },
+          {
+            "status": " M",
+            "path": "controller/channel_period_policy_test.go"
+          },
+          {
+            "status": " M",
+            "path": "dto/channel_period_policy.go"
+          },
+          {
+            "status": " M",
+            "path": "model/channel_period_policy_database_test.go"
+          },
+          {
+            "status": " M",
+            "path": "model/channel_user_period_override.go"
+          },
+          {
+            "status": " M",
+            "path": "service/channel_period_guard.go"
+          },
+          {
+            "status": " M",
+            "path": "service/channel_period_policy.go"
+          },
+          {
+            "status": " M",
+            "path": "service/channel_period_policy_concurrency_test.go"
+          },
+          {
+            "status": " M",
+            "path": "service/channel_period_policy_test.go"
+          },
+          {
+            "status": " M",
+            "path": "service/channel_period_rules.go"
+          },
+          {
+            "status": " M",
+            "path": "service/channel_user_limit_override.go"
+          },
+          {
+            "status": " M",
+            "path": "web/src/features/channels/components/dialogs/channel-period-override-editor.tsx"
+          },
+          {
+            "status": " M",
+            "path": "web/src/features/channels/period-types.ts"
+          }
+        ],
+        "repositories": [
+          {
+            "root": ".",
+            "head": "3d2d3b2ca8705cd2a1bb1dea9abd7a86726c7094",
+            "status": [
+              {
+                "status": "??",
+                "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc"
+              },
+              {
+                "status": "??",
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/spec/backend/channel-period-budget-fallback.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/brief.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/check.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/design.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/implement.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/implement.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/task.json"
+              },
+              {
+                "status": " M",
+                "path": "common/quota_math.go"
+              },
+              {
+                "status": " M",
+                "path": "controller/channel_limit_fallback_compact_test.go"
+              },
+              {
+                "status": " M",
+                "path": "controller/channel_period_policy_test.go"
+              },
+              {
+                "status": " M",
+                "path": "dto/channel_period_policy.go"
+              },
+              {
+                "status": " M",
+                "path": "model/channel_period_policy_database_test.go"
+              },
+              {
+                "status": " M",
+                "path": "model/channel_user_period_override.go"
+              },
+              {
+                "status": " M",
+                "path": "service/channel_period_guard.go"
+              },
+              {
+                "status": " M",
+                "path": "service/channel_period_policy.go"
+              },
+              {
+                "status": " M",
+                "path": "service/channel_period_policy_concurrency_test.go"
+              },
+              {
+                "status": " M",
+                "path": "service/channel_period_policy_test.go"
+              },
+              {
+                "status": " M",
+                "path": "service/channel_period_rules.go"
+              },
+              {
+                "status": " M",
+                "path": "service/channel_user_limit_override.go"
+              },
+              {
+                "status": " M",
+                "path": "web/src/features/channels/components/dialogs/channel-period-override-editor.tsx"
+              },
+              {
+                "status": " M",
+                "path": "web/src/features/channels/period-types.ts"
+              }
+            ],
+            "worktreeDiffSha256": "3ff1772e6148ddbbb2af8f5e19c4e7836fdc2900327ef83a7d80aa215ae66d06",
+            "indexDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "untracked": [
+              {
+                "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc",
+                "sha256": "5b434c1f233e42c5db42aa2f50543cf78b17e0b3ee3532d478bb1990b398a730"
+              },
+              {
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc",
+                "sha256": "1d2f57c10c78999e9ad2e460dd6ef0801e3db602ee8e8faa48b90df176b98a57"
+              },
+              {
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/brief.md",
+                "sha256": "c69e39b7f5a744185b1e9521444d72279dedb1c4f5e8d7e231c1515104ce53af"
+              },
+              {
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/check.jsonl",
+                "sha256": "0760c8517023ff2fa289d40a70071521bb92723b4b7bc5719204cd4d681ddc90"
+              },
+              {
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/design.md",
+                "sha256": "c8946cbf474c3b6cab4540e3ae5fbfec7ea21edbe1edec492b0d8ce8a154999a"
+              },
+              {
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/implement.jsonl",
+                "sha256": "23c8d3b395d43ea9b2f27b316c43dd104a1693ce8517bb4b0528411bfeeef07f"
+              },
+              {
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/implement.md",
+                "sha256": "be34e32134dd05e3c8e1b9522ac8e4534ccb203ca87caaabf5fb2624661e8e46"
+              },
+              {
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/prd.md",
+                "sha256": "4d2d827ed39b403a1ab319a4e5da5b98546ebbec293c223072b33b8b5915cd72"
+              },
+              {
+                "path": ".trellis/tasks/09-11-channel-pool-model-budget-override/task.json",
+                "sha256": "e42b1d85b5c90db81d68a40e9092f666ff2f7472fb598a00252a97b9d8866f2e"
+              }
+            ],
+            "conflicts": [],
+            "integration": [],
+            "fingerprint": "0f0966bdf80fbd9513cbe72b954cf44d6f72e45497ce6cc6d66df633628420de"
+          }
+        ],
+        "fingerprint": "e2f417c1ab6bb1fd87086206da214c7b197f61639adca3d314dc69d07d831e70"
+      }
+    }
+  },
+  "closeout": {
+    "status": "pending",
+    "closedAt": null,
+    "blockers": []
+  }
+}

@@ -35,5 +35,10 @@
     "partialStep": null,
     "nextStep": "启动子任务 09-12-channel-budget-v2-contract",
     "notes": "旧 relay 日/周检查与指标新增字段推迟到阶段二"
+  },
+  "closeout": {
+    "status": "closed",
+    "closedAt": "2026-09-29T02:49:13Z",
+    "blockers": []
   }
 }

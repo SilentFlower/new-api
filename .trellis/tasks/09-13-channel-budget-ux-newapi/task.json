@@ -35,5 +35,10 @@
     "partialStep": null,
     "nextStep": "两仓同版本发布并在预发环境确认 ai-fund 404 回退（上线后验证）；父任务集成验收 AC1–AC7",
     "notes": ""
+  },
+  "closeout": {
+    "status": "closed",
+    "closedAt": "2026-09-29T02:49:13Z",
+    "blockers": []
   }
 }

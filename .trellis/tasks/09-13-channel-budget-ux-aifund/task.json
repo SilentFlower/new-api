@@ -1,0 +1,33 @@
+{
+  "id": "channel-budget-ux-aifund",
+  "name": "channel-budget-ux-aifund",
+  "title": "ai-fund 号池限制界面改版（跨仓跟踪）",
+  "description": "",
+  "status": "planning",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-09-13",
+  "completedAt": null,
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [
+    "09-13-channel-budget-ux"
+  ],
+  "parent": "09-13-channel-budget-ux",
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "closeout": {
+    "status": "pending",
+    "closedAt": null,
+    "blockers": []
+  }
+}
