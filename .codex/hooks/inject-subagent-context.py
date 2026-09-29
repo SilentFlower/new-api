@@ -42,12 +42,15 @@ if callable(_stdin_reconfigure):
 
 # IMPORTANT: Force stdout to use UTF-8 on Windows
 # This fixes UnicodeEncodeError when outputting non-ASCII characters
+# BEGIN skill-garden patch subagent-stream-ownership v0.6
 if sys.platform.startswith("win"):
-    import io as _io
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-    elif hasattr(sys.stdout, "detach"):
-        sys.stdout = _io.TextIOWrapper(sys.stdout.detach(), encoding="utf-8", errors="replace")  # type: ignore[union-attr]
+    _stdout_reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(_stdout_reconfigure):
+        try:
+            _stdout_reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+# END skill-garden patch subagent-stream-ownership v0.6
 
 
 # =============================================================================
@@ -850,7 +853,9 @@ def build_codex_subagent_context(
     context: str,
 ) -> str:
     """Build developer context for a native, already-dispatched Codex role."""
-    role = subagent_type.removeprefix("trellis-")
+# BEGIN skill-garden patch subagent-python38-prefix v0.6
+    role = subagent_type[len("trellis-"):] if subagent_type.startswith("trellis-") else subagent_type
+# END skill-garden patch subagent-python38-prefix v0.6
     return f"""<!-- trellis-hook-injected -->
 # Trellis Native {role.title()} Subagent
 

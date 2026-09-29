@@ -75,7 +75,7 @@ description: "Create a new trellis entry as command or skill for the target plat
 
 | 形态 | 何时选 | 触发方式 |
 |------|--------|---------|
-| **command** | 显式动作、高风险、需确认点（如 finish-work、continue） | 按目标平台的显式入口语法 |
+| **command** | 显式动作、高风险、需确认点（如 continue、push） | 按目标平台的显式入口语法 |
 | **skill** | 自然语可触发、查询 / 分析 / 检查、低破坏性（如 check-all、extract-prd、visualize） | 自动匹配或显式调用，以目标平台能力为准 |
 
 决定不了时**推荐 skill**：自然语路由更灵活，显式斜杠仍可用。反过来，后悔做成 skill 想改 command 比较费事。
@@ -224,7 +224,7 @@ description: "<what> <when> <exclusion>"
 
 | 类型 | 前缀 | 示例 |
 |------|------|------|
-| 会话生命周期 | — | `continue` / `finish-work` |
+| 会话恢复 | — | `continue` |
 | Pre-development | `before-` | `before-dev` |
 | Check | `check-` | `check-all` |
 | Verify | `verify-` | `verify-task` |

@@ -1,6 +1,6 @@
 # Change Local Task Lifecycle
 
-Task lifecycle includes creation, start, context configuration, finish, archive, parent/child tasks, and lifecycle hooks. The default customization targets are `.trellis/tasks/`, `.trellis/config.yaml`, and `.trellis/scripts/`.
+Task lifecycle includes creation, start, context configuration, deterministic Close, parent/child tasks, lifecycle hooks, and delayed physical GC. The default customization targets are `.trellis/tasks/`, `.trellis/config.yaml`, and `.trellis/scripts/`.
 
 <!-- BEGIN skill-garden patch trellis-meta-managed-lifecycle-entry-points v0.6 -->
 ## Read These Files First
@@ -12,7 +12,7 @@ Task lifecycle includes creation, start, context configuration, finish, archive,
 5. `.trellis/scripts/common/task_utils.py`
 6. `.trellis/scripts/common/active_task.py`
 7. `.trellis/scripts/task_progress.py` when saved progress, completion, or reopen behavior is involved
-8. The owning `trellis-task-brief`, `trellis-push`, `trellis-continue`, or `trellis-finish-work` skill for the boundary being changed
+8. The owning `trellis-task-brief`, `trellis-push`, or `trellis-continue` skill for the boundary being changed
 9. The current task's `.trellis/tasks/<task>/task.json` and planning artifacts
 
 ## Common Needs And Edit Points
@@ -21,33 +21,28 @@ Task lifecycle includes creation, start, context configuration, finish, archive,
 | --- | --- |
 | Change planning handoff or activation approval | `trellis-task-brief`, the task-start Brief guard, and planning workflow ownership. |
 | Automatically sync an external system after a lifecycle command | The matching `hooks.after_*` entry in `.trellis/config.yaml`. |
-| Change default task fields or archive movement | `.trellis/scripts/common/task_store.py` and `.trellis/scripts/common/task_utils.py`. |
+| Change default task fields or physical GC movement | `.trellis/scripts/common/task_store.py`, `.trellis/scripts/common/tasks.py`, and `.trellis/scripts/task_lifecycle.py`. |
 | Change active task behavior | `.trellis/scripts/common/active_task.py` plus the relevant platform session bridge. |
 | Change saved progress validation or lifecycle writes | `.trellis/scripts/task_progress.py` and its owning caller. |
 | Change normal completion activation | `trellis-push`, `task_progress.py`, and `[workflow-state:completed]`. |
 | Change interruption recovery or candidate rebinding | `trellis-continue` owns the user decision, `task_progress.py` owns candidate evidence, and `task.py start` with `.trellis/scripts/common/active_task.py` owns the explicit session bind; never bind a candidate automatically. |
 | Change completed-task rework | The explicit reopen path, then refresh planning artifacts and Brief when scope changed. |
-| Change final archive and session bookkeeping | `trellis-finish-work` plus the archive implementation; archive must not create completion implicitly. |
+| Change deterministic Close or delayed physical GC | `.trellis/scripts/task_lifecycle.py`, its progress/auto-loop callers, and the SessionStart bridge. |
 <!-- END skill-garden patch trellis-meta-managed-lifecycle-entry-points v0.6 -->
 
-## lifecycle hooks
+<!-- BEGIN skill-garden patch trellis-meta-managed-lifecycle-hooks v0.6 -->
+## Lifecycle Hooks
 
-`.trellis/config.yaml` supports:
+`.trellis/config.yaml` supports `after_create`, `after_start`, `after_finish`, and `after_close`. `after_close` runs best-effort only after the closed state is persisted; it must not own physical GC or decide whether Close is allowed.
 
 ```yaml
 hooks:
-  after_create:
-    - "python3 .trellis/scripts/hooks/my_sync.py create"
-  after_start:
-    - "python3 .trellis/scripts/hooks/my_sync.py start"
-  after_finish:
-    - "python3 .trellis/scripts/hooks/my_sync.py finish"
-  after_archive:
-    - "python3 .trellis/scripts/hooks/my_sync.py archive"
+  after_close:
+    - "python3 .trellis/scripts/hooks/my_sync.py close"
 ```
 
-Hook commands receive the `TASK_JSON_PATH` environment variable, pointing to the current task's `task.json`. Hook failures should usually warn, but not block the main task operation.
-
+Hook commands receive `TASK_JSON_PATH` for the current task metadata. A hook failure is diagnostic and does not roll back an already-persisted Close.
+<!-- END skill-garden patch trellis-meta-managed-lifecycle-hooks v0.6 -->
 ## Change Task Fields
 
 If the user wants to add project-local fields, prefer putting them under `meta` in `task.json` to avoid breaking existing scripts' assumptions about standard fields.
@@ -87,7 +82,7 @@ If you fork `task.py` to add a new creation path (e.g. an external import that b
 
 1. Confirm the current task and inspect `task.json`, planning artifacts, saved progress, and the current workflow state.
 2. Identify the exact lifecycle writer and owner. Do not treat `task.py`, progress text, a state block, and an owner skill as interchangeable sources of truth.
-3. Preserve the stable sequence: Brief review before planning activation; normal final progress and completion written atomically before the task-record commit/push; completed tasks routed through the Push-owned publication preflight; finish-work limited to archive eligibility and bookkeeping; explicit reopen before rework.
+3. Preserve the stable sequence: Brief review before planning activation; normal final progress, completion, and Close written atomically before the task-record commit/push; completed-but-open tasks routed through publication recovery or explicit blocker resolution; closed tasks hidden from every active view; explicit reopen before rework; SessionStart-only delayed physical GC.
 4. For project-local behavior, edit the narrow local owner. For Flower/Skill-Garden-managed behavior, change the canonical Patch/skill/helper source and then synchronize snapshot, compiled targets, and dogfood.
 5. Update every affected caller, guard, recovery path, conflict assertion, and final-output test. A status transition is incomplete if another entry can bypass or contradict it.
 6. Re-run the relevant task lifecycle, Patch conflict, compiled-target, and idempotency checks before relying on the new behavior.

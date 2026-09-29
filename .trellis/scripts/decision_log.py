@@ -72,10 +72,10 @@ def _resolve_task_dir(repo_root: Path, task: str) -> Path:
         DecisionLogError: 任务不存在或位于项目外。
     """
     _load_common_modules(repo_root)
-    from common.task_utils import resolve_task_reference  # type: ignore[import-not-found]
+    from common.task_utils import resolve_active_task_reference  # type: ignore[import-not-found]
 
     try:
-        return resolve_task_reference(task, repo_root)
+        return resolve_active_task_reference(task, repo_root)
     except ValueError as exc:
         raise DecisionLogError(str(exc)) from exc
 
@@ -225,13 +225,13 @@ def _atomic_write_events(task_dir: Path, events: list[dict[str, Any]]) -> None:
 
 
 def decision_review_status(task_dir: Path) -> dict[str, Any]:
-    """返回任务当前决策摘要与归档审查状态。
+    """返回任务当前决策摘要与 Close 审查状态。
 
     Args:
         task_dir: 任务目录。
 
     Returns:
-        包含 decision 数量、digest、最新有效 review 和归档门禁状态的对象。
+        包含 decision 数量、digest、最新有效 review 和 Close 门禁状态的对象。
 
     Raises:
         DecisionLogError: 日志损坏。
@@ -260,7 +260,7 @@ def decision_review_status(task_dir: Path) -> dict[str, Any]:
         "decision_digest": digest,
         "review_verdict": verdict,
         "reviewed_at": valid_review.get("reviewed_at") if valid_review else None,
-        "archive_allowed": not decisions or verdict == "accepted",
+        "close_allowed": not decisions or verdict == "accepted",
         "needs_review": bool(decisions) and verdict != "accepted",
         "decisions": decisions,
     }
@@ -318,11 +318,13 @@ def append_decision(
         raise DecisionLogError("choice 必须存在于非空 options 中")
 
     events = load_events(task_dir)
-    existing_ids = [
-        int(str(event["decision_id"]).removeprefix("DEC-"))
-        for event in _decision_events(events)
-        if str(event.get("decision_id", "")).removeprefix("DEC-").isdigit()
-    ]
+    existing_ids = []
+    for previous in _decision_events(events):
+        number = str(previous.get("decision_id", ""))
+        if number.startswith("DEC-"):
+            number = number[4:]
+        if number.isdigit():
+            existing_ids.append(int(number))
     event = {
         "schema_version": SCHEMA_VERSION,
         "event": "decision",

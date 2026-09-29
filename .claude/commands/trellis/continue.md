@@ -27,7 +27,7 @@ python3 ./.trellis/scripts/task_progress.py status --json
 Treat the structured result as advisory recovery evidence only:
 
 - For `status=ok` with `taskStatus=in_progress`, relay only `summary.partialStep`, `summary.nextStep`, and notes that are necessary to resume safely.
-- For `status=ok` with `taskStatus=completed`, do not resume Phase 2 or Phase 3.3. Enter the `trellis-push` completed-task preflight; it is the one-hop owner that either prepares publication recovery, points to explicit `trellis-finish-work`, or blocks on ambiguous evidence.
+- For `status=ok` with `taskStatus=completed`, do not resume Phase 2 or Phase 3.3. Enter the `trellis-push` completed-task preflight only when task-record publication is incomplete; otherwise report `closeout.blockers` and retry deterministic Close after the blocker is resolved.
 - For `status=candidates`, relay each healthy candidate with its `taskStatus` plus necessary `invalidCandidates` or `scanWarnings`, and suggest an explicit rebind when appropriate. After explicit rebind, a completed candidate uses the same Push preflight. Never rebind the session or task automatically.
 - For `status=no-progress` or `status=no-current-task`, continue without inventing saved progress. For `status=error`, report the structured blocker instead of guessing.
 
@@ -68,7 +68,7 @@ Shows the Phase Index (Plan / Execute / Finish) with routing + skill mapping.
 - `status=in_progress` + implementation done, not yet checked → **2.2**
 - `status=in_progress` + check passed → **3.3** (spec update) → **3.4** (commit)
 <!-- BEGIN skill-garden patch trellis-continue-completed-route v0.6 -->
-- `status=completed` -> enter the `trellis-push` completed-task preflight. It either prepares publication recovery, points to explicit `trellis-finish-work`, or blocks on ambiguous evidence. Do not resume Phase 2 or Phase 3.3.
+- `status=completed` -> if task-record publication is incomplete, enter the `trellis-push` completed-task preflight; otherwise report `closeout.blockers` and retry deterministic Close only after the blocker is resolved. Do not resume Phase 2 or Phase 3.3.
 <!-- END skill-garden patch trellis-continue-completed-route v0.6 -->
 
 Phase rules (full detail in `.trellis/workflow.md`):

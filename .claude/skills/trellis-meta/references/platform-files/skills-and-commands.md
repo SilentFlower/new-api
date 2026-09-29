@@ -7,7 +7,7 @@ Skills and commands are textual entry points for user interaction with Trellis. 
 | Type | Trigger mode | Best for |
 | --- | --- | --- |
 | skill | AI auto-match or explicit user mention | Long-term capabilities, workflow rules, modification guides. |
-| command | Explicit user invocation | Clear operation entry points such as continue and finish-work. |
+| command | Explicit user invocation | Clear operation entry points such as continue and push. |
 | prompt | Explicit user invocation or platform selection | Similar to command, but in a platform prompt format. |
 | workflow | Explicit user selection or platform auto-match | Guides the main session when no sub-agent/hook exists. |
 

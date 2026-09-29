@@ -362,22 +362,21 @@ Before finishing your code-spec update:
 
 ---
 
-## Relationship to Other Commands
+<!-- BEGIN skill-garden patch trellis-update-spec-command-relationship v0.6 -->
+## Relationship to Other Capabilities
 
 ```
 Development Flow:
-  Learn something → /trellis:update-spec → Knowledge captured
+  Learn something → `update-spec` (Trellis capability) → Knowledge captured
        ↑                                  ↓
-  /trellis:break-loop ←──────────────────── Future sessions benefit
+  `break-loop` (Trellis capability) ←──────────────────── Future sessions benefit
   (deep bug analysis)
 ```
 
-- `/trellis:break-loop` - Analyzes bugs deeply, often reveals spec updates needed
-- `/trellis:update-spec` - Actually makes the updates
-- `/trellis:finish-work` - Reminds you to check if specs need updates
-
----
-
+- `break-loop` analyzes bugs deeply and often reveals spec updates needed.
+- `update-spec` evaluates and writes durable project guidance.
+- Check-All decides whether the current result may continue to Update-Spec and Push.
+<!-- END skill-garden patch trellis-update-spec-command-relationship v0.6 -->
 ## Core Philosophy
 
 > **Code-specs are living documents. Every debugging session, every "aha moment" is an opportunity to make the implementation contract clearer.**

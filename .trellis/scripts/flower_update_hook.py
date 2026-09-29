@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import ntpath
 import os
 import re
 import shutil
@@ -108,11 +109,11 @@ def _format_bootstrap(data: dict) -> str:
     if data.get("command"):
         lines.extend([
             f"recommended_command: {data['command']}",
-            "ai_instruction: 告知成员本机缺少 Flower CLI，展示锁定版本和 recommended_command；说明全局 npm 安装会同步本机 Trellis 命令。先征得当前成员确认，确认前禁止执行 recommended_command；当前对话已明确授权这次安装时不重复确认。",
+            "ai_instruction: 普通请求路由前先告知成员本机缺少 Flower CLI，展示锁定版本和 recommended_command；说明全局 npm 安装会同步本机 Trellis 命令。先征得当前成员确认，确认前禁止执行 recommended_command；当前对话已明确授权这次安装时不重复确认。",
             "verification: 安装返回成功后，在目标项目执行 flower-trellis -v 核对 CLI 首行版本，再执行 flower-trellis self-check --json --target <目标项目>；参数按所在 shell 引用。确认 CLI 可用后继续原请求，不把项目锁视为内容完整性证明，不隐式执行 init/update/self-update。",
         ])
     else:
-        lines.append("ai_instruction: 说明诊断原因与缺失前提；版本未知时请维护者补齐有效项目锁，不依据旧 manifest 或猜测 latest 安装；入口异常先修复 PATH、权限或解释器。")
+        lines.append("ai_instruction: 普通请求路由前先说明诊断原因与缺失前提；版本未知时请维护者补齐有效项目锁，不依据旧 manifest 或猜测 latest 安装；入口异常先修复 PATH、权限或解释器。")
     lines.extend([
         "failure_policy: 成员拒绝后本次对话不重复追问；安装或验证失败如实报告，不自动提权、不循环安装。依赖 CLI 的操作说明尚未满足的前提；本次已处理的相同引导不重复执行。",
         "</flower-cli-bootstrap>",
@@ -144,25 +145,45 @@ def _project_dir(hook_input: dict) -> Path:
 
 
 def _run_self_check(project_dir: Path) -> dict | None:
-    """执行 flower-trellis self-check 并解析 JSON。"""
+    """执行 flower-trellis self-check，保留目标路径并解析 JSON。
+
+    Args:
+        project_dir: 要检查的项目目录。
+    Returns:
+        CLI 检查结果或安装、环境诊断。
+    """
     bootstrap = _check_cli(project_dir)
     if bootstrap:
         return bootstrap
+    # Windows 不会按 PATHEXT 为裸命令补 .CMD，执行时必须使用探测到的入口路径。
+    cli_path = shutil.which("flower-trellis")
+    if not cli_path:
+        return {"status": "cli_unavailable", "reason": "Flower 入口在执行前已不可用，请检查 PATH"}
+    command = [cli_path, "self-check", "--json", "--target", str(project_dir)]
+    run_options = {}
+    if os.name == "nt" and os.path.splitext(cli_path)[1].lower() in {".cmd", ".bat"}:
+        command_processor = os.environ.get("COMSPEC")
+        if not command_processor and os.environ.get("SystemRoot"):
+            command_processor = os.path.join(os.environ["SystemRoot"], "System32", "cmd.exe")
+        if not command_processor or not ntpath.isabs(command_processor):
+            return {"status": "cli_unavailable", "reason": "Windows 命令解释器的绝对路径无法确认，请检查 COMSPEC 与 SystemRoot"}
+        # 批处理即使 shell=False 也会经过 CMD；带引号的环境占位符保留路径中的 &、^ 和 %。
+        # 禁用 AutoRun 与延迟展开，避免宿主配置或 !变量! 改变检查命令及路径。
+        environment = os.environ.copy()
+        environment["FLOWER_UPDATE_HOOK_CLI"] = cli_path
+        environment["FLOWER_UPDATE_HOOK_TARGET"] = str(project_dir)
+        command = f'"{command_processor}" /d /v:off /s /c ""%FLOWER_UPDATE_HOOK_CLI%" self-check --json --target "%FLOWER_UPDATE_HOOK_TARGET%""'
+        run_options = {"executable": command_processor, "env": environment}
     try:
         result = subprocess.run(
-            [
-                "flower-trellis",
-                "self-check",
-                "--json",
-                "--target",
-                str(project_dir),
-            ],
+            command,
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
             timeout=SELF_CHECK_TIMEOUT_SECONDS,
             cwd=str(project_dir),
+            **run_options,
         )
     except subprocess.TimeoutExpired:
         return {"status": "cli_unavailable", "reason": "Flower CLI 检查超时，不能据此判定未安装"}
@@ -241,10 +262,13 @@ def _ai_instruction(data: dict, command: str | None) -> str | None:
     """生成面向 AI 的单条动作指令,避免重复字段互相打架。"""
     ai = data.get("ai") or {}
     instruction = ai.get("instruction")
-    if ai.get("mode") == "ask" and command:
-        if _has_release_notes(data):
-            return "先展示 release_notes 摘要和 recommended_command,再询问用户确认;确认前禁止执行 recommended_command;用户拒绝本次升级时执行 snooze_command,明确跳过时执行 skip_command。"
-        return "先展示 recommended_command,再询问用户确认;确认前禁止执行 recommended_command;用户拒绝本次升级时执行 snooze_command,明确跳过时执行 skip_command。"
+    if command:
+        display_target = "release_notes 摘要和 recommended_command" if _has_release_notes(data) else "recommended_command"
+        if ai.get("mode") == "ask":
+            return f"普通请求路由前先展示 {display_target},再询问用户确认;确认前禁止执行 recommended_command;用户拒绝本次升级时执行 snooze_command,明确跳过时执行 skip_command。"
+        if isinstance(instruction, str) and instruction:
+            return f"普通请求路由前先展示 {display_target};{instruction}"
+        return f"普通请求路由前先展示 {display_target}。"
     return instruction if isinstance(instruction, str) and instruction else None
 
 
@@ -259,14 +283,16 @@ def _format_context(data: dict) -> str:
     out_of_sync_reasons = project.get("outOfSyncReasons") or []
     current_trellis = current.get("bundledTrellisVersion")
     project_trellis = project.get("trellisVersion")
-    lines = [
-        "<flower-update>",
-        "priority: blocking_confirmation_required",
+    command = (data.get("commands") or {}).get("recommended") or ai.get("command")
+    lines = ["<flower-update>"]
+    if ai.get("mode") == "ask" and command:
+        lines.append("priority: blocking_confirmation_required")
+    lines.extend([
         "instruction_scope: first_assistant_reply",
         f"status: {data.get('status')}",
         f"current_flower: {current.get('flowerVersion')}",
         f"project_flower: {project.get('flowerVersion')}",
-    ]
+    ])
     if current_trellis and project_trellis and current_trellis != project_trellis:
         lines.append(f"bundled_trellis: {current_trellis}")
         lines.append(f"project_trellis: {project_trellis}")
@@ -277,7 +303,6 @@ def _format_context(data: dict) -> str:
     if remote.get("errorCode"):
         lines.append(f"remote_error_code: {remote.get('errorCode')}")
     lines.extend(_release_notes_lines(data))
-    command = (data.get("commands") or {}).get("recommended") or ai.get("command")
     if command:
         lines.append(f"recommended_command: {command}")
     prompt_commands = prompt.get("commands") if isinstance(prompt, dict) else {}
@@ -303,10 +328,11 @@ def _system_message(data: dict) -> str:
     command = (data.get("commands") or {}).get("recommended") or ai.get("command")
     if ai.get("mode") == "ask" and command:
         if _has_release_notes(data):
-            return "flower-trellis 发现可执行更新;必须先展示更新摘要并询问用户是否执行 recommended_command,确认前禁止运行;用户拒绝时执行 snooze_command。"
-        return "flower-trellis 发现可执行更新;必须先询问用户是否执行 recommended_command,确认前禁止运行;用户拒绝时执行 snooze_command。"
+            return "flower-trellis 发现可执行更新;普通请求路由前必须先展示更新摘要并询问用户是否执行 recommended_command,确认前禁止运行;用户拒绝时执行 snooze_command,明确跳过时执行 skip_command。"
+        return "flower-trellis 发现可执行更新;普通请求路由前必须先询问用户是否执行 recommended_command,确认前禁止运行;用户拒绝时执行 snooze_command,明确跳过时执行 skip_command。"
     if command:
-        return "flower-trellis 发现可执行更新;已注入 recommended_command。"
+        display_target = "更新摘要和 recommended_command" if _has_release_notes(data) else "recommended_command"
+        return f"flower-trellis 发现可执行更新;普通请求路由前必须先展示 {display_target},再按 ai_instruction 的既有授权语义处理。"
     return "flower-trellis update context injected"
 
 

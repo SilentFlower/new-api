@@ -8,7 +8,7 @@ description: "核对 Trellis 任务 release.md，并生成任务上线操作单�
 本 skill 有两个明确分离的模式：
 
 - 默认批次模式：核对并汇总一组任务，生成 `.trellis/releases/<release-file>.md`，写盘前需要用户确认。
-- 内部 `audit-current`：只核对当前活动任务，为 finish-work 维护单任务 `release.md`，不需要额外确认。
+- `audit-current`：仅在用户明确要求核对当前活动任务时维护单任务 `release.md`，不进入批次流程。
 
 本 skill 只整理和核对上线事项，不执行上线、不提交代码、不推送代码。
 
@@ -28,7 +28,7 @@ description: "核对 Trellis 任务 release.md，并生成任务上线操作单�
 
 ## 内部模式：audit-current
 
-`trellis-release audit-current` 只供 finish-work 或用户明确要求核对当前任务时使用。它不进入后续批次 Step 1-6。
+`trellis-release audit-current` 只供用户明确要求核对当前任务时使用。它不进入后续批次 Step 1-6。
 
 ### 输入与证据
 
@@ -99,7 +99,7 @@ Verify according to task acceptance criteria.
 - 多个任务即将归档时仍只处理当前活动任务。
 - dirty path 只能作为风险证据，不能直接当作已完成上线内容。
 
-返回结构化结果，供 finish-work 使用：
+返回结构化结果，供当前任务上线核对使用：
 
 ```json
 {
@@ -121,8 +121,7 @@ Verify according to task acceptance criteria.
 
 ```bash
 python3 ./.trellis/scripts/task.py current --source || true
-python3 ./.trellis/scripts/task.py list --mine || true
-python3 ./.trellis/scripts/task.py list-archive || true
+python3 ./.trellis/scripts/task.py list --all --json || true
 ```
 
 根据用户输入确定任务集合：

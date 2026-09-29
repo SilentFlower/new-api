@@ -371,7 +371,7 @@ def get_hooks(event: str, repo_root: Path | None = None) -> list[str]:
     """Get hook commands for a lifecycle event.
 
     Args:
-        event: Event name (e.g. "after_create", "after_archive").
+        event: Event name (e.g. "after_create", "after_close").
         repo_root: Repository root path.
 
     Returns:

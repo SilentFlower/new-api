@@ -41,7 +41,8 @@ Stable owner categories are:
 | Automatic task loop and return gate | `trellis-auto-loop` plus the matching Check-All result |
 | Executable knowledge capture | `trellis-update-spec` |
 | Commit/push safety and completion activation | `trellis-push` and `task_progress.py` |
-| Completed-task archive and session bookkeeping | `trellis-finish-work` and the archive implementation |
+| Deterministic task Close | `task_progress.py`, `task_lifecycle.py`, and the invoking `trellis-push` / `trellis-auto-loop` path |
+| Delayed physical GC | SessionStart bridge and `task_lifecycle.py session-start` |
 | Cross-session task progress discovery and recovery | `trellis-continue` owns the recovery decision, `task_progress.py` owns candidate evidence and completed-task reopen, and `task.py start` with `.trellis/scripts/common/active_task.py` owns explicit session binding |
 
 This reference names owners; it does not copy their command schemas, interaction templates, state formats, or error matrices. Read `.trellis/workflow.md`, the local owner skill/helper, available `overrides/bundles/`, and `.flower/state.json` for the installed version. Do not maintain a fixed Skill-Garden skill count or exhaustive capability list here.
@@ -73,7 +74,7 @@ Start from the runtime section, then move to its owner:
 | Change recovery decisions or candidate discovery | `trellis-continue` and `task_progress.py` |
 | Change explicit candidate rebind | `trellis-continue` owns the decision, and `task.py start` with `.trellis/scripts/common/active_task.py` owns the session pointer write |
 | Change completed-task reopen | The explicit `task_progress.py reopen` path |
-| Change final archive or session bookkeeping | `trellis-finish-work` and the archive implementation |
+| Change deterministic Close or physical GC | `task_lifecycle.py`, its callers, and the SessionStart bridge |
 | Change one platform adapter | The owning platform file/Patch while preserving the shared workflow contract |
 
 In managed mode, update the source Patch and owner, run the synchronization and compiled-target checks, then reread the final `.trellis/workflow.md`. In native mode, a narrow local edit remains valid when no Plugin ownership claim applies.
@@ -83,7 +84,7 @@ In managed mode, update the source Patch and owner, run the synchronization and 
 `workflow.md` is the semantic center of the local workflow, but each platform can also have its own entry files:
 
 - skills, such as `trellis-brainstorm` and `trellis-check`.
-- commands/prompts/workflows, such as continue and finish-work.
+- commands/prompts/workflows, such as continue and push.
 - hooks, such as session-start or workflow-state injection.
 
 If only `workflow.md` changes, platform entry files may still contain old language. When the user wants to change "what the AI actually does," also inspect the relevant platform directory.

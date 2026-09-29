@@ -177,7 +177,7 @@ class CLIAdapter:
 
         Args:
             project_root: Project root directory
-            *parts: Additional path parts (e.g., 'trellis', 'finish-work.md')
+            *parts: Additional path parts (e.g., 'trellis', 'continue.md')
 
         Returns:
             Path to commands directory or file
@@ -270,7 +270,7 @@ class CLIAdapter:
         """Get relative path to a trellis command file.
 
         Args:
-            name: Command name without extension (e.g., 'finish-work', 'check')
+            name: Command name without extension (e.g., 'continue', 'check')
 
         Returns:
             Relative path string for use in JSONL entries

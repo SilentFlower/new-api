@@ -5,7 +5,6 @@ Task CRUD operations.
 Provides:
     ensure_tasks_dir   - Ensure tasks directory exists
     cmd_create         - Create a new task
-    cmd_archive        - Archive completed task
     cmd_set_branch     - Set git branch for task
     cmd_set_base_branch - Set PR target branch
     cmd_set_scope      - Set scope for PR title
@@ -26,12 +25,11 @@ from pathlib import Path
 from .config import (
     get_codex_dispatch_mode,
     get_packages,
-    get_session_auto_commit,
     is_monorepo,
     resolve_package,
     validate_package,
 )
-from .git import branch_exists_locally, resolve_default_branch, run_git
+from .git import resolve_default_branch, run_git
 from .io import read_json, write_json
 from .log import Colors, colored
 from .paths import (
@@ -44,22 +42,12 @@ from .paths import (
     get_repo_root,
     get_tasks_dir,
 )
-from .safe_commit import (
-    print_gitignore_warning,
-    safe_archive_paths_to_add,
-    safe_git_add,
-)
+# BEGIN skill-garden patch task-lifecycle-prune-legacy-store-commit-import v0.6
+# END skill-garden patch task-lifecycle-prune-legacy-store-commit-import v0.6
 from .task_utils import (
-    archive_task_complete,
-    find_task_by_name,
-    is_within_tasks_dir,
     resolve_task_dir,
     run_task_hooks,
 )
-# BEGIN skill-garden patch task-store-decision-log-import v0.6
-
-from decision_log import DecisionLogError, decision_review_status
-# END skill-garden patch task-store-decision-log-import v0.6
 
 
 # =============================================================================
@@ -417,6 +405,11 @@ def cmd_create(args: argparse.Namespace) -> int:
         "assignee": assignee,
         "createdAt": today,
         "completedAt": None,
+        "closeout": {
+            "status": "pending",
+            "closedAt": None,
+            "blockers": [],
+        },
         "branch": None,
         "base_branch": base_branch,
         "worktree_path": None,
@@ -575,250 +568,6 @@ def cmd_create(args: argparse.Namespace) -> int:
 
     run_task_hooks("after_create", task_json_path, repo_root)
     return 0
-
-
-# =============================================================================
-# Command: archive
-# =============================================================================
-
-def cmd_archive(args: argparse.Namespace) -> int:
-    """Archive completed task."""
-    repo_root = get_repo_root()
-    task_name = args.name
-
-    if not task_name:
-        print(colored("Error: Task name is required", Colors.RED), file=sys.stderr)
-        return 1
-
-    tasks_dir = get_tasks_dir(repo_root)
-
-    # Resolve task directory (supports task name, relative path, or absolute path)
-    task_dir = resolve_task_dir(task_name, repo_root)
-
-    if not task_dir or not task_dir.is_dir():
-        print(colored(f"Error: Task not found: {task_name}", Colors.RED), file=sys.stderr)
-        print("Active tasks:", file=sys.stderr)
-        # Import lazily to avoid circular dependency
-        from .tasks import iter_active_tasks
-        for t in iter_active_tasks(tasks_dir):
-            print(f"  - {t.dir_name}/", file=sys.stderr)
-        return 1
-
-    # Refuse to archive anything that isn't a real task directly under
-    # .trellis/tasks/. A mistyped name (e.g. "src") resolves to repo_root/src,
-    # which is a dir but not a task — without this guard archive would move the
-    # user's source directory out of the repo.
-    if not is_within_tasks_dir(task_dir, repo_root):
-        print(colored(
-            f"Error: refusing to archive '{task_name}': "
-            f"{task_dir} is not a task under {tasks_dir}",
-            Colors.RED), file=sys.stderr)
-        return 1
-
-    dir_name = task_dir.name
-    task_json_path = task_dir / FILE_TASK_JSON
-
-    # Update status before archiving
-# BEGIN skill-garden patch task-archive-metadata-guard v0.6
-
-    task_data = read_json(task_json_path) if task_json_path.is_file() else None
-    if not task_data:
-        print(colored(f"Error: task.json not found or invalid: {task_json_path}", Colors.RED), file=sys.stderr)
-        return 1
-    if task_data.get("status") != "completed":
-        print(
-            colored("Error: only completed tasks can be archived", Colors.RED),
-            file=sys.stderr,
-        )
-        print(
-            "Hint: complete the normal trellis-push progress sync before finish-work archive.",
-            file=sys.stderr,
-        )
-        return 1
-
-    try:
-        decision_status = decision_review_status(task_dir)
-    except DecisionLogError as error:
-        print(colored(f"Error: Decision log is invalid: {error}", Colors.RED), file=sys.stderr)
-        return 1
-    if not decision_status["archive_allowed"]:
-        print(colored("Error: AI decisions require review before archive.", Colors.RED), file=sys.stderr)
-        print(
-            "Hint: Run decision_log.py status --task <task> --json, then record an accepted review.",
-            file=sys.stderr,
-        )
-        return 1
-# END skill-garden patch task-archive-metadata-guard v0.6
-    today = datetime.now().strftime("%Y-%m-%d")
-    # Names of child task dirs whose task.json gets modified below; passed
-    # into safe_archive_paths_to_add so they're staged in this commit.
-    modified_children: list[str] = []
-    if task_json_path.is_file():
-        data = read_json(task_json_path)
-        if data:
-            # Warn (don't block) when the recorded branch is stale — it was
-            # likely already merged and deleted (#399 item 2).
-            stored_branch = data.get("branch")
-            if stored_branch and not branch_exists_locally(stored_branch, repo_root):
-                print(
-                    colored(
-                        f"Warning: recorded branch '{stored_branch}' no longer exists locally "
-                        "(likely merged and deleted).",
-                        Colors.YELLOW,
-                    ),
-                    file=sys.stderr,
-                )
-
-# BEGIN skill-garden patch task-archive-status-write v0.6
-            # completedAt 仅是审计元数据；兼容旧任务时在移动前补齐，不把缺失元数据当作非法状态。
-            if not data.get("completedAt"):
-                data["completedAt"] = today
-                if not write_json(task_json_path, data):
-                    print(colored("Error: Failed to persist completedAt before archive", Colors.RED), file=sys.stderr)
-                    return 1
-                print(
-                    colored(f"Warning: completedAt was missing and has been set to {today}.", Colors.YELLOW),
-                    file=sys.stderr,
-                )
-# END skill-garden patch task-archive-status-write v0.6
-
-            # Handle subtask relationships on archive.
-            # Keep this task in its parent's children list so progress
-            # counters (children_progress) stay consistent — children
-            # missing from the active set are treated as completed.
-            task_children = data.get("children", [])
-
-            # If this is a parent, clear parent field in all children
-            if task_children:
-                for child_name in task_children:
-                    child_dir_path = find_task_by_name(child_name, tasks_dir)
-                    if child_dir_path:
-                        child_json = child_dir_path / FILE_TASK_JSON
-                        if child_json.is_file():
-                            child_data = read_json(child_json)
-                            if child_data:
-                                child_data["parent"] = None
-                                write_json(child_json, child_data)
-                                modified_children.append(child_dir_path.name)
-
-    # Clear any session that still points at this task before the path moves.
-    from .active_task import clear_task_from_sessions
-    clear_task_from_sessions(str(task_dir), repo_root)
-
-    # Archive
-    result = archive_task_complete(task_dir, repo_root)
-    if "archived_to" in result:
-        archive_dest = Path(result["archived_to"])
-        year_month = archive_dest.parent.name
-        print(colored(f"Archived: {dir_name} -> archive/{year_month}/", Colors.GREEN), file=sys.stderr)
-
-        # Auto-commit unless --no-commit
-        if not getattr(args, "no_commit", False):
-            if not _auto_commit_archive(dir_name, repo_root, modified_children):
-                print(
-                    colored(
-                        "Archive moved on disk, but git auto-commit did not complete. "
-                        "Resolve `git status` before continuing.",
-                        Colors.RED,
-                    ),
-                    file=sys.stderr,
-                )
-                return 1
-
-        # Return the archive path
-        print(f"{DIR_WORKFLOW}/{DIR_TASKS}/{DIR_ARCHIVE}/{year_month}/{dir_name}")
-
-        # Run hooks with the archived path
-        archived_json = archive_dest / FILE_TASK_JSON
-        run_task_hooks("after_archive", archived_json, repo_root)
-        return 0
-
-    return 1
-
-
-def _auto_commit_archive(
-    task_name: str,
-    repo_root: Path,
-    modified_children: list[str] | None = None,
-) -> bool:
-    """Stage Trellis-owned task paths and commit after archive.
-
-    Scoped narrowly to the archived task's source + destination paths
-    plus any child task dirs whose ``task.json`` was edited (parent →
-    children relationship update). Dirty changes in OTHER active task
-    dirs are NOT bundled into the archive commit.
-
-    If ``.gitignore`` blocks the paths, we warn + skip — we do NOT
-    retry with ``git add -f``. The warning explicitly forbids
-    ``git add -f .trellis/`` (which would fan out to caches/backups)
-    and points users at ``session_auto_commit: false``.
-
-    Honors ``session_auto_commit`` in ``.trellis/config.yaml``: when
-    set to ``false``, this function returns immediately without
-    touching git (the archive directory move on disk is unaffected).
-    """
-    if not get_session_auto_commit(repo_root):
-        print(
-            "[OK] session_auto_commit: false — skipping git stage/commit.",
-            file=sys.stderr,
-        )
-        return True
-
-    source_rel = f"{DIR_WORKFLOW}/{DIR_TASKS}/{task_name}"
-    rc, tracked_out, _ = run_git(
-        ["ls-files", "--", source_rel],
-        cwd=repo_root,
-    )
-    source_was_tracked = rc == 0 and bool(tracked_out.strip())
-
-    paths = safe_archive_paths_to_add(
-        repo_root, task_name=task_name, modified_children=modified_children
-    )
-    if not paths:
-        print("[OK] No task changes to commit.", file=sys.stderr)
-        return True
-
-    success, _, err = safe_git_add(paths, repo_root)
-    if not success:
-        if err and "ignored by" in err.lower():
-            print_gitignore_warning(paths)
-        else:
-            print(
-                f"[WARN] git add failed: {err.strip() if err else 'unknown error'}",
-                file=sys.stderr,
-            )
-        return not source_was_tracked
-
-    # Belt-and-suspenders for the phantom-delete bug: `safe_git_add` uses
-    # `git add` (no -A) which only stages additions/modifications. The
-    # source task directory was moved away by `shutil.move`, so its files
-    # need an explicit `git rm --cached` to stage the deletions in this
-    # same commit — otherwise they sit as uncommitted "phantom deletes"
-    # against HEAD until something later picks them up.
-    #
-    # `--ignore-unmatch` makes this a no-op when the task was never tracked
-    # (e.g. archiving a task that lived only in working tree).
-    run_git(
-        ["rm", "-r", "--cached", "--ignore-unmatch", "--", source_rel],
-        cwd=repo_root,
-    )
-
-    rc, _, _ = run_git(
-        ["diff", "--cached", "--quiet", "--", *paths, source_rel],
-        cwd=repo_root,
-    )
-    if rc == 0:
-        print("[OK] No task changes to commit.", file=sys.stderr)
-        return True
-
-    commit_msg = f"chore(task): archive {task_name}"
-    rc, _, err = run_git(["commit", "-m", commit_msg], cwd=repo_root)
-    if rc == 0:
-        print(f"[OK] Auto-committed: {commit_msg}", file=sys.stderr)
-        return True
-    else:
-        print(f"[WARN] Auto-commit failed: {err.strip()}", file=sys.stderr)
-        return not source_was_tracked
 
 
 # =============================================================================

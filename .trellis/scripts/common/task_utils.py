@@ -6,15 +6,12 @@ Provides:
     is_safe_task_path   - Validate task path is safe to operate on
     find_task_by_name   - Find task directory by name
     resolve_task_dir    - Resolve task directory from name, relative, or absolute path
-    archive_task_dir    - Archive task to monthly directory
     run_task_hooks      - Run lifecycle hooks for task events
 """
 
 from __future__ import annotations
 
-import shutil
 import sys
-from datetime import datetime
 from pathlib import Path
 
 from .paths import get_repo_root, get_tasks_dir
@@ -69,34 +66,6 @@ def is_safe_task_path(task_path: str, repo_root: Path | None = None) -> bool:
     return True
 
 
-def is_within_tasks_dir(task_dir_abs: Path, repo_root: Path | None = None) -> bool:
-    """Check that a resolved task directory really is a task under the tasks dir.
-
-    A real task lives directly at ``.trellis/tasks/<name>``. This returns True
-    only when ``task_dir_abs`` is an immediate child of the tasks directory.
-
-    Guards archive: ``resolve_task_dir`` falls back to ``repo_root/<name>`` for
-    an unknown name, so a mistyped ``task.py archive src`` resolves to the real
-    ``src/`` source directory. Without this check archive would ``shutil.move``
-    it out of the repo. Also rejects the tasks dir itself and anything nested
-    under ``archive/`` (already-archived tasks).
-    """
-    if repo_root is None:
-        repo_root = get_repo_root()
-    try:
-        resolved = task_dir_abs.resolve()
-        tasks_resolved = get_tasks_dir(repo_root).resolve()
-    except (OSError, RuntimeError):
-        return False
-    if resolved.parent != tasks_resolved:
-        return False
-    return resolved.name != "archive"
-
-
-# =============================================================================
-# Task Lookup
-# =============================================================================
-
 def find_task_by_name(task_name: str, tasks_dir: Path) -> Path | None:
     """Find task directory by name (exact or suffix match).
 
@@ -121,74 +90,6 @@ def find_task_by_name(task_name: str, tasks_dir: Path) -> Path | None:
             return d
 
     return None
-
-
-# =============================================================================
-# Archive Operations
-# =============================================================================
-
-def archive_task_dir(task_dir_abs: Path, repo_root: Path | None = None) -> Path | None:
-    """Archive a task directory to archive/{YYYY-MM}/.
-
-    Args:
-        task_dir_abs: Absolute path to task directory.
-        repo_root: Repository root path. Defaults to auto-detected.
-
-    Returns:
-        Path to archived directory, or None on error.
-    """
-    if not task_dir_abs.is_dir():
-        print(f"Error: task directory not found: {task_dir_abs}", file=sys.stderr)
-        return None
-
-    # Get tasks directory (parent of the task)
-    tasks_dir = task_dir_abs.parent
-    archive_dir = tasks_dir / "archive"
-    year_month = datetime.now().strftime("%Y-%m")
-    month_dir = archive_dir / year_month
-
-    # Create archive directory
-    try:
-        month_dir.mkdir(parents=True, exist_ok=True)
-    except (OSError, IOError) as e:
-        print(f"Error: Failed to create archive directory: {e}", file=sys.stderr)
-        return None
-
-    # Move task to archive
-    task_name = task_dir_abs.name
-    dest = month_dir / task_name
-
-    try:
-        shutil.move(str(task_dir_abs), str(dest))
-    except (OSError, IOError, shutil.Error) as e:
-        print(f"Error: Failed to move task to archive: {e}", file=sys.stderr)
-        return None
-
-    return dest
-
-
-def archive_task_complete(
-    task_dir_abs: Path,
-    repo_root: Path | None = None
-) -> dict[str, str]:
-    """Complete archive workflow: archive directory.
-
-    Args:
-        task_dir_abs: Absolute path to task directory.
-        repo_root: Repository root path. Defaults to auto-detected.
-
-    Returns:
-        Dict with archive result info.
-    """
-    if not task_dir_abs.is_dir():
-        print(f"Error: task directory not found: {task_dir_abs}", file=sys.stderr)
-        return {}
-
-    archive_dest = archive_task_dir(task_dir_abs, repo_root)
-    if archive_dest:
-        return {"archived_to": str(archive_dest)}
-
-    return {}
 
 
 # =============================================================================
@@ -236,7 +137,54 @@ def resolve_task_dir(target_dir: str, repo_root: Path) -> Path:
 # BEGIN skill-garden patch task-reference-resolution v0.6
 
 
-def resolve_task_reference(task_ref: str, repo_root: Path) -> Path:
+def _resolve_task_reference_from_records(
+    task_ref: str,
+    repo_root: Path,
+    records,
+    scope_name: str,
+) -> Path:
+    """Resolve one task reference from an explicit lifecycle record scope."""
+    raw = task_ref.strip() if isinstance(task_ref, str) else ""
+    if not raw:
+        raise ValueError("任务引用不能为空")
+
+    tasks_dir = get_tasks_dir(repo_root).resolve()
+    normalized = raw.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+
+    candidate = Path(raw)
+    path_reference = candidate.is_absolute() or "/" in normalized or normalized.startswith(".trellis")
+    if path_reference:
+        candidate = candidate if candidate.is_absolute() else repo_root / Path(normalized)
+        try:
+            resolved = candidate.resolve()
+        except (OSError, RuntimeError) as error:
+            raise ValueError(f"无法解析任务引用：{task_ref}") from error
+        if candidate.is_symlink() or resolved.parent != tasks_dir or resolved.name == "archive":
+            raise ValueError(f"任务引用必须指向{scope_name}：{task_ref}")
+        if not resolved.is_dir():
+            raise ValueError(f"任务不存在：{task_ref}")
+        matches = [task.directory.resolve() for task in records if task.directory.resolve() == resolved]
+    else:
+        matches = [
+            task.directory.resolve()
+            for task in records
+            if task.dir_name == raw or task.dir_name.endswith(f"-{raw}")
+        ]
+
+    matches = sorted(set(matches))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        names = ", ".join(path.name for path in matches)
+        raise ValueError(f"任务引用存在歧义：{task_ref}；候选：{names}；请使用完整目录名")
+    if path_reference or (tasks_dir / raw).is_dir():
+        raise ValueError(f"任务引用必须指向{scope_name}：{task_ref}")
+    raise ValueError(f"任务不存在：{task_ref}")
+
+
+def resolve_active_task_reference(task_ref: str, repo_root: Path) -> Path:
     """Resolve an existing active task reference deterministically.
 
     Args:
@@ -249,55 +197,53 @@ def resolve_task_reference(task_ref: str, repo_root: Path) -> Path:
     Raises:
         ValueError: The reference is empty, ambiguous, missing, or outside active tasks.
     """
-    raw = task_ref.strip() if isinstance(task_ref, str) else ""
-    if not raw:
-        raise ValueError("任务引用不能为空")
+    from .tasks import iter_active_tasks
 
     tasks_dir = get_tasks_dir(repo_root).resolve()
-    normalized = raw.replace("\\", "/")
-    while normalized.startswith("./"):
-        normalized = normalized[2:]
-
-    candidate = Path(raw)
-    if candidate.is_absolute() or "/" in normalized or normalized.startswith(".trellis"):
-        candidate = candidate if candidate.is_absolute() else repo_root / Path(normalized)
-        try:
-            resolved = candidate.resolve()
-        except (OSError, RuntimeError) as error:
-            raise ValueError(f"无法解析任务引用：{task_ref}") from error
-        if resolved.parent != tasks_dir or resolved.name == "archive":
-            raise ValueError(f"任务引用必须指向活动任务目录：{task_ref}")
-        if not resolved.is_dir():
-            raise ValueError(f"任务不存在：{task_ref}")
-        return resolved
-
-    exact = tasks_dir / raw
-    if exact.is_dir():
-        resolved = exact.resolve()
-        if resolved.parent != tasks_dir or resolved.name == "archive":
-            raise ValueError(f"任务引用必须指向活动任务目录：{task_ref}")
-        return resolved
-
     try:
-        named_matches = sorted(
-            path
-            for path in tasks_dir.iterdir()
-            if path.is_dir() and path.name != "archive" and path.name.endswith(f"-{raw}")
-        )
+        records = list(iter_active_tasks(tasks_dir))
     except OSError as error:
         raise ValueError(f"无法读取活动任务目录：{tasks_dir}") from error
-    matches = []
-    for path in named_matches:
-        resolved = path.resolve()
-        if resolved.parent != tasks_dir or resolved.name == "archive":
-            raise ValueError(f"任务引用必须指向活动任务目录：{task_ref}")
-        matches.append(resolved)
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        names = ", ".join(path.name for path in matches)
-        raise ValueError(f"任务引用存在歧义：{task_ref}；候选：{names}；请使用完整目录名")
-    raise ValueError(f"任务不存在：{task_ref}")
+    return _resolve_task_reference_from_records(task_ref, repo_root, records, "活动任务目录")
+
+
+def resolve_top_level_task_reference(task_ref: str, repo_root: Path) -> Path:
+    """Resolve an existing top-level task, including a logical closed task.
+
+    Args:
+        task_ref: Exact task name, unique suffix, relative path, or absolute path.
+        repo_root: Repository root path.
+
+    Returns:
+        Resolved top-level task directory.
+
+    Raises:
+        ValueError: The reference is empty, ambiguous, missing, or physically archived.
+    """
+    from .tasks import iter_top_level_tasks
+
+    tasks_dir = get_tasks_dir(repo_root).resolve()
+    try:
+        records = list(iter_top_level_tasks(tasks_dir))
+    except OSError as error:
+        raise ValueError(f"无法读取顶层任务目录：{tasks_dir}") from error
+    return _resolve_task_reference_from_records(task_ref, repo_root, records, "顶层任务目录")
+
+
+def resolve_task_reference(task_ref: str, repo_root: Path) -> Path:
+    """Resolve an active task reference for backward-compatible callers.
+
+    Args:
+        task_ref: Exact task name, unique suffix, relative path, or absolute path.
+        repo_root: Repository root path.
+
+    Returns:
+        Resolved active task directory.
+
+    Raises:
+        ValueError: The reference is not an unambiguous active task.
+    """
+    return resolve_active_task_reference(task_ref, repo_root)
 # END skill-garden patch task-reference-resolution v0.6
 
 

@@ -37,44 +37,30 @@ python3 ./.trellis/scripts/get_context.py --mode packages   # list packages / la
 
 **When to update spec**: new pattern/convention found · bug-fix prevention to codify · new technical decision.
 
+<!-- BEGIN skill-garden patch workflow-task-system-closeout v0.6 -->
 ### Task System
 
-Every task has its own directory under `.trellis/tasks/{MM-DD-name}/` holding `task.json`, `prd.md`, optional `design.md`, optional `implement.md`, optional `research/`, and context manifests (`implement.jsonl`, `check.jsonl`) for sub-agent-capable platforms.
+Every task has a directory under `.trellis/tasks/{MM-DD-name}/`. `task.json.status` records work state (`planning`, `in_progress`, `completed`); `task.json.closeout` independently records deterministic Close (`pending`, `blocked`, `closed`). A closed task leaves every active view immediately, even before its directory moves.
 
 ```bash
-# Task lifecycle
 python3 ./.trellis/scripts/task.py create "<title>" [--slug <name>] [--parent <dir>]
-python3 ./.trellis/scripts/task.py start <name>          # set active task (session-scoped when available)
-python3 ./.trellis/scripts/task.py current --source      # show active task and source
-python3 ./.trellis/scripts/task.py finish                # clear active task (triggers after_finish hooks)
-python3 ./.trellis/scripts/task.py archive <name>        # move to archive/{year-month}/
-python3 ./.trellis/scripts/task.py list [--mine] [--status <s>]
-python3 ./.trellis/scripts/task.py list-archive
-
-# Code-spec context (injected into implement/check agents via JSONL).
-# `implement.jsonl` / `check.jsonl` are seeded on `task create` for sub-agent-capable
-# platforms; the AI curates real spec + research entries during planning when needed.
+python3 ./.trellis/scripts/task.py start <name>
+python3 ./.trellis/scripts/task.py current --source
+python3 ./.trellis/scripts/task.py finish                # only clear this session pointer
+python3 ./.trellis/scripts/task.py close <name> --json
+python3 ./.trellis/scripts/task.py list [--closed|--all] [--mine] [--json]
+python3 ./.trellis/scripts/task.py gc --closed --before 3d [--dry-run] [--json]
+python3 ./.trellis/scripts/task.py restore <name> [--dry-run] [--json]
 python3 ./.trellis/scripts/task.py add-context <name> <action> <file> <reason>
 python3 ./.trellis/scripts/task.py list-context <name> [action]
 python3 ./.trellis/scripts/task.py validate <name>
-
-# Task metadata
-python3 ./.trellis/scripts/task.py set-branch <name> <branch>
-python3 ./.trellis/scripts/task.py set-base-branch <name> <branch>    # PR target
-python3 ./.trellis/scripts/task.py set-scope <name> <scope>
-
-# Hierarchy (parent/child)
 python3 ./.trellis/scripts/task.py add-subtask <parent> <child>
 python3 ./.trellis/scripts/task.py remove-subtask <parent> <child>
-
-# PR creation
 python3 ./.trellis/scripts/task.py create-pr [name] [--dry-run]
 ```
 
-> Run `python3 ./.trellis/scripts/task.py --help` to see the authoritative, up-to-date list.
-
-**Current-task mechanism**: `task.py create` creates the task directory and (when session identity is available) auto-sets the per-session active-task pointer so the planning breadcrumb fires immediately. `task.py start` writes the same pointer (idempotent if already set) and flips `task.json.status` from `planning` to `in_progress`. State is stored under `.trellis/.runtime/sessions/`. If no context key is available from hook input, `TRELLIS_CONTEXT_ID`, or a platform-native session environment variable, there is no active task and `task.py start` fails with a session identity hint. `task.py finish` deletes the current session file (status unchanged). `task.py archive <task>` writes `status=completed`, moves the directory to `archive/`, and deletes any runtime session files that still point at the archived task.
-
+`task.py start` binds the task to the current AI session and moves planning work to `in_progress`. Successful normal delivery and successful auto-loop commit-only both write completion plus Close through their owning deterministic helper; Close does not call a model. Physical GC runs best-effort from SessionStart on startup/resume for tasks closed at least three days, commits only the exact moved paths, never pushes, and can be reversed with `restore`.
+<!-- END skill-garden patch workflow-task-system-closeout v0.6 -->
 ### Workspace System
 
 Records every AI session for cross-session tracking under `.trellis/workspace/<developer>/`.
@@ -129,9 +115,8 @@ python3 ./.trellis/scripts/get_context.py --mode phase --step <X.Y>  # detailed 
                                     task.py start until successful ordinary
                                     trellis-push progress completion)
     [workflow-state:in_progress-inline] → Codex inline variant of Phase 2/3
-    [workflow-state:completed]    → business push and final progress are
-                                    complete; task stays active until
-                                    explicit trellis-finish-work archive
+    [workflow-state:completed]    → business work is complete but deterministic
+                                    Close remains pending or blocked
 
   Editing checklist:
     - When you change a [workflow-state:STATUS] block, also check the
@@ -170,15 +155,15 @@ Complete contracts live in the owning phase, workflow state, skill, hook, or hel
 | Interactive Post-Check Stop Gate | Phase 2.2 + `trellis-check-all` | current Check-All evidence |
 | Code Commit Confirmation Gate | Phase 3.4 + `trellis-push` | exact Git safety checks |
 | Auto-loop Commit-only Preauthorization | `trellis-auto-loop` | `auto_loop.py` + `trellis-push` internal commit-only |
-| Bookkeeping Auto-commit Scope | `trellis-finish-work` | `safe_commit.py` + archive/journal commands |
+| Deterministic Task Close | `trellis-push` + `trellis-auto-loop` | `task_progress.py` + `task_lifecycle.py` |
+| Deferred Physical GC | SessionStart | `task_lifecycle.py session-start` |
 | Task Progress Recovery | `trellis-continue` | `task_progress.py` |
 
 Cross-stage ordering:
 
-1. A blocking `<flower-update>` confirmation is handled before ordinary request routing; a completed update returns through `trellis-push`.
-2. Request intent, active-task scope, and any current untracked work are resolved before task creation, task routing, or file edits.
-3. A validated auto-loop result returns through matching `record` + `next` before the interactive post-check stop applies.
-4. Interactive completion proceeds Check-All -> `trellis-update-spec` -> `trellis-push`; `trellis-finish-work` runs only after Phase 3.4 and only when explicitly requested.
+1. Request intent, active-task scope, and any current untracked work are resolved before task creation, task routing, or file edits.
+2. A validated auto-loop result returns through matching `record` + `next` before the interactive post-check stop applies.
+3. Interactive completion proceeds Check-All -> `trellis-update-spec` -> `trellis-push`; successful delivery writes completion and deterministic Close in one lifecycle update.
 
 Mechanical rule: follow the owner named above. The Hub must not duplicate owner procedures, helper schemas, interaction templates, error matrices, or Git path rules.
 <!-- END skill-garden patch workflow-hub v0.6 -->
@@ -228,7 +213,7 @@ No active task. Infer the current request intent before acting.
 Repair intent alone is not a no-task switch; inspect unknown scope and reclassify before edits. Only an explicit current-request workflow instruction such as `直接做` / `不要任务` may override automatic `task_plan`.
 For non-trivial project work, follow the `Request Triage` Project Knowledge Discovery contract before routing the action. Load a Trellis capability directly only when the user explicitly names it or the request exactly matches that capability; route project-specific workflow actions through the matched SOP instead of keyword-mapping a general release/publish request to `trellis-release`.
 Handle `discuss` and `inspect` silently. For quick direct edit, make the bounded edit, run focused validation, and report without creating `untracked_flow`; small wording/config tweaks, release dry-runs, version checks, local SOP steps, and other one-turn fixes stay in this path unless the current request explicitly asks future `下一步` / `继续` / check / push handoff to remember this no-task work. For tracked direct edit, state once that work will use the session-scoped untracked flow, then run `python3 ./.trellis/scripts/untracked_flow.py begin --summary "<bounded work summary>" --source <inferred|user-explicit> --mode tracked-direct-edit`.
-Never create `untracked_flow` for `workflow_action` itself, including release/publish, commit, push, finish-work, task operations, snapshot sync, auto-loop control, or read-only inspection. If a workflow action reveals a separate code/config fix, pause that workflow action, explain the separate fix, and only create tracked direct edit when the user wants later turns to remember that fix's check/spec/push handoff; otherwise keep it as quick direct edit.
+Never create `untracked_flow` for `workflow_action` itself, including release/publish, commit, push, task operations, snapshot sync, auto-loop control, or read-only inspection. If a workflow action reveals a separate code/config fix, pause that workflow action, explain the separate fix, and only create tracked direct edit when the user wants later turns to remember that fix's check/spec/push handoff; otherwise keep it as quick direct edit.
 A same-item hit resumes the existing state; `active-work-conflict` blocks unrelated code writes until the current item is completed, explicitly abandoned, or adopted into a task. Unrelated read-only requests may continue without mutating the state. A successful `begin` starts at `stage=implement`; the helper is a workflow cursor and does not gate edits on file scope, Git state, or owner evidence.
 For high-confidence complex implementation, create an auto-routed planning task through `task_intent.py create`, show one non-blocking switch hint, and enter `trellis-brainstorm`. Ask only for material ambiguity or independent safety gates. Do NOT call the harness built-in plan mode (`EnterPlanMode` / `ExitPlanMode`) as a substitute; Trellis planning owns this routing.
 <!-- END skill-garden patch workflow-state-no-task v0.6 -->
@@ -269,7 +254,7 @@ If it succeeds, in the same turn treat the current user request as `no_task` and
 <!-- END skill-garden patch workflow-phase-index-create-task v0.6 -->
 - 1.1 Requirement exploration `[required · repeatable]` (`prd.md`; complex tasks also need `design.md` + `implement.md`)
 - 1.2 Research `[optional · repeatable]`
-- 1.3 Configure context `[required · once]` — Claude Code, Cursor, OpenCode, Codex, Kiro, Gemini, Qoder, CodeBuddy, Copilot, Droid, Pi, Oh My Pi, ZCode, Snow, Reasonix, Grok, Kimi Code (sub-agent-dispatch platforms only; inline platforms skip)
+- 1.3 Configure context `[required · once]` — configure task context before sub-agent dispatch; inline execution skips.
 - 1.4 Activate task `[required · once]` (review gate, then `task.py start`; status → in_progress)
 - 1.5 Completion criteria
 
@@ -310,11 +295,12 @@ Inline mode skips JSONL curation and loads task artifacts plus relevant specs th
 - 2.2 Quality check `[required · repeatable]`
 - 2.3 Rollback `[on demand]`
 
+<!-- BEGIN skill-garden patch workflow-in-progress-closeout-scope v0.6 -->
 <!-- Per-turn breadcrumb: shown while status='in_progress'.
-     Scope: all of Phase 2 + Phase 3.2-3.4 (status stays 'in_progress' from
-     task.py start until task.py archive; only archive flips it). The body
-     therefore must cover every required step from implementation through
-     commit, including Phase 3.3 spec update and Phase 3.4 commit. -->
+     Scope: Phase 2 + Phase 3.2-3.4. Successful completion writes final
+     progress, status=completed, and deterministic Close through the owning
+     delivery path; closed tasks disappear from active views immediately. -->
+<!-- END skill-garden patch workflow-in-progress-closeout-scope v0.6 -->
 
 Sub-agent dispatch protocol applies to all platforms and all sub-agents, including native Codex `SubagentStart` context injection with child-side pull fallback, class-2 Gemini/Qoder/Copilot/Reasonix/Trae/Grok/Kimi Code, hook-backed ZCode/Snow, and `trellis-research`: every dispatch prompt starts with `Active task: <task path from task.py current>` before role-specific instructions. On Grok Build, use `spawn_subagent` with `subagent_type` set to the Trellis agent name (e.g. `trellis-implement`). On Kimi Code, dispatch the built-in `coder` / `explore` sub-agent with the matching `.kimi-code/skills/trellis-<role>/SKILL.md` instructions.
 
@@ -325,7 +311,7 @@ Before routing or editing, apply the `Request Triage` Active Task Scope Guard. N
 Enter Phase 2.1/2.2 through the target-matched `trellis-route`; a user route override wins over remembered evidence. Do NOT call the harness built-in plan mode (`EnterPlanMode` / `ExitPlanMode`) to plan sub-changes; keep planning in Trellis artifacts.
 After implementation and focused validation, return to the Phase 2.1 completion contract and resolve its Pre-Check action before ending the turn; the full hold/default policy remains owned by Phase 2.1.
 After Check-All, follow the `Interactive Post-Check Stop Gate`: a validated auto-loop immediately records and advances, a matching direct Git strict pass or accepted-risk pass may continue to `trellis-update-spec`, and every other interactive result reports and stops. A later interactive next/continue, including explicit acceptance of the current report's findings followed by continue, runs `trellis-update-spec`; downstream disposition remains owned by Update-Spec and `trellis-push`.
-Run `/trellis:finish-work` only when explicitly requested after Phase 3.4 completes.
+After Phase 3.4 succeeds, deterministic Close is written by the owning progress path; there is no separate wrap-up command.
 Dispatch `trellis-implement` or audit-only Check-All sub-agents only when the matching route selected subagent mode. Every dispatch prompt starts with `Active task: <task path from task.py current>` and loads JSONL entries before task artifacts.
 <!-- END skill-garden patch workflow-state-in-progress v0.6 -->
 [/workflow-state:in_progress]
@@ -342,7 +328,7 @@ Before routing or editing, apply the `Request Triage` Active Task Scope Guard. N
 Enter Phase 2.1/2.2 through the target-matched `trellis-route`; a user route override wins over remembered evidence. Do NOT call the harness built-in plan mode (`EnterPlanMode` / `ExitPlanMode`) to plan sub-changes; keep planning in Trellis artifacts.
 After implementation and focused validation, return to the Phase 2.1 completion contract and resolve its Pre-Check action before ending the turn; the full hold/default policy remains owned by Phase 2.1.
 After Check-All, follow the `Interactive Post-Check Stop Gate`: a validated auto-loop immediately records and advances, a matching direct Git strict pass or accepted-risk pass may continue to `trellis-update-spec`, and every other interactive result reports and stops. A later interactive next/continue, including explicit acceptance of the current report's findings followed by continue, runs `trellis-update-spec`; downstream disposition remains owned by Update-Spec and `trellis-push`.
-Run `/trellis:finish-work` only when explicitly requested after Phase 3.4 completes.
+After Phase 3.4 succeeds, deterministic Close is written by the owning progress path; there is no separate wrap-up command.
 Inline workflow-state is not an inline route decision. Do not default inline because the state or helper is inline; follow the resolved route, and use `trellis-before-dev` before main-session edits.
 <!-- END skill-garden patch workflow-state-in-progress-inline v0.6 -->
 [/workflow-state:in_progress-inline]
@@ -353,16 +339,14 @@ Inline workflow-state is not an inline route decision. Do not default inline bec
 - 3.4 Commit changes `[required · once]`
 - 3.5 Wrap-up reminder
 
-> Note: step 3.1 was folded into 2.2 (last-iteration full-scope check) and 3.4 (commit preamble). Numbering kept stable to avoid breaking external references.
+
 
 <!-- BEGIN skill-garden patch workflow-state-completed v0.6 -->
-<!-- Per-turn breadcrumb: shown while status='completed'.
-     The task remains active until the Push-owned completed preflight resolves
-     publication recovery or explicit trellis-finish-work archive succeeds. -->
+<!-- Per-turn breadcrumb: shown while status='completed' and Close is not closed. -->
 
 [workflow-state:completed]
-Business work and final task progress are complete, but `status=completed` alone does not prove that a normal task-record commit was pushed. Do not resume implementation or Update-Spec automatically.
-Enter the `trellis-push` completed-task preflight for the single next hop. It either prepares publication recovery, points to explicit `/trellis:finish-work`, or blocks on ambiguous evidence; this state does not inspect Git or auto-loop details itself.
+Business work and final task progress are complete, but deterministic Close is still pending or blocked. Do not resume implementation or Update-Spec automatically.
+Enter the `trellis-push` completed-task preflight when delivery or task-record publication needs recovery. Otherwise inspect `closeout.blockers`, resolve only the reported condition, and retry `task.py close`; closed tasks disappear from active views immediately.
 For rework, obtain an explicit user decision and run `task_progress.py reopen --task <task-name> --json` before returning to `in_progress`. Material scope changes still require refreshed planning artifacts and Brief approval.
 [/workflow-state:completed]
 <!-- END skill-garden patch workflow-state-completed v0.6 -->
@@ -390,7 +374,7 @@ The route result owns the inline/subagent choice. Do not infer execution mode fr
 ### Guardrails
 
 - Task creation approval is not implementation approval; implementation waits for `task.py start` after artifact review.
-- PRD-only is valid for lightweight tasks; complex tasks need `design.md` + `implement.md`.
+
 - Planning must be persisted to task artifacts; checks must run before reporting completion.
 
 ### Loading Step Detail
@@ -673,9 +657,11 @@ Ordinary mode defaults to commit and push. Commit-only is allowed only when the 
 
 Do not run bare `git add`, `git commit`, or `git push` as a substitute for this phase.
 <!-- END skill-garden patch workflow-phase-3-commit v0.6 -->
-#### 3.5 Wrap-up reminder
+<!-- BEGIN skill-garden patch workflow-phase-3-closeout-handoff v0.6 -->
+#### 3.5 Completion handoff
 
-After the above, remind the user they can run `/finish-work` to wrap up (archive the task, record the session).
+Successful Phase 3.4 writes deterministic Close through its owning progress path. There is no separate model-driven wrap-up command. Report only unresolved Close blockers, retained local changes, or publication recovery that still needs user action; SessionStart owns delayed physical GC.
+<!-- END skill-garden patch workflow-phase-3-closeout-handoff v0.6 -->
 
 ---
 
@@ -691,7 +677,7 @@ Edit the corresponding step's walkthrough body in the Phase 1 / 2 / 3 sections a
 - No active task must infer the current request intent first; high-confidence reversible routing proceeds directly, while material ambiguity and independent safety boundaries still require confirmation.
 <!-- END skill-garden patch workflow-customization-intent-invariant v0.6 -->
 - Planning must distinguish lightweight PRD-only tasks from complex tasks that require `prd.md`, `design.md`, and `implement.md` before start.
-- Every required execution path must keep the Phase 3.4 commit reminder reachable before `/trellis:finish-work`.
+- Every required execution path must keep the Phase 3.4 commit reminder reachable before deterministic Close.
 
 All tag blocks live in the `## Phase Index` section above, immediately after each phase summary:
 
@@ -702,7 +688,7 @@ All tag blocks live in the `## Phase Index` section above, immediately after eac
 | Codex inline Phase 1 | `[workflow-state:planning-inline]` |
 | Phase 2 + Phase 3.2–3.4 (implementation + check + wrap-up) | `[workflow-state:in_progress]` (after Phase 2 summary) |
 | Codex inline Phase 2 + Phase 3.2–3.4 | `[workflow-state:in_progress-inline]` |
-| After completion write, before Push-owned recovery preflight or archive | `[workflow-state:completed]` (observable active lifecycle state) |
+| After completion write, while deterministic Close is pending or blocked | `[workflow-state:completed]` (observable active lifecycle state) |
 
 ### Changing the per-turn prompt text
 
@@ -721,7 +707,7 @@ your per-turn prompt text
 Constraints:
 - STATUS charset: `[A-Za-z0-9_-]+` (underscores and hyphens allowed, e.g. `in-review`, `blocked-by-team`)
 - A lifecycle hook must write `task.json.status` to your custom value, otherwise the tag is never read
-- Lifecycle hooks live in `task.json.hooks.after_*` and bind to one of `after_create / after_start / after_finish / after_archive`
+- Lifecycle hooks live in `task.json.hooks.after_*` and bind to one of `after_create / after_start / after_finish / after_close`
 
 ### Adding a lifecycle hook
 
@@ -730,14 +716,14 @@ Add a `hooks` field to your `task.json`:
 ```json
 {
   "hooks": {
-    "after_finish": [
+    "after_close": [
       "your-script-or-command-here"
     ]
   }
 }
 ```
 
-Supported events: `after_create / after_start / after_finish / after_archive`. Note that `after_finish` ≠ a status change (it only clears the active-task pointer); use `after_archive` for "task is done" notifications.
+Supported events: `after_create / after_start / after_finish / after_close`. `after_close` runs only after deterministic Close succeeds; physical GC is intentionally not a lifecycle notification boundary.
 
 ### Full contract
 

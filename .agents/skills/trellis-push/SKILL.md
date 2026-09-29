@@ -13,9 +13,9 @@ description: "按确认的精确文件范围提交普通变更或完成已就绪
 - 普通多仓计划可以包含本地确定性生成命令；生成后没有新增计划外文件时沿用同一次确认。
 - 普通模式把当前任务产物与更新后的 `task.json` 纳入同一次确认下的独立任务记录提交。
 - 用户明确要求“只提交不推送”时使用 `commit-only`。
-- auto-loop 可调用内部 `commit-only`，复用本 skill 的仓库发现、动态多仓计划、确定性本地生成、精确提交和失败保留能力；不再次确认、不 push，也不执行 Step 5 的任务进度写入、进度 commit 或 progress push。Auto-Loop runner 仍按自己的状态契约写入本地 `task.json.progress` 与本地完成态（`status=completed` + `completedAt`）。
+- auto-loop 可调用内部 `commit-only`，复用本 skill 的仓库发现、动态多仓计划、确定性本地生成、精确提交和失败保留能力；不再次确认、不 push，也不执行 Step 5 的任务进度写入、进度 commit 或 progress push。Auto-Loop runner 在提交成功后原子写入本地 `task.json.progress`、`status=completed`、`completedAt` 与确定性 `closeout`。
 - 不发起、终止或解决分支合并；只允许普通模式完成已经开始、冲突已清零且索引完全可归属的 merge commit。
-- 不处理上线核对、任务归档、会话日志或自动任务队列状态。
+- 不处理上线核对、物理 GC、会话日志或自动任务队列状态。
 - 不使用 `git add .`、`git add -A`，不要求工作区整体干净，也不提交计划外文件。
 - untracked 上下文只接受 `stage=push`；该状态只负责路由，不替代本 skill 的正式计划、确认和 Git 安全检查，也不生成任务进度提交。
 
@@ -25,7 +25,7 @@ description: "按确认的精确文件范围提交普通变更或完成已就绪
 | --- | --- | --- | --- |
 | 普通 | 展示最小计划并确认一次 | exact commit；已有 merge 就绪时完成双父提交；然后 push | 有活动任务时立即同步 |
 | 用户 `commit-only` | 展示最小计划并确认一次 | exact local commit | 跳过 |
-| auto-loop 内部 `commit-only` | 复用 auto-loop 预授权 | exact local commit chain | 由 Auto-Loop runner 写本地 progress 与本地完成态；本 skill 跳过 Step 5 |
+| auto-loop 内部 `commit-only` | 复用 auto-loop 预授权 | exact local commit chain | 由 Auto-Loop runner 写本地 progress、完成态与 Close；本 skill 跳过 Step 5 |
 
 内部 `commit-only` 不接受超出当前任务证据、runner owned dirty 和 protected-retained 边界的文件，不执行远端推送或其他附加动作。安全条件不满足时返回失败，由调用方决定后续状态。
 
@@ -67,7 +67,7 @@ python3 ./.trellis/scripts/task_progress.py status --json || true
 git status --short --untracked-files=all -- <task-dir>
 ```
 
-若 `task_progress.py status` 返回 `taskStatus=completed`，立即按需读取 `references/completed-task-recovery.md`，由该 reference 完成只读 preflight 并返回“恢复计划 / 显式 finish-work / 阻断”之一。在得到结果前不得进入普通业务规划，也不得重复已经成功的业务 Git 动作。reference 缺失、不可读或证据无法闭合时失败关闭；`task.json.progress` 只作诊断，不能单独选择恢复动作。
+若 `task_progress.py status` 返回 `taskStatus=completed`，立即按需读取 `references/completed-task-recovery.md`，由该 reference 完成只读 preflight 并返回“恢复计划 / Close 待解阻 / 无需动作 / 阻断”之一。在得到结果前不得进入普通业务规划，也不得重复已经成功的业务 Git 动作。reference 缺失、不可读或证据无法闭合时失败关闭；`task.json.progress` 只作诊断，不能单独选择恢复动作。
 
 不得把默认 `git status --short` 可能返回的 `?? <task-dir>/` 折叠目录当成 exact file、展示条目或 pathspec。无活动 task 时仍可提交相关代码，但不生成任务进度。untracked 命中时，结合当前请求、work summary 和实际 diff 判断业务 `planned` 文件归属，计划同时显示 work id；无法明确归属的文件只能保留或作为风险。存在活动 task 时，结合 `brief.md`、`implement.md`、当前 diff 与本轮执行范围生成一行语义进度；同时识别当前任务目录中已存在且可归属的 dirty/untracked 产物，供 Step 5 生成任务记录 exact files。不得从旧进度推断 Git 动作。
 
@@ -88,15 +88,28 @@ git ls-files -u
 git rev-parse --verify MERGE_HEAD 2>/dev/null || true
 git log --oneline -5
 git log @{u}..HEAD --oneline 2>/dev/null || true
+git rev-list --reverse @{u}..HEAD 2>/dev/null || true
 ```
 
 停止条件：
 
 - detached HEAD、分支不可读、未解决冲突、rebase、cherry-pick、revert 或其它非 merge 的未完成 Git 集成状态。
 - `MERGE_HEAD` 存在时仅普通模式可继续，并且必须固定当前 `HEAD` / `MERGE_HEAD`、确认 `git ls-files -u` 为空、全部 staged paths 都属于 planned 且没有 retained staged；否则停止。用户/auto-loop `commit-only` 不适用。
-- 普通推送会携带无法归属本次任务的历史 ahead commits。
+- 普通推送会携带既无法归属本次任务、也未通过下述自动 GC 审计的历史 ahead commits。
 - 无法确定 planned file 是否属于当前请求或活动任务。
 - 内部 `commit-only` 发现 staged 区非空。
+
+### 历史自动 GC 提交
+
+仅普通推送及其任务记录发布恢复使用这一默认许可。对 `@{u}..HEAD` 的每个完整提交哈希逐个判断：已由当前任务证据归属的提交沿用原规则；候选自动 GC 提交调用当前平台 `trellis-push` skill 目录中的只读脚本：
+
+```bash
+python3 <skill-dir>/scripts/verify_gc_commit.py --repo <repository-root> --commit <full-sha>
+```
+
+`<skill-dir>` 是当前实际加载的 `.agents/skills/trellis-push` 或 `.claude/skills/trellis-push`，不能从另一平台借用脚本。只有退出码为 0、JSON `status=verified` 且返回的完整 `commit` 与请求哈希一致，才把该提交标为“已验证自动 GC”。脚本逐项验证单父和完整固定消息、无重命名推断的 Git 树、顶层 closed 任务与 UTC 月份归档文件的同 blob/模式映射；支持同批多任务和已有相同归档的去重。它不读取或修改工作区，不凭提交消息单独放行。脚本缺失、执行失败、JSON 损坏、内容改写或任一证据不符都保持未知 ahead 并停止普通推送。
+
+记录已验证 GC 的完整哈希及仓库，作为计划和执行前复核基线。它是用户对纯自动 GC 的默认许可，不属于业务 `planned` 或任务记录 exact files，不增加专项确认，也不自行触发 GC 或单独 push。正常业务提交仍须展示并确认一次 Push 计划；用户 `commit-only` 和 auto-loop 内部 `commit-only` 不因本规则扩大授权。
 
 业务 Git 文件分为两组；普通模式的当前任务记录 exact files 按下方独立提交规则处理：
 
@@ -116,7 +129,7 @@ git log @{u}..HEAD --oneline 2>/dev/null || true
 
 上述优先级用于发现意图和执行顺序，不允许用文档覆盖当前仓库事实。命令入口、工作目录和输出路径必须由受版本控制内容验证；任务 artifacts、SOP/spec、脚本实际行为或 Git 关系互相冲突时失败关闭。
 
-命令必须是受版本控制的稳定入口，并且本地、确定性、可重复、无外部副作用。工作目录和预期影响路径必须可审计；只有名称相似、mtime、目录邻近或惯例不足以执行。禁止任意 shell 字符串、管道、重定向、命令替换、push、release、deploy、archive、凭证和生产数据操作；证据不足时失败关闭。
+命令必须是受版本控制的稳定入口，并且本地、确定性、可重复、无外部副作用。工作目录和预期影响路径必须可审计；只有名称相似、mtime、目录邻近或惯例不足以执行。禁止任意 shell 字符串、管道、重定向、命令替换、push、release、deploy、物理 GC、凭证和生产数据操作；证据不足时失败关闭。
 
 `retained` 只是内部集合名。用户可见输出统一写“保留未提交的变更（dirty）”，按输出 reference 的阈值展示；内部始终保留 exact paths 和 Git 状态，分组摘要不得用于 pathspec 或替代校验。unknown ahead、branch/upstream 异常、归属不确定等真正需要处理的事项单独进入“风险”区；普通 retained dirty 不默认视为阻塞。
 
@@ -142,7 +155,7 @@ auto-loop 内部 `commit-only` 不渲染交互式计划或结果，也不再次�
 
 ## Step 4：精确提交与推送
 
-每个仓库按计划顺序执行。执行前重新检查 planned files、当前分支、HEAD、upstream、冲突状态、staged、全部 dirty paths 和 retained 摘要；任一关键条件变化都停止当前执行并重新规划。普通模式仅 `retained` 内容变化时可更新说明；auto-loop 内部模式的 retained 内容必须保持不变。
+每个仓库按计划顺序执行。执行前重新检查 planned files、当前分支、HEAD、upstream、冲突状态、staged、全部 dirty paths 和 retained 摘要；普通推送还须逐个重验计划中已验证 GC 的完整哈希与当前 `@{u}..HEAD`。任一关键条件变化都停止当前执行并重新规划。普通模式仅 `retained` 内容变化时可更新说明；auto-loop 内部模式的 retained 内容必须保持不变。
 
 计划包含本地生成命令时，前置仓成功后按计划执行命令，再复用本节现有预检。命令成功、后续仓全部 dirty paths（auto-loop 内部 `commit-only` 扣除已登记且验证未变化的 retained paths）都在预计 exact files 内且 retained 摘要未漂移时直接继续；否则停止并重新生成计划。预计文件最终 clean 时不强行提交。
 
@@ -220,9 +233,9 @@ auto-loop 内部链失败时向调用方返回全部已完成仓库提交和失�
 
 - 当前任务 exact files 与首次确认的路径集合一致，没有新增当前任务路径或无法归属的 dirty 内容。
 - 父仓分支、upstream 和冲突状态安全。
-- 推送不会携带无法归属的历史 ahead commits。
+- 对当前 `@{u}..HEAD` 重做 Step 2 归属检查；已验证的自动 GC 可随任务记录推送，其它无法归属的历史 ahead commits 仍停止。
 
-全部业务 commit/push 成功时，通过 helper 用同一份最终 progress 原子写入 `progress`、`status=completed` 与 `completedAt`：
+全部业务 commit/push 成功时，通过 helper 用同一份最终 progress 原子写入 `progress`、`status=completed`、`completedAt` 与确定性 `closeout`：
 
 ```bash
 python3 ./.trellis/scripts/task_progress.py write \
@@ -232,7 +245,7 @@ python3 ./.trellis/scripts/task_progress.py write \
   --json
 ```
 
-部分成功时调用同一 helper，但不得携带 `--complete`，并写入精确恢复位置。用户 `commit-only`、auto-loop 内部 `commit-only` 和尚未发生任何成功业务 Git 动作的失败都不得由本 skill 请求 complete；auto-loop 的本地完成态由 Auto-Loop runner 自己写入，不经过本步骤。helper 写入失败时任务保持原状态，不得继续任务记录提交或报告完成。
+helper 返回 `closeResult=closed|already-closed` 时任务立即退出所有活跃视图；返回 `closeResult=blocked` 时必须保留并展示 `closeBlockers`，但仍可提交已完成的任务记录。部分成功时调用同一 helper，但不得携带 `--complete`，并写入精确恢复位置。用户 `commit-only`、auto-loop 内部 `commit-only` 和尚未发生任何成功业务 Git 动作的失败都不得由本 skill 请求 complete；auto-loop 的本地完成态与 Close 由 Auto-Loop runner 自己写入，不经过本步骤。helper 写入失败时任务保持原状态，不得继续任务记录提交或报告完成。
 
 helper 成功后，只提交并推送首次确认的当前任务 exact files；该集合包含完成态 `task.json`，以及首次计划时已存在且可归属的当前任务 dirty/untracked 产物：
 
@@ -242,16 +255,16 @@ git commit --only -m "chore(task): update <task-name> progress" -- <current-task
 git push origin <current-branch>
 ```
 
-该动作属于用户已确认的普通 push 计划，不增加第二次确认。提交后必须验证 commit 只包含首次确认的当前任务 exact files，且 `task.json` 已包含同一份最终 progress、`status=completed` 与 `completedAt`；其他任务和无关 dirty/staged 文件保持原状。
+该动作属于用户已确认的普通 push 计划，不增加第二次确认。提交后必须验证 commit 只包含首次确认的当前任务 exact files，且 `task.json` 已包含同一份最终 progress、`status=completed`、`completedAt` 与同次 Close 结果；其他任务和无关 dirty/staged 文件保持原状。
 
 失败时保留真实现场，不 reset、amend、revert 或制造 dirty 回滚：
 
 - helper 失败：任务保持 `in_progress`，不得创建任务记录 commit。
 - helper 成功但任务记录 commit 失败：保留本地 `completed` 与当前任务 exact dirty，后续按 Step 1 的任务记录 commit 恢复路径重新验证和确认；不得重复业务提交或 helper 写入。
 - 任务记录 commit 成功但 push 失败：任务目录应为 clean，并保留可归属的 ahead commit；后续只重试该 commit 的 push，不重复业务提交、helper 写入或任务记录 commit。
-- 任务记录 push 成功：本任务产生的当前任务目录变更必须 clean；不得再写入第二份预归档完成态。
+- 任务记录 push 成功：本任务产生的当前任务目录变更必须 clean；不得再次写入完成态或 Close。
 
-任何恢复都必须验证当前分支、upstream、HEAD、`@{u}..HEAD`、任务记录 commit message 与 exact file set，以及 `task.json` 的最终完成态。无法证明归属时停止，不把未知 ahead 或 dirty 当作可恢复任务记录。
+任何恢复都必须验证当前分支、upstream、HEAD、`@{u}..HEAD`、任务记录 commit message 与 exact file set，以及 `task.json` 的最终完成态。已验证自动 GC 可按 Step 2 默认许可归属；其它未知 ahead 或 dirty 不能当作可恢复任务记录。
 
 ## Step 6：结果
 
@@ -264,7 +277,7 @@ reference 缺失、无法读取或缺少对应章节时停止并报告 `阻塞`�
 ## 禁止事项
 
 - 扩大到计划外文件或要求清理无关工作区。
-- 把普通 push 中可归属当前活动任务的规划产物列为 retained，并以“finish-work 归档时再入库”为由延后首次记录。
+- 把普通 push 中可归属当前活动任务的规划产物列为 retained，并以“之后再整理”为由延后首次记录。
 - 执行首次计划未展示的生成命令，或生成计划外文件后仍沿用旧确认。
 - 用任务进度决定是否推送代码。
 - 在本 skill 内发起、终止、解决冲突或改变分支合并目标；只允许完成已就绪的 merge commit。

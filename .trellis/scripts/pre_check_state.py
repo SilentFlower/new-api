@@ -115,7 +115,7 @@ def _runtime_scope(
     if source_type in {"session-corrupt", "session-io_error"}:
         return {
             "status": "error",
-            "reason": f"session-runtime-{source_type.removeprefix('session-')}",
+            "reason": f"session-runtime-{source_type[len('session-'):]}",
             "context_key": context_key,
             "path": path,
         }

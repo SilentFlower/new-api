@@ -57,7 +57,7 @@ Use a parent task when a request has multiple independently verifiable deliverab
 - The map of child tasks and their responsibility boundaries.
 - Cross-child acceptance criteria and final integration review.
 
-Use child tasks for deliverables that can move through planning, implementation, check, and archive independently. If one child depends on another, write that dependency in the child `prd.md` / `implement.md`; do not rely on tree position to imply ordering.
+Use child tasks for deliverables that can move through planning, implementation, check, and deterministic Close independently. If one child depends on another, write that dependency in the child `prd.md` / `implement.md`; do not rely on tree position to imply ordering.
 
 Create new children with:
 
@@ -72,7 +72,7 @@ python3 ./.trellis/scripts/task.py add-subtask <parent-dir> <child-dir>
 python3 ./.trellis/scripts/task.py remove-subtask <parent-dir> <child-dir>
 ```
 
-`children` on the parent is a historical list. When a child is archived, Trellis keeps that child name in the parent so progress like `[2/3 done]` remains meaningful after completed children move to `archive/`.
+`children` on the parent is a historical list. Closing a child, or later moving it through physical GC, does not remove that identity, so progress such as `[2/3 done]` remains meaningful without keeping the child active.
 
 <!-- BEGIN skill-garden patch trellis-meta-managed-task-readiness v0.6 -->
 The AI should not treat phase numbers or saved progress text as task status. Planning readiness comes from the required planning artifacts plus the refreshed `brief.md` review gate; execution and recovery use authoritative task status, owner evidence, required JSONL context, and the current workflow. Saved progress is advisory recovery evidence only.
@@ -93,17 +93,18 @@ If the platform or shell environment has no stable session identity, `task.py st
 
 `task.json.status` and the planning artifacts are authoritative. `task.json.progress` is narrow recovery evidence owned by `task_progress.py`; it must not override status, infer a workflow phase, restore a previous push mode, or resume Git orchestration.
 
-When no active pointer exists, `trellis-continue` may surface healthy `in_progress` or `completed` progress candidates, together with necessary invalid-candidate or scan diagnostics. The user must explicitly choose a task before the session is rebound; the recovery flow must never bind a session automatically. After explicit rebind, a completed candidate enters the `trellis-push` completed-task preflight, which owns publication recovery and the handoff to explicit `trellis-finish-work`. Rework requires an explicit `completed -> in_progress` reopen.
+When no active pointer exists, `trellis-continue` may surface healthy `in_progress` or completed-but-not-closed progress candidates, together with necessary invalid-candidate or scan diagnostics. The user must explicitly choose a task before the session is rebound; the recovery flow must never bind a session automatically. A completed candidate enters the `trellis-push` recovery preflight only when task-record publication is incomplete; otherwise its Close blockers are reported directly. Rework requires an explicit `completed -> in_progress` reopen.
 
 The normal completion boundary is:
 
 ```text
-in_progress -> business push -> atomic final progress + completed -> task-record commit/push
-completed -> trellis-push completed-task preflight -> recovery or explicit trellis-finish-work -> archive
+in_progress -> business push -> atomic final progress + completed + deterministic Close -> task-record commit/push
+completed + closeout pending/blocked -> recover delivery or resolve blockers -> deterministic Close
+closed -- SessionStart after three days --> physical GC
 completed -> explicit reopen -> in_progress
 ```
 
-Partial pushes, user `commit-only`, and normal helper failures remain `in_progress`. Auto-loop internal commits keep their separate local completion and `pending_archive` contract. `trellis-finish-work` independently enforces archive eligibility for direct invocation, but does not reproduce Push recovery classification or manufacture completion from progress text.
+Partial pushes, user `commit-only`, and normal helper failures remain `in_progress`. Auto-loop closes an item immediately after its verified internal commit-only chain. Closed tasks are excluded from active pointers, task queues, counts, statusline, and recovery candidates; physical GC only changes storage location and never changes semantic state.
 <!-- END skill-garden patch trellis-meta-managed-active-task-lifecycle v0.6 -->
 ## JSONL Context
 
@@ -123,6 +124,7 @@ Rules:
 - Do not treat temporary conclusions in chat as the only context.
 - Seed rows have no `file` field; they only prompt the AI to fill in real entries.
 
+<!-- BEGIN skill-garden patch trellis-meta-managed-task-common-commands v0.6 -->
 ## Common Commands
 
 ```bash
@@ -131,12 +133,14 @@ python3 ./.trellis/scripts/task.py start <task>
 python3 ./.trellis/scripts/task.py current --source
 python3 ./.trellis/scripts/task.py add-context <task> implement <file> <reason>
 python3 ./.trellis/scripts/task.py validate <task>
-python3 ./.trellis/scripts/task.py finish
-python3 ./.trellis/scripts/task.py archive <task>
+python3 ./.trellis/scripts/task.py close <task> --json
+python3 ./.trellis/scripts/task.py list [--closed|--all] [--json]
+python3 ./.trellis/scripts/task.py gc --closed --before 3d [--dry-run] [--json]
+python3 ./.trellis/scripts/task.py restore <task> [--dry-run] [--json]
 ```
 
-When modifying the task system, the AI should prefer script commands to maintain structure. Edit JSON/Markdown directly only when scripts do not cover the need.
-
+Close changes semantic lifecycle state immediately. Physical GC only moves already-closed task directories and is normally invoked by SessionStart; run it manually only for diagnosis or explicit maintenance. Prefer script commands to direct JSON edits.
+<!-- END skill-garden patch trellis-meta-managed-task-common-commands v0.6 -->
 ## Local Customization Points
 
 | Need | Edit location |
@@ -145,6 +149,6 @@ When modifying the task system, the AI should prefer script commands to maintain
 | Change status semantics | `.trellis/workflow.md`, workflow-state hook logic, and task usage conventions. |
 | Add task lifecycle actions | `hooks.after_*` in `.trellis/config.yaml`. |
 | Change context rules | Planning artifact guidance in `.trellis/workflow.md` and related platform agent/hook instructions. |
-| Change archive policy | `.trellis/scripts/common/task_store.py` / `task_utils.py`. |
+| Change Close or physical GC policy | `.trellis/scripts/task_lifecycle.py`, `task.py`, shared task views, and the SessionStart bridge. |
 
 These are local files in the user project. Do not default to editing Trellis CLI source code unless the user wants to contribute upstream.

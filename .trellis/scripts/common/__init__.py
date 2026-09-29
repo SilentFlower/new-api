@@ -17,20 +17,18 @@ import sys
 # =============================================================================
 
 
+# BEGIN skill-garden patch common-stream-ownership v0.6
 def _configure_stream(stream: object) -> object:
-    """Configure a stream for UTF-8 encoding on Windows."""
-    # Try reconfigure() first (Python 3.7+, more reliable)
-    if hasattr(stream, "reconfigure"):
-        stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
-        return stream
-    # Fallback: detach and rewrap with TextIOWrapper
-    elif hasattr(stream, "detach"):
-        return io.TextIOWrapper(
-            stream.detach(),  # type: ignore[union-attr]
-            encoding="utf-8",
-            errors="replace",
-        )
+    """Configure UTF-8 where supported without taking ownership of the stream."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if callable(reconfigure):
+        try:
+            reconfigure(encoding="utf-8", errors="replace")
+        except (OSError, ValueError):
+            pass
+    # In-memory and host-owned streams must remain attached and open.
     return stream
+# END skill-garden patch common-stream-ownership v0.6
 
 
 if sys.platform == "win32":

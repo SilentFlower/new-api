@@ -35,7 +35,7 @@
     ],
     "SessionStart": [
       {
-        "matcher": "startup|clear|compact",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
@@ -51,6 +51,11 @@
             "type": "command",
             "command": "python3 -X utf8 .trellis/scripts/flower_session_start.py --hook .codex/hooks/session-start.py --part stages",
             "timeout": 30
+          },
+          {
+            "type": "command",
+            "command": "python3 -X utf8 .trellis/scripts/flower_telemetry_hook.py --platform codex",
+            "timeout": 5
           }
         ]
       },
@@ -61,16 +66,6 @@
             "type": "command",
             "command": "python3 -X utf8 .trellis/scripts/flower_update_hook.py",
             "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "startup|resume|clear|compact",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 -X utf8 .trellis/scripts/flower_telemetry_hook.py --platform codex",
-            "timeout": 5
           }
         ]
       }

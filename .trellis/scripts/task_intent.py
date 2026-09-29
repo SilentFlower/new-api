@@ -20,7 +20,11 @@ from common.active_task import (
 )
 from common.io import read_json, write_json
 from common.paths import get_repo_root, get_tasks_dir
-from common.task_utils import is_safe_task_path, resolve_task_dir
+from common.task_utils import (
+    is_safe_task_path,
+    resolve_active_task_reference,
+    resolve_top_level_task_reference,
+)
 from git_evidence import (
     GitEvidenceError,
     capture_workspace_evidence,
@@ -60,6 +64,7 @@ def _run_git(repo_root: Path, args: list[str], *, binary: bool = False) -> subpr
         cwd=repo_root,
         capture_output=True,
         text=not binary,
+        encoding=None if binary else "utf-8",
         check=False,
     )
 
@@ -124,6 +129,8 @@ def _create_planning_task(
     """调用 task.py 创建 planning task 并读取元数据。"""
     command = [
         sys.executable,
+        "-X",
+        "utf8",
         str(_task_script()),
         "create",
         args.title,
@@ -144,6 +151,7 @@ def _create_planning_task(
         cwd=repo_root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
         check=False,
     )
     if result.stderr:
@@ -152,7 +160,7 @@ def _create_planning_task(
         raise IntentTaskError("task-create-failed", "task.py create 执行失败")
 
     task_ref = _find_created_task(result.stdout)
-    task_dir = resolve_task_dir(task_ref, repo_root)
+    task_dir = resolve_active_task_reference(task_ref, repo_root)
     data = read_json(task_dir / "task.json")
     if not data:
         _rollback_created_task(
@@ -329,7 +337,11 @@ def _resolve_safe_task(task_ref: str, repo_root: Path) -> tuple[Path, str]:
     """解析并验证活动 tasks 根目录下的直接 task 路径。"""
     if not is_safe_task_path(task_ref, repo_root):
         raise IntentTaskError("unsafe-task-path", "task 路径未通过安全校验")
-    raw_task_dir = resolve_task_dir(task_ref, repo_root)
+    try:
+        raw_task_dir = resolve_active_task_reference(task_ref, repo_root)
+    except ValueError as error:
+        reason = "task-not-found" if "任务不存在" in str(error) else "unsafe-task-path"
+        raise IntentTaskError(reason, str(error)) from error
     if raw_task_dir.is_symlink():
         raise IntentTaskError("unsafe-task-path", "不允许丢弃软链 task 目录")
     tasks_dir = get_tasks_dir(repo_root).resolve()
@@ -360,7 +372,10 @@ def _prepare_parent_update(task_dir: Path, task_data: dict, repo_root: Path) -> 
     parent_name = task_data.get("parent")
     if not parent_name:
         return None
-    parent_dir = resolve_task_dir(str(parent_name), repo_root)
+    try:
+        parent_dir = resolve_top_level_task_reference(str(parent_name), repo_root)
+    except ValueError as error:
+        raise IntentTaskError("parent-link-invalid", str(error)) from error
     if parent_dir.is_symlink() or parent_dir.resolve().parent != get_tasks_dir(repo_root).resolve():
         raise IntentTaskError("parent-link-invalid", "parent task 路径不安全")
     parent_json = parent_dir / "task.json"

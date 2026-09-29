@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import ntpath
 import os
 import shutil
 import subprocess
@@ -57,7 +58,7 @@ def _can_skip(platform: str) -> bool:
             return hint.get("delivered") is True
         retry = meta.get("nextRetryAt")
         return bool(retry and datetime.fromisoformat(retry.replace("Z", "+00:00")).timestamp() > time.time())
-    except (OSError, ValueError, TypeError, AttributeError):
+    except (OSError, ValueError, TypeError, AttributeError, RuntimeError):
         return False
 
 
@@ -86,10 +87,24 @@ def main() -> None:
         command = shutil.which("flower-trellis")
         if not command:
             return
+        argv = [command, "telemetry", "record-activity", platform, "--target", target]
+        run_options = {}
+        if os.name == "nt" and os.path.splitext(command)[1].lower() in {".cmd", ".bat"}:
+            processor = os.environ.get("COMSPEC")
+            if not processor and os.environ.get("SystemRoot"):
+                processor = os.path.join(os.environ["SystemRoot"], "System32", "cmd.exe")
+            if not processor or not ntpath.isabs(processor):
+                return
+            # CMD 的环境占位符只展开一轮；引号和关闭延迟展开共同保留特殊路径字符。
+            environment = os.environ.copy()
+            environment["FLOWER_ACTIVITY_HOOK_CLI"] = command
+            environment["FLOWER_ACTIVITY_HOOK_TARGET"] = target
+            argv = f'"{processor}" /d /v:off /s /c ""%FLOWER_ACTIVITY_HOOK_CLI%" telemetry record-activity {platform} --target "%FLOWER_ACTIVITY_HOOK_TARGET%""'
+            run_options = {"executable": processor, "env": environment}
         # 只转交固定事件类型、平台和本地定位参数；Node 独占身份创建及队列写入。
-        subprocess.run([command, "telemetry", "record-activity", platform, "--target", target],
+        subprocess.run(argv,
                        cwd=target, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL, timeout=3, check=False)
+                       stderr=subprocess.DEVNULL, timeout=3, check=False, **run_options)
     except (OSError, ValueError, TypeError, subprocess.SubprocessError):
         return
 

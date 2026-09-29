@@ -124,7 +124,8 @@ def discover_git_repositories(repo_root: Path) -> list[Path]:
     repositories: dict[str, Path] = {_relative_root(root, root): root}
     submodules = _run_git(
         root,
-        ["submodule", "foreach", "--recursive", "--quiet", "pwd"],
+        # Git 自己返回宿主路径，避免 MSYS pwd 产生原生 Python 无法识别的 /c 或 /tmp 路径。
+        ["submodule", "foreach", "--recursive", "--quiet", "git rev-parse --show-toplevel"],
     )
     if submodules.returncode != 0:
         raise GitEvidenceError(

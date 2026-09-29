@@ -69,7 +69,7 @@ The user is asking whether they keep repeating the same kind of mistake or decis
 
 Reach: `trellis mem search "<topic>" --global --limit 50` and scan the dates / projects in the listing. Optionally `extract` two or three for comparison.
 
-## Finish-work retrospective (on demand)
+## Task retrospective (on demand)
 
 The user explicitly wants to look back at this task — not as a forced step, only when they ask.
 

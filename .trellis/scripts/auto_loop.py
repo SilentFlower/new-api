@@ -21,6 +21,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from decision_log import DecisionLogError, append_decision, load_events
 from git_evidence import GitEvidenceError, discover_git_repositories, parse_porcelain_z
+from task_lifecycle import evaluate_close, finalize_close_effects
 
 SCHEMA_VERSION = 2
 LEGACY_SCHEMA_VERSION = 1
@@ -282,6 +283,15 @@ def _current_pointer(repo_root: Path) -> Path:
     return _auto_dir(repo_root) / "current.json"
 
 
+def _is_relative_to(path: Path, root: Path) -> bool:
+    """兼容 Python 3.8 的路径包含判断；由调用方决定是否解析软链。"""
+    try:
+        path.relative_to(root)
+        return True
+    except ValueError:
+        return False
+
+
 def _route_state_helper(repo_root: Path) -> Path | None:
     """返回本地 trellis-route helper 路径，缺失时返回 None。"""
     candidates = [
@@ -292,7 +302,7 @@ def _route_state_helper(repo_root: Path) -> Path | None:
     # .agents/.claude 就把已安装的路由能力当作缺失。
     candidates.extend(sorted(repo_root.glob(".*/skills/trellis-route/scripts/route_state.py")))
     for path in candidates:
-        if path.is_file() and path.resolve().is_relative_to(repo_root.resolve()):
+        if path.is_file() and _is_relative_to(path.resolve(), repo_root.resolve()):
             return path
     return None
 
@@ -306,13 +316,13 @@ def _effective_route_authorization(repo_root: Path, task_ref: str, route_authori
     effective: dict[str, str] = {}
     for target, valid_modes in (("implement", VALID_IMPLEMENT_ROUTES), ("check", VALID_CHECK_ROUTES)):
         command = [
-            "python3", str(helper), "resolve", "--target", target,
+            sys.executable, "-X", "utf8", str(helper), "resolve", "--target", target,
             "--read-only", "--task", task_ref,
         ]
         mode = authorization.get(target)
         if mode in valid_modes:
             command.extend(["--auto-mode", str(mode)])
-        result = subprocess.run(command, cwd=repo_root, check=False, text=True, capture_output=True)
+        result = subprocess.run(command, cwd=repo_root, check=False, text=True, encoding="utf-8", capture_output=True)
         try:
             data = json.loads(result.stdout)
         except json.JSONDecodeError:
@@ -523,7 +533,7 @@ def _progress_for_completed(state: dict[str, Any], item: dict[str, Any]) -> dict
         "updatedAt": _utc_now(),
         "completedSteps": [f"auto-loop: 本地提交完成 {completed_label}"],
         "partialStep": None,
-        "nextStep": "auto-loop 已本地提交并置为本地完成态；需要用户显式运行 finish-work/archive 完成归档",
+        "nextStep": "auto-loop 已完成本地提交与确定性 Close；如有 blocker，按 close_result 处理",
         "notes": _trim_text(notes),
     }
 
@@ -568,18 +578,16 @@ def _auto_progress_for_item(state: dict[str, Any], item: dict[str, Any]) -> dict
     return None
 
 
-def _apply_local_completion(item: dict[str, Any], task_data: dict[str, Any]) -> bool:
-    """把已本地提交的队列项写入任务本地完成态，返回 task.json 是否发生变化。
-
-    auto-loop 的终点是本地提交，finish-work 仍要求 `status=completed`；正常完成时同时
-    写入 `completedAt` 作为审计元数据，旧任务缺失该字段时由 archive 兼容补写。
-    只允许 `in_progress -> completed` 这一个跃迁，并保留既有 `completedAt`，
-    避免覆盖人工已确认的完成日期或把 planning/已完成任务重复改写。
-    """
+def _apply_local_completion(
+    repo_root: Path,
+    item: dict[str, Any],
+    task_data: dict[str, Any],
+) -> tuple[bool, dict[str, Any] | None]:
+    """把成功 record 的 item 完成态与 Close 结果写入同一个 task.json 对象。"""
     if item.get("status") != "completed":
-        return False
+        return False, None
     if not item.get("commit") and not _repo_commit_summaries(item):
-        return False
+        return False, None
     changed = False
     if task_data.get("status") == "in_progress":
         task_data["status"] = "completed"
@@ -587,7 +595,19 @@ def _apply_local_completion(item: dict[str, Any], task_data: dict[str, Any]) -> 
     if task_data.get("status") == "completed" and not task_data.get("completedAt"):
         task_data["completedAt"] = _utc_date()
         changed = True
-    return changed
+    task_dir = _task_dir(repo_root, str(item.get("task") or ""))
+    close_result = evaluate_close(
+        task_dir,
+        repo_root,
+        task_data,
+        delivery_verified=True,
+    )
+    if close_result.get("closeout") and task_data.get("closeout") != close_result["closeout"]:
+        task_data["closeout"] = close_result["closeout"]
+        changed = True
+    item["close_result"] = close_result.get("status")
+    item["close_blockers"] = close_result.get("blockers", [])
+    return changed, close_result
 
 
 def _write_auto_task_progress(repo_root: Path, state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any] | None:
@@ -610,20 +630,31 @@ def _write_auto_task_progress(repo_root: Path, state: dict[str, Any], item: dict
         and _progress_stable_fields(existing) == _progress_stable_fields(progress)
     )
     # 生命周期写入独立判定：progress 稳定字段未变时也可能仍缺本地完成态。
-    lifecycle_changed = _apply_local_completion(item, task_data)
+    lifecycle_changed, close_result = _apply_local_completion(repo_root, item, task_data)
     if not progress_changed and not lifecycle_changed:
         return None
     if progress_changed:
         task_data["progress"] = progress
     task_data.pop("last_push_snapshot", None)
     _write_json(task_json_path, task_data)
+    if item.get("status") == "completed":
+        # GC 只能信任本次原子写入后登记的精确内容，不能只凭 runtime 声称该路径由 runner 所有。
+        item["task_json_sha256"] = _file_sha256(task_json_path)
+    if close_result is not None:
+        close_result = finalize_close_effects(task_json_path.parent, repo_root, close_result)
+        item["close_result"] = close_result.get("status")
+        item["close_blockers"] = close_result.get("blockers", [])
+        if close_result.get("sessionCleanupWarning"):
+            item["close_session_warning"] = close_result["sessionCleanupWarning"]
+        if close_result.get("hookWarning"):
+            item["close_hook_warning"] = close_result["hookWarning"]
     result = {
         "task": task_ref,
         "status": "written",
         "path": _rel_path(repo_root, task_json_path),
     }
     if lifecycle_changed:
-        result["lifecycle"] = "completed"
+        result["lifecycle"] = item.get("close_result") or "completed"
     return result
 
 
@@ -734,8 +765,9 @@ def _normalize_record_file(raw: str) -> str:
     if "::" in value:
         repository, path = value.split("::", 1)
         repository = repository.strip() or "."
-        return _baseline_key(repository, path.strip().removeprefix("./"))
-    return _baseline_key(".", value.removeprefix("./"))
+        path = path.strip()
+        return _baseline_key(repository, path[2:] if path.startswith("./") else path)
+    return _baseline_key(".", value[2:] if value.startswith("./") else value)
 
 
 def _normalize_repository_root(raw: str) -> str:
@@ -743,7 +775,7 @@ def _normalize_repository_root(raw: str) -> str:
     value = raw.strip()
     if value == ".":
         return "."
-    return value.removeprefix("./").rstrip("/")
+    return (value[2:] if value.startswith("./") else value).rstrip("/")
 
 
 def _planning_digest(task_dir: Path) -> tuple[str, list[str]]:
@@ -1349,10 +1381,11 @@ def _current_session_key(repo_root: Path) -> str | None:
         return override.strip() or None
 
     result = subprocess.run(
-        ["python3", str(repo_root / ".trellis/scripts/task.py"), "current", "--source"],
+        [sys.executable, "-X", "utf8", str(repo_root / ".trellis/scripts/task.py"), "current", "--source"],
         cwd=repo_root,
         check=False,
         text=True,
+        encoding="utf-8",
         capture_output=True,
     )
     for line in result.stdout.splitlines():
@@ -1494,8 +1527,6 @@ def _recent_run_summaries(repo_root: Path, limit: int = 8) -> list[dict[str, Any
         state = result["data"]
         counts = _queue_counts(state)
         current = _current_queue_item(state)
-        # run 终态会清除 pointer，之后 status 只走本列表；归档待办必须在这里也可见。
-        handoff = _pending_archive_handoff(state)
         entry = {
             "run_id": state.get("run_id") or path.stem,
             "path": _rel_path(repo_root, path),
@@ -1509,8 +1540,6 @@ def _recent_run_summaries(repo_root: Path, limit: int = 8) -> list[dict[str, Any
             "current_task": current.get("task") if current else None,
             "next_step": current.get("current_step") if current else "done",
         }
-        if handoff:
-            entry["pending_archive"] = handoff
         runs.append(entry)
     return runs
 
@@ -1548,37 +1577,6 @@ def _clear_pointer_if_current(repo_root: Path, run_id: str | None) -> None:
         pass
 
 
-def _pending_archive_handoff(state: dict[str, Any]) -> dict[str, Any] | None:
-    """返回本次 run 遗留的归档待办。
-
-    runner 只推进到本地提交与本地完成态，归档必须由用户显式执行；
-    父任务不进入实现流水线，但必须排在全部子任务归档之后单独收尾。
-    没有任何待办时返回 None，避免在摘要里留下空字段。
-
-    Args:
-        state: Auto run 状态。
-
-    Returns:
-        含待归档任务与队列外父任务的交接信息，或 None。
-    """
-    awaiting = [
-        str(item.get("task") or "")
-        for item in _queue_items(state)
-        if item.get("status") == "completed"
-    ]
-    parents = [str(ref) for ref in (state.get("parent_tasks_outside_queue") or []) if str(ref)]
-    if not awaiting and not parents:
-        return None
-    handoff: dict[str, Any] = {
-        "note": "auto-loop 已写入本地 completed+completedAt；归档仍需用户显式运行 finish-work",
-        "tasks_awaiting_archive": awaiting,
-    }
-    if parents:
-        handoff["parent_tasks_outside_queue"] = parents
-        handoff["parent_note"] = "父任务未纳入队列；需在全部子任务归档后单独 finish-work"
-    return handoff
-
-
 def _resume_capsule(state: dict[str, Any]) -> dict[str, Any]:
     """生成短小的人类可读恢复摘要。"""
     queue = _queue_items(state)
@@ -1591,7 +1589,6 @@ def _resume_capsule(state: dict[str, Any]) -> dict[str, Any]:
         if _repo_commit_summaries(item)
     ]
     counts = _queue_counts(state)
-    handoff = _pending_archive_handoff(state)
     return {
         "run_id": state.get("run_id"),
         "status": state.get("status"),
@@ -1603,8 +1600,6 @@ def _resume_capsule(state: dict[str, Any]) -> dict[str, Any]:
         "remaining": counts["remaining"],
         "auto_completed_tasks": auto_completed,
         "recorded_commits": recorded_commits,
-        "task_lifecycle_note": handoff["note"] if handoff else None,
-        "pending_archive": handoff,
         "blocked_tasks": blocked,
     }
 
@@ -1679,6 +1674,8 @@ def _completed_task_summaries(
         repo_commits = item.get("commits") if isinstance(item.get("commits"), list) else []
         if repo_commits:
             task["commits"] = repo_commits if include_detail else _repo_commit_summaries(item)
+        task["close_result"] = item.get("close_result")
+        task["close_blockers"] = item.get("close_blockers") or []
         completed.append(task)
     return completed
 
@@ -1761,10 +1758,6 @@ def _compact_summary(state: dict[str, Any]) -> dict[str, Any]:
         })
         if current and current.get("artifact_recovery"):
             summary["artifact_recovery"] = _recovery_summary(state, current)
-    handoff = _pending_archive_handoff(state)
-    if handoff:
-        summary["task_lifecycle_note"] = handoff["note"]
-        summary["pending_archive"] = handoff
     return summary
 
 
@@ -2036,11 +2029,10 @@ def _next_item_legacy(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str,
     state["status"] = _terminal_status(queue, LEGACY_SCHEMA_VERSION)
     return None, {
         "status": "blocked" if state["status"] == "blocked" else "done",
-        "finish_work_required_for_archive": True,
         "instruction": (
             "auto-loop 队列存在 blocked 项；补齐条件后运行 retry-blocked 继续同一个 run。"
             if state["status"] == "blocked"
-            else "auto-loop 队列已结束；如需归档任务，请用户显式运行 trellis-finish-work。"
+            else "auto-loop 队列已结束；已完成 item 已执行确定性 Close。"
         ),
         "summary": _compact_summary(state),
     }
@@ -2305,11 +2297,10 @@ def _next_running_v2(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, 
     state["status"] = _terminal_status(queue)
     return None, {
         "status": "done" if state["status"] == "completed" else "completed_with_blocked",
-        "finish_work_required_for_archive": True,
         "instruction": (
             "auto-loop 已处理完整队列；blocked 项可由用户显式运行 retry-blocked。"
             if state["status"] == "completed_with_blocked"
-            else "auto-loop 队列已结束；归档仍需用户显式运行 trellis-finish-work。"
+            else "auto-loop 队列已结束；已完成 item 已执行确定性 Close。"
         ),
         "summary": _compact_summary(state),
     }
@@ -2349,6 +2340,14 @@ def _next_prepare(repo_root: Path, state: dict[str, Any]) -> tuple[dict[str, Any
             _block_item(item, "task-status-not-runnable", f"任务状态不允许 auto-loop:{status}")
             continue
         if status == "in_progress":
+            if not item.get("planning_sha256") or not item.get("handoff_sha256"):
+                # 只为尚未发行 action 的新接管冻结当前内容，重试不能洗掉旧漂移。
+                if (item.get("planning_sha256") or item.get("handoff_sha256")
+                        or item.get("last_action") or item.get("pending_artifact_decision")
+                        or item.get("action_generation") or item.get("decision_count")):
+                    _block_item(item, "artifact-drift", "在途任务缺少可验证的冻结基线")
+                    continue
+                item["planning_sha256"], item["handoff_sha256"] = _current_artifact_hashes(repo_root, item)
             item["prepare_status"] = "ready"
             if item.get("current_step") not in {"implement", "check", "fix", "recheck", "spec_update", "commit_only"}:
                 item["current_step"] = "implement"
@@ -2610,9 +2609,20 @@ def cmd_retry_blocked(args: argparse.Namespace) -> int:
         if not args.all and not task and reason not in RECOVERABLE_BLOCK_REASONS:
             skipped.append({"task": str(item.get("task")), "reason": reason or "unknown"})
             continue
+        preserve_action = False
+        if isinstance(item.get("pending_artifact_decision"), dict):
+            # 先核验原 action，再恢复终态；清空它会丢失 pending 所绑定的可信身份。
+            if not isinstance(item.get("last_action"), dict) or _protected_drift_present(repo_root, state):
+                skipped.append({"task": str(item.get("task")), "reason": "pending-baseline-unverifiable"})
+                continue
+            if not _pending_event(repo_root, state, item) and not _restore_missing_decision_baseline(repo_root, state, item):
+                skipped.append({"task": str(item.get("task")), "reason": "pending-baseline-unverifiable"})
+                continue
+            preserve_action = True
         item["status"] = "pending"
         item["blocked"] = None
-        item["last_action"] = None
+        if not preserve_action:
+            item["last_action"] = None
         if reason in {"retry-budget-exhausted", "artifact-drift", "commit-repair-budget-exhausted"}:
             attempts = item.get("attempts")
             if not isinstance(attempts, dict):
@@ -2940,7 +2950,7 @@ def _advance_after_ok(item: dict[str, Any], action: str, args: argparse.Namespac
         _append_item_decision(
             item,
             "task_auto_completed",
-            "auto-loop item 已完成本地提交；任务生命周期仍等待 finish-work/archive",
+            "auto-loop item 已完成本地提交；task.json 将在同次 record 中执行确定性 Close",
             {
                 "commit": item.get("commit"),
                 "summary": args.summary,
@@ -3883,9 +3893,9 @@ def _validate_decision_file(repo_root: Path, state: dict[str, Any], key: str) ->
         raise ValueError(f"非法文件路径:{key}")
     root = (repo_root / repository).resolve()
     target = root / path
-    if not target.resolve().is_relative_to(root):
+    if not _is_relative_to(target.resolve(), root):
         raise ValueError(f"文件越过仓库边界:{key}")
-    if any(part.is_symlink() for part in [target, *target.parents] if part != root and part.is_relative_to(root)):
+    if any(part.is_symlink() for part in [target, *target.parents] if part != root and _is_relative_to(part, root)):
         raise ValueError(f"不接受软链文件或父目录:{key}")
     if target.exists() and not target.is_file():
         raise ValueError(f"目标不是普通文件:{key}")
@@ -3952,6 +3962,52 @@ def _pending_event(
     return event
 
 
+def _restore_missing_decision_baseline(
+    repo_root: Path, state: dict[str, Any], item: dict[str, Any],
+) -> bool:
+    """从相互印证的登记前证据补回旧在途任务遗漏的两项摘要。
+
+    Args:
+        repo_root: 当前项目根目录。
+        state: 待恢复运行，终态只由显式 retry-blocked 调用此函数。
+        item: 保留原 action 与 pending 的队列项。
+
+    Returns:
+        证据完整且已补回遗漏摘要时为 True，否则不修改队列项。
+    """
+    keys = ("planning_sha256", "handoff_sha256")
+    if (_schema_version(state) != SCHEMA_VERSION or any(item.get(key) for key in keys)
+            or _task_status(repo_root, str(item.get("task") or "")) != "in_progress"
+            or _protected_drift_present(repo_root, state)):
+        return False
+    pending = item.get("pending_artifact_decision")
+    last = item.get("last_action")
+    if not isinstance(pending, dict) or not isinstance(last, dict):
+        return False
+    if (not isinstance(last.get("artifact_sha256"), dict)
+            or last["artifact_sha256"] != pending.get("artifact_sha256")
+            or not pending.get("action") or pending["action"] != _action_identity(item)):
+        return False
+    hashes = {key: pending.get(key) for key in keys}
+    if any(not isinstance(value, str) or len(value) != 64
+           or any(char not in "0123456789abcdef" for char in value) for value in hashes.values()):
+        return False
+    candidate = {**item, **hashes}
+    if not _pending_event(repo_root, state, candidate):
+        return False
+    try:
+        for key in pending.get("files", []):
+            _validate_decision_file(repo_root, state, key)
+    except (TypeError, ValueError):
+        return False
+    # 只恢复登记时的旧摘要；当前文档仍由原检查器逐项核对，record 独占重绑。
+    item.update(hashes)
+    _append_item_decision(item, "missing_artifact_baseline_restored",
+                          "原 action、pending 与决策日志一致，补回遗漏的冻结摘要",
+                          {"decision_id": pending["decision_id"], **hashes})
+    return True
+
+
 def _recovery_summary(state: dict[str, Any], item: dict[str, Any]) -> dict[str, Any]:
     """默认只展示纠正必需上下文，完整回执留在 runtime。"""
     recovery = item["artifact_recovery"]
@@ -3959,7 +4015,7 @@ def _recovery_summary(state: dict[str, Any], item: dict[str, Any]) -> dict[str, 
     if recovery.get("resolved"):
         summary["instruction"] = "纠正已完成；原登记被拒绝时先重试 decide，否则继续原 action 并真实 record。不要重放纠正来推进阶段。"
         return summary
-    summary["command"] = ["python3", "./.trellis/scripts/auto_loop.py", "reconcile",
+    summary["command"] = [sys.executable, "-X", "utf8", "./.trellis/scripts/auto_loop.py", "reconcile",
                           "--run-id", state["run_id"], "--task", item["task"],
                           "--recovery-id", recovery["recovery_id"], "--attempt-id", "<本次唯一ID>",
                           "--result", "<ok|failed|blocked>", "--summary", "<纠正结论>"]
@@ -4027,7 +4083,7 @@ def _inspect_action_artifacts(
                        "instruction": "继续原 Check artifact-drift 自纠并重新 record；不要调用 next 或 reconcile，不重置原基线与预算。"})
         return result
     if isinstance(pending, dict):
-        if not _pending_event(repo_root, state, item):
+        if not _pending_event(repo_root, state, item) and not _restore_missing_decision_baseline(repo_root, state, item):
             _block_item(item, "artifact-drift", "pending 决策缺少可信原始基线或日志")
             return {"status": "blocked", "reason": "artifact-drift"}
         try:

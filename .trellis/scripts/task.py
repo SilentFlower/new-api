@@ -15,9 +15,10 @@ Usage:
     python3 task.py set-base-branch <dir> <branch>  # Set PR target branch
     python3 task.py set-scope <dir> <scope>     # Set scope for PR title
     python3 task.py set-meta <dir> <key> <value>  # Set a task metadata key
-    python3 task.py archive <task-dir>          # Archive completed task
-    python3 task.py list                        # List active tasks
-    python3 task.py list-archive [month]        # List archived tasks
+    python3 task.py close <task> [--resolve-blocker <code>] [--json]  # Close completed task
+    python3 task.py gc --closed [--before 3d]   # Move expired closed tasks
+    python3 task.py restore <task> [--json]     # Restore physical task location
+    python3 task.py list [--closed|--all]       # List task lifecycle views
     python3 task.py add-subtask <parent-dir> <child-dir>     # Link child to parent
     python3 task.py remove-subtask <parent-dir> <child-dir>  # Unlink child from parent
 """
@@ -45,13 +46,20 @@ from common.active_task import (
     set_active_task,
 )
 from common.io import read_json, write_json
-from common.task_utils import resolve_task_dir, run_task_hooks
-from common.tasks import iter_active_tasks, children_progress
+from common.task_utils import resolve_active_task_reference, run_task_hooks
+from common.tasks import (
+    children_progress,
+    get_all_statuses,
+    iter_active_tasks,
+    iter_closed_tasks,
+    iter_task_records,
+    task_closeout_view,
+)
+from task_lifecycle import cmd_close, cmd_gc, cmd_restore
 
 # Import command handlers from split modules (also re-exports for plan.py compatibility)
 from common.task_store import (
     cmd_create,
-    cmd_archive,
     cmd_set_branch,
     cmd_set_base_branch,
     cmd_set_scope,
@@ -179,8 +187,12 @@ def cmd_start(args: argparse.Namespace) -> int:
         print(colored("Error: task directory or name required", Colors.RED))
         return 1
 
-    # Resolve task directory (supports task name, relative path, or absolute path)
-    full_path = resolve_task_dir(task_input, repo_root)
+    # Start 只能绑定共享 active 视图中的任务，closed 任务必须先显式 reopen。
+    try:
+        full_path = resolve_active_task_reference(task_input, repo_root)
+    except ValueError as error:
+        print(colored(f"Error: {error}", Colors.RED))
+        return 1
 
     if not full_path.is_dir():
         print(colored(f"Error: Task not found: {task_input}", Colors.RED))
@@ -338,7 +350,14 @@ def _display_status(t, all_statuses: dict) -> str:
 
 
 def cmd_list(args: argparse.Namespace) -> int:
-    """List active tasks."""
+    """List active, closed, or all tasks through shared lifecycle views.
+
+    Args:
+        args: List filters and output mode.
+
+    Returns:
+        Process exit code.
+    """
     repo_root = get_repo_root()
     tasks_dir = get_tasks_dir(repo_root)
     current_task = get_current_task(repo_root)
@@ -346,101 +365,96 @@ def cmd_list(args: argparse.Namespace) -> int:
     filter_mine = args.mine
     filter_status = args.status
     as_json = getattr(args, "json", False)
+    if getattr(args, "closed", False):
+        view_name = "closed"
+        selected = iter_closed_tasks(tasks_dir)
+    elif getattr(args, "all", False):
+        view_name = "all"
+        selected = iter_task_records(tasks_dir)
+    else:
+        view_name = "active"
+        selected = iter_active_tasks(tasks_dir)
+    tasks = {task.dir_name: task for task in selected}
+    all_statuses = get_all_statuses(tasks_dir)
 
-    # Single pass: collect all tasks via shared iterator
-    all_tasks = {t.dir_name: t for t in iter_active_tasks(tasks_dir)}
-    all_statuses = {name: t.status for name, t in all_tasks.items()}
+    if filter_mine and not developer:
+        if as_json:
+            print(json.dumps({"error": "No developer set"}), file=sys.stderr)
+        else:
+            print(colored("Error: No developer set. Run init_developer.py first", Colors.RED), file=sys.stderr)
+        return 1
+
+    def _included(task) -> bool:
+        """Apply assignee and work-status filters to one task."""
+        if filter_mine and (task.assignee or "-") != developer:
+            return False
+        return not filter_status or task.status == filter_status
 
     if as_json:
-        if filter_mine and not developer:
-            print(json.dumps({"error": "No developer set"}), file=sys.stderr)
-            return 1
-
         items = []
-        for dir_name in sorted(all_tasks.keys()):
-            t = all_tasks[dir_name]
-            if filter_mine and (t.assignee or "-") != developer:
+        for dir_name in sorted(tasks):
+            task = tasks[dir_name]
+            if not _included(task):
                 continue
-            if filter_status and t.status != filter_status:
-                continue
+            closeout = task_closeout_view(task, tasks_dir)
             items.append({
-                "dir": f"{DIR_WORKFLOW}/{DIR_TASKS}/{dir_name}",
-                "id": t.raw.get("id") or dir_name,
-                "title": t.title,
-                "status": t.status,
-                "display_status": _display_status(t, all_statuses),
-                "priority": t.priority,
-                "assignee": t.assignee or None,
-                "parent": t.parent,
-                "children": list(t.children),
-                "package": t.package,
+                "dir": task.directory.relative_to(repo_root).as_posix(),
+                "id": task.raw.get("id") or dir_name,
+                "title": task.title,
+                "status": task.status,
+                "display_status": _display_status(task, all_statuses),
+                "closeout": closeout,
+                "priority": task.priority,
+                "assignee": task.assignee or None,
+                "parent": task.parent,
+                "children": list(task.children),
+                "package": task.package,
             })
-        print(json.dumps({"tasks": items}, ensure_ascii=False))
+        print(json.dumps({"view": view_name, "tasks": items}, ensure_ascii=False))
         return 0
 
+    labels = {"active": "Active tasks", "closed": "Closed tasks", "all": "All tasks"}
+    prefix = "My" if filter_mine else labels[view_name]
     if filter_mine:
-        if not developer:
-            print(colored("Error: No developer set. Run init_developer.py first", Colors.RED), file=sys.stderr)
-            return 1
-        print(colored(f"My tasks (assignee: {developer}):", Colors.BLUE))
+        print(colored(f"{prefix} {view_name} tasks (assignee: {developer}):", Colors.BLUE))
     else:
-        print(colored("All active tasks:", Colors.BLUE))
+        print(colored(f"{prefix}:", Colors.BLUE))
     print()
-
-    # Display tasks hierarchically
     count = 0
 
     def _print_task(dir_name: str, indent: int = 0) -> None:
+        """Print one visible task and its visible children."""
         nonlocal count
-        t = all_tasks[dir_name]
-
-        # Apply --mine filter
-        if filter_mine and (t.assignee or "-") != developer:
+        task = tasks[dir_name]
+        if not _included(task):
             return
-
-        # Apply --status filter
-        if filter_status and t.status != filter_status:
-            return
-
-        relative_path = f"{DIR_WORKFLOW}/{DIR_TASKS}/{dir_name}"
-        marker = ""
-        if relative_path == current_task:
-            marker = f" {colored('<- current', Colors.GREEN)}"
-
-        # Children progress
-        progress = children_progress(t.children, all_statuses)
-        status_label = _display_status(t, all_statuses)
-
-        # Package tag
-        pkg_tag = f" @{t.package}" if t.package else ""
-
-        prefix = "  " * indent + "  - "
-
+        try:
+            relative_path = task.directory.relative_to(repo_root).as_posix()
+        except ValueError:
+            relative_path = str(task.directory)
+        marker = f" {colored('<- current', Colors.GREEN)}" if relative_path == current_task else ""
+        progress = children_progress(task.children, all_statuses)
+        status_label = _display_status(task, all_statuses)
+        package_tag = f" @{task.package}" if task.package else ""
+        line_prefix = "  " * indent + "  - "
         if filter_mine:
-            print(f"{prefix}{dir_name}/ ({status_label}){pkg_tag}{progress}{marker}")
+            print(f"{line_prefix}{dir_name}/ ({status_label}){package_tag}{progress}{marker}")
         else:
-            print(f"{prefix}{dir_name}/ ({status_label}){pkg_tag}{progress} [{colored(t.assignee or '-', Colors.CYAN)}]{marker}")
+            print(
+                f"{line_prefix}{dir_name}/ ({status_label}){package_tag}{progress} "
+                f"[{colored(task.assignee or '-', Colors.CYAN)}]{marker}"
+            )
         count += 1
-
-        # Print children indented
-        for child_name in t.children:
-            if child_name in all_tasks:
+        for child_name in task.children:
+            if child_name in tasks:
                 _print_task(child_name, indent + 1)
 
-    # Display only top-level tasks: those without a parent, plus orphans
-    # whose recorded parent is not (or no longer) in the active set — a
-    # dangling parent ref must still render flat instead of disappearing.
-    for dir_name in sorted(all_tasks.keys()):
-        parent = all_tasks[dir_name].parent
-        if not parent or parent not in all_tasks:
+    for dir_name in sorted(tasks):
+        parent = tasks[dir_name].parent
+        if not parent or parent not in tasks:
             _print_task(dir_name)
-
     if count == 0:
-        if filter_mine:
-            print("  (no tasks assigned to you)")
-        else:
-            print("  (no active tasks)")
-
+        print(f"  (no {view_name} tasks)")
     print()
     print(f"Total: {count} task(s)")
     return 0
@@ -448,40 +462,6 @@ def cmd_list(args: argparse.Namespace) -> int:
 
 # =============================================================================
 # Command: list-archive
-# =============================================================================
-
-def cmd_list_archive(args: argparse.Namespace) -> int:
-    """List archived tasks."""
-    repo_root = get_repo_root()
-    tasks_dir = get_tasks_dir(repo_root)
-    archive_dir = tasks_dir / "archive"
-    month = args.month
-
-    print(colored("Archived tasks:", Colors.BLUE))
-    print()
-
-    if month:
-        month_dir = archive_dir / month
-        if month_dir.is_dir():
-            print(f"[{month}]")
-            for d in sorted(month_dir.iterdir()):
-                if d.is_dir():
-                    print(f"  - {d.name}/")
-        else:
-            print(f"  No archives for {month}")
-    else:
-        if archive_dir.is_dir():
-            for month_dir in sorted(archive_dir.iterdir()):
-                if month_dir.is_dir():
-                    month_name = month_dir.name
-                    count = sum(1 for d in month_dir.iterdir() if d.is_dir())
-                    print(f"[{month_name}] - {count} task(s)")
-
-    return 0
-
-
-# =============================================================================
-# Help
 # =============================================================================
 
 def show_usage() -> None:
@@ -503,19 +483,22 @@ Usage:
   python3 task.py set-base-branch <dir> <branch>     Set PR target branch
   python3 task.py set-scope <dir> <scope>            Set scope for PR title
   python3 task.py set-meta <dir> <key> <value>       Set/overwrite a task metadata key
-  python3 task.py archive <task-dir>                 Archive completed task
+  python3 task.py close <task> [--resolve-blocker <code>] [--json]  Close a completed task
+  python3 task.py gc --closed [--before 3d]          Move expired closed tasks
+  python3 task.py restore <task> [--json]            Restore physical task location
   python3 task.py add-subtask <parent> <child>       Link child task to parent
   python3 task.py remove-subtask <parent> <child>    Unlink child from parent
-  python3 task.py list [--mine] [--status <status>] [--json]  List tasks
-  python3 task.py list-archive [YYYY-MM]             List archived tasks
+  python3 task.py list [--closed|--all] [--mine] [--status <status>] [--json]
 
 Monorepo options:
   --package <pkg>      Package name (validated against config.yaml packages)
 
 List options:
   --mine, -m           Show only tasks assigned to current developer
-  --status, -s <s>     Filter by status (planning, in_progress, review, completed)
-  --json               Output machine-readable JSON (also available on `current`)
+  --status, -s <s>     Filter by work status
+  --closed             Show the unified closed view
+  --all                Show active and closed task views together
+  --json               Output machine-readable JSON
 
 Examples:
   python3 task.py create "Add login feature" --slug add-login
@@ -527,7 +510,7 @@ Examples:
   python3 task.py start .trellis/tasks/01-21-add-login
   python3 task.py current --source
   python3 task.py finish
-  python3 task.py archive add-login
+  python3 task.py close add-login
   python3 task.py add-subtask parent-task child-task  # Link existing tasks
   python3 task.py remove-subtask parent-task child-task
   python3 task.py list                               # List all active tasks
@@ -652,15 +635,37 @@ def main() -> int:
     p_setmeta.add_argument("key", help="Metadata key")
     p_setmeta.add_argument("value", help="Metadata value")
 
-    # archive
-    p_archive = subparsers.add_parser("archive", help="Archive task")
-    p_archive.add_argument("name", help="Task directory or name")
-    p_archive.add_argument("--no-commit", action="store_true", help="Skip auto git commit after archive")
+    # close
+    p_close = subparsers.add_parser("close", help="Close a completed task")
+    p_close.add_argument("task", help="Task directory or name")
+    p_close.add_argument(
+        "--resolve-blocker",
+        action="append",
+        default=[],
+        help="Explicitly resolve one persisted semantic blocker code (repeatable)",
+    )
+    p_close.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+
+    # gc
+    p_gc = subparsers.add_parser("gc", help="Move expired closed tasks")
+    p_gc.add_argument("--closed", action="store_true", help="Required closed-task selector")
+    p_gc.add_argument("--before", default="3d", help="Minimum close age, for example 3d")
+    p_gc.add_argument("--dry-run", action="store_true", help="Calculate without moving or committing")
+    p_gc.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+
+    # restore
+    p_restore = subparsers.add_parser("restore", help="Restore a physically moved task")
+    p_restore.add_argument("task", help="Archived task directory or name")
+    p_restore.add_argument("--dry-run", action="store_true", help="Calculate without moving or committing")
+    p_restore.add_argument("--json", action="store_true", help="Output machine-readable JSON")
 
     # list
     p_list = subparsers.add_parser("list", help="List tasks")
     p_list.add_argument("--mine", "-m", action="store_true", help="My tasks only")
-    p_list.add_argument("--status", "-s", help="Filter by status")
+    p_list.add_argument("--status", "-s", help="Filter by work status")
+    p_list_view = p_list.add_mutually_exclusive_group()
+    p_list_view.add_argument("--closed", action="store_true", help="Show closed tasks")
+    p_list_view.add_argument("--all", action="store_true", help="Show active and closed tasks")
     p_list.add_argument("--json", action="store_true", help="Output machine-readable JSON")
 
     # add-subtask
@@ -673,9 +678,8 @@ def main() -> int:
     p_rmsub.add_argument("parent_dir", help="Parent task directory")
     p_rmsub.add_argument("child_dir", help="Child task directory")
 
-    # list-archive
-    p_listarch = subparsers.add_parser("list-archive", help="List archived tasks")
-    p_listarch.add_argument("month", nargs="?", help="Month (YYYY-MM)")
+# BEGIN skill-garden patch task-lifecycle-prune-legacy-closed-view-parser v0.6
+# END skill-garden patch task-lifecycle-prune-legacy-closed-view-parser v0.6
 
     args = parser.parse_args()
 
@@ -695,11 +699,12 @@ def main() -> int:
         "set-base-branch": cmd_set_base_branch,
         "set-scope": cmd_set_scope,
         "set-meta": cmd_set_meta,
-        "archive": cmd_archive,
+        "close": cmd_close,
+        "gc": cmd_gc,
+        "restore": cmd_restore,
         "add-subtask": cmd_add_subtask,
         "remove-subtask": cmd_remove_subtask,
         "list": cmd_list,
-        "list-archive": cmd_list_archive,
     }
 
     if args.command in commands:

@@ -168,13 +168,16 @@ def cmd_start() -> None:
     cmd_sync()
 
 
-def cmd_archive() -> None:
+# BEGIN skill-garden patch task-lifecycle-linear-close-function v0.6
+def cmd_close() -> None:
+    """Mark the linked Linear issue done after deterministic task Close."""
     task, _ = _read_task()
     issue = _get_linear_issue(task)
     if not issue:
         return
     _linearis("issues", "update", issue, "-s", STATUS_DONE)
     print(f"Updated {issue} -> {STATUS_DONE}")
+# END skill-garden patch task-lifecycle-linear-close-function v0.6
 
 
 def cmd_sync() -> None:
@@ -231,7 +234,7 @@ if __name__ == "__main__":
     actions = {
         "create": cmd_create,
         "start": cmd_start,
-        "archive": cmd_archive,
+        "close": cmd_close,
         "sync": cmd_sync,
     }
     fn = actions.get(action)

@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from task_lifecycle import evaluate_close, finalize_close_effects
+
 
 DIR_WORKFLOW = ".trellis"
 DIR_TASKS = "tasks"
@@ -86,11 +88,19 @@ def _rel_path(repo_root: Path, path: Path) -> str:
 
 
 def _resolve_task_dir(repo_root: Path, task_ref: str) -> Path:
-    """解析任务目录引用。"""
+    """解析 active-only 任务目录引用。"""
     _load_common_modules(repo_root)
-    from common.task_utils import resolve_task_reference  # type: ignore[import-not-found]
+    from common.task_utils import resolve_active_task_reference  # type: ignore[import-not-found]
 
-    return resolve_task_reference(task_ref, repo_root)
+    return resolve_active_task_reference(task_ref, repo_root)
+
+
+def _resolve_top_level_task_dir(repo_root: Path, task_ref: str) -> Path:
+    """解析包含逻辑 closed 的顶层任务目录引用。"""
+    _load_common_modules(repo_root)
+    from common.task_utils import resolve_top_level_task_reference  # type: ignore[import-not-found]
+
+    return resolve_top_level_task_reference(task_ref, repo_root)
 
 
 def _current_task_dir(repo_root: Path) -> Path | None:
@@ -190,16 +200,23 @@ def _load_task_progress(repo_root: Path, task_dir: Path) -> dict[str, Any]:
 
 
 def _iter_active_task_dirs(repo_root: Path) -> list[Path]:
-    """列出活动任务树的一层任务目录。"""
+    """通过共享 active 视图列出任务目录。"""
+    _load_common_modules(repo_root)
+    from common.paths import get_tasks_dir  # type: ignore[import-not-found]
+    from common.tasks import iter_active_tasks  # type: ignore[import-not-found]
+
     tasks_dir = repo_root / DIR_WORKFLOW / DIR_TASKS
-    try:
-        return [
-            path
-            for path in sorted(tasks_dir.iterdir())
-            if path.is_dir() and path.name != "archive"
-        ]
-    except OSError:
-        return []
+    return [task.directory for task in iter_active_tasks(get_tasks_dir(repo_root) if tasks_dir.is_dir() else tasks_dir)]
+
+
+def _iter_invalid_task_dirs(repo_root: Path) -> list[Path]:
+    """通过共享诊断入口列出无法解析的顶层任务目录。"""
+    _load_common_modules(repo_root)
+    from common.paths import get_tasks_dir  # type: ignore[import-not-found]
+    from common.tasks import iter_invalid_top_level_tasks  # type: ignore[import-not-found]
+
+    tasks_dir = repo_root / DIR_WORKFLOW / DIR_TASKS
+    return list(iter_invalid_top_level_tasks(get_tasks_dir(repo_root) if tasks_dir.is_dir() else tasks_dir))
 
 
 def _progress_candidates(
@@ -238,6 +255,13 @@ def _progress_candidates(
             "taskStatus": data.get("status"),
             "source": source,
             **_progress_summary(validated),
+        })
+    for task_dir in _iter_invalid_task_dirs(repo_root):
+        task_json = _task_json_path(task_dir)
+        scan_warnings.append({
+            "task": _rel_path(repo_root, task_dir),
+            "path": _rel_path(repo_root, task_json),
+            "reason": "invalid-task-json",
         })
     return candidates, invalid_candidates, scan_warnings
 
@@ -347,7 +371,8 @@ def _print_status_text(data: dict[str, Any]) -> int:
 def cmd_status(args: argparse.Namespace, repo_root: Path) -> int:
     """执行 status 子命令。"""
     if args.task:
-        result = _load_task_progress(repo_root, _resolve_task_dir(repo_root, args.task))
+        # 显式任务引用同时承担发布失败恢复入口；逻辑 closed 不能遮蔽仍需读取的交付记录。
+        result = _load_task_progress(repo_root, _resolve_top_level_task_dir(repo_root, args.task))
     else:
         task_dir = _current_task_dir(repo_root)
         if task_dir is None:
@@ -420,9 +445,18 @@ def cmd_write(args: argparse.Namespace, repo_root: Path) -> int:
     migrated = isinstance(data.get("last_push_snapshot"), dict)
     data["progress"] = progress
     data.pop("last_push_snapshot", None)
+    close_result: dict[str, Any] | None = None
     if getattr(args, "complete", False):
         data["status"] = "completed"
         data["completedAt"] = _utc_date()
+        close_result = evaluate_close(
+            task_dir,
+            repo_root,
+            data,
+            delivery_verified=True,
+        )
+        if close_result.get("closeout"):
+            data["closeout"] = close_result["closeout"]
     try:
         _write_json(task_json, data)
     except OSError as exc:
@@ -437,12 +471,17 @@ def cmd_write(args: argparse.Namespace, repo_root: Path) -> int:
         print(f"错误：write-failed：{exc}", file=sys.stderr)
         return 1
 
+    if close_result is not None:
+        close_result = finalize_close_effects(task_dir, repo_root, close_result)
+
     result = {
         "status": "written",
         "task": _rel_path(repo_root, task_dir),
         "path": _rel_path(repo_root, task_json),
         "migratedLegacySnapshot": migrated,
         "taskStatus": data.get("status"),
+        "closeResult": close_result.get("status") if close_result else None,
+        "closeBlockers": close_result.get("blockers", []) if close_result else [],
         "summary": _progress_summary(progress),
     }
     if args.json:
@@ -454,7 +493,7 @@ def cmd_write(args: argparse.Namespace, repo_root: Path) -> int:
 
 def cmd_reopen(args: argparse.Namespace, repo_root: Path) -> int:
     """把已完成任务显式恢复为进行中并保留进度证据。"""
-    task_dir = _resolve_task_dir(repo_root, args.task)
+    task_dir = _resolve_top_level_task_dir(repo_root, args.task)
     task_json = _task_json_path(task_dir)
     data = _read_json(task_json)
     if data is None:
@@ -476,6 +515,11 @@ def cmd_reopen(args: argparse.Namespace, repo_root: Path) -> int:
 
     data["status"] = "in_progress"
     data["completedAt"] = None
+    data["closeout"] = {
+        "status": "pending",
+        "closedAt": None,
+        "blockers": [],
+    }
     try:
         _write_json(task_json, data)
     except OSError as exc:

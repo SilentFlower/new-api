@@ -156,7 +156,7 @@ Before final review, verify all of the following:
 Lightweight tasks may omit `design.md` and `implement.md`; they may not skip evidence inspection, requirement convergence, final review, or fresh implementation approval.
 
 <!-- BEGIN skill-garden patch brainstorm-planning-summary-shape v0.6 -->
-The final Brief must cover Goal, Scope, Non-Goals, Key Decisions, Key Context, Acceptance, one-hop Next Step, and relevant Risks / Deferred items.
+The final Brief must cover a one-sentence Goal, a Scope limited to included changes, Non-Goals, Context & Decisions, Acceptance, and one-hop Next Step; include Technical Overview only when the planning artifacts define a technical mechanism, and Risks only when relevant.
 <!-- END skill-garden patch brainstorm-planning-summary-shape v0.6 -->
 
 ## Artifact Rules

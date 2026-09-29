@@ -125,10 +125,11 @@ def _normalize_mode(target: str, mode: Any) -> str | None:
 def _current_task(repo_root: Path) -> tuple[str | None, str | None, str | None]:
     """通过 task.py current --source 获取当前任务和 session key。"""
     result = subprocess.run(
-        ["python3", str(repo_root / ".trellis/scripts/task.py"), "current", "--source"],
+        [sys.executable, "-X", "utf8", str(repo_root / ".trellis/scripts/task.py"), "current", "--source"],
         cwd=repo_root,
         check=False,
         text=True,
+        encoding="utf-8",
         capture_output=True,
     )
     current = None

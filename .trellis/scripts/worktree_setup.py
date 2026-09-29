@@ -80,6 +80,7 @@ def _git_run(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            encoding="utf-8",
             timeout=timeout,
         )
     except (OSError, subprocess.SubprocessError) as error:
@@ -441,10 +442,12 @@ def _same_symlink_target(link: Path, expected: Path) -> bool:
     """判断 symlink 是否仍指向 manifest 声明的绝对来源。"""
     try:
         raw_target = Path(os.readlink(link))
+        actual = raw_target if raw_target.is_absolute() else link.parent / raw_target
+        # Windows 3.12 会保留 readlink 的扩展路径前缀；同一目录的路径文本不一定相等。
+        # 按文件身份比较，并让缺失、无权限或损坏的目标继续失败关闭。
+        return actual.samefile(expected)
     except OSError:
         return False
-    actual = raw_target if raw_target.is_absolute() else link.parent / raw_target
-    return actual.resolve(strict=False) == expected.resolve(strict=False)
 
 
 def _registry_registration_conflicts(
@@ -516,6 +519,7 @@ def _flower_call(operation: str, **values: Any) -> dict[str, Any]:
             input=json.dumps({"operation": operation, **values}, ensure_ascii=False),
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=60,
             check=False,
         )
@@ -1037,12 +1041,13 @@ def _task_directories(target_root: Path) -> set[str]:
 def _run_target_python(target_root: Path, script: Path, *args: str) -> None:
     """使用当前 Python 解释器运行目标分支自己的 Trellis 脚本。"""
     result = subprocess.run(
-        [sys.executable, str(script), *args],
+        [sys.executable, "-X", "utf8", str(script), *args],
         cwd=target_root,
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        encoding="utf-8",
         timeout=30,
     )
     if result.returncode != 0:

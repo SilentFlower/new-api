@@ -15,7 +15,7 @@
         ]
       },
       {
-        "matcher": "startup|clear|compact",
+        "matcher": "startup|resume|clear|compact",
         "hooks": [
           {
             "type": "command",
@@ -31,12 +31,7 @@
             "type": "command",
             "command": "python3 .trellis/scripts/flower_session_start.py --hook .claude/hooks/session-start.py --part stages",
             "timeout": 30
-          }
-        ]
-      },
-      {
-        "matcher": "startup|resume|clear|compact",
-        "hooks": [
+          },
           {
             "type": "command",
             "command": "python3 .trellis/scripts/flower_telemetry_hook.py --platform claude",
