@@ -205,6 +205,8 @@ type ClaudeToolChoice struct {
 	DisableParallelToolUse bool   `json:"disable_parallel_tool_use,omitempty"`
 }
 
+// ClaudeRequest 表示 Claude Messages API 的请求体。
+// Claude Code 的分类器和会话字段保留原始 JSON，以免中转时丢失未知内容。
 type ClaudeRequest struct {
 	Model        string          `json:"model"`
 	Prompt       string          `json:"prompt,omitempty"`
@@ -222,6 +224,10 @@ type ClaudeRequest struct {
 	TopK              *int            `json:"top_k,omitempty"`
 	Stream            *bool           `json:"stream,omitempty"`
 	Tools             any             `json:"tools,omitempty"`
+	Safeguards        json.RawMessage `json:"safeguards,omitempty"`
+	Diagnostics       json.RawMessage `json:"diagnostics,omitempty"`
+	Fallbacks         json.RawMessage `json:"fallbacks,omitempty"`
+	Thread            json.RawMessage `json:"thread,omitempty"`
 	ContextManagement json.RawMessage `json:"context_management,omitempty"`
 	OutputConfig      json.RawMessage `json:"output_config,omitempty"`
 	OutputFormat      json.RawMessage `json:"output_format,omitempty"`
