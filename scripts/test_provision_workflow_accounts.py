@@ -1,10 +1,12 @@
 """工作流开通命令的本地安全与恢复测试。"""
 
+import io
 import json
 import os
 import sys
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 from unittest.mock import patch
 
@@ -51,6 +53,36 @@ class FakeNewApi:
 
 class ProvisionWorkflowAccountsTest(unittest.TestCase):
     """验证凭证持久化顺序及重复执行行为。"""
+
+    def test_admin_request_retries_429_with_retry_after(self):
+        """管理接口限流时遵守 Retry-After，并重发同一个请求。"""
+        limited = urllib.error.HTTPError("http://localhost/api/status", 429, "limited",
+                                         {"Retry-After": "41"}, None)
+        response = io.BytesIO(b'{"success":true,"data":{"quota_per_unit":1}}')
+        api = provision.NewApi("http://localhost", "test-pat")
+
+        with patch.object(provision.urllib.request, "urlopen", side_effect=[limited, response]) as urlopen, \
+                patch.object(provision.time, "sleep") as sleep:
+            self.assertEqual(api.request("GET", "/api/status"), {"quota_per_unit": 1})
+
+        self.assertEqual(urlopen.call_count, 2)
+        sleep.assert_called_once_with(41)
+
+    def test_admin_request_stops_after_bounded_429_retries(self):
+        """持续限流时停止请求，不让开户脚本无限等待。"""
+        api = provision.NewApi("http://localhost", "test-pat")
+
+        def limited(*_args, **_kwargs):
+            raise urllib.error.HTTPError("http://localhost/api/status", 429, "limited",
+                                         {"Retry-After": "1"}, None)
+
+        with patch.object(provision.urllib.request, "urlopen", side_effect=limited) as urlopen, \
+                patch.object(provision.time, "sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "new-api 请求失败: GET /api/status"):
+                api.request("GET", "/api/status")
+
+        self.assertEqual(urlopen.call_count, 5)
+        self.assertEqual(sleep.call_count, 4)
 
     def test_provision_persists_key_and_resumes_without_duplicate(self):
         """同一清单重跑时保留原账号、原令牌和私有凭证。"""

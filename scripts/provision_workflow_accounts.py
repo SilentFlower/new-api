@@ -7,7 +7,9 @@ import os
 import re
 import sys
 import tempfile
+import time
 import unicodedata
+import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
@@ -103,14 +105,25 @@ class NewApi:
             method=method,
             headers={"Authorization": f"Bearer {self.token}", "Content-Type": "application/json"},
         )
-        try:
-            with urllib.request.urlopen(request, timeout=20) as response:
-                result = json.load(response)
-        except Exception as error:
-            raise RuntimeError(f"new-api 请求失败: {method} {path}") from error
-        if result.get("success") is not True:
-            raise RuntimeError(f"new-api 拒绝请求: {method} {path}: {result.get('message', '')}")
-        return result.get("data")
+        # 限流中间件在写操作前拒绝请求，按服务端等待时间重发不会重复开户。
+        for attempt in range(5):
+            try:
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    result = json.load(response)
+            except urllib.error.HTTPError as error:
+                if error.code != 429 or attempt == 4:
+                    raise RuntimeError(f"new-api 请求失败: {method} {path}") from error
+                try:
+                    retry_after = int(error.headers.get("Retry-After", "") if error.headers else "")
+                except (TypeError, ValueError):
+                    retry_after = 2 ** attempt
+                time.sleep(min(max(retry_after, 1), 60))
+                continue
+            except Exception as error:
+                raise RuntimeError(f"new-api 请求失败: {method} {path}") from error
+            if result.get("success") is not True:
+                raise RuntimeError(f"new-api 拒绝请求: {method} {path}: {result.get('message', '')}")
+            return result.get("data")
 
     def account(self, entry):
         """按精确用户名和工作流 ID 读取非敏感归属状态。"""
