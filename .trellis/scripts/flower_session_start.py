@@ -20,6 +20,7 @@ MAX_PART_CHARS = 8000
 WORKFLOW_BLOCK = re.compile(r"<trellis-workflow>\n(.*?)\n</trellis-workflow>\n*", re.DOTALL)
 ASTRA_MODEL = "gpt-6-astra"
 SOL_MODEL = "gpt-6-sol"
+SOL_6_1_MODEL = "gpt-6.1-sol"
 MODEL_HINT_MAX_BYTES = 2048
 WORKFLOW_STATE_REFRESH_ARG = "--trellis-session-start-refresh"
 MODEL_WORKFLOW_HINT_BODY = """Applies only while the active model is {model}; it does not apply after switching models. Perform checks internally, without a routine checklist report. Keep ordinary answers brief.
@@ -37,6 +38,9 @@ ASTRA_WORKFLOW_HINT = (f'<trellis-astra-workflow-hint model="{ASTRA_MODEL}" vers
 SOL_WORKFLOW_HINT = (f'<trellis-sol-workflow-hint model="{SOL_MODEL}" version="1">\n'
                      f'{MODEL_WORKFLOW_HINT_BODY.format(model=SOL_MODEL)}\n'
                      '</trellis-sol-workflow-hint>')
+SOL_6_1_WORKFLOW_HINT = (f'<trellis-sol-6-1-workflow-hint model="{SOL_6_1_MODEL}" version="1">\n'
+                         f'{MODEL_WORKFLOW_HINT_BODY.format(model=SOL_6_1_MODEL)}\n'
+                         '</trellis-sol-6-1-workflow-hint>')
 
 
 def _model_workflow_hint(root: Path, config_key: str, hint: str, label: str) -> str:
@@ -86,6 +90,15 @@ def _sol_workflow_hint(root: Path) -> str:
     @return: Sol 提示块；关闭时为空串。
     """
     return _model_workflow_hint(root, "sol_workflow_hint", SOL_WORKFLOW_HINT, "Sol")
+
+
+def _sol_6_1_workflow_hint(root: Path) -> str:
+    """读取 Sol 6.1 独立开关并返回提示。
+
+    @param root: 当前部署项目根目录。
+    @return: Sol 6.1 提示块；关闭时为空串。
+    """
+    return _model_workflow_hint(root, "sol_6_1_workflow_hint", SOL_6_1_WORKFLOW_HINT, "Sol 6.1")
 
 
 def split_workflow(summary: str) -> dict[str, str]:
@@ -319,6 +332,8 @@ def render_part(root: Path, hook: str, part: str, hook_input: dict) -> dict | No
                 hint_builder, label = _astra_workflow_hint, "Astra"
             elif model == SOL_MODEL:
                 hint_builder, label = _sol_workflow_hint, "Sol"
+            elif model == SOL_6_1_MODEL:
+                hint_builder, label = _sol_6_1_workflow_hint, "Sol 6.1"
             if hint_builder is not None:
                 try:
                     hint = hint_builder(root)
