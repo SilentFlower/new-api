@@ -50,6 +50,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 	adaptor.Init(info)
 	var requestBody io.Reader
 	if (model_setting.GetGlobalSettings().PassThroughRequestEnabled || info.ChannelSetting.PassThroughBodyEnabled) && !info.UsesResponsesCompactEndpoint() {
+		syncAdvancedChannelReasoningEffortFromRequest(info, responsesReq)
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
@@ -79,6 +80,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 				return newAPIErrorFromParamOverride(err)
 			}
 		}
+		syncAdvancedChannelReasoningEffortFromBody(info, jsonData)
 		if info.IsResponsesCompact() {
 			logger.LogDebug(c, "Responses Compact upstream request prepared, bytes=%d", len(jsonData))
 		} else {

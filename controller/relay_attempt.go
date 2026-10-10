@@ -115,6 +115,11 @@ func cloneRelayRequest(request dto.Request) (dto.Request, error) {
 
 func resetMainRelayAttemptFields(relayInfo *relaycommon.RelayInfo, originModelName string) {
 	relayInfo.OriginModelName = originModelName
+	// 最终参数与协议属于当前渠道尝试，不能继承上一渠道的日志状态。
+	relayInfo.ReasoningEffort = ""
+	relayInfo.FinalRequestRelayFormat = ""
+	relayInfo.RequestConversionChain = nil
+	relayInfo.InitRequestConversionChain()
 	relayInfo.FinalPreConsumedQuota = 0
 	relayInfo.SubscriptionPostDelta = 0
 	relayInfo.ToolCallBilling = nil

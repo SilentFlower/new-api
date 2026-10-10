@@ -33,7 +33,7 @@
 | [GitHub 用户 Key 公开泄露扫描契约](./token-leak-scan.md) | 用户 Key 的公开代码搜索、精确确认、任务互斥、通知幂等、敏感信息边界和处置流程 | 已完成 |
 | [错误处理](./error-handling.md) | 错误类型、传播流程、API 响应格式 | 已完成 |
 | [代码质量标准](./quality-guidelines.md) | 禁止模式、必需模式、测试、构建流程 | 已完成 |
-| [日志规范](./logging-guidelines.md) | 日志层级、格式、敏感数据处理 | 已完成 |
+| [日志规范](./logging-guidelines.md) | 日志层级、格式、敏感数据处理及 Anthropic/高级渠道最终思考强度记录 | 已完成 |
 | [远程令牌运维 SOP](./remote-token-operations-sop.md) | 远程批量令牌创建、IP 记录修正、Cloudflare D1 同步流程 | 已完成 |
 | [工作流独立账号与令牌契约](./workflow-account-tokens.md) | 显式迁移目标、有效归属核验、单工作流轮换与开通门禁 | 已完成 |
 

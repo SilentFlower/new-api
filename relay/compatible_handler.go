@@ -106,6 +106,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 	var requestBody io.Reader
 
 	if passThroughGlobal || info.ChannelSetting.PassThroughBodyEnabled {
+		syncAdvancedChannelReasoningEffortFromRequest(info, textReq)
 		storage, err := common.GetBodyStorage(c)
 		if err != nil {
 			return types.NewErrorWithStatusCode(err, types.ErrorCodeReadRequestBodyFailed, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
@@ -184,6 +185,7 @@ func TextHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types
 			}
 		}
 		syncAnthropicReasoningEffortFromRequestBody(info, jsonData)
+		syncAdvancedChannelReasoningEffortFromBody(info, jsonData)
 
 		logger.LogDebug(c, "text request body: %s", jsonData)
 

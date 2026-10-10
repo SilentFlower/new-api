@@ -823,6 +823,83 @@ syncAnthropicReasoningEffortFromRequestBody(info, jsonData)
 syncAnthropicReasoningEffort(info, request.OutputConfig)
 ```
 
+## 场景：高级渠道思考强度消费日志
+
+### 1. Scope / Trigger
+
+- Trigger：修改高级自定义渠道的请求转换、参数覆盖、请求透传、`RelayInfo.ReasoningEffort`、最终协议状态或消费日志详情。
+- 适用于 `constant.ChannelTypeAdvancedCustom` 的 OpenAI Chat、Responses、Claude 和 Gemini 文本请求，不受 GPT 模型名前缀限制。同步与流式复用同一请求准备阶段。
+- 记录的是明确的出站参数，不能据此证明上游实际遵从该强度；不记录正文、对话、凭据或隐藏思考。
+
+### 2. Signatures
+
+`relay/advanced_channel_reasoning_effort.go` 的独立日志入口，`dto` 来自 `relaykit/dto`：
+
+```go
+func syncAdvancedChannelReasoningEffortFromBody(info *relaycommon.RelayInfo, body []byte)
+func syncAdvancedChannelReasoningEffortFromRequest(info *relaycommon.RelayInfo, request dto.Request)
+```
+
+复用 `RelayInfo.GetFinalRequestRelayFormat()`、`service.GenerateTextOtherInfo` 和既有 `other.reasoning_effort?: string`；不新增 API、数据库列或环境配置。
+
+### 3. Contracts
+
+| 最终请求协议 | 明确强度字段 |
+| --- | --- |
+| OpenAI Chat | `reasoning_effort`；缺失、null 或空字符串时兼容 `reasoning.effort` |
+| OpenAI Responses | `reasoning.effort` |
+| Claude Messages | `output_config.effort` |
+| Gemini GenerateContent | `generationConfig.thinkingConfig.thinkingLevel`，兼容 `thinking_config` / `thinking_level` |
+
+- 仅新 helper 修改高级渠道的强度；普通 OpenAI、DeepSeek、OpenRouter 和 Anthropic 渠道保持原行为，旧 Anthropic helper 的类型隔离合同继续有效。
+- 非透传路径从转换、模型映射、禁用字段及参数覆盖完成后的最终 JSON 取值；以 `GetFinalRequestRelayFormat()` 为准，不按入站协议猜字段。Chat 经 Responses 的桥接在覆盖及最终转换完成后同步。
+- 请求体透传从原入站 DTO 提取：Chat 的 `ReasoningEffort` / `Reasoning`、Responses 的 `Reasoning.Effort`、Claude 的 `OutputConfig`、Gemini 的 `GenerationConfig.ThinkingConfig.ThinkingLevel`。不得读取适配器改写后的副本、重新消费 body reader 或额外复制完整正文。
+- Gemini 的蛇形配置对象优先于驼峰配置，null 别名不覆盖驼峰配置；同一配置内非空蛇形 `thinking_level` 优先，匹配现有 DTO 别名语义。
+- 只接受 JSON 字符串并保留原值和大小写；缺失、空字符串、非字符串或未知最终协议先清空高级渠道旧值。Chat 顶层为非字符串且非 null 时不回退嵌套字段。
+- 每次主渠道尝试由 `resetMainRelayAttemptFields` 清空 `ReasoningEffort`、`FinalRequestRelayFormat`，重建仅含入站协议的 `RequestConversionChain`，防止旧转换链影响下一次取值；沿用已有计费快照清理合同。
+- `GenerateTextOtherInfo` 仅把非空值写入 `other.reasoning_effort`，Claude 日志生成器复用它；既有详情页按字段非空展示，不加 GPT 判断。历史日志不回填。
+- 不根据 `enable_thinking`、`thinking.budget_tokens`、reasoning Token 或模型默认值推导强度；日志处理不修改请求正文、模型路由或计费。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 日志行为 |
+| --- | --- |
+| 高级渠道明确 effort 为 `low` / `HIGH` | 原样记录，包括大小写 |
+| 参数覆盖 low → high | 记录最终 `high` |
+| 参数删除、字段缺失、空字符串、非字符串或未知协议 | 清空旧值，消费元数据不含该字段 |
+| 透传配置同时存在参数覆盖 | 读取原入站 DTO 的值；透传路径未执行的覆盖不能写成已生效 |
+| 前一尝试为 Claude，下一尝试为 Chat | 重置最终协议和转换链，再从当前 Chat 请求取值 |
+| 只有思考开关或数值预算 | 不推导、不写强度 |
+| 非高级渠道、空 RelayInfo 或空 ChannelMeta | 新 helper 不修改原上下文，不 panic |
+
+以上日志缺失情形不新增请求错误；入站 DTO 校验与上游错误继续按原链路处理。
+
+### 5. Scenarios and Examples
+
+- 正常：高级渠道的最终正文包含 `{"model":"deepseek-flash","reasoning_effort":"low"}` 这些字段，消费元数据包含 `{"reasoning_effort":"low"}`，详情复用既有强度行；Qwen 等非 GPT 模型同样适用。
+- 边界：只有 `{"enable_thinking":false}`，消费元数据不含强度，详情不显示空行；这不能用来判断思考开关是否成功送达。
+- 错误用法：在参数覆盖前保存 low，或入站 Chat 转 Claude 后仍读取顶层 `reasoning_effort`，会记录旧值或丢失最终值。正确处理是在最终 JSON 就绪后按最终协议同步：
+
+```go
+// 参数覆盖、禁用字段和协议转换已经完成，再同步日志。
+syncAdvancedChannelReasoningEffortFromBody(info, jsonData)
+```
+
+- 错误用法：为了透传日志重新序列化已映射的 DTO，导致日志与原正文不一致。正确处理是使用原入站 DTO，正文继续从既有 BodyStorage 转发：
+
+```go
+// 透传不执行参数覆盖，日志只读取原入站参数。
+syncAdvancedChannelReasoningEffortFromRequest(info, textReq)
+```
+
+### 6. Tests Required
+
+- `TestAdvancedChannelReasoningEffortFields`：四种协议、Chat 字段优先级、Gemini 别名、最终协议优先、缺失/空值/非字符串、预算与开关不推导、普通渠道隔离，并断言输入正文不变。
+- `TestAdvancedChannelReasoningEffortHandlers`：真实高级渠道适配器和 handler 加本机 HTTP 模拟上游，覆盖 DeepSeek/Qwen、同步/流式请求准备、双向协议转换、Chat 经 Responses 桥接、覆盖 high、删除和原始正文透传；断言捕获正文与日志值一致、冻结计费模型不变。
+- `TestResetMainRelayAttemptReasoningEffort`：实际尝试初始化必须清空旧值和旧最终协议，转换链恢复为入站协议，再转换后能正确获得新最终协议。
+- 保留 `TestSyncAnthropicReasoningEffort` 回归。验证命令：`go test ./relay/... ./service ./controller -count=1`、`go vet ./relay/... ./service ./controller`、`go test -race ./relay ./controller -run 'TestAdvancedChannelReasoningEffort|TestResetMainRelayAttemptReasoningEffort|TestSyncAnthropicReasoningEffort' -count=1`、`git diff --check`。
+- 本机模拟在账务写入前终止，只验证请求准备、转发和消费元数据生成；不能声称真实流式结算、数据库消费记录或浏览器展示已实测。获准上线后补查新的高级渠道明确 effort 消费记录和实际详情页。
+
 ## 场景：AI 入站消息持久化审计
 
 ### 1. Scope / Trigger
