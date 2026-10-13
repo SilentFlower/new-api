@@ -17,6 +17,7 @@ type ChannelSettings struct {
 	Proxy                              string                      `json:"proxy"`
 	PassThroughBodyEnabled             bool                        `json:"pass_through_body_enabled,omitempty"`
 	ResponsesCompactPassthroughEnabled bool                        `json:"responses_compact_passthrough_enabled,omitempty"`
+	ResponsesReasoningIncludedEnabled  bool                        `json:"responses_reasoning_included_enabled,omitempty"`
 	UseUpstreamModelForBilling         bool                        `json:"use_upstream_model_for_billing,omitempty"`
 	SystemPrompt                       string                      `json:"system_prompt,omitempty"`
 	SystemPromptOverride               bool                        `json:"system_prompt_override,omitempty"`

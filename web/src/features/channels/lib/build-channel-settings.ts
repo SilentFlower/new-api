@@ -57,6 +57,7 @@ export type AnySearchFreshness = (typeof anySearchFreshnessValues)[number]
 
 export const buildChannelSettingFormSchema = {
   responses_compact_passthrough_enabled: z.boolean().optional(),
+  responses_reasoning_included_enabled: z.boolean().optional(),
   use_upstream_model_for_billing: z.boolean().optional(),
   vision_assist_enabled: z.boolean().optional(),
   vision_assist_channel_id: z.number().min(0).optional(),
@@ -98,6 +99,7 @@ export const buildChannelOtherSettingFormSchema = {
 
 export const BUILD_CHANNEL_SETTING_DEFAULTS = {
   responses_compact_passthrough_enabled: false,
+  responses_reasoning_included_enabled: false,
   use_upstream_model_for_billing: false,
   vision_assist_enabled: false,
   vision_assist_channel_id: 0,
@@ -132,6 +134,7 @@ export const BUILD_CHANNEL_OTHER_SETTING_DEFAULTS = {
 
 export const BUILD_CHANNEL_SETTING_FORM_FIELDS = [
   'responses_compact_passthrough_enabled',
+  'responses_reasoning_included_enabled',
   'use_upstream_model_for_billing',
   'vision_assist_enabled',
   'vision_assist_channel_id',
@@ -279,6 +282,8 @@ export function parseBuildChannelSettingDefaults(
   return {
     responses_compact_passthrough_enabled:
       parsed.responses_compact_passthrough_enabled === true,
+    responses_reasoning_included_enabled:
+      parsed.responses_reasoning_included_enabled === true,
     use_upstream_model_for_billing:
       parsed.use_upstream_model_for_billing === true,
     vision_assist_enabled: visionAssist.enabled === true,
@@ -378,6 +383,8 @@ export function buildChannelSettingFields(
   return {
     responses_compact_passthrough_enabled:
       formData.responses_compact_passthrough_enabled === true,
+    responses_reasoning_included_enabled:
+      formData.responses_reasoning_included_enabled === true,
     use_upstream_model_for_billing:
       formData.use_upstream_model_for_billing === true,
     vision_assist: {
@@ -548,6 +555,7 @@ export function hasBuildChannelSettingValues(
 ): boolean {
   return Boolean(
     values.responses_compact_passthrough_enabled ||
+    values.responses_reasoning_included_enabled ||
     values.use_upstream_model_for_billing ||
     values.vision_assist_enabled ||
     values.web_search_enabled ||

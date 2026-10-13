@@ -50,6 +50,7 @@ import {
   VISION_ASSIST_COMBINED_MAX_IMAGES_MAX,
 } from '../../../lib/build-channel-settings'
 import { ResponsesCompactPassthroughField } from './responses-compact-passthrough-field'
+import { ResponsesReasoningIncludedField } from './responses-reasoning-included-field'
 import { VisionAssistModelFields } from './vision-assist-model-fields'
 
 const UPSTREAM_DETECTED_MODEL_PREVIEW_LIMIT = 8
@@ -140,6 +141,7 @@ export function BuildChannelExtraSettingsFields() {
   return (
     <>
       <ResponsesCompactPassthroughField />
+      <ResponsesReasoningIncludedField />
 
       <FormField
         control={form.control}

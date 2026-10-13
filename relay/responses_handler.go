@@ -24,6 +24,7 @@ import (
 // @return 请求转换、上游调用、响应处理或计费错误。
 func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *types.NewAPIError) {
 	info.InitChannelMeta(c)
+	helper.PrepareResponsesReasoningHeader(c, info)
 	if newAPIError := validateResponsesCompactEndpoint(info); newAPIError != nil {
 		return newAPIError
 	}
@@ -114,6 +115,7 @@ func ResponsesHelper(c *gin.Context, info *relaycommon.RelayInfo) (newAPIError *
 		}
 	}
 
+	helper.SupplementResponsesReasoningHeader(c, info, httpResp)
 	usage, newAPIError := adaptor.DoResponse(c, httpResp, info)
 	if newAPIError != nil {
 		// reset status code 重置状态码

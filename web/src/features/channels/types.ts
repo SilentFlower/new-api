@@ -88,6 +88,7 @@ export interface ChannelSettings {
   proxy?: string
   pass_through_body_enabled?: boolean
   responses_compact_passthrough_enabled?: boolean
+  responses_reasoning_included_enabled?: boolean
   use_upstream_model_for_billing?: boolean
   system_prompt?: string
   system_prompt_override?: boolean

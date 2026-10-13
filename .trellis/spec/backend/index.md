@@ -25,6 +25,7 @@
 | [Relay 计费模型快照契约](./relay-billing-model.md) | 模型映射后的计费模型选择、冻结、重试清理、任务历史兼容和日志一致性 | 已完成 |
 | [Relay 非流式 JSON 响应保活契约](./relay-nonstream-keepalive.md) | JSON 空白心跳、响应提交、重试、错误体、响应头和并发 writer 生命周期 | 已完成 |
 | [Relay 流式 SSE 响应保活契约](./relay-stream-keepalive.md) | 流式响应头等待、正文扫描、SSE comment 保活、idle timeout 和请求体读取边界 | 已完成 |
+| [Responses 历史推理计数响应头契约](./relay-responses-reasoning-header.md) | 渠道级标识补充、上游值优先、HTTP/SSE 生效范围及保活与客户端限制 | 已完成 |
 | [渠道单用户并发限制契约](./channel-user-concurrency.md) | 渠道配置、Redis/内存租约、HTTP/WebSocket/任务生命周期、429/503 错误与取消传播 | 已完成 |
 | [渠道单用户每日额度契约](./channel-user-daily-quota.md) | 渠道每日软上限、自然日 Redis/内存状态、正向记账、管理 API、个人目标值调整、可视化、Redis 持久化与恢复 | 已完成 |
 | [渠道周期预算与降级契约](./channel-period-budget-fallback.md) | 预算 v2 配置、按行用量/提额、聚合用量摘要、迁移撤销与回滚、统计起点、五页签预算表与行上抽屉、时段状态推算、一次 HTTP 降级与两仓合同 | 已完成 |

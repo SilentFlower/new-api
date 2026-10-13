@@ -294,6 +294,7 @@ const SENSITIVE_FORM_FIELDS = [
   'http2_connection_shards',
   'pass_through_body_enabled',
   'responses_compact_passthrough_enabled',
+  'responses_reasoning_included_enabled',
   'system_prompt',
   'system_prompt_override',
   'allow_service_tier',
@@ -734,6 +735,9 @@ export function ChannelMutateDrawer({
   const currentResponsesCompactPassthroughEnabled = form.watch(
     'responses_compact_passthrough_enabled'
   )
+  const currentResponsesReasoningIncludedEnabled = form.watch(
+    'responses_reasoning_included_enabled'
+  )
   const currentDisableTaskPollingSleep = form.watch(
     'disable_task_polling_sleep'
   )
@@ -1008,6 +1012,7 @@ export function ChannelMutateDrawer({
     currentThinkingToContent ||
     currentPassThroughBodyEnabled ||
     currentResponsesCompactPassthroughEnabled ||
+    currentResponsesReasoningIncludedEnabled ||
     currentDisableTaskPollingSleep ||
     currentProxy?.trim() ||
     currentSystemPrompt?.trim() ||
