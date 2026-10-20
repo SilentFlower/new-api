@@ -50,6 +50,7 @@ func GetChannelBudgetUsage(c *gin.Context) {
 		view.Items[i].Username, view.Items[i].DisplayName = summaries[view.Items[i].UserID].Username, summaries[view.Items[i].UserID].DisplayName
 	}
 	view.Page, view.PageSize = pageInfo.GetPage(), pageInfo.GetPageSize()
+	view.ChannelID = channelLimitRequestedID(c, channel)
 	common.ApiSuccess(c, view)
 }
 
@@ -232,5 +233,5 @@ func GetChannelUserBudgetOverrides(c *gin.Context) {
 		row := rows[item.BudgetId]
 		items = append(items, channelUserBudgetOverrideItem{User: summaries[item.UserId], BudgetID: item.BudgetId, BudgetName: row.Name, BaseLimit: row.Limit, Limit: item.QuotaLimit, ExpiresAt: item.ExpiresAt})
 	}
-	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"channel_id": channel.Id, "page": pageInfo.GetPage(), "page_size": pageInfo.GetPageSize(), "total": total, "items": items}})
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "", "data": gin.H{"channel_id": channelLimitRequestedID(c, channel), "page": pageInfo.GetPage(), "page_size": pageInfo.GetPageSize(), "total": total, "items": items}})
 }

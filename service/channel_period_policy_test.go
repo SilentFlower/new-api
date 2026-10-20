@@ -33,7 +33,7 @@ func setupChannelPeriodTest(t testing.TB, now *time.Time, useRedis bool) *model.
 	sqlDB, err := db.DB()
 	require.NoError(t, err)
 	sqlDB.SetMaxOpenConns(1)
-	require.NoError(t, db.AutoMigrate(&model.ChannelPeriodPolicy{}, &model.ChannelQuotaTracking{}, &model.ChannelUserPeriodOverride{}, &model.ChannelUserLimitOverride{}, &model.ChannelUserBudgetOverride{}, &model.Channel{}, &model.User{}))
+	require.NoError(t, db.AutoMigrate(&model.ChannelLimitParent{}, &model.ChannelPeriodPolicy{}, &model.ChannelQuotaTracking{}, &model.ChannelUserPeriodOverride{}, &model.ChannelUserLimitOverride{}, &model.ChannelUserBudgetOverride{}, &model.Channel{}, &model.User{}))
 	model.DB = db
 	common.RedisEnabled, common.RDB = useRedis, nil
 	if useRedis {

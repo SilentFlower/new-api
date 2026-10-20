@@ -12,6 +12,7 @@ import (
 )
 
 func TestSetupContextForSelectedChannelSetsUserConcurrencyLimit(t *testing.T) {
+	setupDistributorTestDatabase(t)
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	limit := 4

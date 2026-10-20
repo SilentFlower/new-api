@@ -135,7 +135,7 @@ func GetChannelUserLimitOverrides(c *gin.Context) {
 		})
 	}
 	common.ApiSuccess(c, gin.H{
-		"channel_id": channel.Id,
+		"channel_id": channelLimitRequestedID(c, channel),
 		"page":       pageInfo.GetPage(),
 		"page_size":  pageInfo.GetPageSize(),
 		"total":      total,
@@ -245,7 +245,7 @@ func buildChannelUserLimitStatus(c *gin.Context, channel *model.Channel, userID 
 	}
 	return &channelUserLimitStatusResponse{
 		PeriodLimits: periodStatus,
-		ChannelID:    channel.Id,
+		ChannelID:    channelLimitRequestedID(c, channel),
 		User:         users[0],
 		Concurrency: channelUserLimitMetric{
 			BaseLimit:      limits.BaseConcurrency,

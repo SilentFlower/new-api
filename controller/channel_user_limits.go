@@ -3,6 +3,7 @@ package controller
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 
 	"github.com/QuantumNous/new-api/common"
@@ -95,7 +96,7 @@ func GetChannelUserConcurrency(c *gin.Context) {
 		})
 	}
 	common.ApiSuccess(c, channelUserLimitListResponse{
-		ChannelID:   channel.Id,
+		ChannelID:   channelLimitRequestedID(c, channel),
 		Limit:       limit,
 		StorageMode: storageMode,
 		Page:        pageInfo.GetPage(),
@@ -125,7 +126,21 @@ func getChannelForUserLimit(c *gin.Context) (*model.Channel, bool) {
 		}
 		return nil, false
 	}
-	return channel, true
+	c.Set("channel_limit_requested_id", channel.Id)
+	if c.Request.Method == http.MethodPut || c.Request.Method == http.MethodDelete {
+		if err := service.CheckChannelLimitParentWritable(c, channel.Id); err != nil {
+			respondChannelLimitParentError(c, err)
+			return nil, false
+		}
+		// 写入始终绑定路径渠道，避免解绑后的旧关系缓存或并发关联把写入转向父渠道。
+		return channel, true
+	}
+	owner, err := service.ResolveChannelLimitParent(c, channel)
+	if err != nil {
+		respondChannelLimitParentError(c, err)
+		return nil, false
+	}
+	return owner, true
 }
 
 func getChannelUserLimitPage(c *gin.Context) (*common.PageInfo, bool) {

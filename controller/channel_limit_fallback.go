@@ -61,7 +61,7 @@ func preflightChannelPeriodLimits(c *gin.Context, info *relaycommon.RelayInfo) *
 
 func prepareChannelLimitFallback(c *gin.Context, info *relaycommon.RelayInfo, source *model.Channel, original dto.Request) (*model.Channel, *types.NewAPIError) {
 	isResponsesCompact := relay.ShouldHandleResponsesCompactPassthrough(info)
-	policy, err := service.GetChannelPeriodPolicy(c, source.Id)
+	policy, err := service.GetChannelPeriodPolicy(c, service.ChannelLimitOwnerID(c))
 	if err != nil {
 		return source, service.ChannelPeriodAPIError(err)
 	}

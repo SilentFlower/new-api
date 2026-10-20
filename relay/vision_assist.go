@@ -668,6 +668,7 @@ func switchContextToVisionAssistChannel(c *gin.Context, channelModel *model.Chan
 		constant.ContextKeyChannelOrganization,
 		constant.ContextKeyChannelAutoBan,
 		constant.ContextKeyChannelUserConcurrencyLimit,
+		constant.ContextKeyChannelLimitOwnerID,
 		constant.ContextKeyChannelModelMapping,
 		constant.ContextKeyChannelStatusCodeMapping,
 		constant.ContextKeyChannelIsMultiKey,

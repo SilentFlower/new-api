@@ -76,7 +76,10 @@ type ToolCallResult struct {
 	QuotaClamp *common.QuotaClamp `json:"-"`
 }
 
+// ChannelMeta 保存本次尝试的物理渠道配置和独立的限制归属快照。
+// @return 真实上游配置及不可随结算时关系变化而漂移的限制归属。
 type ChannelMeta struct {
+	ChannelLimitOwnerID  int
 	ChannelType          int
 	ChannelId            int
 	ChannelIsMultiKey    bool
@@ -229,6 +232,7 @@ func (info *RelayInfo) InitChannelMeta(c *gin.Context) {
 	headerOverride := common.GetContextKeyStringMap(c, constant.ContextKeyChannelHeaderOverride)
 	apiType, _ := common.ChannelType2APIType(channelType)
 	channelMeta := &ChannelMeta{
+		ChannelLimitOwnerID:  common.GetContextKeyInt(c, constant.ContextKeyChannelLimitOwnerID),
 		ChannelType:          channelType,
 		ChannelId:            common.GetContextKeyInt(c, constant.ContextKeyChannelId),
 		ChannelIsMultiKey:    common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey),

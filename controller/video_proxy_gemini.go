@@ -40,7 +40,9 @@ func getGeminiVideoURL(c *gin.Context, channel *model.Channel, task *model.Task,
 	}
 
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
-	service.ApplyChannelUserEffectiveLimits(c, channel)
+	if apiErr := service.ApplyChannelLimitContext(c, channel); apiErr != nil {
+		return "", apiErr
+	}
 	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrencyGuard(c)
 	if concurrencyErr != nil {
 		return "", concurrencyErr
@@ -191,7 +193,9 @@ func getVertexVideoURL(c *gin.Context, channel *model.Channel, task *model.Task)
 	}
 
 	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
-	service.ApplyChannelUserEffectiveLimits(c, channel)
+	if apiErr := service.ApplyChannelLimitContext(c, channel); apiErr != nil {
+		return "", apiErr
+	}
 	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrencyGuard(c)
 	if concurrencyErr != nil {
 		return "", concurrencyErr

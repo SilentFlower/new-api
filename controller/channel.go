@@ -986,6 +986,12 @@ func UpdateChannel(c *gin.Context) {
 		return
 	}
 	originProxy := originChannel.GetSetting().Proxy
+	if _, provided := requestData["user_concurrency_limit"]; provided && channel.GetUserConcurrencyLimit() != originChannel.GetUserConcurrencyLimit() {
+		if err := service.CheckChannelLimitParentWritable(c, channel.Id); err != nil {
+			respondChannelLimitParentError(c, err)
+			return
+		}
+	}
 	proxyChanged := false
 	if _, settingProvided := requestData["setting"]; settingProvided {
 		newProxy, _ := service.NormalizeProxyURL(channel.GetSetting().Proxy)

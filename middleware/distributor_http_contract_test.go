@@ -31,7 +31,7 @@ func setupDistributorTestDatabase(t *testing.T) *gorm.DB {
 	dsn := fmt.Sprintf("file:distributor-contract-%d?mode=memory&cache=shared", time.Now().UnixNano())
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
-	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.Ability{}))
+	require.NoError(t, db.AutoMigrate(&model.Channel{}, &model.ChannelLimitParent{}, &model.Ability{}))
 
 	model.DB = db
 	common.MemoryCacheEnabled = true

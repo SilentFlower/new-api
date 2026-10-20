@@ -264,7 +264,11 @@ func RecalculateTaskQuota(ctx context.Context, task *model.Task, actualQuota int
 		logQuota = quotaDelta
 		model.UpdateUserUsedQuotaAndRequestCount(task.UserId, quotaDelta)
 		model.UpdateChannelUsedQuota(task.ChannelId, quotaDelta)
-		if err := RecordChannelUserModelQuotaUsage(ctx, task.ChannelId, task.UserId, quotaDelta, task.Properties.OriginModelName); err != nil {
+		ownerID := task.ChannelId
+		if task.PrivateData.ChannelLimitOwnerID != nil {
+			ownerID = *task.PrivateData.ChannelLimitOwnerID
+		}
+		if err := RecordChannelUserModelQuotaUsage(ctx, ownerID, task.UserId, quotaDelta, task.Properties.OriginModelName); err != nil {
 			logger.LogWarn(ctx, fmt.Sprintf("记录异步任务渠道单用户周期额度失败 (task=%s, delta=%d): %s", task.TaskID, quotaDelta, common.LocalLogPreview(err.Error())))
 		}
 	} else {

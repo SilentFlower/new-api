@@ -98,7 +98,10 @@ func ResolveOriginTask(c *gin.Context, info *relaycommon.RelayInfo) *dto.TaskErr
 		common.SetContextKey(c, constant.ContextKeyChannelType, ch.Type)
 		common.SetContextKey(c, constant.ContextKeyChannelBaseUrl, ch.GetBaseURL())
 		common.SetContextKey(c, constant.ContextKeyChannelId, originTask.ChannelId)
-		service.ApplyChannelUserEffectiveLimits(c, ch)
+		if apiErr := service.ApplyChannelLimitContext(c, ch); apiErr != nil {
+			return service.TaskErrorFromAPIError(apiErr)
+		}
+		info.ChannelLimitOwnerID = service.ChannelLimitOwnerID(c)
 
 		info.ChannelBaseUrl = ch.GetBaseURL()
 		info.ChannelId = originTask.ChannelId
@@ -454,7 +457,9 @@ func tryRealtimeFetch(c *gin.Context, task *model.Task, isOpenAIVideoAPI bool) (
 		return nil, nil
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelId, channelModel.Id)
-	service.ApplyChannelUserEffectiveLimits(c, channelModel)
+	if apiErr := service.ApplyChannelLimitContext(c, channelModel); apiErr != nil {
+		return nil, service.TaskErrorFromAPIError(apiErr)
+	}
 	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrency(c)
 	if concurrencyErr != nil {
 		taskErr := service.TaskErrorFromAPIError(concurrencyErr)

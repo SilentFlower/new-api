@@ -450,6 +450,11 @@ func getTaskOriginModelName(c *gin.Context) string {
 	return ""
 }
 
+// SetupContextForSelectedChannel 写入物理上游信息并独立解析本次尝试的限制归属。
+// @param c 已认证的请求上下文。
+// @param channel 实际调用渠道。
+// @param modelName 当前路由模型。
+// @return 配置或限制归属解析错误，失败时不得调用上游。
 func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, modelName string) *types.NewAPIError {
 	c.Set("original_model", modelName) // for retry
 	if channel == nil {
@@ -472,7 +477,9 @@ func SetupContextForSelectedChannel(c *gin.Context, channel *model.Channel, mode
 		common.SetContextKey(c, constant.ContextKeyChannelOrganization, *channel.OpenAIOrganization)
 	}
 	common.SetContextKey(c, constant.ContextKeyChannelAutoBan, channel.GetAutoBan())
-	service.ApplyChannelUserEffectiveLimits(c, channel)
+	if limitErr := service.ApplyChannelLimitContext(c, channel); limitErr != nil {
+		return limitErr
+	}
 	common.SetContextKey(c, constant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, constant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 

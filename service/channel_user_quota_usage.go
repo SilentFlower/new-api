@@ -49,7 +49,11 @@ func RecordRelayChannelUserQuotaUsage(ctx context.Context, relayInfo *relaycommo
 	if relayInfo == nil || relayInfo.ChannelMeta == nil || quota <= 0 {
 		return
 	}
-	if err := RecordChannelUserModelQuotaUsage(ctx, relayInfo.ChannelId, relayInfo.UserId, quota, relayInfo.RoutingModel()); err != nil {
+	ownerID := relayInfo.ChannelLimitOwnerID
+	if ownerID <= 0 {
+		ownerID = relayInfo.ChannelId
+	}
+	if err := RecordChannelUserModelQuotaUsage(ctx, ownerID, relayInfo.UserId, quota, relayInfo.RoutingModel()); err != nil {
 		logger.LogWarn(ctx, fmt.Sprintf(
 			"记录渠道单用户周期额度失败: channel_id=%d user_id=%d quota=%d error=%s",
 			relayInfo.ChannelId,

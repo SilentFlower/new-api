@@ -176,6 +176,10 @@ import {
   collectInvalidStatusCodeEntries,
   collectNewDisallowedStatusCodeRedirects,
 } from '../../lib/status-code-risk-guard'
+import {
+  channelLimitParentQueryKey,
+  getChannelLimitParent,
+} from '../../limit-parent-api'
 import type { Channel } from '../../types'
 import { useChannels } from '../channels-provider'
 import { AdvancedCustomEditorDialog } from '../dialogs/advanced-custom-editor-dialog'
@@ -642,6 +646,11 @@ export function ChannelMutateDrawer({
   const isEditing = Boolean(currentRow)
   const channelId = currentRow?.id ?? null
   const sensitiveLocked = isEditing && !canEditSensitive
+  const limitParentQuery = useQuery({
+    queryKey: channelLimitParentQueryKey(channelId || 0),
+    queryFn: () => getChannelLimitParent(channelId || 0),
+    enabled: open && isEditing && Boolean(channelId),
+  })
 
   // Fetch channel details if editing
   const { data: channelData, isLoading: isChannelLoading } = useQuery({
@@ -3674,6 +3683,18 @@ export function ChannelMutateDrawer({
                                         step={1}
                                         placeholder='0'
                                         {...field}
+                                        disabled={
+                                          isEditing &&
+                                          (!limitParentQuery.data ||
+                                            limitParentQuery.isError ||
+                                            limitParentQuery.data.read_only)
+                                        }
+                                        value={
+                                          limitParentQuery.data?.read_only
+                                            ? limitParentQuery.data
+                                                .concurrency_limit
+                                            : field.value
+                                        }
                                         onChange={(e) =>
                                           field.onChange(Number(e.target.value))
                                         }
@@ -3690,6 +3711,19 @@ export function ChannelMutateDrawer({
                                           'All tokens of the same user share this limit. WebSocket connections count until closed.'
                                         )}
                                       </span>
+                                      {limitParentQuery.data?.read_only && (
+                                        <span className='block'>
+                                          {t(
+                                            'Limits inherited from {{name}} (#{{id}})',
+                                            {
+                                              name: limitParentQuery.data.parent
+                                                ?.name,
+                                              id: limitParentQuery.data
+                                                .parent_channel_id,
+                                            }
+                                          )}
+                                        </span>
+                                      )}
                                     </FormDescription>
                                     <FormMessage />
                                   </FormItem>

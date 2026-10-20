@@ -7,7 +7,7 @@
 ### 1. Scope / Trigger
 
 - Trigger：修改渠道 `user_concurrency_limit` 字段、渠道缓存上下文、并发租约存储、当前并发管理查询、Relay 重试、流式/非流式 HTTP、Realtime/Responses WebSocket、异步任务实时查询、Midjourney、Claude `count_tokens`、视觉辅助上游调用或管理端错误日志记录。
-- 统计维度固定为 `channel_id + user_id`；同一用户的多个 API Token 共享限制，不同用户或不同渠道互不影响。
+- 统计维度为限制归属渠道 ID + 用户 ID；同一用户的多个 API Token 共享限制，不同用户或未关联渠道互不影响。父子渠道按下文的一级继承契约共享父桶。
 - 限制只覆盖实际上游调用。管理端渠道测试、纯数据库任务查询和异步任务在上游响应结束后的后台运行时间不占名额。
 - 定制逻辑必须保持薄层：Redis、内存、续租和释放归属 `service/channel_user_concurrency.go`；协议错误与 Gin 生命周期归属独立 Controller/Relay 领域文件；既有热点只保留获取、持有、取消和释放调用。
 
@@ -311,3 +311,63 @@ members, err := redisClient.SMembers(ctx, channelUserConcurrencyUserIndexKey(cha
 ```
 
 索引维护必须合并进现有获取、续租和释放 Lua，不为每个 Relay 请求增加额外 Redis 往返。
+
+## 场景：一级父渠道限制继承与共享计数
+
+### 1. Scope / Trigger
+
+- 修改父子渠道关联、共享并发/预算、个人提额、只读管理、任务结算或渠道删除时读取本节；预算内核仍遵循 [预算 v2 契约](./channel-period-budget-fallback.md)。
+- 限制归属与物理上游身份分开，不能用替换 `ContextKeyChannelId` 的方式共享计数。
+
+### 2. Signatures
+
+- `model.ChannelLimitParent`：`ChannelId` 主键且不自增，`ParentChannelId`、`Revision`、`UpdatedAt`、`UpdatedBy`；普通/快速迁移均注册。
+- `model.GetChannelLimitParent(ctx, channelID)` / `ReplaceChannelLimitParent(ctx, value)` 读取及按旧 revision 保存关系；`ListChannelLimitParentOptions` 只选择 ID、名称、状态。
+- `service.ResolveChannelLimitParent(ctx, channel)` 返回限制渠道；`ApplyChannelLimitContext(c, channel)` 写 owner 和有效并发；两个 guard 使用 `ChannelLimitOwnerID(c)`。
+- GET/PUT `/api/channel/:id/limit-parent` 分别为 ChannelRead/ChannelOperate；GET `/limit-parent/options?keyword=...&p=1&page_size=20` 为 ChannelRead，页大小沿用最多 100 的公共分页。
+- PUT 必填 `{expected_revision:int,parent_channel_id:int}`，两字段均非负；0 表示解除，缺省不能当作 0。返回安全视图 `{channel_id,parent_channel_id,revision,read_only,concurrency_limit,parent?:{id,name}}`；候选返回 `{items:[{id,name,status}],total,page,page_size}`。
+- `constant.ContextKeyChannelLimitOwnerID` 与 `relaycommon.ChannelMeta.ChannelLimitOwnerID` 保存本次尝试归属；`model.TaskPrivateData.ChannelLimitOwnerID *int` 以私有 JSON `channel_limit_owner_id,omitempty` 持久化。
+
+### 3. Contracts
+
+- 仅支持一级 B→A；缺记录等于独立且 revision=0。解除保留递增版本；自身、目标已有父、来源已有子、渠道不存在均拒绝。事务按 ID 排序，通过 `lockForUpdate(tx)` 锁涉及渠道，并按 revision CAS 保存，防止拓扑竞争及过期覆盖。
+- 关系缓存是本地有界 4096 项、TTL 5 秒；查询不持 map 锁，保存及迟到查询发布均比较版本。管理写保护直接读权威 DB，不能依赖缓存。
+- A 是并发、预算及个人提额的唯一来源；A/B 的同用户请求只持一份父桶租约，跨令牌共享，另一用户独立。A 既有预算 ID、计数 key 及累计保留；B 仅从关联后的新尝试消费开始计入 A，不回填历史。
+- 物理渠道仍决定密钥、地址、模型、账单和日志；正向限制累计读取冻结的 owner，不在结算时重查关系。金额保持既有软上限，零额/退款/负差额不新增累计；解除后 B 恢复原配置和原控制用量。
+- 新任务提交保存 owner；历史私有 JSON 缺字段时，后续正差额只记原 `ChannelId`，即使当前已关联。WebSocket 在整个连接内保持开始归属；视觉辅助切换/恢复要同步 owner 键和预算基础渠道；普通重试释放后重新选渠、解析。
+- 选渠、历史任务/Midjourney 切渠、视觉辅助、实时任务及 Gemini/Vertex 视频结果 URL 查询均须先 `ApplyChannelLimitContext`，成功后才能获取 guard、预扣或请求上游。关系不可用不能回落子渠道不限配置。
+- B 的限制读取使用 A 数据，但响应 `channel_id` 保留请求路径的 B；PUT/DELETE 统一拒绝关联中的 B。通过权威写保护后始终写路径渠道自身，不能再次按旧缓存解析到 A。普通渠道更新仅在实际改变 B 并发时拒绝，原值回传允许，防止编辑上游配置误改备份。
+- 前端在限制弹窗设置父关系、展示来源、进入父管理和解除；继承限制及编辑抽屉并发只读，元数据失败时禁写，本窗口更改关系前须处理预算脏草稿。候选用名称和 ID 区分，当前父不在候选页时保留。
+- ai-fund 继续映射并管理 A，既有身份、分页、版本和字段白名单合同不变，不修改其源码或替它汇总成员。
+- 单删/批删/按状态清理都拒绝删除仍有子关联的父渠道。状态清理先取候选，再由 `deleteChannelsMatchingStatus` 在删除事务内按原状态重新筛选并锁定，仅删除仍匹配的渠道及能力，避免误删期间重新启用者；分块、回滚与 `BatchDeleteChannels` 同步复核。
+- 全部实例升级后才启用关系；变更前暂停新请求、排空在途，保存后至少等待 5 秒再恢复。旧异步任务仍按提交快照结算；回滚前处理含新快照的未结任务。运行时无新增环境键，多实例计数仍要求 Redis。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 结果 |
+| --- | --- |
+| 管理输入缺字段、未知键、非法类型或拓扑 | 400 `invalid_channel_limit_parent` 或既有严格 JSON 参数错误，不保存 |
+| 关系旧 revision | 409 `channel_limit_parent_conflict`，不覆盖 |
+| 从 B 写继承限制 | 409 `channel_limit_parent_read_only`，指明父 ID，不写 A/B |
+| 关系存储失败或父不存在/已有父 | 请求 503 `channel_user_concurrency_unavailable`、SkipRetry；管理 503 `channel_limit_parent_unavailable`，不泄露底层错误 |
+| 同用户 A/B 合计达到上限 | 429 `channel_user_concurrency_exceeded`，零上游/预扣、不普通重试或自动禁用 |
+| 显式金额降级到关联渠道 | 目标重新解析 owner 并检查预算，不能绕过同一已耗尽父预算 |
+| 删除仍被引用的父渠道 | `ErrChannelLimitParentInUse`，整个删除事务回滚 |
+| 状态清理候选已重新启用 | 保留该渠道及能力，返回实际删除数量 |
+
+### 5. Scenarios and Examples
+
+- 正常：A 上限 4，同用户 A2+B2 时第 5 个拒绝；释放一个后可进入；改 A 后 B 继承生效，B 无法反写 A。
+- 边界：A 已用 3、B 旧用量 2，关联不搬桶；B 新消费 1 后 A 为 4，唯一消费日志仍归 B。解绑后的在途结算仍记原 owner。
+- 错误：视频查询直接调用 `ApplyChannelUserEffectiveLimits(c, B)` 后获取 guard，仍会使用 B 桶；正确：统一解析父归属并传播 429/503。
+- 错误：状态清理按查询到的 ID 无条件删除；正确：同一删除事务内重新筛选原状态并锁定，只清理仍符合条件的渠道和能力。
+
+### 6. Tests Required
+
+- `model/channel_limit_parent*_test.go`：自身/多级/循环、CAS、解除显式零值、精简候选、所有删除入口；三库迁移重入、拓扑及绑定/删除竞争。专用 DSN 只用于隔离测试库。
+- `model/channel_status_cleanup_test.go`：在候选查询完成后重新启用，两个清理入口均保留渠道及能力、删除数量正确；三库合同复用该确定性场景。
+- `service/channel_limit_parent_test.go`：内存/Redis 共用原子父桶、用户隔离、A3+B旧2+新1、快照结算/历史任务、坏关系失败关闭、迟到查询不回退版本；执行 race。
+- `controller/channel_limit_parent*_test.go`：完整 Relay 第五个拒绝且零上游/扣费、B 凭据和唯一物理日志、共享预算不被降级绕过、B 只读及解绑旧缓存不反写 A、管理版本与真实父响应兼容 ai-fund；视频两入口覆盖 429/503，Gemini 释放后查询成功且租约不泄漏。
+- `controller/responses_websocket_test.go` 与 `relay/channel_limit_parent_test.go`：多轮连接中途解绑仍用父租约，关闭释放；Midjourney 物理身份与限制累计分离、视觉辅助恢复主归属。
+- 渠道 React 测试：来源/同名 ID/跨页保留、明确 0 解绑、确认版本、预算脏草稿及继承只读；七语言缺键/值/占位符检查、typecheck/lint/build。
+- 使用父渠道真实 Controller 响应验证 ai-fund 当前解析器及读写请求，不修改其源码；运行相关现有 Worker 测试。

@@ -260,6 +260,7 @@ func migrateDB() error {
 
 	err := DB.AutoMigrate(
 		&Channel{},
+		&ChannelLimitParent{},
 		&ChannelUserLimitOverride{},
 		&ChannelPeriodPolicy{},
 		&ChannelQuotaTracking{},
@@ -337,6 +338,7 @@ func migrateDBFast() error {
 		name  string
 	}{
 		{&Channel{}, "Channel"},
+		{&ChannelLimitParent{}, "ChannelLimitParent"},
 		{&ChannelUserLimitOverride{}, "ChannelUserLimitOverride"},
 		{&ChannelPeriodPolicy{}, "ChannelPeriodPolicy"},
 		{&ChannelQuotaTracking{}, "ChannelQuotaTracking"},

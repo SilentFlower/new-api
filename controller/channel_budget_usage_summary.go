@@ -45,5 +45,6 @@ func GetChannelBudgetUsageSummary(c *gin.Context) {
 			item.TopUser.Username, item.TopUser.DisplayName = summaries[item.TopUser.UserID].Username, summaries[item.TopUser.UserID].DisplayName
 		}
 	}
+	view.ChannelID = channelLimitRequestedID(c, channel)
 	common.ApiSuccess(c, view)
 }

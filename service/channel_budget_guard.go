@@ -240,7 +240,7 @@ func ChannelPeriodAPIError(err error) *types.NewAPIError {
 // @param c 已完成选渠的 Gin 上下文。
 // @return 本地限额或存储错误，不访问供应商。
 func CheckSelectedChannelPeriodLimits(c *gin.Context) *types.NewAPIError {
-	channelID := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	channelID := ChannelLimitOwnerID(c)
 	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
 	policy, err := GetChannelPeriodPolicy(c, channelID)
 	if err != nil {

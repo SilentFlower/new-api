@@ -467,6 +467,9 @@ func BatchInsertChannels(channels []Channel) error {
 	return tx.Commit().Error
 }
 
+// BatchDeleteChannels 原子删除渠道与能力，阻止删除仍被子渠道引用的父渠道。
+// @param ids 待删除的物理渠道 ID。
+// @return 实际删除数量及关系约束或数据库错误。
 func BatchDeleteChannels(ids []int) (int64, error) {
 	if len(ids) == 0 {
 		return 0, nil
@@ -478,6 +481,10 @@ func BatchDeleteChannels(ids []int) (int64, error) {
 	}
 	var deletedCount int64
 	for _, chunk := range lo.Chunk(ids, 200) {
+		if err := protectChannelLimitParentDeletion(tx, chunk); err != nil {
+			tx.Rollback()
+			return 0, err
+		}
 		result := tx.Where("id in (?)", chunk).Delete(&Channel{})
 		if result.Error != nil {
 			tx.Rollback()
@@ -613,13 +620,13 @@ func (channel *Channel) UpdateBalance(balance float64) {
 	}
 }
 
+// Delete 删除当前渠道及其能力，保留仍被引用的父渠道。
+// @return 关联约束或数据库错误。
 func (channel *Channel) Delete() error {
-	var err error
-	err = DB.Delete(channel).Error
-	if err != nil {
-		return err
+	if channel.Id <= 0 {
+		return gorm.ErrMissingWhereClause
 	}
-	err = channel.DeleteAbilities()
+	_, err := BatchDeleteChannels([]int{channel.Id})
 	return err
 }
 
@@ -888,14 +895,25 @@ func updateChannelUsedQuota(id int, quota int) {
 	}
 }
 
+// DeleteChannelByStatus 按物理状态删除渠道，并执行父渠道引用保护。
+// @param status 待清理的渠道状态。
+// @return 实际删除数量及错误。
 func DeleteChannelByStatus(status int64) (int64, error) {
-	result := DB.Where("status = ?", status).Delete(&Channel{})
-	return result.RowsAffected, result.Error
+	var ids []int
+	if err := DB.Model(&Channel{}).Where("status = ?", status).Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	return deleteChannelsMatchingStatus(ids, []int64{status})
 }
 
+// DeleteDisabledChannel 清理禁用渠道，仍有子渠道的父渠道必须先解除关联。
+// @return 实际删除数量及错误。
 func DeleteDisabledChannel() (int64, error) {
-	result := DB.Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).Delete(&Channel{})
-	return result.RowsAffected, result.Error
+	var ids []int
+	if err := DB.Model(&Channel{}).Where("status = ? or status = ?", common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled).Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	return deleteChannelsMatchingStatus(ids, []int64{common.ChannelStatusAutoDisabled, common.ChannelStatusManuallyDisabled})
 }
 
 func GetPaginatedTags(offset int, limit int) ([]*string, error) {

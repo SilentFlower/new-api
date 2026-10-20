@@ -538,22 +538,21 @@ func TestProxyResponsesWebSocketForwardsCancelPongAndCloseCode(t *testing.T) {
 }
 
 func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testing.T) {
+	db := setupChannelUserLimitsTestDB(t)
 	gin.SetMode(gin.TestMode)
 	// 真实回合会异步记录性能指标，必须在后续用例切换全局缓存状态前收口。
 	defer func() {
 		require.Eventually(t, func() bool { return gopool.WorkerCount() == 0 }, 2*time.Second, time.Millisecond)
 	}()
 	oldLogConsumeEnabled := common.LogConsumeEnabled
+	oldMemoryCacheEnabled := common.MemoryCacheEnabled
 	oldGuardAcquirer := responsesWebSocketConcurrencyGuardAcquirer
 	common.LogConsumeEnabled = false
+	common.MemoryCacheEnabled = false
 	guardAcquireCalls := 0
 	responsesWebSocketConcurrencyGuardAcquirer = func(c *gin.Context) (*channelUserConcurrencyGuard, *types.NewAPIError) {
 		guardAcquireCalls++
-		return &channelUserConcurrencyGuard{
-			lease:       &service.ChannelUserConcurrencyLease{},
-			baseContext: c.Request.Context(),
-			cancel:      func() {},
-		}, nil
+		return acquireChannelUserConcurrencyGuard(c)
 	}
 	quotaSetting := operation_setting.GetQuotaSetting()
 	oldFreeModelPreConsume := quotaSetting.EnableFreeModelPreConsume
@@ -568,6 +567,7 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(modelRatios)))
 	t.Cleanup(func() {
 		common.LogConsumeEnabled = oldLogConsumeEnabled
+		common.MemoryCacheEnabled = oldMemoryCacheEnabled
 		responsesWebSocketConcurrencyGuardAcquirer = oldGuardAcquirer
 		quotaSetting.EnableFreeModelPreConsume = oldFreeModelPreConsume
 		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(savedModelRatios))
@@ -620,6 +620,11 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 		Group:   "default",
 	}
 	channel.SetSetting(dto.ChannelSettings{ResponsesCompactPassthroughEnabled: true})
+	parent := &model.Channel{Id: 100, Name: "WebSocket 限制父渠道", UserConcurrencyLimit: common.GetPointer(4)}
+	require.NoError(t, db.Create(parent).Error)
+	require.NoError(t, db.Create(channel).Error)
+	relation := &model.ChannelLimitParent{ChannelId: channel.Id, ParentChannelId: parent.Id, UpdatedBy: 1}
+	require.NoError(t, service.SaveChannelLimitParent(t.Context(), relation))
 	proxyResults := make(chan error, 1)
 	logOtherResults := make(chan map[string]interface{}, 1)
 	engine := gin.New()
@@ -642,6 +647,7 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 			return
 		}
 		common.SetContextKey(c, constant.ContextKeyTokenSpecificChannelId, fmt.Sprint(channel.Id))
+		common.SetContextKey(c, constant.ContextKeyUserId, 787)
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
 		common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
 		if apiErr := middleware.SetupContextForSelectedChannel(c, channel, turn.selectionModel); apiErr != nil {
@@ -679,6 +685,12 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	_, firstCompleted, err := clientConn.ReadMessage()
 	require.NoError(t, err)
 	require.Equal(t, "response.completed", gjson.GetBytes(firstCompleted, "type").String())
+	parentUsage, _, err := service.GetChannelUserConcurrencyUsage(t.Context(), parent.Id, 787)
+	require.NoError(t, err)
+	assert.Equal(t, 1, parentUsage)
+	// 连接开始时已持有父渠道租约，解绑只影响后续新连接。
+	relation.ParentChannelId = 0
+	require.NoError(t, service.SaveChannelLimitParent(t.Context(), relation))
 	secondTurn := []byte(`{"type":"response.create","model":"ws-model-b","stream":true,"input":[{"type":"compaction_trigger"}],"client_metadata":{"turn":2}}`)
 	require.NoError(t, clientConn.WriteMessage(websocket.TextMessage, secondTurn))
 	_, itemDone, err := clientConn.ReadMessage()
@@ -687,6 +699,12 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	_, secondCompleted, err := clientConn.ReadMessage()
 	require.NoError(t, err)
 	require.Equal(t, "response.completed", gjson.GetBytes(secondCompleted, "type").String())
+	parentUsage, _, err = service.GetChannelUserConcurrencyUsage(t.Context(), parent.Id, 787)
+	require.NoError(t, err)
+	assert.Equal(t, 1, parentUsage)
+	childUsage, _, err := service.GetChannelUserConcurrencyUsage(t.Context(), channel.Id, 787)
+	require.NoError(t, err)
+	assert.Zero(t, childUsage)
 
 	thirdTurn := []byte(`{"type":"response.create","model":"ws-model-c","stream":true,"input":[{"type":"message","role":"user"}]}`)
 	require.NoError(t, clientConn.WriteMessage(websocket.TextMessage, thirdTurn))
@@ -718,6 +736,9 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	}
 	require.NoError(t, <-proxyResults)
 	assert.Equal(t, 1, guardAcquireCalls)
+	parentUsage, _, err = service.GetChannelUserConcurrencyUsage(t.Context(), parent.Id, 787)
+	require.NoError(t, err)
+	assert.Zero(t, parentUsage)
 }
 
 func TestPrepareResponsesWebSocketTurnAttemptRejectsAdvancedCustomConverter(t *testing.T) {

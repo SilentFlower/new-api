@@ -243,6 +243,7 @@ func TestBuildVisionAssistGeminiRequestUsesCleanUserContent(t *testing.T) {
 }
 
 func TestCallVisionAssistModelRejectsConcurrencyBeforeUpstream(t *testing.T) {
+	setupRelayChannelLimitParentDB(t)
 	gin.SetMode(gin.TestMode)
 	oldRedisEnabled := common.RedisEnabled
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled

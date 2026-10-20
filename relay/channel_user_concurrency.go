@@ -29,7 +29,7 @@ func acquireChannelUserConcurrency(c *gin.Context) (*channelUserConcurrencyGuard
 	if limit <= 0 {
 		return nil, nil
 	}
-	channelID := common.GetContextKeyInt(c, constant.ContextKeyChannelId)
+	channelID := service.ChannelLimitOwnerID(c)
 	userID := common.GetContextKeyInt(c, constant.ContextKeyUserId)
 	baseContext := context.Background()
 	if c.Request != nil {

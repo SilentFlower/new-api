@@ -326,7 +326,9 @@ func RelayMidjourneyTaskImageSeed(c *gin.Context) *dto.MidjourneyResponse {
 		return service.MidjourneyErrorWrapper(constant.MjRequestError, "该任务所属渠道已被禁用")
 	}
 	c.Set("channel_id", originTask.ChannelId)
-	service.ApplyChannelUserEffectiveLimits(c, channel)
+	if apiErr := service.ApplyChannelLimitContext(c, channel); apiErr != nil {
+		return channelUserConcurrencyMidjourneyError(apiErr)
+	}
 	c.Request.Header.Set("Authorization", fmt.Sprintf("Bearer %s", channel.Key))
 
 	requestURL := getMjRequestPath(c.Request.URL.String())
@@ -512,7 +514,9 @@ func RelayMidjourneySubmit(c *gin.Context, relayInfo *relaycommon.RelayInfo) *dt
 			if channel.Status != common.ChannelStatusEnabled {
 				return service.MidjourneyErrorWrapper(constant.MjRequestError, "该任务所属渠道已被禁用")
 			}
-			applyMidjourneyOriginChannel(c, relayInfo, channel)
+			if apiErr := applyMidjourneyOriginChannel(c, relayInfo, channel); apiErr != nil {
+				return channelUserConcurrencyMidjourneyError(apiErr)
+			}
 			logger.LogDebug(c, "Midjourney action uses origin channel: id=%s, base_url=%s", strconv.Itoa(originTask.ChannelId), channel.GetBaseURL())
 		}
 		midjRequest.Prompt = originTask.Prompt

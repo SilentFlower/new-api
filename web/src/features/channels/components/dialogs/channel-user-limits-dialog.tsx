@@ -88,6 +88,10 @@ import {
 } from '../../api'
 import { channelsQueryKeys } from '../../lib'
 import {
+  channelLimitParentQueryKey,
+  getChannelLimitParent,
+} from '../../limit-parent-api'
+import {
   channelPeriodErrorKey,
   getChannelBudgetUserOverrides,
   saveChannelBudgetOverride,
@@ -99,6 +103,7 @@ import type {
 } from '../../types'
 import { BudgetOverrideSheet } from './budget/budget-override-sheet'
 import { ChannelBudgetUsageTab } from './budget/budget-usage-tab'
+import { ChannelLimitParentPanel } from './channel-limit-parent-panel'
 import { ChannelPeriodPolicyPanel } from './channel-period-policy-panel'
 
 const PAGE_SIZE = 20
@@ -106,7 +111,7 @@ const PAGE_SIZE = 20
 type ChannelUserLimitsDialogProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
-  channel: Channel | null
+  channel: Pick<Channel, 'id' | 'name'> | null
 }
 
 function UserIdentity(props: {
@@ -260,6 +265,10 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
   const currentUser = useAuthStore((state) => state.auth.user)
   const [activeTab, setActiveTab] = useState('budgets')
   const [policyDirty, setPolicyDirty] = useState(false)
+  const [managedParent, setManagedParent] = useState<Pick<
+    Channel,
+    'id' | 'name'
+  > | null>(null)
   const [confirmClose, setConfirmClose] = useState(false)
   const [confirmRevokeConcurrency, setConfirmRevokeConcurrency] =
     useState(false)
@@ -284,14 +293,27 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
   const [hasExpiration, setHasExpiration] = useState(false)
   const [expirationInput, setExpirationInput] = useState('')
   const channelId = props.channel?.id ?? 0
-  const canOperate = hasPermission(
+  const canManageAssociation = hasPermission(
     currentUser,
     ADMIN_PERMISSION_RESOURCES.CHANNEL,
     ADMIN_PERMISSION_ACTIONS.OPERATE
   )
+  const limitParentQuery = useQuery({
+    queryKey: channelLimitParentQueryKey(channelId),
+    queryFn: () => getChannelLimitParent(channelId),
+    enabled: props.open && channelId > 0,
+  })
+  const canOperate =
+    canManageAssociation &&
+    limitParentQuery.isSuccess &&
+    !limitParentQuery.data.read_only
+  const disabledReason = limitParentQuery.data?.read_only
+    ? t('Inherited limits are read-only. Edit the parent channel.')
+    : t('No permission to perform this action')
 
   useEffect(() => {
     if (!props.open) {
+      setManagedParent(null)
       setOverrideUser(null)
       return
     }
@@ -529,9 +551,7 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
           <span
             className='inline-flex'
             tabIndex={canOperate ? undefined : 0}
-            aria-label={
-              canOperate ? undefined : t('No permission to perform this action')
-            }
+            aria-label={canOperate ? undefined : disabledReason}
           />
         }
       >
@@ -545,11 +565,7 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
           {t('Concurrency override')}
         </Button>
       </TooltipTrigger>
-      {!canOperate ? (
-        <TooltipContent>
-          {t('No permission to perform this action')}
-        </TooltipContent>
-      ) : null}
+      {!canOperate ? <TooltipContent>{disabledReason}</TooltipContent> : null}
     </Tooltip>
   )
 
@@ -572,12 +588,24 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
         }
         contentHeight='72vh'
         contentClassName='sm:max-w-6xl'
-        bodyClassName='h-full'
+        bodyClassName='flex h-full flex-col'
       >
+        {props.open && channelId > 0 && (
+          <ChannelLimitParentPanel
+            key={channelId}
+            channelId={channelId}
+            canOperate={canManageAssociation}
+            blockedByDraft={policyDirty}
+            onManageParent={(id) => {
+              const parent = limitParentQuery.data?.parent
+              if (parent?.id === id) setManagedParent(parent)
+            }}
+          />
+        )}
         <Tabs
           value={activeTab}
           onValueChange={setActiveTab}
-          className='h-full gap-3'
+          className='min-h-0 flex-1 gap-3'
         >
           <TabsList className='grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-5'>
             <TabsTrigger value='budgets'>{t('Budgets')}</TabsTrigger>
@@ -600,7 +628,7 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
           >
             {props.open && channelId > 0 && (
               <ChannelPeriodPolicyPanel
-                key={channelId}
+                key={`${channelId}:${limitParentQuery.data?.revision ?? 0}`}
                 channelId={channelId}
                 section={activeTab === 'schedules' ? 'schedules' : 'budgets'}
                 canOperate={canOperate}
@@ -1176,6 +1204,18 @@ export function ChannelUserLimitsDialog(props: ChannelUserLimitsDialogProps) {
           props.onOpenChange(false)
         }}
       />
+      {managedParent && (
+        <ChannelUserLimitsDialog
+          open
+          channel={managedParent}
+          onOpenChange={(open) => {
+            if (!open) {
+              setManagedParent(null)
+              void queryClient.invalidateQueries({ queryKey: ['channels'] })
+            }
+          }}
+        />
+      )}
     </>
   )
 }

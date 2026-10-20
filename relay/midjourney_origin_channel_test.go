@@ -16,6 +16,7 @@ import (
 )
 
 func TestApplyMidjourneyOriginChannelAttributesDailyQuotaToOriginChannel(t *testing.T) {
+	setupRelayChannelLimitParentDB(t)
 	previousRedisEnabled, previousRedis := common.RedisEnabled, common.RDB
 	common.RedisEnabled = false
 	common.RDB = nil
@@ -52,7 +53,7 @@ func TestApplyMidjourneyOriginChannelAttributesDailyQuotaToOriginChannel(t *test
 	require.NoError(t, service.SetChannelUserDailyQuota(t.Context(), initialChannelID, userID, 0))
 	require.NoError(t, service.SetChannelUserDailyQuota(t.Context(), originChannelID, userID, 0))
 
-	applyMidjourneyOriginChannel(c, relayInfo, channel)
+	require.Nil(t, applyMidjourneyOriginChannel(c, relayInfo, channel))
 	service.RecordRelayChannelUserDailyQuota(c, relayInfo, 250)
 
 	assert.Equal(t, originChannelID, relayInfo.ChannelId)

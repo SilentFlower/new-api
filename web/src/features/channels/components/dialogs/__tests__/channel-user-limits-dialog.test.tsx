@@ -385,8 +385,42 @@ function previewEcho(input: { method: string; data?: unknown }) {
 
 async function renderChannelUserLimitsDialog(
   open = true,
-  onOpenChange: (open: boolean) => void = () => undefined
+  onOpenChange: (open: boolean) => void = () => undefined,
+  inherited = false
 ) {
+  const get = apiClient.get
+  apiClient.get = (url, config) => {
+    if (url.endsWith('/limit-parent')) {
+      const id = Number(
+        url.match(/\/channel\/(\d+)\/limit-parent$/)?.[1] ?? testChannel.id
+      )
+      const readOnly = inherited && id === testChannel.id
+      return Promise.resolve({
+        data: {
+          success: true,
+          data: {
+            channel_id: id,
+            parent_channel_id: readOnly ? 80 : 0,
+            revision: 0,
+            read_only: readOnly,
+            concurrency_limit: 4,
+            ...(readOnly
+              ? { parent: { id: 80, name: 'Parent channel A' } }
+              : {}),
+          },
+        },
+      })
+    }
+    if (url.endsWith('/limit-parent/options')) {
+      return Promise.resolve({
+        data: {
+          success: true,
+          data: { items: [], total: 0, page: 1, page_size: 20 },
+        },
+      })
+    }
+    return get(url, config)
+  }
   const host = document.createElement('div')
   document.body.append(host)
   const root = createRoot(host)
@@ -438,6 +472,37 @@ afterEach(async () => {
 
 afterAll(() => {
   domWindow.close()
+})
+
+test('关联子渠道能查看继承来源，但预算新增操作为只读', async () => {
+  setOperator(true)
+  apiClient.get = async (url) => {
+    if (url.includes('/targets')) {
+      return { data: { success: true, data: [] } }
+    }
+    if (url.includes('/usage-summary')) {
+      return { data: { success: true, data: usageSummary() } }
+    }
+    if (url.includes('/period-policy')) {
+      return { data: { success: true, data: policyView() } }
+    }
+    throw new Error(`未预期的读取: ${url}`)
+  }
+  await renderChannelUserLimitsDialog(true, () => undefined, true)
+  await waitForCondition(
+    () =>
+      (document.body.textContent ?? '').includes('Parent channel A') &&
+      [...document.querySelectorAll('button')].some(
+        (item) => item.textContent?.trim() === 'Add budget'
+      ),
+    '继承预算未显示'
+  )
+  assert.equal(findButton('Add budget').disabled, true)
+  assert.match(
+    document.body.textContent ?? '',
+    /Inherited limits are read-only/
+  )
+  assert.ok(findButton('Manage parent limits'))
 })
 
 test('按行用量页签选中预算后展示用户用量，并按行提交目标已用额度', async () => {
