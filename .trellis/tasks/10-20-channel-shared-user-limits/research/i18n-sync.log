@@ -1,0 +1,2 @@
+$ node scripts/sync-i18n.mjs
+i18n sync done. Report: /root/project/new-api/web/src/i18n/locales/_reports/_sync-report.json

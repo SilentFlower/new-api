@@ -1,0 +1,40 @@
+{
+  "newKeys": 18,
+  "locales": {
+    "en": {
+      "newMissing": 0,
+      "newUntranslated": 0,
+      "placeholderMismatch": 0
+    },
+    "zh": {
+      "newMissing": 0,
+      "newUntranslated": 0,
+      "placeholderMismatch": 0
+    },
+    "zh-TW": {
+      "newMissing": 0,
+      "newUntranslated": 0,
+      "placeholderMismatch": 0
+    },
+    "fr": {
+      "newMissing": 0,
+      "newUntranslated": 0,
+      "placeholderMismatch": 0
+    },
+    "ja": {
+      "newMissing": 0,
+      "newUntranslated": 0,
+      "placeholderMismatch": 0
+    },
+    "ru": {
+      "newMissing": 0,
+      "newUntranslated": 0,
+      "placeholderMismatch": 0
+    },
+    "vi": {
+      "newMissing": 0,
+      "newUntranslated": 0,
+      "placeholderMismatch": 0
+    }
+  }
+}

@@ -1,0 +1,384 @@
+bun test v1.3.14 (0d9b296a)
+
+src/features/channels/api.test.ts:
+(pass) 渠道模型选项使用只读精简接口 [8.04ms]
+(pass) 渠道用户限制接口使用指定渠道、分页和目标额度载荷 [0.59ms]
+(pass) 个人覆盖接口只提交白名单字段并读取指定用户状态 [0.85ms]
+
+src/features/channels/lib/channel-form.test.ts:
+(pass) 渠道单用户并发限制保持 API 与表单往返一致 [3.16ms]
+(pass) 渠道单用户并发限制拒绝非法边界 [19.56ms]
+(pass) Responses Compact 透传开关保持 setting JSON 往返兼容 [0.80ms]
+(pass) Responses Compact 透传开关能从已有渠道设置恢复 [0.15ms]
+(pass) Build 渠道设置保持未知字段和 WebSearch API Key 状态 [0.42ms]
+(pass) 新建渠道默认使用合并识别 [0.07ms]
+(pass) 视觉辅助多图模式缺失或非法时保持逐张识别 [0.16ms]
+(pass) 视觉辅助合并单批图片数默认值、边界和往返保持一致 [1.66ms]
+(pass) Build WebSearch 支持清空旧 Key 或替换为新 Key [0.60ms]
+(pass) Build 上游模型检测 settings 保持未知字段并规范 ignored models [0.31ms]
+
+src/features/channels/lib/__tests__/responses-reasoning-settings.test.ts:
+(pass) 旧渠道默认关闭，已有渠道能恢复历史推理计数开关 [0.34ms]
+(pass) 历史推理计数开关可创建、保存和关闭，保留未知配置 [1.02ms]
+
+src/features/channels/lib/__tests__/channel-table-row-id.test.ts:
+(pass) channel table row identity > keeps each channel identity when priority updates reorder the rows [0.19ms]
+(pass) channel table row identity > uses separate namespaces for tag and channel rows [0.10ms]
+
+src/features/channels/lib/__tests__/channel-policy-error-rows.test.ts:
+(pass) 「原因：行名」格式按整段精确匹配，不把行名互为前缀的其他行一起标出 [4.10ms]
+(pass) 重复预算的「A / B」格式同时标出两行 [0.19ms]
+(pass) 「行名 的超限动作无效：原因」格式取前面的行名 [0.09ms]
+(pass) 没有点名任何行或草稿行没有名称时不标出行；整段不匹配时退回子串匹配 [0.17ms]
+(pass) 去掉哨兵前缀只留具体原因，没有前缀时原样返回 [0.15ms]
+
+src/features/channels/lib/__tests__/new-api-channel.test.ts:
+(pass) New API channel > registers selection, ordering, model discovery, and icon metadata [0.73ms]
+(pass) New API channel > requires a non-blank Base URL [1.82ms]
+(pass) New API channel > keeps Sub2API Base URL validation unchanged [0.37ms]
+
+src/features/channels/lib/__tests__/channel-budget-status.test.ts:
+(pass) 状态推导按 已停用 > 未到时段 > 已超限 > 接近上限 > 生效中 的优先级，0 上限不视为超限 [0.21ms]
+(pass) 日窗口忽略时段：带时段的日行与无时段日行共用计数并指向创建最早的已保存行 [0.62ms]
+(pass) 整段窗口按时段区分计数，模型集合顺序不影响身份 [1.39ms]
+(pass) 个人行生效上限取最高用量用户的生效上限，池子行取行上限 [0.29ms]
+
+src/features/channels/lib/__tests__/channel-schedule-state.test.ts:
+(pass) 指定日期时段按起止判定：未开始给出开始时间，进行中不给，结束后标记已结束 [0.42ms]
+(pass) 被已保存行引用的时段优先采用预览来源的出现区间，而不是前端推算 [0.13ms]
+(pass) 未被引用的每周时段按服务器时区推算：跨周窗口命中为进行中，否则给出本周内的下次开始 [4.76ms]
+(pass) 停用的时段即使处于窗口内也不算进行中，但仍保留下次开始时间 [0.16ms]
+(pass) 时区名无法识别时退回浏览器时区继续判断；未落盘的指定日期时段没有起止时为未知 [1.54ms]
+
+src/features/channels/lib/__tests__/channel-field-update.test.ts:
+(pass) channel field update scheduler > coalesces rapid schedules into one update with the latest value [0.74ms]
+(pass) channel field update scheduler > flush commits the pending value immediately and cancels the timer [0.17ms]
+(pass) channel field update scheduler > flush without a pending value does nothing [0.09ms]
+(pass) channel field update scheduler > preserves a pending value of 0 [0.11ms]
+
+src/features/channels/components/dialogs/__tests__/channel-user-limits-dialog.test.tsx:
+[zustand persist middleware] Unable to update item 'system-config-storage', the given storage is currently unavailable.
+(pass) 关联子渠道能查看继承来源，但预算新增操作为只读 [1005.07ms]
+An update to TabsPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[zustand persist middleware] Unable to update item 'system-config-storage', the given storage is currently unavailable.
+(pass) 按行用量页签选中预算后展示用户用量，并按行提交目标已用额度 [1114.72ms]
+An update to TabsPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[zustand persist middleware] Unable to update item 'system-config-storage', the given storage is currently unavailable.
+(pass) 缺少渠道运行权限时禁用按行用量调整 [409.04ms]
+An update to TabsPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[zustand persist middleware] Unable to update item 'system-config-storage', the given storage is currently unavailable.
+(pass) 刷新后总数收缩时从空的末页自动回到有效页 [776.36ms]
+[zustand persist middleware] Unable to update item 'system-config-storage', the given storage is currently unavailable.
+(pass) 当前并发仅在对应页签打开时轮询，Dialog 关闭后停止 [635.97ms]
+[zustand persist middleware] Unable to update item 'system-config-storage', the given storage is currently unavailable.
+(pass) 查询失败时使用国际化后的兜底文案 [258.31ms]
+An update to TabsPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+[zustand persist middleware] Unable to update item 'system-config-storage', the given storage is currently unavailable.
+(pass) 无请求记录的用户可通过搜索提前配置并发覆盖，行级提额列表按行展示 [1464.99ms]
+[zustand persist middleware] Unable to update item 'system-config-storage', the given storage is currently unavailable.
+(pass) 页签顺序为预算、时段、用量、个人覆盖、并发，时段页签的改动切回预算页签后仍保留 [547.87ms]
+[zustand persist middleware] Unable to update item 'system-config-storage', the given storage is currently unavailable.
+(pass) 预算草稿未保存时关闭弹窗先弹出放弃确认，确认后才通知关闭 [710.33ms]
+
+src/features/channels/components/dialogs/__tests__/channel-limit-parent-panel.test.tsx:
+(pass) 当前父渠道不在候选页时仍保留其名称和 ID，同名候选可区分 [84.65ms]
+(pass) 解除关联经确认后发送显式零父渠道和确认版本，回显为独立限制 [130.10ms]
+(pass) 存在预算草稿时父渠道选择和保存均禁用，不能覆盖未保存配置 [27.55ms]
+
+src/features/channels/components/dialogs/__tests__/channel-period-policy-panel.test.tsx:
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+(pass) 修改后出现保存栏，预览 diff 后写入；版本冲突锁定草稿并允许重新加载 [493.55ms]
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+(pass) 新增按模型预算行：模型按钮与上限进入草稿，预览与保存携带临时 id 且 body 一致 [559.15ms]
+An update to DialogRoot inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+(pass) 已保存的预算行从行上打开用量抽屉，确认后才提交目标已用额度 [539.48ms]
+(pass) 只读权限不能提交，跨渠道迟到的查询不能覆盖当前面板 [92.75ms]
+(pass) 预算表展示时段、状态徽标与聚合进度；抽屉关闭和 Esc 都保留草稿 [275.38ms]
+(pass) 个人行进度来自聚合摘要的最高用量用户及其提额，读取失败可重试，新行不请求用量 [351.38ms]
+(pass) 放弃草稿需确认，确认后恢复权威配置并隐藏保存栏 [191.76ms]
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+(pass) 渠道模型累计默认关闭，预览保存保留开关和服务端来源，切换渠道恢复各自配置 [446.33ms]
+(pass) 带时段的日预算与同范围同模型的无时段预算共用计数：只画一条进度条，另一行显示文字说明 [107.68ms]
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to DialogRoot inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+(pass) 编辑抽屉选择「本渠道换模型」后草稿写入 channel_id=0，预览 body 与表格摘要一致 [516.54ms]
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ChannelPeriodPolicyForm inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+(pass) 后端 400 点名的预算行被高亮并显示具体原因，打开该行编辑抽屉时同样可见 [315.71ms]
+(pass) 未到时段的预算行在时段列显示下次开始时间，时段列表同样标注 [111.45ms]
+
+src/features/channels/components/drawers/sections/responses-compact-passthrough-field.test.tsx:
+(pass) Responses Compact 透传开关绑定表单值与可访问标签 [32.43ms]
+
+src/features/channels/components/drawers/sections/__tests__/vision-assist-multi-image-mode.test.tsx:
+(pass) 多图模式默认合并且可在两个选项间切换 [331.41ms]
+
+src/features/channels/components/drawers/sections/__tests__/responses-reasoning-included-field.test.tsx:
+(pass) 渠道历史推理计数开关有可访问标签，点击后同步表单并可关闭 [53.59ms]
+
+src/features/channels/components/drawers/sections/__tests__/vision-assist-model-fields.test.tsx:
+(pass) 同名渠道显示各自 ID，按 ID 搜索后切换渠道会清空旧模型 [131.30ms]
+(pass) 历史失效渠道和模型保持可见，未选择渠道时模型禁用 [53.10ms]
+(pass) 渠道加载期间禁用选择，失败后保留历史值并提供重试入口 [39.91ms]
+
+ 68 pass
+ 0 fail
+Ran 68 tests across 16 files. [14.34s]

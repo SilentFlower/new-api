@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "checks": [
+    "GET /api/channel/79001",
+    "GET /api/channel/79001/user-limit-status/77",
+    "GET /api/channel/79001/period-policy",
+    "GET /api/channel/79001/user-concurrency?p=1&page_size=20",
+    "GET /api/channel/79001/budgets/usage-summary",
+    "GET /api/channel/79001/budgets/f31470527f4e4b3eb8f05ee11f9b721b/usage?scope=user&p=1&page_size=20",
+    "GET /api/channel/79001/user-limit-overrides?p=1&page_size=20",
+    "GET /api/channel/79001/budget-user-overrides?p=1&page_size=20",
+    "PUT /api/channel/",
+    "PUT /api/channel/79001/user-limit-overrides/77",
+    "PUT /api/channel/79001/budgets/f31470527f4e4b3eb8f05ee11f9b721b/user-overrides/77",
+    "PUT /api/channel/79001/period-policy"
+  ],
+  "sourceChanged": false
+}

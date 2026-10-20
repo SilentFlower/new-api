@@ -1,0 +1,192 @@
+$ rsbuild build
+
+Rsbuild v2.1.6
+
+info    build started...
+ready   built in 13.3s
+
+File (web)                                                             Size         Gzip
+dist/static/js/async/8458.b077b85a48.js                                0.15 kB      0.14 kB
+dist/static/js/async/3197.99a09f68dd.js                                0.15 kB      0.14 kB
+dist/static/js/async/349.15552ba8aa.js                                 0.15 kB      0.14 kB
+dist/static/js/async/4527.a0d67c0fdd.js                                0.15 kB      0.14 kB
+dist/static/js/async/8666.5b959d0cbe.js                                0.20 kB      0.17 kB
+dist/static/js/async/576.fc497d38ac.js                                 0.88 kB      0.50 kB
+dist/static/js/async/8063.49c00ffa52.js                                1.0 kB       0.57 kB
+dist/static/js/async/9941.037e923972.js                                1.0 kB       0.57 kB
+dist/index.html                                                        1.1 kB       0.54 kB
+dist/static/js/async/2122.1539665e2e.js                                2.8 kB       1.2 kB
+dist/static/js/async/4247.7c878defb1.js                                3.0 kB       1.4 kB
+dist/static/js/async/837.d34af4967b.js                                 3.1 kB       1.4 kB
+dist/static/js/async/2414.c8700a5f05.js                                3.2 kB       1.0 kB
+dist/static/js/async/5676.5c9fe36647.js                                3.3 kB       1.2 kB
+dist/static/js/async/4083.d59a7006ab.js                                3.3 kB       1.7 kB
+dist/static/js/async/9641.501209946a.js                                3.4 kB       1.5 kB
+dist/static/js/async/7578.59eb81b65d.js                                3.4 kB       1.5 kB
+dist/static/js/async/8839.b65b7ec68e.js                                3.5 kB       1.6 kB
+dist/static/js/async/9634.2e8395a112.js                                3.9 kB       1.9 kB
+dist/static/js/async/3559.73469e1caa.js                                4.0 kB       1.7 kB
+dist/static/js/async/344.4542582870.js                                 4.0 kB       1.8 kB
+dist/static/js/async/6215.aba7ead168.js                                4.1 kB       1.7 kB
+dist/static/js/async/7729.76fb640241.js                                4.1 kB       1.8 kB
+dist/static/js/async/9908.ce1d9e4dc0.js                                4.2 kB       1.6 kB
+dist/static/font/KaTeX_Size3-Regular.9acaf01c64.woff                   4.4 kB
+dist/static/js/async/2994.743c6a20e0.js                                4.6 kB       1.9 kB
+dist/static/js/async/9998.e5987380fc.js                                4.6 kB       1.9 kB
+dist/static/js/async/2097.b6d58ac991.js                                4.8 kB       2.0 kB
+dist/static/js/async/6362.5b6b941154.js                                4.9 kB       2.0 kB
+dist/static/font/KaTeX_Size4-Regular.10d95fd3a2.woff2                  4.9 kB
+dist/static/js/async/1648.8831bdcb4b.js                                5.1 kB       2.1 kB
+dist/static/font/KaTeX_Size2-Regular.5916a24fa3.woff2                  5.2 kB
+dist/static/font/KaTeX_Size1-Regular.eae34984b3.woff2                  5.5 kB
+dist/static/font/KaTeX_Size4-Regular.7a996c9da2.woff                   6.0 kB
+dist/static/font/KaTeX_Size2-Regular.577270225e.woff                   6.2 kB
+dist/static/font/KaTeX_Size1-Regular.e1e279cbdd.woff                   6.5 kB
+dist/static/font/KaTeX_Caligraphic-Regular.55fac25845.woff2            6.9 kB
+dist/static/font/KaTeX_Caligraphic-Bold.ec17d13264.woff2               6.9 kB
+dist/static/js/async/2450.283953c8c4.js                                7.4 kB       2.8 kB
+dist/static/font/KaTeX_Size3-Regular.a144ef5840.ttf                    7.6 kB
+dist/static/font/KaTeX_Caligraphic-Regular.dad44a7fc6.woff             7.7 kB
+dist/static/font/KaTeX_Caligraphic-Bold.b67709187b.woff                7.7 kB
+dist/static/font/public-sans-vietnamese-wght-normal.7b0fa8550c.woff2   7.7 kB
+dist/static/js/async/829.0a5f30693d.js                                 7.9 kB       3.1 kB
+dist/static/js/async/2878.58cdb69f8a.js                                8.0 kB       3.4 kB
+dist/static/js/async/1892.ba7b52b6e4.js                                8.4 kB       3.3 kB
+dist/static/js/async/4661.774fbc840c.js                                8.9 kB       3.6 kB
+dist/static/font/lora-vietnamese-wght-normal.19149cdf69.woff2          9.0 kB
+dist/static/js/async/4241.074ded2688.js                                9.3 kB       3.8 kB
+dist/static/font/KaTeX_Script-Regular.03e9641d6f.woff2                 9.6 kB
+dist/static/js/async/3151.bbc4a8df54.js                                10.0 kB      3.2 kB
+dist/static/font/KaTeX_SansSerif-Regular.ba21ed5f84.woff2              10.3 kB
+dist/static/font/KaTeX_Size4-Regular.fbccdabe0a.ttf                    10.4 kB
+dist/static/font/KaTeX_Script-Regular.0750571032.woff                  10.6 kB
+dist/static/font/KaTeX_Fraktur-Regular.d3c882a649.woff2                11.3 kB
+dist/static/font/KaTeX_Fraktur-Bold.d42a5579b0.woff2                   11.3 kB
+dist/static/font/KaTeX_Size2-Regular.d6b476ecd3.ttf                    11.5 kB
+dist/static/js/async/5443.cd37cbc3bc.js                                11.5 kB      4.2 kB
+dist/static/font/KaTeX_SansSerif-Italic.3b1e59b3ba.woff2               12.0 kB
+dist/static/font/KaTeX_SansSerif-Bold.8c5b5494b6.woff2                 12.2 kB
+dist/static/font/KaTeX_Size1-Regular.fabc004aab.ttf                    12.2 kB
+dist/static/font/KaTeX_SansSerif-Regular.740484788f.woff               12.3 kB
+dist/static/font/KaTeX_Caligraphic-Regular.07ef19e7b0.ttf              12.3 kB
+dist/static/font/KaTeX_Caligraphic-Bold.cce5b8ecea.ttf                 12.4 kB
+dist/static/js/async/7044.0d4712a18a.js                                12.9 kB      4.6 kB
+dist/static/js/async/7373.27c864fc3a.js                                12.9 kB      4.9 kB
+dist/static/font/KaTeX_Fraktur-Regular.7c1871215e.woff                 13.2 kB
+dist/static/font/KaTeX_Fraktur-Bold.9f256b8593.woff                    13.3 kB
+dist/static/font/KaTeX_Typewriter-Regular.a8709e3622.woff2             13.6 kB
+dist/static/js/async/8890.74ddbcf4ee.js                                13.8 kB      5.2 kB
+dist/static/font/KaTeX_SansSerif-Italic.7c9bc82b17.woff                14.1 kB
+dist/static/font/KaTeX_SansSerif-Bold.bf59d231c3.woff                  14.4 kB
+dist/static/js/async/7166.e395f6c9ff.js                                14.6 kB      5.2 kB
+dist/favicon.ico                                                       15.4 kB
+dist/static/js/async/7260.ba3c1381fc.js                                16.0 kB      5.7 kB
+dist/static/font/KaTeX_Typewriter-Regular.6258592bdc.woff              16.0 kB
+dist/static/font/KaTeX_Math-BoldItalic.572d331f69.woff2                16.4 kB
+dist/static/font/KaTeX_Math-Italic.f28c23acad.woff2                    16.4 kB
+dist/static/font/KaTeX_Script-Regular.fe9cbbe1a0.ttf                   16.6 kB
+dist/static/font/KaTeX_Main-BoldItalic.6f2bb1dff2.woff2                16.8 kB
+dist/static/js/async/566.6992d904f5.js                                 16.9 kB      5.9 kB
+dist/static/font/KaTeX_Main-Italic.8916142bec.woff2                    17.0 kB
+dist/static/font/lora-symbols-wght-normal.0f558387a7.woff2             17.2 kB
+dist/static/js/async/8282.b9c4a3f61e.js                                18.0 kB      5.8 kB
+dist/static/font/public-sans-latin-ext-wght-normal.0afa0ba4c0.woff2    18.5 kB
+dist/static/font/KaTeX_Math-BoldItalic.f1035d8d5d.woff                 18.7 kB
+dist/static/font/KaTeX_Math-Italic.5295ba483a.woff                     18.7 kB
+dist/static/js/async/4798.03042d5f02.js                                19.3 kB      7.4 kB
+dist/static/font/KaTeX_Main-BoldItalic.e3f82f9d27.woff                 19.4 kB
+dist/static/font/KaTeX_SansSerif-Regular.d4d7ba4804.ttf                19.4 kB
+dist/static/js/async/8687.07a14056d4.js                                19.4 kB      6.9 kB
+dist/static/font/KaTeX_Fraktur-Regular.ed38e79f57.ttf                  19.6 kB
+dist/static/font/KaTeX_Fraktur-Bold.b18f59e1d1.ttf                     19.6 kB
+dist/static/font/KaTeX_Main-Italic.9024d815ba.woff                     19.7 kB
+dist/static/font/lora-latin-ext-wght-normal.ffcbee2da9.woff2           20.1 kB
+dist/static/font/lora-cyrillic-wght-normal.e27a865958.woff2            21.2 kB
+dist/static/js/async/745.c081cd1537.js                                 21.9 kB      6.9 kB
+dist/static/js/async/7020.532964c97c.js                                22.1 kB      5.7 kB
+dist/static/js/async/8513.46953bdbb6.js                                22.3 kB      8.2 kB
+dist/static/font/KaTeX_SansSerif-Italic.b4c20c84d8.ttf                 22.4 kB
+dist/static/js/async/3247.bb49ca4f9f.js                                22.9 kB      7.4 kB
+dist/static/js/async/3680.c201667bbd.js                                23.1 kB      7.8 kB
+dist/static/font/lora-cyrillic-ext-wght-normal.a558ae9346.woff2        23.6 kB
+dist/static/font/KaTeX_SansSerif-Bold.94e1e8dc5f.ttf                   24.5 kB
+dist/static/font/KaTeX_Main-Bold.c3fb5ac22f.woff2                      25.3 kB
+dist/static/font/KaTeX_Main-Regular.0462f03bdf.woff2                   26.3 kB
+dist/static/font/public-sans-latin-wght-normal.035c7fe496.woff2        26.8 kB
+dist/static/js/async/9645.2b50f48850.js                                27.3 kB      7.4 kB
+dist/static/font/KaTeX_Typewriter-Regular.d97aaf4a1e.ttf               27.6 kB
+dist/static/font/KaTeX_AMS-Regular.a79f1c3119.woff2                    28.1 kB
+dist/static/js/async/7280.550b85a1e3.js                                28.7 kB      8.6 kB
+dist/static/font/lora-math-wght-normal.b7769d42e6.woff2                29.2 kB
+dist/static/css/4590.10e003a7e2.css                                    29.2 kB      8.0 kB
+dist/static/font/KaTeX_Main-Bold.d181c4650d.woff                       29.9 kB
+dist/static/js/async/193.ea7cdd66e9.js                                 30.7 kB      8.2 kB
+dist/static/font/KaTeX_Main-Regular.7f51fe0340.woff                    30.8 kB
+dist/static/font/KaTeX_Math-BoldItalic.a879cf8383.ttf                  31.2 kB
+dist/static/font/KaTeX_Math-Italic.939bc64440.ttf                      31.3 kB
+dist/static/font/KaTeX_Main-BoldItalic.70d8b0a530.ttf                  33.0 kB
+dist/static/font/KaTeX_AMS-Regular.1608a09b4a.woff                     33.5 kB
+dist/static/font/KaTeX_Main-Italic.47373d1e51.ttf                      33.6 kB
+dist/static/js/async/1424.0e2174402e.js                                35.2 kB      9.6 kB
+dist/static/font/lora-latin-wght-normal.f60a385cfb.woff2               37.8 kB
+dist/static/js/async/5712.76817adbea.js                                38.3 kB      10.5 kB
+dist/static/js/async/3794.1761ba097c.js                                41.7 kB      12.4 kB
+dist/static/js/async/4573.8ddde58f90.js                                51.0 kB      15.2 kB
+dist/static/font/KaTeX_Main-Bold.b74a1a8b2c.ttf                        51.3 kB
+dist/static/font/KaTeX_Main-Regular.b7f8fe9b5f.ttf                     53.6 kB
+dist/static/js/async/4576.83c0f6bbca.js                                57.7 kB      14.2 kB
+dist/static/js/async/2105.9fc8a182cd.js                                62.3 kB      18.2 kB
+dist/static/font/KaTeX_AMS-Regular.4aafdb685c.ttf                      63.6 kB
+dist/static/js/async/2029.c53531e948.js                                71.6 kB      18.8 kB
+dist/static/js/async/7007.848eff75f3.js                                71.9 kB      20.3 kB
+dist/static/js/async/7229.82cf1c7769.js                                76.3 kB      21.6 kB
+dist/static/js/async/7910.cc0d435e35.js                                82.1 kB      20.7 kB
+dist/static/js/async/5306.5f0cd3353f.js                                91.9 kB      27.2 kB
+dist/static/js/async/1402.df0b4d8164.js                                99.6 kB      26.0 kB
+dist/static/js/async/4429.c1412c7b4d.js                                104.0 kB     29.5 kB
+dist/static/js/async/1923.0ddc6015e0.js                                115.5 kB     14.4 kB
+dist/static/js/async/9086.8a05e1e933.js                                128.0 kB     42.7 kB
+dist/static/js/async/4057.0915c9844f.js                                134.2 kB     32.4 kB
+dist/static/js/async/2424.82c9ed0532.js                                168.2 kB     42.3 kB
+dist/static/js/vendor-tanstack.d26c1b8179.js                           178.8 kB     52.1 kB
+dist/static/js/async/8085.a0d000b045.js                                186.4 kB     30.0 kB
+dist/static/js/lib-react.064bab1680.js                                 189.0 kB     59.7 kB
+dist/static/js/async/9253.07a7c08b7c.js                                209.1 kB     74.1 kB
+dist/static/js/async/3427.cc585d3fa4.js                                227.0 kB     63.8 kB
+dist/static/js/async/6314.31f3f0d7a7.js                                235.4 kB     61.3 kB
+dist/static/js/async/4345.19b033e29c.js                                259.8 kB     72.0 kB
+dist/static/js/async/6709.56a044e410.js                                288.6 kB     62.5 kB
+dist/static/js/async/7396.32b6e9c276.js                                328.5 kB     81.1 kB
+dist/static/js/vendor-ui-primitives.b17b3046c5.js                      339.9 kB     109.7 kB
+dist/static/js/async/9532.f1c38c8b66.js                                365.1 kB     123.7 kB
+dist/static/js/async/9126.b8ae74fcfc.js                                404.9 kB     93.2 kB
+dist/static/css/index.f84c2419bd.css                                   417.1 kB     60.4 kB
+dist/static/js/async/9120.da1e517c54.js                                419.7 kB     118.2 kB
+dist/static/js/async/6939.d567d12c3f.js                                445.0 kB     107.9 kB
+dist/static/js/async/9534.012eec26ae.js                                458.6 kB     143.9 kB
+dist/static/js/async/9884.20e91e5653.js                                465.8 kB     100.4 kB
+dist/static/js/async/6139.cc8363fd35.js                                483.7 kB     157.5 kB
+dist/static/js/async/1129.41cfd8d75e.js                                529.9 kB     179.8 kB
+dist/static/js/async/9309.9b56d27d3e.js                                577.1 kB     109.4 kB
+dist/static/js/async/5229.9362ee6298.js                                691.4 kB     80.9 kB
+dist/static/js/async/4744.5c6f2d3b08.js                                707.5 kB     196.8 kB
+dist/static/js/async/5430.ea74b4eb8d.js                                746.4 kB     235.3 kB
+dist/static/js/async/1127.bee1faa10b.js                                786.7 kB     210.7 kB
+dist/static/js/async/6981.f850cc11ff.js                                793.9 kB     201.6 kB
+dist/static/js/4590.50b6c16a6b.js                                      805.2 kB     244.7 kB
+dist/static/js/async/1024.16cd255875.js                                1094.4 kB    359.4 kB
+dist/static/js/async/7515.da10aad504.js                                1319.1 kB    426.9 kB
+dist/static/js/async/9353.e2ede62aa4.js                                1625.0 kB    302.6 kB
+dist/static/js/async/4151.99268a3b97.js                                1664.5 kB    485.5 kB
+dist/static/js/async/3239.33fd36c243.js                                1961.9 kB    418.0 kB
+dist/static/js/async/9243.b5c19ac00c.js                                2066.1 kB    561.6 kB
+dist/static/js/async/240.8dd4101a83.js                                 2119.8 kB    560.8 kB
+dist/static/js/async/5143.003cfdc535.js                                2147.8 kB    478.0 kB
+dist/static/js/async/8496.d136c3a3a9.js                                3164.3 kB    374.1 kB
+dist/static/js/index.17d3327b3c.js                                     3862.6 kB    1102.2 kB
+dist/static/js/async/3898.ebb33f5002.js                                5088.1 kB    1968.2 kB
+dist/static/js/async/9197.6b3bf7a7e7.js                                5371.6 kB    1203.9 kB
+dist/static/js/async/8733.fc0eea39aa.js                                5469.0 kB    1030.1 kB
+dist/static/js/async/9926.350cbf223b.js                                6827.3 kB    2750.5 kB
+
+                                                              Total:   58576.8 kB   16911.1 kB

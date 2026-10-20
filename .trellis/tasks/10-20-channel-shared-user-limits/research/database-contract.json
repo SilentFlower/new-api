@@ -1,0 +1,13 @@
+{
+  "run_id": "newapi-channel-parent-9f231b1a",
+  "images": {
+    "mysql": "mysql:8.0",
+    "postgres": "postgres:16-alpine"
+  },
+  "passed": true,
+  "cleaned": true,
+  "ports": {
+    "mysql": "44636",
+    "postgres": "44637"
+  }
+}

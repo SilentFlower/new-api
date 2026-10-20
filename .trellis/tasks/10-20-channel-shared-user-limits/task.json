@@ -1,0 +1,196 @@
+{
+  "id": "channel-shared-user-limits",
+  "name": "channel-shared-user-limits",
+  "title": "多个渠道共享用户并发与额度限制",
+  "description": "子渠道单向继承父渠道的并发、预算与个人提额并共享计数，子项只读、历史不回填，ai-fund 继续管理父渠道且无需改源码。",
+  "status": "completed",
+  "dev_type": "fullstack",
+  "scope": "channels",
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-10-20",
+  "completedAt": "2026-10-20",
+  "closeout": {
+    "status": "closed",
+    "closedAt": "2026-10-20T08:27:08Z",
+    "blockers": []
+  },
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-10-20T06:40:21Z",
+      "contextKey": "codex_01a15807-5784-7212-8cd7-07d6fd4733e3",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "13da98d47910706b7edfd76b6d158635945af0bc",
+        "status": [
+          {
+            "status": "??",
+            "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc"
+          },
+          {
+            "status": "??",
+            "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/brief.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/design.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/implement.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/release.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/reasoning-effort-low.png"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/release-evidence.json"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/task.json"
+          },
+          {
+            "status": "??",
+            "path": "scripts/__pycache__/provision_workflow_accounts.cpython-312.pyc"
+          },
+          {
+            "status": "??",
+            "path": "scripts/__pycache__/test_provision_workflow_accounts.cpython-312.pyc"
+          }
+        ],
+        "repositories": [
+          {
+            "root": ".",
+            "head": "13da98d47910706b7edfd76b6d158635945af0bc",
+            "status": [
+              {
+                "status": "??",
+                "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc"
+              },
+              {
+                "status": "??",
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/brief.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/design.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/implement.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/release.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/reasoning-effort-low.png"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/release-evidence.json"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/task.json"
+              },
+              {
+                "status": "??",
+                "path": "scripts/__pycache__/provision_workflow_accounts.cpython-312.pyc"
+              },
+              {
+                "status": "??",
+                "path": "scripts/__pycache__/test_provision_workflow_accounts.cpython-312.pyc"
+              }
+            ],
+            "worktreeDiffSha256": "054129c5d95f6ccb8252ee77b25ec2c5c00c3b137d6aaaa6bb74f167e6c4383a",
+            "indexDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "untracked": [
+              {
+                "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc",
+                "sha256": "5b434c1f233e42c5db42aa2f50543cf78b17e0b3ee3532d478bb1990b398a730"
+              },
+              {
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc",
+                "sha256": "711f6c4c2ef4f2d25bfac5fb55b5b80f662f746e837a2884aac06fc5e5f4d82b"
+              },
+              {
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/release.md",
+                "sha256": "ba1c7a1400ac9cd6aa9bab959da9f1803f8fcf49105a4021e2127ec1ddfb35c9"
+              },
+              {
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/reasoning-effort-low.png",
+                "sha256": "59b0a70d221b5e79066a105c97a54909f7ce3f797b40c0d984a1c7e045f298cc"
+              },
+              {
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/release-evidence.json",
+                "sha256": "3c3ca7768cb0987e3289fc2c22ff8c34837a7837de4ede5ffb53de2d0261e8ed"
+              },
+              {
+                "path": "scripts/__pycache__/provision_workflow_accounts.cpython-312.pyc",
+                "sha256": "67ebe9097d5d27b05818bbacf6539d8d6c1f074c87941ed6339346d3ad82bd88"
+              },
+              {
+                "path": "scripts/__pycache__/test_provision_workflow_accounts.cpython-312.pyc",
+                "sha256": "7b4e8cff9a155ac40682ebe5b0e5cf486267315d08760fdbbb2f5fa07aa28760"
+              }
+            ],
+            "conflicts": [],
+            "integration": [],
+            "fingerprint": "b10485fe01d4284d1bdcbf48754ebc3b03e6005a48d65718e3b9228ed11240f1"
+          }
+        ],
+        "fingerprint": "8255f6c4b4e666f3378291bfa7d66760b597c97a9caadaf714e46b9bd774ff2c"
+      }
+    }
+  },
+  "progress": {
+    "completedSteps": [
+      "父子渠道共享限制与只读管理已实现",
+      "CHK-001、FBK-001 已修复，full Check-All 重检通过",
+      "Go、三库、前端与 ai-fund 合同验证通过",
+      "项目规范已回写",
+      "功能代码已提交并推送"
+    ],
+    "partialStep": null,
+    "nextStep": "任务完成；上线由既有发布流程安排",
+    "notes": "ai-fund 源码未修改；21项验证通过。关系切换先排空在途，保存后至少等待5秒，多实例需Redis。",
+    "updatedAt": "2026-10-20T08:27:08Z"
+  }
+}

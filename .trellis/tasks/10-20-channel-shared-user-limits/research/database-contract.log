@@ -1,0 +1,40 @@
+=== RUN   TestChannelLimitParentDatabaseMigrationAndConcurrentTopology
+=== RUN   TestChannelLimitParentDatabaseMigrationAndConcurrentTopology/sqlite
+
+2026/10/20 16:13:27 [31;1m/root/project/new-api/model/channel_limit_parent.go:78 [35;1mrecord not found
+[0m[33m[0.042ms] [34;1m[rows:0][0m SELECT * FROM `codex_parent_contract_channel_limit_parents` WHERE channel_id = 81 ORDER BY `codex_parent_contract_channel_limit_parents`.`channel_id` LIMIT 1
+
+2026/10/20 16:13:27 [31;1m/root/project/new-api/model/channel_limit_parent.go:78 [35;1mrecord not found
+[0m[33m[0.037ms] [34;1m[rows:0][0m SELECT * FROM `codex_parent_contract_channel_limit_parents` WHERE channel_id = 82 ORDER BY `codex_parent_contract_channel_limit_parents`.`channel_id` LIMIT 1
+
+2026/10/20 16:13:27 [34;1m/root/project/new-api/model/channel_status_cleanup_test.go:35
+[0m[35m[warn] [0mremoving callback `test:channel_status_cleanup_reenable` from /root/project/new-api/model/channel_status_cleanup_test.go:35
+=== RUN   TestChannelLimitParentDatabaseMigrationAndConcurrentTopology/mysql
+
+2026/10/20 16:13:28 [31;1m/root/project/new-api/model/channel_limit_parent.go:78 [35;1mrecord not found
+[0m[33m[1.592ms] [34;1m[rows:0][0m SELECT * FROM `codex_parent_contract_channel_limit_parents` WHERE channel_id = 81 ORDER BY `codex_parent_contract_channel_limit_parents`.`channel_id` LIMIT 1
+
+2026/10/20 16:13:28 [31;1m/root/project/new-api/model/channel_limit_parent.go:78 [35;1mrecord not found
+[0m[33m[2.028ms] [34;1m[rows:0][0m SELECT * FROM `codex_parent_contract_channel_limit_parents` WHERE channel_id = 82 ORDER BY `codex_parent_contract_channel_limit_parents`.`channel_id` LIMIT 1
+
+2026/10/20 16:13:28 [34;1m/root/project/new-api/model/channel_status_cleanup_test.go:35
+[0m[35m[warn] [0mremoving callback `test:channel_status_cleanup_reenable` from /root/project/new-api/model/channel_status_cleanup_test.go:35
+=== RUN   TestChannelLimitParentDatabaseMigrationAndConcurrentTopology/postgres
+
+2026/10/20 16:13:29 [31;1m/root/project/new-api/model/channel_limit_parent.go:78 [35;1mrecord not found
+[0m[33m[2.197ms] [34;1m[rows:0][0m SELECT * FROM "codex_parent_contract_channel_limit_parents" WHERE channel_id = 81 ORDER BY "codex_parent_contract_channel_limit_parents"."channel_id" LIMIT 1
+
+2026/10/20 16:13:29 [31;1m/root/project/new-api/model/channel_limit_parent.go:78 [35;1mrecord not found
+[0m[33m[2.593ms] [34;1m[rows:0][0m SELECT * FROM "codex_parent_contract_channel_limit_parents" WHERE channel_id = 82 ORDER BY "codex_parent_contract_channel_limit_parents"."channel_id" LIMIT 1
+
+2026/10/20 16:13:29 [31;1m/root/project/new-api/model/channel_limit_parent.go:78 [35;1mrecord not found
+[0m[33m[0.996ms] [34;1m[rows:0][0m SELECT * FROM "codex_parent_contract_channel_limit_parents" WHERE channel_id = 84 ORDER BY "codex_parent_contract_channel_limit_parents"."channel_id" LIMIT 1
+
+2026/10/20 16:13:29 [34;1m/root/project/new-api/model/channel_status_cleanup_test.go:35
+[0m[35m[warn] [0mremoving callback `test:channel_status_cleanup_reenable` from /root/project/new-api/model/channel_status_cleanup_test.go:35
+--- PASS: TestChannelLimitParentDatabaseMigrationAndConcurrentTopology (1.75s)
+    --- PASS: TestChannelLimitParentDatabaseMigrationAndConcurrentTopology/sqlite (0.01s)
+    --- PASS: TestChannelLimitParentDatabaseMigrationAndConcurrentTopology/mysql (1.04s)
+    --- PASS: TestChannelLimitParentDatabaseMigrationAndConcurrentTopology/postgres (0.70s)
+PASS
+ok  	github.com/QuantumNous/new-api/model	1.820s

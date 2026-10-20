@@ -1,0 +1,12 @@
+{"file": ".trellis/spec/guides/build-upstream-friendly-customization.md", "reason": "独立领域实现与原文件薄接入约束"}
+{"file": ".trellis/spec/backend/channel-user-concurrency.md", "reason": "原子租约、取消、查询、错误与重试合同"}
+{"file": ".trellis/tasks/10-20-channel-shared-user-limits/research/budget-spec-loading.md", "reason": "预算权威规范超过注入上限，按此说明分段完整读取原文，禁止依赖截断上下文"}
+{"file": ".trellis/spec/backend/channel-user-daily-quota.md", "reason": "保留仍生效的计数与正向结算不变量，废弃配置以 v2 为准"}
+{"file": ".trellis/spec/backend/channel-user-weekly-quota-and-overrides.md", "reason": "个人并发覆盖、历史任务和 BFF 边界，预算字段以 v2 为准"}
+{"file": ".trellis/spec/backend/database-guidelines.md", "reason": "三库迁移与事务，锁规则以 AGENTS.md 的 lockForUpdate 为准"}
+{"file": ".trellis/spec/backend/api-contracts.md", "reason": "安全候选、分页、身份与权限合同"}
+{"file": ".trellis/spec/frontend/base-ui-composition.md", "reason": "父选择器、弹窗、只读与组合上下文"}
+{"file": ".trellis/spec/frontend/i18n-merge-guidelines.md", "reason": "七语言及源码缺键验证"}
+{"file": ".trellis/tasks/10-20-channel-shared-user-limits/research/current-behavior.md", "reason": "现有入口与已确认产品决定"}
+{"file": ".trellis/tasks/10-20-channel-shared-user-limits/research/parent-channel-inheritance.md", "reason": "父继承与快照接入依据"}
+{"file": ".trellis/tasks/10-20-channel-shared-user-limits/research/ai-fund-impact.md", "reason": "ai-fund 固定管理 A 且源码不变的兼容边界"}

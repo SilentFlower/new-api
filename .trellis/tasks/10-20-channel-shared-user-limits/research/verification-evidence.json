@@ -1,0 +1,226 @@
+{
+  "verifiedAt": "2026-10-20T08:14:52.185956+00:00",
+  "checks": [
+    {
+      "name": "go-all",
+      "command": "go test ./...",
+      "cwd": ".",
+      "exitCode": 0,
+      "evidence": "research/backend-all-final.log"
+    },
+    {
+      "name": "go-race",
+      "command": "go test -race ./service ./controller ./relay -run 'TestChannelLimitParent|TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns' -count=1",
+      "cwd": ".",
+      "exitCode": 0,
+      "evidence": "research/backend-race-final.log"
+    },
+    {
+      "name": "go-vet",
+      "command": "go vet ./model ./service ./controller ./middleware ./router ./relay",
+      "cwd": ".",
+      "exitCode": 0,
+      "evidence": "research/backend-vet.log"
+    },
+    {
+      "name": "databases",
+      "command": "python3 .trellis/tasks/10-20-channel-shared-user-limits/research/verify-local-databases.py",
+      "cwd": ".",
+      "exitCode": 0,
+      "evidence": "research/database-contract.log"
+    },
+    {
+      "name": "frontend-tests",
+      "command": "bun test src/features/channels",
+      "cwd": "web",
+      "exitCode": 0,
+      "evidence": "research/frontend-channels.log"
+    },
+    {
+      "name": "typecheck",
+      "command": "bun run typecheck",
+      "cwd": "web",
+      "exitCode": 0,
+      "evidence": "research/frontend-typecheck.log"
+    },
+    {
+      "name": "lint",
+      "command": "bun run lint",
+      "cwd": "web",
+      "exitCode": 0,
+      "evidence": "research/frontend-lint.log"
+    },
+    {
+      "name": "frontend-build",
+      "command": "bun run build",
+      "cwd": "web",
+      "exitCode": 0,
+      "evidence": "research/frontend-build.log"
+    },
+    {
+      "name": "i18n-sync",
+      "command": "bun run i18n:sync",
+      "cwd": "web",
+      "exitCode": 0,
+      "evidence": "research/i18n-sync.log"
+    },
+    {
+      "name": "i18n-source",
+      "command": "node scripts/find-missing-keys.mjs (temporary script removed)",
+      "cwd": "web",
+      "exitCode": 0,
+      "evidence": "research/i18n-missing.log"
+    },
+    {
+      "name": "i18n-values",
+      "command": "Seven locale new-key and placeholder comparison",
+      "cwd": ".",
+      "exitCode": 0,
+      "evidence": "research/i18n-verification.json"
+    },
+    {
+      "name": "ai-fund-tests",
+      "command": "node --test worker/src/newapi_client.test.js worker/src/pool_limits.test.js worker/src/pool_period_limits.test.js",
+      "cwd": "/root/project/ai-fund",
+      "exitCode": 0,
+      "evidence": "research/ai-fund-tests.log"
+    },
+    {
+      "name": "ai-fund-contract",
+      "command": "node .trellis/tasks/10-20-channel-shared-user-limits/research/verify-ai-fund-contract.mjs",
+      "cwd": ".",
+      "exitCode": 0,
+      "evidence": "research/ai-fund-contract.log"
+    },
+    {
+      "name": "relaykit-build",
+      "command": "GOWORK=off go build ./...",
+      "cwd": "relaykit",
+      "exitCode": 0,
+      "evidence": "research/relaykit-build.log"
+    },
+    {
+      "name": "relaykit-vet",
+      "command": "GOWORK=off go vet ./...",
+      "cwd": "relaykit",
+      "exitCode": 0,
+      "evidence": "research/relaykit-vet.log"
+    },
+    {
+      "name": "format",
+      "command": "gofmt on changed Go files; protected-header formatter --write and --check on a temporary copy of changed TS/TSX",
+      "exitCode": 0
+    },
+    {
+      "name": "diff",
+      "command": "git diff --check",
+      "exitCode": 0
+    },
+    {
+      "name": "task-context",
+      "command": "python3 .trellis/scripts/task.py validate .trellis/tasks/10-20-channel-shared-user-limits",
+      "exitCode": 0
+    },
+    {
+      "name": "repair-focused",
+      "command": "go test ./model ./controller -run 'TestChannelStatusCleanupPreservesReenabledChannels|TestChannelLimitParentVideoLookupRejectsSharedConcurrency|TestChannelLimitParentProtectsEveryDeletionEntry' -count=1",
+      "cwd": ".",
+      "exitCode": 0,
+      "evidence": "research/repair-focused.log"
+    },
+    {
+      "name": "repair-race",
+      "command": "go test -race ./model ./controller -run 'TestChannelStatusCleanupPreservesReenabledChannels|TestChannelLimitParentVideoLookupRejectsSharedConcurrency|TestChannelLimitParentProtectsEveryDeletionEntry' -count=1",
+      "cwd": ".",
+      "exitCode": 0,
+      "evidence": "research/repair-race.log"
+    },
+    {
+      "name": "repair-vet",
+      "command": "go vet ./model ./controller",
+      "cwd": ".",
+      "exitCode": 0,
+      "evidence": "research/repair-vet.log"
+    }
+  ],
+  "sourceSha256": {
+    "constant/context_key.go": "07ba20a4915e85adf76dfa2645e64c4f78d8c2a0a5d8c6c66f634bff6c736df0",
+    "controller/channel.go": "ae4ea2c63300ead245340c0070f663a95f9134b26bc016b5d672c5538c7f729f",
+    "controller/channel_budget.go": "b1faf37d7a71133594275ea8f92a78c3fb2b41b84eb38254ec33efd482024908",
+    "controller/channel_budget_usage_summary.go": "5735164eb614b3f5b50a145bfb6196f72dedea9ecd8555883020a32446887ef8",
+    "controller/channel_limit_fallback.go": "04e2011c0f8a36a073f26e8f33db82c43918ac1634d21bb18edc2af46433be66",
+    "controller/channel_limit_parent.go": "5d4a62e14f032de93c53bf55dcedcfbdde2dd7370c8c783b0fc3847f28fc747c",
+    "controller/channel_limit_parent_test.go": "e046005ceaa6aa4064c64d4eda0a5ed68f1e23e56572f7af4e999a86af1fbf78",
+    "controller/channel_limit_parent_video_test.go": "4ec6251394023ab8426ee0688541b26f8a386b3069eccc3434f60fde242febb4",
+    "controller/channel_user_concurrency.go": "751be390abbb534fe79ce2518d8087fee5221591f70011c61fbec8bd037f3bbd",
+    "controller/channel_user_limit_overrides.go": "5b6434fc1b0b5dd4ee9225e8fb9d6c1922ffac6e76ccb83fa49980633efe69b9",
+    "controller/channel_user_limits.go": "f961a10faa80344fab4c9daae6048b547585bf8a6dfb29c6bca5f9ebef86d546",
+    "controller/channel_user_limits_test.go": "1a7755386cada4304f530f8402117512d6b313d681c068882c9c19d6e3907e00",
+    "controller/model_list_test.go": "6a9cdff2094da50e7aa3e0327b74a82fe3f0623593cb222a6d8ec397b13bb317",
+    "controller/responses_websocket_test.go": "b67fee2bcceedf2d106cf58e85d6210bb2169403bcf7e5df98c902801d654a7b",
+    "controller/video_proxy_gemini.go": "244ead8d2cb29e8a1b3ad03e0b325f4ca52748ba412b31e074d5461ac07ed305",
+    "dto/channel_limit_parent.go": "b664dc1502749b50eaa34e27c11f4ae5d875542db2bc5e6e24346f29b8a70df7",
+    "middleware/channel_user_concurrency_context_test.go": "c64fb04d6f4cc819f35105296266e1133559de90f791112feaaeb95b41b11e10",
+    "middleware/distributor.go": "954c5bec28a385803f128456c3a3845c8f0d460bebbf0964a6434d5fbf6b989f",
+    "middleware/distributor_http_contract_test.go": "26bfee87ee57a0668b6f45122aa1a69ea9cd923390d0de81f6f66dc42246c551",
+    "model/channel.go": "7097a29c6f666f6ddef804c312d9268d13ed958428fde5cc601f2094c2d32946",
+    "model/channel_limit_parent.go": "b8137edad43f50f4a0cacfd1378cfd8ef5d4e8e91d6fadb96e3d1f8dc58deca9",
+    "model/channel_limit_parent_database_test.go": "d15a12998daa1d9c9b5137ea4f3bf7962307e8866b5e353cb80e6ccabe2f9478",
+    "model/channel_limit_parent_test.go": "d22a6041e17bc89e0e56aeabaf41d2153066f15f4b45c195e61a6615058a5041",
+    "model/channel_status_cleanup.go": "ba43d32bc91a77c00329f4bd711449fcc466088bba46efa7d98300053a9fae6d",
+    "model/channel_status_cleanup_test.go": "21ebd1738c45be5b522b1149df3446db5c393679da4f658006e80ca05977928b",
+    "model/main.go": "9ccb92426f03cf5ccc85da2c06a554f2e08cbdd656304bfc7414f14b9362ec02",
+    "model/task.go": "cfde708cb7cedd2daabac6c8286ab57254ea1e44b4721404bfe29e3edbf014c2",
+    "model/task_cas_test.go": "fc9332150d2cfa6b2d79002b71564710cc2322e8943f5ec8e241f20c94441d7c",
+    "relay/channel_limit_parent_test.go": "12da9a50148bd15605ba587648470fde8e8d7b641847173771b7d6f49bd89078",
+    "relay/channel_user_concurrency.go": "59983735ceb9317b8c4447bdd745999579e420531f1dfcee90a6ebdd4615a13d",
+    "relay/common/relay_info.go": "b9944ac2b18a6e00a5448fe8122459905256b309b01923c94bb40c1d39cfa6af",
+    "relay/midjourney_origin_channel.go": "bce6c46ea2ae81d02b84c2622e6ef3369797540bc97f071dae6797c079936445",
+    "relay/midjourney_origin_channel_test.go": "4aff36fbe65a38e922ee172c5dc2ba05512c87bf0b470ae69e01d0a5ab4edd40",
+    "relay/mjproxy_handler.go": "c595667e10d2437d618863119bfe08c3147fb3f5b529de89c7ce9732cef785f3",
+    "relay/relay_task.go": "4ecd0c2dc2419eac40a50785462b00a0036246a8f99483835b2241273498d552",
+    "relay/vision_assist.go": "008a585dbf823871d418d1a940af20325e15ea1cf911b4ef70c23f6574f10dfa",
+    "relay/vision_assist_test.go": "2268bf197ce7e235b2bd6a0702542832fc144c2ecab8fc31706b9ebfd2b2e2c8",
+    "router/channel-router.go": "181ebf1ae266e29ace32d41421957d72e6d3e63a50bef43ac78559d044abcdb9",
+    "router/channel_router_test.go": "20cba2593b63004dd883fb5fdda6bff860f2a4bb981db2451da9e37562e9cba0",
+    "service/channel_budget_guard.go": "70d8a652f3041bf405d5283cb1274cff3104d6d3d50693c1df9cdcb83254c991",
+    "service/channel_limit_parent.go": "3756e7babf4fd19f6f438826a261a88868f70e4d501996231952fd8be663df62",
+    "service/channel_limit_parent_test.go": "7d15325863eb250b8a37ff1d1cce3a8fbf867594b67ae26219206f802ea6129e",
+    "service/channel_period_policy_test.go": "7c87d8eaed53779d129c8176a0781f6f749f5871c65a138907964e4f45eb38cb",
+    "service/channel_user_quota_usage.go": "874312a779b5765dce82a02259e17bd7e353c7a8092dcabe59e4d928c6afb48f",
+    "service/task_billing.go": "5179d5631bad41750ddf01311d7b9dfc03560a1e7ab2926a123f4b4d1b7e445f",
+    "service/task_billing_test.go": "025c766c04cbe0151090816106988af290146f47b89c68583e0fd8effb3a50df",
+    "web/src/features/channels/components/dialogs/__tests__/channel-limit-parent-panel.test.tsx": "2dd0e0410733ccb01bb1b4437da931735790b847ec93c1a080aeefdacf4ed7fa",
+    "web/src/features/channels/components/dialogs/__tests__/channel-user-limits-dialog.test.tsx": "4b88bf5d9b224a13b5770d4031a3165a4bbc37832d5a170965a25db976d2ebf5",
+    "web/src/features/channels/components/dialogs/channel-limit-parent-panel.tsx": "803496730c4f3d7ce8febea132013f91e2056f8008e089d2eec04416effc87cb",
+    "web/src/features/channels/components/dialogs/channel-user-limits-dialog.tsx": "afd68b3f9ac8bb162237f1feffe5f0b3e80e6638713a34cd7b47fc861254c9f3",
+    "web/src/features/channels/components/drawers/channel-mutate-drawer.tsx": "5732616d44b99f5dd9c22872eb32db668b5c88f2c6b84f1c11eee1b209af2258",
+    "web/src/features/channels/limit-parent-api.ts": "1701919c2a995f7a148f9780b698127c8fe4416f190ebce757539594ac0e958e",
+    "web/src/features/channels/limit-parent-types.ts": "dc5557d35facb89766fb74f8cedc235ee2bbdb48a74c29865cc02457ab94a10e",
+    "web/src/i18n/locales/en.json": "417ad87784e160cdd6ec87e86d38d4623c03a2d5eaa51a20d25419f733909d4f",
+    "web/src/i18n/locales/fr.json": "5fe68225c45d04085e5d60646ad8180793915c56069858f1c9bc8ae71f2971aa",
+    "web/src/i18n/locales/ja.json": "d0347212f78a8f033b596d1bafbe41bb412f973857a82b628d414e7321327b5d",
+    "web/src/i18n/locales/ru.json": "38afc40c44b289eeb2927e12406336819325b508d83f550e373f3189545af7a6",
+    "web/src/i18n/locales/vi.json": "5574dcc0fb36e42fe0ab5158a4267d9c3e89766d21fcf166a8255479e3e2dae7",
+    "web/src/i18n/locales/zh-TW.json": "f4ce5f9ac0b4c44815aaa4b2a86316cacf33762c422dc7b4d3ef3da632fefad2",
+    "web/src/i18n/locales/zh.json": "3120e21e65ce0da26ad3a0c894e45e99c14b76ed9a1b1f9b94a1ea66bf9296f5"
+  },
+  "frontendTests": 68,
+  "aiFundTests": 73,
+  "aiFundContractRequests": 12,
+  "databaseDialects": [
+    "SQLite",
+    "MySQL 8.0",
+    "PostgreSQL 16"
+  ],
+  "notes": [
+    "ai-fund 源码未修改；fetch 全由本地桩接管，无线上写入。",
+    "三库专用临时容器已清理；未验证 MySQL 5.7/PostgreSQL 9.6 最低版本。",
+    "全仓 lint 有既存警告，无错误；本次新增文案无缺键、未翻译或占位符错配。",
+    "只格式化本次改动前端文件，保护原始版权头；临时 i18n 脚本已删除。"
+  ],
+  "repairFindings": {
+    "CHK-001": "Gemini/Vertex 查询统一解析父归属，429/503 均跳过重试；Gemini 释放后成功且名额无泄漏。",
+    "FBK-001": "两种按状态清理均在事务内重筛并锁定；三库保留重新启用渠道及能力，删除数量准确。"
+  }
+}
