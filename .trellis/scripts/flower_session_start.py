@@ -23,6 +23,9 @@ SOL_MODEL = "gpt-6-sol"
 SOL_6_1_MODEL = "gpt-6.1-sol"
 MODEL_HINT_MAX_BYTES = 2048
 WORKFLOW_STATE_REFRESH_ARG = "--trellis-session-start-refresh"
+CODEX_USER_INTERACTION_HINT = """<trellis-codex-user-interaction>
+For questions, use synchronous request_user_input when allowed by the active tool instructions and schema; otherwise ask in the final reply and wait. Do not call request_user_input_async, send_user_message_async, or async equivalents. Show progress in commentary and results in final. Keep existing review/approval gates; never switch modes to unlock a tool or infer consent from silence.
+</trellis-codex-user-interaction>"""
 MODEL_WORKFLOW_HINT_BODY = """Applies only while the active model is {model}; it does not apply after switching models. Perform checks internally, without a routine checklist report. Keep ordinary answers brief.
 When executing the current task:
 - Act autonomously within applicable SKILL and WORKFLOW steps. Do not waive required steps, references, review gates or templates because work seems simple, a check seems redundant, or fewer interruptions are preferred.
@@ -325,6 +328,8 @@ def render_part(root: Path, hook: str, part: str, hook_input: dict) -> dict | No
             result["systemMessage"] = "\n".join(filter(None, [result.get("systemMessage"), message]))
             print(message, file=sys.stderr)
         if hook == HOOKS[0] and source in ("startup", "clear", "compact"):
+            # 交互方式属于 Codex 平台规则，不能因模型切换或关闭模型提示而消失。
+            context = f"{context}\n{CODEX_USER_INTERACTION_HINT}"
             model = hook_input.get("model")
             hint_builder = None
             label = ""

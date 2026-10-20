@@ -315,7 +315,7 @@ Read real evidence in this order. Do not decide from the chat summary, task titl
 5. The current subject's actual diff, source code, tests, and commit evidence.
 6. Existing specs and their indexes returned by `spec_router.py`.
 
-When there is no active task, use a valid current-session untracked state when present; otherwise require an explicit Update-Spec invocation and use the current request, actual diff, source/tests, and existing specs. Do not invent task evidence.
+When there is no active task, use a valid current-session untracked state when present; otherwise require an explicit Update-Spec invocation or a passed Check-All continuation authorized by its owner, and use the current request, actual diff, source/tests, and existing specs. Do not invent task evidence.
 
 ### Minimal Write Boundary
 
@@ -336,8 +336,8 @@ When applicable, also validate indexes/links, code signatures, or project-specif
 
 ### Workflow Disposition
 
-- Interactive: after a passed Check-All stop, when the user says “下一步”, “继续”, `next`, `continue`, or an equivalent continuation intent, run this skill. A `no-op` or `written` result must load `trellis-push` in the same turn and present its single confirmation plan. A `needs-review` result stops and must not generate a Push plan.
-- Interactive direct Git or explicit continuation: follow the continuation decision made by Check-All's `Interactive Post-Check Stop Gate`, including strict pass and accepted-risk pass. When that gate permits continuation, run this skill in the same turn after the Check-All report or brief acceptance acknowledgment if no currently valid `spec_update_result` exists. Reuse valid acceptance evidence internally without repeating unchanged risks. Only `no-op` or `written` may proceed to `trellis-push`; `needs-review` stops. Do not infer intent or risk acceptance from unrelated history, summaries, dirty state, or an auto-loop internal `commit-only`.
+- Interactive: follow the continuation decision made by Check-All's `Interactive Post-Check Stop Gate`, including strict pass and accepted-risk pass. A passed check defaults to this skill in the same turn after the Check-All report or brief acceptance acknowledgment; an explicit check-only or stop-after-check request keeps the chain stopped. When the user later says “下一步”, “继续”, `next`, `continue`, or an equivalent continuation intent, resume the deliberately stopped chain. Reuse a currently valid `spec_update_result` instead of evaluating again.
+- Interactive completion, including direct Git: when the gate permits continuation, a `no-op` or `written` result must load `trellis-push` in the same turn and present its single confirmation plan; if there are no deliverable changes, report that no commit is needed instead of manufacturing an empty commit. Only `no-op` or `written` may proceed to `trellis-push`; `needs-review` stops and must not generate a Push plan. Reuse valid acceptance evidence internally without repeating unchanged risks. Default continuation does not authorize Git writes; do not infer risk acceptance or Git write authorization from unrelated history, summaries, dirty state, or an auto-loop internal `commit-only`.
 - Validated auto-loop: for `no-op` or `written`, execute `record --action run_spec_update --result ok`; only after a successful record immediately run `next`. If record returns `status=retryable` with an artifact recovery diagnosis, follow `trellis-auto-loop` recovery instructions in the same turn, then resubmit the original truthful record; do not advance or request user continuation. For `needs-review`, execute `record --action run_spec_update --result blocked --failure-type spec-needs-review`; never disguise it as `no-op`.
 - Untracked: keep the cursor at `spec` for `needs-review`. For `no-op` or `written`, run `untracked_flow.py advance --stage push`. Any later product edit returns the cursor to `implement`; the helper does not validate or preserve owner evidence.
 

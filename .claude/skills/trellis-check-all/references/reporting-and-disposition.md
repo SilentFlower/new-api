@@ -59,7 +59,7 @@
 - 后续重检完整展示新增、实质变化、接受失效及仍待处置的问题；未变化且接受仍有效的问题只汇总数量，计入报告总数与接受数，不重复字段。无须展开的通道省略问题区块。
 - 恢复会话、验证进展和 Update-Spec 内部沿用有效接受记录，不主动复述；Push 按其输出 reference 汇总。用户要求详情时再展开指定问题的原报告与当前处置。
 - 原报告或接受依据无法恢复时，说明缺口并针对受影响项目补核，不凭摘要伪报通过或要求全部重接受。复用现有对话或任务记录，不新增展示次数、状态文件或报告附件。
-- 单纯接受只更新处置；已有当前完成链推进意图时沿用。“接受并继续”等明确表达在通过门禁后同轮进入 Update-Spec，无需再回复“继续”；仍有未处置问题或阻塞时说明剩余项并停止。继续不替代 Push 的精确计划确认。
+- 接受后按下方 Gate 推进；明确“仅接受、不继续”时只更新处置。仍有未处置问题或阻塞时说明剩余项并停止。接受风险不替代 Push 的精确计划确认。
 
 ## 验证阶段
 
@@ -167,13 +167,7 @@ interactive 完成检查与允许的 DOC 修复后，先自然说明实际改动
 
 ## 修复与重检
 
-用户选择 `修复全部`、混合精确问题 ID 或其它明确修复范围后：
-
-1. 主会话复用当前 task 已有的合法 implement route；untracked 则重新直接读取个人 pref。不存在合法 route 时进入 `trellis-route(target=implement)`，不得自行默认 inline/subagent。
-2. 修复过程中不对每个问题重复确认。
-3. 新增业务歧义、破坏性风险或范围扩张时才暂停，并一次性说明受影响问题。
-4. 完成定向验证后复用当前 check route 重新执行 Check-All。
-5. 原 ID 沿用，新根因递增。后续按当前 diff 选深度：原 finding、修复路径、引用/回归和定向证据均闭合时可 light；范围扩大、契约/基线变化、未知 dirty 或证据失效时 full。
+用户选择 `修复全部`、混合精确问题 ID 或其它明确修复范围后，必须先读取 `references/repair-and-recheck.md` 执行修复续行；未选择时不加载。
 
 修复完成后输出：
 
@@ -203,7 +197,7 @@ interactive 完成检查与允许的 DOC 修复后，先自然说明实际改动
 
 重检后按下方 `Interactive Post-Check Stop Gate` 分流；仍有未处置 `CHK-*` 或 `FBK-*` 时停留在处置/重检循环。
 
-untracked helper 不存检查证据或风险接受。普通通过后保持 `stage=check`；direct Git 同轮继续或用户明确继续才 `advance --stage spec`。未处置 `CHK-*` / `FBK-*`、阻断型部分验证、阻塞或新编辑先 `advance --stage implement`；仅 `[上线后验证]` 不回退。
+untracked helper 不存检查证据或风险接受。通过且按下方 Gate 默认推进时执行 `advance --stage spec`；用户明确只检查或检查后停止时保持 `stage=check`。未处置 `CHK-*` / `FBK-*`、阻断型部分验证、阻塞或新编辑先 `advance --stage implement`；仅 `[上线后验证]` 不回退。
 
 ---
 
@@ -226,10 +220,10 @@ subagent 只返回结构化 `CHK-*`、`FBK-*`、`DOC-*` 候选、报告和 `chec
 
 非 validated auto-loop 先按本文件输出标准报告或接受状态的简短确认，再依序分流；不重贴已有报告：
 
-1. 只从当前完成链证据识别 direct Git intent：触发检查的最新用户消息明确请求普通 push 或用户主动 `commit-only`；或者 Check-All 已因该 Git 请求报告并停止后，用户在当前报告上明确接受风险并要求继续。不得从任务标题、摘要、dirty 状态、无关历史或 auto-loop 内部 action 推断。
-2. direct Git 或用户明确要求继续，可在 strict pass，或全部 findings 已有效接受时继续；还须无阻塞、无阻断型部分验证、无未接受且未标记 `[上线后验证]` 的实质风险。允许已验证 `DOC-*` 和完整登记的 `[上线后验证]`；报告或简短确认后同轮进入 Update-Spec，`no-op|written` 再到 Push，`needs-review` 停止。
-3. 未处置 `CHK-*` / `FBK-*`、blocked、阻断型部分验证或其它未接受实质风险时，报告并停止，不运行 Update-Spec 或生成 Git 计划。Git 请求不授权修复或代用户接受风险。
-4. 没有匹配 direct Git intent 且用户未要求继续的普通 interactive 检查保持原行为：报告或简短确认后停止并等待用户选择。
+1. 先识别当前事项最新有效的明确停止要求：`只检查`、`只读检查`、`检查后停止`、`暂不收尾`、`仅接受、不继续` 等。停止收尾，不运行 Update-Spec 或生成 Git 计划；同一事项后续明确继续可解除该限制。普通“检查一下”不等于只检查后停止，不从无关历史或摘要猜测限制。
+2. 未处置 `CHK-*` / `FBK-*`、blocked、阻断型部分验证或其它未接受实质风险（`[上线后验证]` 除外）时，报告并停止，不运行 Update-Spec 或生成 Git 计划。Git 请求不授权修复或代用户接受风险；普通代码问题始终由用户选择修复范围。
+3. 没有有效停止要求且 strict pass，或全部 findings 已有效接受时，默认同轮继续；通过条件沿用上方风险接受和验证阶段，完整登记的 `[上线后验证]` 不阻断。报告或简短确认后同轮进入 Update-Spec，`no-op|written` 再到 Push，`needs-review` 停止。无需 direct Git intent 或额外回复“继续”，通过不授权 Git 写入。
+4. 只从当前完成链证据识别 direct Git intent，保留 push / 用户主动 `commit-only` 选择；不从无关历史、摘要、dirty 状态或 auto-loop action 推断。风险接受沿用上方证据规则。
 
 ### 交互式下一步引导
 
@@ -237,8 +231,8 @@ subagent 只返回结构化 `CHK-*`、`FBK-*`、`DOC-*` 候选、报告和 `chec
 
 1. 有未处置 findings：提示 `修复全部`、精确 ID、接受当前报告全部风险、`接受风险 <ID> 并继续` 或 `仅保留报告`；不逐项重复确认。
 2. 有 blocked、阻断型部分验证或未标记 `[上线后验证]` 的实质风险：指出所需决策、授权或验证，完成后重跑 Check-All；不自行执行生产、外部或破坏性操作。
-3. direct Git 或用户已要求继续，且 strict pass / 已接受风险通过：说明本轮正在进入 `trellis-update-spec`，不要求用户再次回复“继续”；Git 计划确认仍由 Push 执行。
-4. 无 direct Git intent、用户未要求继续且 strict pass / 已接受风险通过：提示用户回复 `继续`，下一轮进入 `trellis-update-spec`，再由 `trellis-push` 生成提交计划。
+3. 有有效的明确停止要求且检查通过：说明已按要求停止，之后明确继续才恢复收尾。
+4. 无有效停止要求且 strict pass / 已接受风险通过：说明本轮正在进入 `trellis-update-spec`，不要求用户再次回复“继续”；Git 计划确认仍由 Push 执行。
 
 停止边界只控制是否自动推进，不能让报告在没有下一步提示的情况下结束。
 

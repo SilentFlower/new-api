@@ -27,7 +27,9 @@ python3 ./.trellis/scripts/pre_check_state.py clear
 
 ## Start
 
-任务列表必须显式。用户只说当前任务时，先用 `task.py current --source` 解析。启动前为 implement/check 解析可复用 route；已有 session runtime 或 `.trellis/.route-prefs.tmp` 就复用，没有时按 `trellis-route` 询问并写入真实选择。临时选择才传 runner 参数，个人默认由 route helper 自己保存。
+任务列表必须显式。用户只说当前任务时，先用 `task.py current --source` 解析。启动前进入 `trellis-route` 的“auto-loop 启动前选模例外”：对队列任务只读解析 implement/check，复用匹配任务的 session 决定或个人默认，只询问未决 target。临时选择才传 runner 参数，明确请求的个人默认由 `write-pref` 保存；不提前写 task route decision、绑定任务或实施。
+
+模式确定后同轮回到本 skill，执行下方 start + next，先完成 runner 的 prepare；不得套用普通 route 的选完立即实施，也不等待用户回复“继续”。只有 runner 返回 `run_implement` / `run_check_all` 等运行 action 后才按对应 route 实际执行。
 
 ```bash
 python3 ./.trellis/scripts/auto_loop.py start \
