@@ -593,6 +593,10 @@ func handleResponsesWebSocketUpstreamEvent(c *gin.Context, turn *responsesWebSoc
 	if turn != nil && turn.compactMode.IsCompact() {
 		return handleResponsesCompactPassthroughWebSocketUpstreamEvent(c, turn, channel, payload)
 	}
+	if turn.info != nil {
+		// 与 SSE、Compact 保持首响应口径，收到首个事件即可计时，无需等待正文增量。
+		turn.info.SetFirstResponseTime()
+	}
 	var event dto.ResponsesStreamResponse
 	if err := common.Unmarshal(payload, &event); err != nil {
 		return false

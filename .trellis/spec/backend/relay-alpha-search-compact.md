@@ -172,6 +172,8 @@ func PrepareResponsesCompactPassthrough(c *gin.Context, info *relaycommon.RelayI
 func ResponsesCompactPassthroughHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAPIError
 func ParseResponsesCompactPassthroughUsage(raw json.RawMessage) (*dto.Usage, bool)
 func (info *RelayInfo) RoutingModel() string
+func (info *RelayInfo) SetFirstResponseTime()
+func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) *RelayInfo
 func RecordRelayChannelUserQuotaUsage(ctx context.Context, relayInfo *relaycommon.RelayInfo, quota int)
 
 func SelectResponsesWebSocketChannel(c *gin.Context, modelName string) (*model.Channel, *types.NewAPIError)
@@ -234,6 +236,8 @@ responses_compact_passthrough_enabled: boolean
 - Compact turn 在 dial 和预扣前执行渠道门禁；门禁错误不是 channel error，不能进入 connector failover。
 - 普通 turn 继续使用原有模型映射、转换、disabled fields 和 Param Override；只有 Compact turn 分派到独立准备和终态 observer。
 - 每个 turn 独立预扣、结算或退款；`ClearResponsesCompactAudit` 只清理上一轮 `admin_info.responses_compact`，不能删除 quota saturation 等其他管理员字段。
+- 普通与 Compact turn 都必须在首个上游响应消息到达事件处理入口时调用 `RelayInfo.SetFirstResponseTime()`；`response.created` 即可触发，不等待正文增量。该方法只记录一次，后续帧不得覆盖；下一轮使用新建的 RelayInfo 独立计时。
+- 消费日志复用 `other.frt = FirstResponseTime.UnixMilli() - StartTime.UnixMilli()`，单位毫秒。没有上游响应时保留未知；Ping/Pong 控制帧不得建立模型首响应，不以总耗时补造或回填历史值。
 
 #### 管理端渠道测试
 
@@ -265,6 +269,9 @@ responses_compact_passthrough_enabled: boolean
 | 非 Upgrade `GET /v1/responses` | `400 invalid_request` |
 | WS 亲和渠道已禁用、分组能力失效或 Advanced Custom route/model 不匹配 | 按配置清理当前亲和性，再使用基础模型和 `/v1/responses` 进行普通随机选渠 |
 | WS 后续 turn 的基础模型不被当前渠道或 Advanced Custom route 支持 | 返回 `model_not_found`，不得把不兼容 turn 写入当前上游连接 |
+| 普通或 Compact WS 首个响应为 `response.created` | 建立本轮首响应，后续增量和完成事件不覆盖 |
+| 同一 WS 连接开始下一轮 | 重新建立未观测状态，使用本轮起点与首次响应 |
+| 上游仅有 Ping/Pong 或尚无响应 | 保留未知首响应，不能记为模型输出 |
 | HTTP 分发无效请求、Token 权限拒绝、禁用指定渠道或 context 初始化失败 | 保持对应 HTTP 状态，`error.code` 为空 |
 | HTTP 分发无可用渠道 | `503` 且 `error.code=model_not_found` |
 | Compact 渠道测试传入基础模型 | 不追加后缀，按基础模型查价并原生发送 |
@@ -281,10 +288,12 @@ responses_compact_passthrough_enabled: boolean
 - Good：所选亲和渠道关闭能力；立即返回专用 503，未调用上游、未预扣、未重选或清理亲和性。
 - Good：WS 亲和性命中一个不支持 `/v1/responses` 的 Advanced Custom 渠道；独立选渠逻辑清理失效亲和性，并回落到支持基础模型的普通渠道。
 - Good：管理端用基础模型测试 OpenAI、Codex 或 Advanced Custom 原生 Compact route；即使渠道配置模型映射和 Param Override，上游仍收到基础模型合成 body。
+- Good：普通 WS 请求起点为两秒前，收到 `response.created` 后日志 `frt` 至少为 2000 毫秒；后续正文和完成事件不改变该值。
 - Base：旧渠道没有新字段；开关默认为 false，普通 Responses 不受影响。
 - Base：HTTP Compact 未触发额度降级；`RoutingModel()` 回退客户端基础模型，请求、计费和预算归属保持既有行为。
 - Base：完整 usage 的三个 token 字段显式为零；视为结构合法并按零实际额度结算，不能误判为字段缺失。
 - Base：旧渠道的默认测试模型仍带 `-openai-compact`；选择 Compact 端点时归一为基础模型，选择普通端点时保持原值以避免扩大兼容变更。
+- Base：连接只收到控制帧后关闭，没有模型首响应，既有前端仍显示不适用。
 - Bad：给基础模型追加 `-openai-compact` 后再做 Token 权限、选渠、模型映射或计费。
 - Bad：历史 bridge 发到 `/responses/compact` 后由 new-api 把 unary JSON 重组为 SSE。
 - Bad：能力开关参与候选渠道过滤，导致亲和渠道被静默替换。
@@ -301,6 +310,7 @@ responses_compact_passthrough_enabled: boolean
 - HTTP：使用真实 `httptest` 上游断言 OpenAI/Codex 路径矩阵、原始 body、Channel Authorization、客户端 Cookie/Authorization 过滤、JSON/SSE 原始响应和安全响应头。
 - usage：覆盖完整非零、完整显式零、缺失/null、不完整、负数、超过 `common.MaxQuota`、总数不一致、失败终态和不完整流；断言只结算一次或退款。
 - WebSocket：覆盖原始 frame、基础模型计费、开关关闭不 failover、多 turn 普通/Compact 交替、completed 非法 usage 退款、失败/取消/断连退款。
+- WebSocket 首响应：使用 `GenRelayInfoResponses` 等生产入口初始化夹具，避免手写 RelayInfo 遗漏私有首次标记；覆盖 `response.created`、后续帧不覆盖、逐轮重建、仅 Ping/Pong 和真实连接每轮消费日志。对应 `TestResponsesWebSocketFirstResponseTiming*` 与 `TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns`。
 - WebSocket 选渠：覆盖 Token 权限、指定渠道启用/禁用、亲和性命中、亲和性失效清理、auto group、随机选渠的 Advanced Custom path/model 过滤、context 初始化和后续 turn 当前渠道能力。
 - HTTP 分发：覆盖无效请求、`shouldSelectChannel=false` 时仍执行 Token 权限、禁用指定渠道、无可用渠道的 `model_not_found`，以及 `SetupContextForSelectedChannel` 错误不泄露内部 error code。
 - 管理端渠道测试：覆盖基础模型不追加后缀、历史后缀归一、能力关闭先于查价和网络、模型映射与 Param Override 跳过、OpenAI/Codex/Advanced Custom 原生路径，以及普通端点模型不被归一化。
@@ -346,6 +356,12 @@ _ = helper.ModelMappedHelper(c, info, request)
 channel, apiErr := SelectAndSetupChannel(c, request, true)
 ```
 
+```go
+// 错误：手写计时夹具遗漏私有首次标记，方法调用不会建立首响应。
+info := &relaycommon.RelayInfo{StartTime: time.Now()}
+info.SetFirstResponseTime()
+```
+
 #### Correct
 
 ```go
@@ -386,4 +402,10 @@ if relay.ShouldHandleResponsesCompactPassthrough(info) {
 ```go
 // HTTP 保持上游顺序式 Distribute，WS 使用独立领域入口。
 channel, apiErr := middleware.SelectResponsesWebSocketChannel(c, turn.selectionModel)
+```
+
+```go
+// 使用生产入口建立每轮初始状态，再由首个响应消息调用既有方法。
+info := relaycommon.GenRelayInfoResponses(c, request)
+info.SetFirstResponseTime()
 ```

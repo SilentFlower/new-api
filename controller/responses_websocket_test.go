@@ -545,9 +545,11 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 		require.Eventually(t, func() bool { return gopool.WorkerCount() == 0 }, 2*time.Second, time.Millisecond)
 	}()
 	oldLogConsumeEnabled := common.LogConsumeEnabled
+	oldDataExportEnabled := common.DataExportEnabled
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
 	oldGuardAcquirer := responsesWebSocketConcurrencyGuardAcquirer
-	common.LogConsumeEnabled = false
+	common.LogConsumeEnabled = true
+	common.DataExportEnabled = false
 	common.MemoryCacheEnabled = false
 	guardAcquireCalls := 0
 	responsesWebSocketConcurrencyGuardAcquirer = func(c *gin.Context) (*channelUserConcurrencyGuard, *types.NewAPIError) {
@@ -567,6 +569,7 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(modelRatios)))
 	t.Cleanup(func() {
 		common.LogConsumeEnabled = oldLogConsumeEnabled
+		common.DataExportEnabled = oldDataExportEnabled
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
 		responsesWebSocketConcurrencyGuardAcquirer = oldGuardAcquirer
 		quotaSetting.EnableFreeModelPreConsume = oldFreeModelPreConsume
@@ -623,6 +626,7 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	parent := &model.Channel{Id: 100, Name: "WebSocket 限制父渠道", UserConcurrencyLimit: common.GetPointer(4)}
 	require.NoError(t, db.Create(parent).Error)
 	require.NoError(t, db.Create(channel).Error)
+	require.NoError(t, db.Create(&model.User{Id: 787, Username: "ws-timing-user"}).Error)
 	relation := &model.ChannelLimitParent{ChannelId: channel.Id, ParentChannelId: parent.Id, UpdatedBy: 1}
 	require.NoError(t, service.SaveChannelLimitParent(t.Context(), relation))
 	proxyResults := make(chan error, 1)
@@ -735,6 +739,20 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	default:
 	}
 	require.NoError(t, <-proxyResults)
+	// 核对真实连接中每轮落库的首响应，防止只验证合成状态而遗漏普通与 Compact 回合交替。
+	var logs []model.Log
+	require.NoError(t, db.Where("type = ?", model.LogTypeConsume).Order("id asc").Find(&logs).Error)
+	require.Len(t, logs, 3)
+	for _, log := range logs {
+		var other map[string]interface{}
+		require.NoError(t, common.UnmarshalJsonStr(log.Other, &other))
+		frt, ok := other["frt"].(float64)
+		require.True(t, ok)
+		assert.GreaterOrEqual(t, frt, float64(0), "模型 %s 的首响应漏记", log.ModelName)
+		assert.Zero(t, log.Quota)
+		assert.Zero(t, log.PromptTokens)
+		assert.Zero(t, log.CompletionTokens)
+	}
 	assert.Equal(t, 1, guardAcquireCalls)
 	parentUsage, _, err = service.GetChannelUserConcurrencyUsage(t.Context(), parent.Id, 787)
 	require.NoError(t, err)
