@@ -1,0 +1,64 @@
+package controller
+
+import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	relayhelper "github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/service"
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/require"
+)
+
+// TestTemporaryResponsesFirstResponseTiming 用同一业务事件核对两种传输写入日志的首字时间
+// @param t 当前测试上下文
+func TestTemporaryResponsesFirstResponseTiming(t *testing.T) {
+	previousTimeout := constant.StreamingTimeout
+	constant.StreamingTimeout = 60
+	t.Cleanup(func() { constant.StreamingTimeout = previousTimeout })
+
+	for _, transport := range []string{"WebSocket", "SSE"} {
+		t.Run(transport, func(t *testing.T) {
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+			common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now().Add(-2*time.Second))
+			stream := true
+			info := relaycommon.GenRelayInfoResponses(c, &dto.OpenAIResponsesRequest{Model: "probe-model", Stream: &stream})
+			info.DisablePing = true
+			info.ChannelMeta = &relaycommon.ChannelMeta{}
+			created := "{\"type\":\"response.created\",\"response\":{\"id\":\"resp_probe\",\"status\":\"in_progress\"}}"
+			delta := "{\"type\":\"response.output_text.delta\",\"delta\":\"你好\"}"
+
+			if transport == "WebSocket" {
+				turn := &responsesWebSocketTurn{info: info}
+				require.False(t, handleResponsesWebSocketUpstreamEvent(c, turn, nil, []byte(created)))
+				require.False(t, handleResponsesWebSocketUpstreamEvent(c, turn, nil, []byte(delta)))
+			} else {
+				response := &http.Response{
+					StatusCode: http.StatusOK,
+					Header: make(http.Header),
+					Body: io.NopCloser(strings.NewReader("data: " + created + "\n\ndata: " + delta + "\n\n")),
+				}
+				relayhelper.StreamScannerHandler(c, response, info, func(_ string, _ *relayhelper.StreamResult) {})
+			}
+
+			other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 1, 0, 1)
+			frt, ok := other["frt"].(float64)
+			require.True(t, ok)
+			t.Logf("传输=%s，模拟请求已经开始超过 2 秒，业务事件处理后日志 frt=%.0f 毫秒", transport, frt)
+			if transport == "WebSocket" {
+				require.Equal(t, float64(-1000), frt)
+			} else {
+				require.GreaterOrEqual(t, frt, float64(2000))
+			}
+		})
+	}
+}

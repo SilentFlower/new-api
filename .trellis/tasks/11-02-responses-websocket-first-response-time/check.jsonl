@@ -1,0 +1,5 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "后端领域入口与必读规范"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "Go 改动与正式行为回归的质量要求"}
+{"file": ".trellis/spec/backend/relay-alpha-search-compact.md", "reason": "普通与 Compact Responses WebSocket 的分派、透传及逐轮生命周期"}
+{"file": ".trellis/spec/guides/build-upstream-friendly-customization.md", "reason": "限制原有 WS 实现的改动范围，避免无关抽象和重构"}
+{"file": ".trellis/tasks/11-02-responses-websocket-first-response-time/research/evidence.md", "reason": "已确认根因、源码位置、临时复现方法及证据边界"}

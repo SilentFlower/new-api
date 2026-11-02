@@ -1,0 +1,54 @@
+{
+  "id": "responses-websocket-first-response-time",
+  "name": "responses-websocket-first-response-time",
+  "title": "修复 Responses WebSocket 首字时间漏记",
+  "description": "普通 Responses WebSocket 已接收业务事件后，消费日志 frt 仍为 -1000，导致首字显示不适用；已补齐每轮首次响应计时，正式回归与完整 Check-All 通过，规范已更新，修复代码已推送，任务已完成并关闭。",
+  "status": "completed",
+  "dev_type": "backend",
+  "scope": "relay",
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-11-02",
+  "completedAt": "2026-11-02",
+  "closeout": {
+    "status": "closed",
+    "closedAt": "2026-11-02T10:08:26Z",
+    "blockers": []
+  },
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    "controller/responses_websocket.go",
+    "controller/responses_websocket_test.go",
+    "controller/responses_websocket_timing_test.go",
+    "relay/common/relay_info.go",
+    "relay/helper/stream_scanner.go",
+    "controller/responses_compact_passthrough_websocket.go",
+    "service/log_info_generate.go",
+    "web/src/features/usage-logs/components/timing-metrics-cell.tsx"
+  ],
+  "notes": "2026-11-02 用户确认完整 Brief 后已启动任务。正式回归先在旧实现失败，最小修复后通过；完整 Check-All（auto→full，时序与逐轮状态）无 CHK/FBK。相关包测试、Compact 定向、WS/Compact 竞态、Go vet、根模块全包构建与格式检查均通过。首响应与计时夹具契约已写入现有规范，修复代码已推送，完成态与 Close 已同步；未连接生产模型，证据见 research/evidence.md。",
+  "meta": {},
+  "progress": {
+    "completedSteps": [
+      "1.1 需求与证据收敛",
+      "1.4 用户确认完整 Brief 并启动任务",
+      "2.1 最小修复与先失败后通过的定向回归",
+      "2.2 完整 Check-All 通过，CHK/FBK 为零",
+      "3.3 首响应计时与生产初始化夹具规范已更新并验证",
+      "3.4 修复代码已提交并推送"
+    ],
+    "partialStep": null,
+    "nextStep": "上线后按验收流程核对真实代理链路的新消费记录",
+    "notes": "修复、本地验证和规范更新完成。保留既有其他任务和缓存文件共 12 项变更，未调用生产模型；任务完成态与 Close 由本次进度写入原子同步。",
+    "updatedAt": "2026-11-02T10:08:26Z"
+  }
+}
