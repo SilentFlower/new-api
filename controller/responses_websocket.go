@@ -474,9 +474,21 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 					return apiErr
 				}
 				if !responsesWebSocketChannelSupportsTurn(c, selectedChannel, turn.selectionModel) {
-					apiErr := types.NewErrorWithStatusCode(errors.New("selected channel does not support the next Responses WebSocket model"), types.ErrorCodeModelNotFound, http.StatusBadRequest, types.ErrOptionWithSkipRetry())
-					writeResponsesWebSocketError(c, clientConn, apiErr)
-					return apiErr
+					previousGuard := concurrencyGuard
+					concurrencyGuard = nil
+					newUpstream, newChannel, connectErr := reconnectResponsesWebSocketTurn(c, turn, upstreamConn, previousGuard)
+					if connectErr != nil {
+						writeResponsesWebSocketError(c, clientConn, connectErr)
+						refundResponsesWebSocketTurn(c, turn)
+						return connectErr
+					}
+					upstreamConn = newUpstream
+					selectedChannel = newChannel
+					concurrencyGuard = turn.concurrencyGuard
+					currentTurn = turn
+					upstreamGeneration++
+					startResponsesWebSocketReader(upstreamConn, upstreamGeneration, upstreamResults)
+					continue
 				}
 				common.SetContextKey(c, constant.ContextKeyOriginalModel, turn.selectionModel)
 				payload, apiErr := prepareResponsesWebSocketTurnAttempt(c, turn)
@@ -749,8 +761,9 @@ func writeResponsesWebSocketError(c *gin.Context, conn *websocket.Conn, apiErr *
 	}
 	apiErr.SetMessage(common.MessageWithRequestId(apiErr.Error(), c.GetString(common.RequestIdKey)))
 	payload, err := common.Marshal(map[string]any{
-		"type":  "error",
-		"error": apiErr.ToOpenAIError(),
+		"type":   "error",
+		"status": apiErr.StatusCode,
+		"error":  apiErr.ToOpenAIError(),
 	})
 	if err == nil {
 		closeCode := websocket.ClosePolicyViolation

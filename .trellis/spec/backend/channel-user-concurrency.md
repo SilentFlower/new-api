@@ -143,7 +143,7 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 
 - 获取时机固定为：渠道已选定且请求准备完成之后，预扣费和实际上游调用之前。
 - HTTP 流式和非流式请求持有到该次上游响应处理结束；重试前必须释放旧渠道租约，再为新渠道获取。
-- OpenAI Realtime 与 Responses WebSocket 按连接持有；同一连接内多轮请求只获取一次，连接关闭、客户端断开或续租丢失时释放。
+- OpenAI Realtime 与 Responses WebSocket 按上游连接持有；复用同一上游的多轮请求只获取一次，连接关闭、客户端断开或续租丢失时释放。Responses WebSocket 因渠道资格变化更换上游时，先释放原租约，再按新渠道解析限制并获取租约，不能同时占用共享父渠道的两个名额。
 - 异步任务提交和实时查询只在实际 HTTP 请求期间持有；纯数据库查询和上游后台处理期不持有。
 - Midjourney 从历史任务切回原渠道时，必须同步原渠道 ID 与限制后再获取。
 - 视觉辅助按实际辅助渠道和当前用户独立获取；主渠道必须在视觉辅助预处理完成后再获取，避免同渠道自占两个名额。

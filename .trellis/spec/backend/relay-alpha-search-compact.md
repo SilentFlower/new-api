@@ -229,7 +229,10 @@ responses_compact_passthrough_enabled: boolean
 
 #### Responses WebSocket 生命周期
 
-- 路由先读取首个 `response.create`，再校验基础 model 权限和选择渠道；同一连接只允许一个 active turn，后续 turn 继续使用当前渠道并校验该渠道是否支持基础模型。
+- 路由先读取首个 `response.create`，再校验基础 model 权限和选择渠道；同一连接只允许一个 active turn，后续 turn 优先复用当前渠道，并重新校验模型与分组资格。
+- 当前渠道失去资格时，先关闭旧上游并释放连接租约。没有 `previous_response_id` 的完整请求复用首轮选渠与 connector，在同一客户端连接上切换上游；Token 权限、指定渠道、亲和性、Compact 能力与预算检查继续生效。
+- 带非空 `previous_response_id` 的增量不得跨渠道转发或删 ID 后当作完整请求发送；返回 `400 previous_response_not_found`、`error.param=previous_response_id` 并关闭连接，由客户端重连后携带完整历史重试。此拒绝发生在本轮预扣与上游发送前。
+- 本地 WS 错误封套包含数字 `status`，与 `NewAPIError.StatusCode` 一致；恢复信号沿用 [OpenAI WebSocket 恢复协议](https://developers.openai.com/api/docs/guides/websocket-mode#reconnect-and-recover)。
 - build 分支的 Responses WebSocket 渠道选择必须由 `middleware/responses_websocket_channel.go` 独立承载，不得为了与 HTTP 共用而重新抽取或改写整个 `middleware.Distribute`。允许保留受测试保护的局部重复。
 - WS 独立实现必须与 HTTP 分发同步复核 Token 模型权限、指定渠道状态、亲和性命中与失效清理、auto group、随机选渠、Advanced Custom `/v1/responses` path/model 约束，以及 `SetupContextForSelectedChannel` 初始化语义。
 - 普通 HTTP 分发错误响应只有无可用渠道返回 `model_not_found`；无效请求、Token 权限、禁用指定渠道和渠道上下文初始化错误的 `error.code` 保持为空。WS 内部返回标准 `NewAPIError`，不得用 HTTP code 清洗逻辑替代。
@@ -268,7 +271,9 @@ responses_compact_passthrough_enabled: boolean
 | SSE/WS 失败、取消、断连或无成功终态 | 退款未结算 turn/request |
 | 非 Upgrade `GET /v1/responses` | `400 invalid_request` |
 | WS 亲和渠道已禁用、分组能力失效或 Advanced Custom route/model 不匹配 | 按配置清理当前亲和性，再使用基础模型和 `/v1/responses` 进行普通随机选渠 |
-| WS 后续 turn 的基础模型不被当前渠道或 Advanced Custom route 支持 | 返回 `model_not_found`，不得把不兼容 turn 写入当前上游连接 |
+| WS 后续完整 turn 的模型或分组资格不再匹配当前渠道 | 关闭旧上游、释放旧租约并重新选渠；没有可用渠道时返回选渠错误，不向旧连接发送 |
+| WS 后续增量 turn 的模型或分组资格不再匹配当前渠道 | 返回 `400 previous_response_not_found`，本轮零预扣、零上游；客户端重连并完整重放 |
+| WS 后续 turn 超出 Token 模型权限 | 保持 `403 access_denied`，不进入换渠恢复 |
 | 普通或 Compact WS 首个响应为 `response.created` | 建立本轮首响应，后续增量和完成事件不覆盖 |
 | 同一 WS 连接开始下一轮 | 重新建立未观测状态，使用本轮起点与首次响应 |
 | 上游仅有 Ping/Pong 或尚无响应 | 保留未知首响应，不能记为模型输出 |
@@ -312,6 +317,7 @@ responses_compact_passthrough_enabled: boolean
 - WebSocket：覆盖原始 frame、基础模型计费、开关关闭不 failover、多 turn 普通/Compact 交替、completed 非法 usage 退款、失败/取消/断连退款。
 - WebSocket 首响应：使用 `GenRelayInfoResponses` 等生产入口初始化夹具，避免手写 RelayInfo 遗漏私有首次标记；覆盖 `response.created`、后续帧不覆盖、逐轮重建、仅 Ping/Pong 和真实连接每轮消费日志。对应 `TestResponsesWebSocketFirstResponseTiming*` 与 `TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns`。
 - WebSocket 选渠：覆盖 Token 权限、指定渠道启用/禁用、亲和性命中、亲和性失效清理、auto group、随机选渠的 Advanced Custom path/model 过滤、context 初始化和后续 turn 当前渠道能力。
+- WebSocket 变更恢复：在缓存开启和关闭时覆盖完整请求重选、增量恢复后完整重放、无可用替代渠道、Token 权限拒绝；使用共享父并发上限验证先释放旧租约，再获取新租约，并核对实际转发历史与逐轮消费日志归属。
 - HTTP 分发：覆盖无效请求、`shouldSelectChannel=false` 时仍执行 Token 权限、禁用指定渠道、无可用渠道的 `model_not_found`，以及 `SetupContextForSelectedChannel` 错误不泄露内部 error code。
 - 管理端渠道测试：覆盖基础模型不追加后缀、历史后缀归一、能力关闭先于查价和网络、模型映射与 Param Override 跳过、OpenAI/Codex/Advanced Custom 原生路径，以及普通端点模型不被归一化。
 - 前端：Default 表单 round-trip 覆盖旧值默认 false、新值保存和未知 `setting` 字段保留；Default/Classic 构建或类型检查验证组件挂载，所有 locale 包含标签和说明。
