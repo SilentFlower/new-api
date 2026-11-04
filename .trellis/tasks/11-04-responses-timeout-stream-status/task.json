@@ -1,0 +1,56 @@
+{
+  "id": "responses-timeout-stream-status",
+  "name": "responses-timeout-stream-status",
+  "title": "修复 Responses 首帧超时配置与异常流终态记录",
+  "description": "首帧等待环境变量默认60秒；准确记录Responses SSE失败和缺少完成事件，保留转发与计费契约。",
+  "status": "completed",
+  "dev_type": "backend",
+  "scope": "relay",
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-11-04",
+  "completedAt": "2026-11-04",
+  "closeout": {
+    "status": "closed",
+    "closedAt": "2026-11-04T04:41:17Z",
+    "blockers": []
+  },
+  "branch": "build-bak",
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [
+    ".env.example",
+    "README.zh_CN.md",
+    "common/init.go",
+    "common/responses_websocket_env.go",
+    "common/responses_websocket_env_test.go",
+    "constant/responses_websocket_env.go",
+    "controller/responses_websocket.go",
+    "controller/responses_websocket_timeout_test.go",
+    "relay/channel/openai/relay_responses.go",
+    "relay/channel/openai/relay_responses_stream_status.go",
+    "relay/channel/openai/relay_responses_stream_status_test.go"
+  ],
+  "notes": "用户已确认精确提交计划；业务修复已推送，检查与规范更新完成。本轮未部署，保留其他任务和缓存改动。",
+  "meta": {},
+  "progress": {
+    "completedSteps": [
+      "首帧等待支持环境变量配置，默认60秒",
+      "Responses SSE业务失败及缺少终态准确记录",
+      "定向与完整回归、race、vet、构建和格式检查通过",
+      "Check-All完整检查及两个契约更新完成",
+      "业务修复已提交并推送"
+    ],
+    "partialStep": null,
+    "nextStep": "本轮开发完成；发布后核对首帧期限及异常日志展示",
+    "notes": "CHK=0、FBK=0；本轮未部署，其他12项改动保持原状。",
+    "updatedAt": "2026-11-04T04:41:17Z"
+  }
+}
