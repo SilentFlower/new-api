@@ -89,6 +89,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 	var responseTextBuilder strings.Builder
 	imageCounter := &relaycommon.ImageGenerationCallCounter{}
 	imageCommitted := false
+	streamObserver := responsesStreamStatusObserver{}
 
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 
@@ -100,6 +101,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			return
 		}
 		sendResponsesStreamData(c, streamResponse, data)
+		streamObserver.observe(info.StreamStatus, streamResponse)
 		if info != nil && info.IsResponsesCompactV2() && info.ResponsesUsageInfo != nil {
 			switch streamResponse.Type {
 			case "response.completed":
@@ -178,6 +180,7 @@ func OaiResponsesStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp
 			}
 		}
 	})
+	streamObserver.finalize(c, info)
 
 	if info != nil && info.IsResponsesCompactV2() && info.ResponsesUsageInfo != nil {
 		observed := info.ResponsesUsageInfo

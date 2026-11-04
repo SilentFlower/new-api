@@ -1,0 +1,7 @@
+package constant
+
+// DefaultResponsesWebSocketFirstFrameTimeoutSeconds 是客户端 WebSocket 首帧等待的默认秒数。
+const DefaultResponsesWebSocketFirstFrameTimeoutSeconds = 60
+
+// ResponsesWebSocketFirstFrameTimeoutSeconds 控制客户端 WebSocket 握手后的首帧读取期限。
+var ResponsesWebSocketFirstFrameTimeoutSeconds = DefaultResponsesWebSocketFirstFrameTimeoutSeconds

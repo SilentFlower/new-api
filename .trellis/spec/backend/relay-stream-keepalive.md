@@ -146,3 +146,57 @@ for scanner.Scan() {
 ```
 
 要求：下游 keepalive 与上游有效数据判断分离；只有真实业务 `data:` 刷新 idle timeout。
+
+## 场景：Responses SSE 业务终态与传输结束分离
+
+### 1. Scope / Trigger
+
+- Trigger：修改 OaiResponsesStreamHandler 的终态观察、StreamStatus 错误记录或日志中的 stream_status。
+- 避免上游已失败、取消或中断，但传输随后发送 [DONE] 而被展示为正常业务完成。
+
+### 2. Signatures
+
+    type responsesStreamStatusObserver struct {
+        completed bool
+        failed bool
+    }
+    func (o *responsesStreamStatusObserver) observe(status *relaycommon.StreamStatus, event dto.ResponsesStreamResponse)
+    func (o *responsesStreamStatusObserver) finalize(c *gin.Context, info *relaycommon.RelayInfo)
+    func (s *StreamStatus) RecordError(msg string)
+
+现有日志字段为 other.stream_status.status、end_reason、error_count、errors；不新增 schema 或前端字段。
+
+### 3. Contracts
+
+- response.failed、response.incomplete、response.cancelled、response.canceled、response.error 和顶层 error 记录一次稳定业务错误，后续 [DONE]/EOF 不消除错误。
+- response.completed 或兼容的 response.done 且没有显式失败状态表示业务完成；完成事件携带 failed/incomplete/cancelled/canceled 状态时仍记异常。
+- 正常传输结束而缺少业务完成事件时，在扫描回调全部退出后补记缺少完成事件；已有客户端取消、超时、读取或 JSON 解码错误保留原始归因。
+- end_reason 继续表达传输收尾原因；最终 status 由 IsNormalEnd 和 HasErrors 共同决定，done/error 是有效组合。
+- 扫描器可能先于回调读到 [DONE]，而 SetEndReason 使用 sync.Once。Responses 观察器必须复用受锁保护的 RecordError，不争抢或重写公共结束原因。
+- 观察器状态仅由串行回调更新，最终检查在 StreamScannerHandler 等待其 goroutine 完成后执行。
+- 沿用原始事件转发、usage 和结算路径，不新增向外层返回的 NewAPIError、错误帧或流开始后的透明重试。
+- 预热、合法零 usage、工具调用及搜索不按输出 Token 数判错；新增诊断只保留固定分类和事件类型，不拼接原始上游 message 或正文。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 最终日志行为 |
+| --- | --- |
+| failed/incomplete/error 等异常事件后接 [DONE] 或 EOF | status=error，errors 保留业务事件类型 |
+| 正常 [DONE]/EOF，但没有 completed/done | status=error，errors 说明缺少业务完成事件 |
+| 已有 client_gone、timeout、读取或解析错误 | 保留已有错误，不追加缺少完成事件覆盖归因 |
+| completed/done，包含合法非零或零 usage | 保持正常，原有 usage 不变 |
+| 未知事件后正常完成 | 未知事件继续转发，保持正常 |
+
+### 5. Scenarios and Examples
+
+- 正常：response.completed 携带 input_tokens=2、output_tokens=0，作为成功预热按现有规则处理。
+- 边界：上游只发送 response.created 后结束，记录缺少业务完成事件；客户端主动取消则保留取消原因。
+- 错误用法：仅因收到 [DONE] 就把业务结果判断为成功，或由 Responses 回调全局改写 SetEndReason 优先级。
+- 正确处理：保留传输结束标记，并独立记录业务异常，使现有日志状态和错误列表展示真实结果。
+
+### 6. Tests Required
+
+- TestResponsesStreamStatusProtocolTerminals：使用真实处理器和日志生成入口，覆盖异常+DONE/EOF、缺少终态、正常完成、预热/零 usage、工具调用及未知事件；断言状态、原因、原始事件和 usage。
+- TestResponsesStreamStatusPreservesTransportErrors：读取错误、客户端取消、超时和 JSON 解码错误保留原始归因。
+- 回归：go test ./relay/channel/openai ./relay/helper ./relay/common ./service -count=1。
+- 时序：go test -race ./relay/channel/openai -run 'Responses.*Stream|Responses.*Billing' -count=1。

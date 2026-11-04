@@ -29,9 +29,8 @@ import (
 )
 
 const (
-	responsesWebSocketFirstFrameTimeout = 30 * time.Second
-	responsesWebSocketWriteTimeout      = 30 * time.Second
-	responsesWebSocketDefaultReadLimit  = 128 << 20
+	responsesWebSocketWriteTimeout     = 30 * time.Second
+	responsesWebSocketDefaultReadLimit = 128 << 20
 )
 
 var responsesWebSocketUpgrader = websocket.Upgrader{
@@ -79,7 +78,8 @@ func RelayResponsesWebSocket(c *gin.Context) {
 	}
 	defer clientConn.Close()
 	clientConn.SetReadLimit(responsesWebSocketReadLimit())
-	_ = clientConn.SetReadDeadline(time.Now().Add(responsesWebSocketFirstFrameTimeout))
+	firstFrameTimeout := time.Duration(constant.ResponsesWebSocketFirstFrameTimeoutSeconds) * time.Second
+	_ = clientConn.SetReadDeadline(time.Now().Add(firstFrameTimeout))
 	messageType, firstPayload, err := clientConn.ReadMessage()
 	_ = clientConn.SetReadDeadline(time.Time{})
 	if err != nil {

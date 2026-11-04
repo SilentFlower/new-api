@@ -415,3 +415,48 @@ channel, apiErr := middleware.SelectResponsesWebSocketChannel(c, turn.selectionM
 info := relaycommon.GenRelayInfoResponses(c, request)
 info.SetFirstResponseTime()
 ```
+
+## 场景：Responses WebSocket 首帧等待配置
+
+### 1. Scope / Trigger
+
+- Trigger：修改 GET /v1/responses 的客户端首帧读取期限、启动配置或首帧读取失败行为。
+- 仅覆盖客户端握手完成后等待首个完整业务消息的阶段；不覆盖上游连接、写入或生成流的空闲超时。
+
+### 2. Signatures
+
+    RESPONSES_WEBSOCKET_FIRST_FRAME_TIMEOUT_SECONDS=<正整数秒数>
+    constant.DefaultResponsesWebSocketFirstFrameTimeoutSeconds = 60
+    constant.ResponsesWebSocketFirstFrameTimeoutSeconds
+    common.initResponsesWebSocketEnv()
+    controller.RelayResponsesWebSocket(c *gin.Context)
+
+### 3. Contracts
+
+- 启动时由 initConstantEnv 调用独立初始化逻辑，未配置或空值使用 60 秒；配置变更在应用重新读取进程环境后生效。
+- 非整数、非正数、整数解析溢出或秒转 time.Duration 溢出时回退 60 秒，不以 0 表示禁用。
+- 常量包自身保留 60 秒初始值，未执行完整启动初始化的入口也不能得到零期限。
+- 首帧读取完成后清除读取期限；后续 type/model 校验、选渠、预扣和原有错误封套保持。
+- 配置解析放在 common/responses_websocket_env.go，控制器只读取规范化结果；不将配置读取分散到请求回调。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 缺失、空值、非法值、0、负数或溢出 | 使用 60 秒默认值 |
+| 有效正整数 | 使用配置的秒数 |
+| 握手后超过期限未读到完整首帧 | 返回现有 WebSocket error 封套，status=400、error.code=invalid_request |
+| 期限内读到首帧 | 清除期限，继续原有首帧校验与分发 |
+
+### 5. Scenarios and Examples
+
+- 正常：配置为 120 时，首帧等待采用 120 秒；及时发送的请求按原有流程处理。
+- 边界：未配置时采用 60 秒，配置为 0 仍采用 60 秒。
+- 错误用法：用 STREAMING_TIMEOUT 调整客户端首帧等待。
+- 正确处理：使用专用首帧环境变量，分别管理首帧等待与上游流空闲期限。
+
+### 6. Tests Required
+
+- TestResponsesWebSocketFirstFrameTimeoutEnv：缺省、空值、有效值、非正数、非法与时长/整数溢出输入，断言规范化秒数及可表示正时长。
+- TestResponsesWebSocketFirstFrameTimeout：真实 WebSocket 使用短配置期限断言超时封套，并覆盖及时首帧继续模型校验。
+- 回归：go test ./common ./controller -run 'ResponsesWebSocket' -count=1。
