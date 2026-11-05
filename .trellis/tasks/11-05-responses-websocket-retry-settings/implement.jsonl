@@ -1,0 +1,11 @@
+{"file": ".trellis/spec/backend/index.md", "reason": "后端必读规范与分层边界"}
+{"file": ".trellis/spec/backend/quality-guidelines.md", "reason": "JSON、测试与构建约定"}
+{"file": ".trellis/spec/backend/error-handling.md", "reason": "错误分类、传播、脱敏和重试语义"}
+{"file": ".trellis/spec/backend/api-contracts.md", "reason": "设置 API 与跨层数据合同"}
+{"file": ".trellis/spec/backend/channel-user-concurrency.md", "reason": "重试与断开时的并发租约释放边界"}
+{"file": ".trellis/spec/backend/relay-billing-model.md", "reason": "预扣、重试、结算与退款事实一致性"}
+{"file": "web/AGENTS.md", "reason": "现有前端组件、表单、测试和构建约定"}
+{"file": ".trellis/spec/frontend/i18n-merge-guidelines.md", "reason": "新增设置字段七语言完整性"}
+{"file": ".trellis/spec/guides/build-upstream-friendly-customization.md", "reason": "独立职责文件与原有文件最薄接入"}
+{"file": ".trellis/tasks/11-05-responses-websocket-retry-settings/research/findings.md", "reason": "真实故障、配置入口与长文规范完整章节的必读索引"}
+{"file": ".trellis/tasks/11-05-responses-websocket-retry-settings/research/retry-inventory.md", "reason": "服务端不重试和调用方恢复场景清单"}

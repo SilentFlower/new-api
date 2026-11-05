@@ -1,0 +1,45 @@
+{
+  "environment": "临时 SQLite、随机本地端口、独立进程与测试管理员；无生产数据及真实上游调用",
+  "checks": [
+    {
+      "scenario": "无持久化设置时加载环境缺省，加载阶段不显示错误占位值",
+      "result": "pass",
+      "effective_seconds": 120
+    },
+    {
+      "scenario": "页面保存、真实 API 及 SQLite 持久化、刷新回显",
+      "result": "pass",
+      "stored_seconds": 180
+    },
+    {
+      "scenario": "零、小数和时长溢出显示字段错误并阻止 API 写入",
+      "result": "pass"
+    },
+    {
+      "scenario": "API 业务失败反馈且刷新后保留旧值",
+      "result": "pass",
+      "boundary": "只在浏览器网络边界注入失败响应；真实数据库写入失败另由 Go 回归覆盖"
+    },
+    {
+      "scenario": "法语标签、说明和字段在实际页面正常显示",
+      "result": "pass"
+    },
+    {
+      "scenario": "应用重启后持久化设置继续覆盖改变后的环境缺省",
+      "result": "pass",
+      "environment_seconds": 240,
+      "effective_seconds": 180
+    },
+    {
+      "scenario": "浏览器运行时错误检查",
+      "result": "pass",
+      "page_errors": []
+    }
+  ],
+  "screenshots": [
+    "settings-zh.png",
+    "settings-validation-zh.png",
+    "settings-save-failure-zh.png",
+    "settings-fr.png"
+  ]
+}
