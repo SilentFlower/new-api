@@ -49,6 +49,8 @@ import { SettingsPageFormActions } from '../components/settings-page-context'
 import { SettingsSection } from '../components/settings-section'
 import { useUpdateOption } from '../hooks/use-update-option'
 
+const maxResponsesWebSocketFirstFrameTimeoutSeconds = 9_223_372_036
+
 const thinkingBlacklistExample = JSON.stringify(
   ['moonshotai/kimi-k2-thinking', 'kimi-k2-thinking'],
   null,
@@ -98,6 +100,14 @@ const schema = z.object({
     non_stream_keepalive_enabled: z.boolean(),
     ping_interval_seconds: z.coerce.number().min(1),
   }),
+  ResponsesWebSocketFirstFrameTimeoutSeconds: z.coerce
+    .number('Enter a positive integer')
+    .int('Enter a positive integer')
+    .min(1, 'Enter a positive integer')
+    .max(
+      maxResponsesWebSocketFirstFrameTimeoutSeconds,
+      'First-frame timeout exceeds the supported range'
+    ),
 })
 
 type GlobalModelSettingsFormValues = z.output<typeof schema>
@@ -110,6 +120,7 @@ type FlatGlobalModelSettings = {
   'general_setting.ping_interval_enabled': boolean
   'general_setting.non_stream_keepalive_enabled': boolean
   'general_setting.ping_interval_seconds': number
+  ResponsesWebSocketFirstFrameTimeoutSeconds: number
 }
 
 const flattenGlobalValues = (
@@ -131,6 +142,8 @@ const flattenGlobalValues = (
     values.general_setting.non_stream_keepalive_enabled,
   'general_setting.ping_interval_seconds':
     values.general_setting.ping_interval_seconds,
+  ResponsesWebSocketFirstFrameTimeoutSeconds:
+    values.ResponsesWebSocketFirstFrameTimeoutSeconds,
 })
 
 function normalizeJsonText(value: string, fallback: string) {
@@ -142,6 +155,11 @@ type GlobalSettingsCardProps = {
   defaultValues: GlobalModelSettingsFormValues
 }
 
+/**
+ * 展示并保存全局模型及连接设置。
+ * @param defaultValues 后端返回的当前有效设置。
+ * @return 包含校验和统一保存入口的设置表单。
+ */
 export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
@@ -408,6 +426,41 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                 </FormControl>
                 <FormDescription>
                   {t('Set this below the idle timeout of your reverse proxy.')}
+                </FormDescription>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name='ResponsesWebSocketFirstFrameTimeoutSeconds'
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>
+                  {t('Responses WebSocket First-frame Timeout (seconds)')}
+                </FormLabel>
+                <FormControl>
+                  <Input
+                    type='number'
+                    min={1}
+                    max={maxResponsesWebSocketFirstFrameTimeoutSeconds}
+                    step={1}
+                    className='w-40'
+                    value={
+                      field.value === undefined || field.value === null
+                        ? ''
+                        : String(field.value)
+                    }
+                    onChange={(event) => field.onChange(event.target.value)}
+                    onBlur={field.onBlur}
+                    name={field.name}
+                    ref={field.ref}
+                  />
+                </FormControl>
+                <FormDescription>
+                  {t(
+                    'Applies to new connections waiting for the first request. Existing connections keep their original timeout.'
+                  )}
                 </FormDescription>
                 <FormMessage />
               </FormItem>

@@ -420,43 +420,74 @@ info.SetFirstResponseTime()
 
 ### 1. Scope / Trigger
 
-- Trigger：修改 GET /v1/responses 的客户端首帧读取期限、启动配置或首帧读取失败行为。
+- Trigger：修改 GET /v1/responses 的客户端首帧读取期限、动态站点设置、启动环境缺省或首帧读取失败行为。
 - 仅覆盖客户端握手完成后等待首个完整业务消息的阶段；不覆盖上游连接、写入或生成流的空闲超时。
 
 ### 2. Signatures
 
     RESPONSES_WEBSOCKET_FIRST_FRAME_TIMEOUT_SECONDS=<正整数秒数>
+    ResponsesWebSocketFirstFrameTimeoutSeconds=<站点 Option key>
     constant.DefaultResponsesWebSocketFirstFrameTimeoutSeconds = 60
-    constant.ResponsesWebSocketFirstFrameTimeoutSeconds
+    constant.MaxResponsesWebSocketFirstFrameTimeoutSeconds = 9223372036
+    constant.ResponsesWebSocketFirstFrameTimeoutOptionKey
+    constant.ResponsesWebSocketFirstFrameTimeoutSeconds // 仅启动环境缺省
     common.initResponsesWebSocketEnv()
+    common.ParseResponsesWebSocketFirstFrameTimeoutSeconds(value string) (int64, error)
+    common.GetResponsesWebSocketFirstFrameTimeout() time.Duration
     controller.RelayResponsesWebSocket(c *gin.Context)
+
+管理端沿用 RootAuth 下的 `GET /api/option/` 与 `PUT /api/option/`。保存体为 `{"key":"ResponsesWebSocketFirstFrameTimeoutSeconds","value":120}`；读取 `data` 中对应 Option 的 `value` 是字符串，例如 `"120"`。
 
 ### 3. Contracts
 
-- 启动时由 initConstantEnv 调用独立初始化逻辑，未配置或空值使用 60 秒；配置变更在应用重新读取进程环境后生效。
-- 非整数、非正数、整数解析溢出或秒转 time.Duration 溢出时回退 60 秒，不以 0 表示禁用。
-- 常量包自身保留 60 秒初始值，未执行完整启动初始化的入口也不能得到零期限。
-- 首帧读取完成后清除读取期限；后续 type/model 校验、选渠、预扣和原有错误封套保持。
-- 配置解析放在 common/responses_websocket_env.go，控制器只读取规范化结果；不将配置读取分散到请求回调。
+- 有效值优先级为：有效持久化站点值 > 启动时规范化的环境变量 > 60 秒。没有站点记录时，OptionMap 导出的值和新连接使用的值都来自环境缺省，页面不能另行硬编码有效值。
+- 启动时由 `initConstantEnv` 调用独立环境初始化。环境缺失、空值、非法、非正数、整数或时长溢出回退 60 秒；更改环境变量仍需重启，不以 0 表示禁用。
+- 站点值只接受 `1..9223372036` 整数秒，先由公共解析器校验，再持久化及发布；非法更新保留数据库与运行时旧值。历史非法值在数据库同步入口同样拒绝，不覆盖当前有效值或启动缺省。
+- 新 key 的单项保存复用 `UpdateOptionsBulk` 的检查错误事务路径，数据库失败必须返回业务失败，不能继续更新内存；不借此重构其他设置的保存行为。
+- 配置 owner 位于 `common/responses_websocket_setting.go`。getter 使用 `OptionMapRWMutex.RLock` 读取站点快照；更新使用同一锁。`constant.ResponsesWebSocketFirstFrameTimeoutSeconds` 仅作启动环境缺省，不能把它改成无保护的热更新变量。
+- 每个新连接在首帧读取前冻结 deadline；保存只影响后续连接，已有连接保持原期限。其他实例沿用现有 `SyncOptions` 周期，不增加即时广播或第二份配置缓存。
+- 首帧读取结束后清除读取期限。后续 type/model 校验、选渠、预扣和主转发状态机保持；没有完整首帧时不选渠、不预扣、不占用上游连接租约。
+- 独立首帧错误分类位于 `controller/responses_websocket_first_frame.go`：网络读取超时使用原有 `type=error` 封套，`status=408`、`error.code=responses_websocket_first_frame_timeout`，随后发送关闭码 `1013`。这是升级后 JSON 的状态字段，成功 upgrade 的 HTTP 状态仍为 `101`。
+- Gorilla 读取超时后连接不能恢复读取；调用方必须重新建连并发送完整请求。不得循环重读原连接、伪造 `response.create` 或把内部 `SkipRetry` 当成客户端恢复指令，也不承诺任意客户端都会自动重连。
+- `ErrReadLimit` 保留底层已发送的 `1009`，正常关闭保留关闭握手，其他传输/协议读取失败终止连接；不得追加统一的参数错误或将其全部升级为可恢复超时。
+- 超时错误保留请求 ID；诊断只记录阶段、分类、期限或关闭码，不输出报文、对话、凭据或原始错误文本。其他业务错误继续使用既有关闭码映射与上游重试规则。
+- 前端在全局模型设置表单接入类型、默认映射、section registry、schema、差异提交和七语言；字段独立于保活开关，支持整数/上限错误、保存失败反馈及服务端回显。
 
 ### 4. Validation & Error Matrix
 
 | 条件 | 行为 |
 | --- | --- |
-| 缺失、空值、非法值、0、负数或溢出 | 使用 60 秒默认值 |
-| 有效正整数 | 使用配置的秒数 |
-| 握手后超过期限未读到完整首帧 | 返回现有 WebSocket error 封套，status=400、error.code=invalid_request |
+| 无站点值，环境缺失、空值、非法、0、负数或溢出 | 使用 60 秒默认值 |
+| 无站点值，环境为 120 | 页面与新连接均使用 120 秒 |
+| 有效站点值 | 持久化后更新运行时，覆盖环境缺省；重启仍保留 |
+| 站点更新为空、非整数、非正数或超过安全上限 | 管理 API 返回业务失败，数据库与运行时值不变 |
+| 数据库保存失败 | 返回业务失败，事务不提交且不发布新值 |
+| 载入历史非法站点值 | 拒绝覆盖，保留当前有效值或启动缺省 |
+| 握手后超过期限未读到完整首帧 | `408 / responses_websocket_first_frame_timeout / 1013`，调用方重连恢复 |
+| 首帧 JSON、type 或 model 非法 | 保留 `400 invalid_request` 和输入拒绝关闭语义 |
+| 首帧报文超限、对端正常关闭或协议错误 | 分别保留底层关闭信号，不追加超时恢复指令 |
 | 期限内读到首帧 | 清除期限，继续原有首帧校验与分发 |
+| 管理端保存后连接仍在等待旧首帧 | 旧连接期限不变，新连接使用新值 |
 
 ### 5. Scenarios and Examples
 
-- 正常：配置为 120 时，首帧等待采用 120 秒；及时发送的请求按原有流程处理。
-- 边界：未配置时采用 60 秒，配置为 0 仍采用 60 秒。
-- 错误用法：用 STREAMING_TIMEOUT 调整客户端首帧等待。
-- 正确处理：使用专用首帧环境变量，分别管理首帧等待与上游流空闲期限。
+- 正常：环境为 120 秒，管理端保存 180 秒；刷新、新连接及应用重启后均采用站点值 180 秒，即使重启时把环境改为 240 秒。
+- 边界：没有任何有效配置时使用 60 秒；站点提交 0 被拒绝，不能表示无限等待。
+- 恢复：客户端迟迟未发送完整首帧，收到超时封套与 `1013`；重新建连并及时提交包含 model 和完整 input 的 `response.create` 后可正常完成一轮。
+- 错误用法：用 `STREAMING_TIMEOUT` 或追加全局 `408` 重试规则调整客户端首帧；没有完整请求时服务端不能透明重放。
+- 正确处理：分别管理首帧等待与上游流空闲期限，首帧恢复由新连接承担；连接建立时使用公共 getter 冻结时长：
+
+```go
+firstFrameTimeout := common.GetResponsesWebSocketFirstFrameTimeout()
+_ = clientConn.SetReadDeadline(time.Now().Add(firstFrameTimeout))
+```
 
 ### 6. Tests Required
 
-- TestResponsesWebSocketFirstFrameTimeoutEnv：缺省、空值、有效值、非正数、非法与时长/整数溢出输入，断言规范化秒数及可表示正时长。
-- TestResponsesWebSocketFirstFrameTimeout：真实 WebSocket 使用短配置期限断言超时封套，并覆盖及时首帧继续模型校验。
-- 回归：go test ./common ./controller -run 'ResponsesWebSocket' -count=1。
+- 环境与公共解析：覆盖缺省、空值、最小正数、有效值、最大安全秒数、非整数、非正数、时长/整数溢出，以及站点/环境/默认值优先级。
+- Option：单项与批量均拒绝非法值，保存与重载正确，历史非法值不污染缺省；真实数据库写入失败时旧记录和内存均不变。
+- 首帧真实连接：断言超时封套、请求 ID 与 `1013`，非法 JSON/缺少模型仍被拒绝，报文超限与正常/协议关闭保留真实关闭码。
+- 期限冻结：旧连接先用较长配置进入读取，再缩短设置；新连接先超时后旧连接仍能发送首帧，不能仅按 Dial 返回推断期限已冻结。
+- 重连：超时前零上游、零消费记录、用户额度不变；新连接发送完整请求后只有一次上游请求和消费记录，并释放并发租约。
+- 前端：保存只提交目标 key 和整数秒数，非法值阻止请求，刷新及服务端值变更正确回显；用实际页面验证加载、失败反馈和七语言文案。
+- 回归：`go test ./common ./controller ./middleware ./model -run 'ResponsesWebSocket' -count=1`，以及相同包过滤条件的 `-race`；普通/Compact 多轮、既有上游重试、增量恢复及账务边界继续通过。

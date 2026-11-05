@@ -18,6 +18,7 @@ import (
 
 // TestResponsesWebSocketFirstFrameTimeout 验证实际首帧读取使用配置期限并保留后续校验。
 // @param t 测试上下文。
+// @return 无返回值。
 func TestResponsesWebSocketFirstFrameTimeout(t *testing.T) {
 	original := constant.ResponsesWebSocketFirstFrameTimeoutSeconds
 	constant.ResponsesWebSocketFirstFrameTimeoutSeconds = 1
@@ -27,9 +28,12 @@ func TestResponsesWebSocketFirstFrameTimeout(t *testing.T) {
 		name    string
 		payload string
 		message string
+		status  int
+		code    string
+		close   int
 	}{
-		{name: "未发送首帧", message: "read first"},
-		{name: "及时首帧继续校验模型", payload: `{"type":"response.create"}`, message: "model is required"},
+		{name: "未发送首帧", message: "reconnect", status: http.StatusRequestTimeout, code: "responses_websocket_first_frame_timeout", close: websocket.CloseTryAgainLater},
+		{name: "及时首帧继续校验模型", payload: `{"type":"response.create"}`, message: "model is required", status: http.StatusBadRequest, code: "invalid_request", close: websocket.ClosePolicyViolation},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			router := gin.New()
@@ -50,9 +54,11 @@ func TestResponsesWebSocketFirstFrameTimeout(t *testing.T) {
 			require.NoError(t, err)
 			assert.Equal(t, websocket.TextMessage, messageType)
 			assert.Equal(t, "error", gjson.GetBytes(payload, "type").String())
-			assert.Equal(t, int64(http.StatusBadRequest), gjson.GetBytes(payload, "status").Int())
-			assert.Equal(t, "invalid_request", gjson.GetBytes(payload, "error.code").String())
+			assert.Equal(t, int64(tc.status), gjson.GetBytes(payload, "status").Int())
+			assert.Equal(t, tc.code, gjson.GetBytes(payload, "error.code").String())
 			assert.Contains(t, gjson.GetBytes(payload, "error.message").String(), tc.message)
+			_, _, closeErr := conn.ReadMessage()
+			assert.True(t, websocket.IsCloseError(closeErr, tc.close), "关闭信号不符合首帧失败类别：%v", closeErr)
 		})
 	}
 }

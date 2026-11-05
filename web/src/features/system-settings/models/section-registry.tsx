@@ -63,6 +63,8 @@ const MODELS_SECTIONS = [
             ping_interval_seconds:
               settings['general_setting.ping_interval_seconds'],
           },
+          ResponsesWebSocketFirstFrameTimeoutSeconds:
+            settings.ResponsesWebSocketFirstFrameTimeoutSeconds,
         }}
       />
     ),

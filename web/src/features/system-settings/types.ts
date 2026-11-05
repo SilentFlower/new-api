@@ -194,6 +194,7 @@ export type ModelSettings = {
   'general_setting.ping_interval_enabled': boolean
   'general_setting.non_stream_keepalive_enabled': boolean
   'general_setting.ping_interval_seconds': number
+  ResponsesWebSocketFirstFrameTimeoutSeconds: number
   'gemini.safety_settings': string
   'gemini.version_settings': string
   'gemini.supported_imagine_models': string

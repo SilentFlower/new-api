@@ -293,6 +293,7 @@ export function ModelMutateDrawer({
       'general_setting.ping_interval_enabled': false,
       'general_setting.non_stream_keepalive_enabled': false,
       'general_setting.ping_interval_seconds': 60,
+      ResponsesWebSocketFirstFrameTimeoutSeconds: 60,
       'gemini.safety_settings': '',
       'gemini.version_settings': '',
       'gemini.supported_imagine_models': '',

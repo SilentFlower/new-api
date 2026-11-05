@@ -45,6 +45,9 @@ export const STATIC_I18N_KEYS = [
   'Routing Reliability',
   'Maintenance',
 
+  // 首帧等待设置的动态校验文案。
+  'First-frame timeout exceeds the supported range',
+
   // System info
   'online',
   'stale',

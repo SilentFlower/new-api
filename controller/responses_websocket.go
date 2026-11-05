@@ -63,6 +63,7 @@ type responsesWebSocketReadResult struct {
 
 // RelayResponsesWebSocket 处理 GET /v1/responses 的首帧分发和双向 WebSocket 转发。
 // @param c 已通过性能检查、Token 鉴权和请求限流的 Gin 上下文。
+// @return 无返回值。
 func RelayResponsesWebSocket(c *gin.Context) {
 	if !websocket.IsWebSocketUpgrade(c.Request) {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -78,12 +79,12 @@ func RelayResponsesWebSocket(c *gin.Context) {
 	}
 	defer clientConn.Close()
 	clientConn.SetReadLimit(responsesWebSocketReadLimit())
-	firstFrameTimeout := time.Duration(constant.ResponsesWebSocketFirstFrameTimeoutSeconds) * time.Second
+	firstFrameTimeout := common.GetResponsesWebSocketFirstFrameTimeout()
 	_ = clientConn.SetReadDeadline(time.Now().Add(firstFrameTimeout))
 	messageType, firstPayload, err := clientConn.ReadMessage()
 	_ = clientConn.SetReadDeadline(time.Time{})
 	if err != nil {
-		writeResponsesWebSocketError(c, clientConn, types.NewErrorWithStatusCode(errors.New("read first response.create failed"), types.ErrorCodeInvalidRequest, http.StatusBadRequest, types.ErrOptionWithSkipRetry()))
+		handleResponsesWebSocketFirstFrameReadError(c, clientConn, err, firstFrameTimeout)
 		return
 	}
 
@@ -767,7 +768,9 @@ func writeResponsesWebSocketError(c *gin.Context, conn *websocket.Conn, apiErr *
 	})
 	if err == nil {
 		closeCode := websocket.ClosePolicyViolation
-		if apiErr.StatusCode >= http.StatusInternalServerError {
+		if apiErr.GetErrorCode() == responsesWebSocketFirstFrameTimeoutCode {
+			closeCode = websocket.CloseTryAgainLater
+		} else if apiErr.StatusCode >= http.StatusInternalServerError {
 			closeCode = websocket.CloseInternalServerErr
 		}
 		_ = conn.SetWriteDeadline(time.Now().Add(responsesWebSocketWriteTimeout))

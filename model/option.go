@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
+	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
@@ -27,9 +28,12 @@ func AllOption() ([]*Option, error) {
 	return options, err
 }
 
+// InitOptionMap 注册选项缺省并从数据库加载有效站点设置。
+// @return 无返回值。
 func InitOptionMap() {
 	common.OptionMapRWMutex.Lock()
 	common.OptionMap = make(map[string]string)
+	common.OptionMap[constant.ResponsesWebSocketFirstFrameTimeoutOptionKey] = strconv.Itoa(constant.ResponsesWebSocketFirstFrameTimeoutSeconds)
 
 	// 添加原有的系统配置
 	common.OptionMap["FileUploadPermission"] = strconv.Itoa(common.FileUploadPermission)
@@ -209,6 +213,10 @@ func SyncOptions(frequency int) {
 }
 
 func validateOptionValue(key string, value string) error {
+	if key == constant.ResponsesWebSocketFirstFrameTimeoutOptionKey {
+		_, err := common.ParseResponsesWebSocketFirstFrameTimeoutSeconds(value)
+		return err
+	}
 	if key == operation_setting.ToolPriceOptionKey {
 		return operation_setting.ValidateToolPricesJSON(value)
 	}
@@ -218,7 +226,15 @@ func validateOptionValue(key string, value string) error {
 	return nil
 }
 
+// UpdateOption 校验并更新单个站点设置。
+// @param key 设置键。
+// @param value 设置字符串值。
+// @return 校验或配置更新错误；首帧设置还会返回持久化错误。
 func UpdateOption(key string, value string) error {
+	if key == constant.ResponsesWebSocketFirstFrameTimeoutOptionKey {
+		// 新设置使用已检查数据库错误的事务路径，避免保存失败却发布运行时值。
+		return UpdateOptionsBulk(map[string]string{key: value})
+	}
 	if err := validateOptionValue(key, value); err != nil {
 		return err
 	}
@@ -276,6 +292,12 @@ func UpdateOptionsBulk(values map[string]string) error {
 }
 
 func updateOptionMap(key string, value string) (err error) {
+	if key == constant.ResponsesWebSocketFirstFrameTimeoutOptionKey {
+		// 数据库同步不经过更新 API，历史非法值也必须在覆盖有效值之前拒绝。
+		if err := validateOptionValue(key, value); err != nil {
+			return err
+		}
+	}
 	if key == retiredThemeOptionKey {
 		common.OptionMapRWMutex.Lock()
 		delete(common.OptionMap, key)
