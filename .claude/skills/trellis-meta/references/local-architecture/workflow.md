@@ -46,6 +46,32 @@ Stable owner categories are:
 | Cross-session task progress discovery and recovery | `trellis-continue` owns the recovery decision, `task_progress.py` owns candidate evidence and completed-task reopen, and `task.py start` with `.trellis/scripts/common/active_task.py` owns explicit session binding |
 
 This reference names owners; it does not copy their command schemas, interaction templates, state formats, or error matrices. Read `.trellis/workflow.md`, the local owner skill/helper, available `overrides/bundles/`, and `.flower/state.json` for the installed version. Do not maintain a fixed Skill-Garden skill count or exhaustive capability list here.
+
+### Runtime Owner Details
+
+The startup Workflow Owner Index names policy owners. Consult this runtime map when maintaining or debugging the workflow.
+
+| Gate / Guard | Runtime owner |
+| --- | --- |
+| Request Intent Routing | `task_intent.py` |
+| Harness Plan Mode Ban | injected state text (no runtime hook) |
+| Brainstorm Gate | `task.py start` readiness |
+| Task Brief Handoff | `task.py start` brief guard |
+| Project Knowledge Discovery | `spec_router.py` |
+| Flower Update Confirmation | update hook / `self-update` arguments |
+| Active Task Scope Guard | `task_intent.py` scope safety |
+| Untracked Work Completion Chain | `untracked_flow.py` |
+| Untracked Task Adoption | `task_intent.py adopt` |
+| Routing Gate | `route_state.py` |
+| Auto-Loop Return Gate | `auto_loop.py record/next` |
+| Interactive Post-Check Stop Gate | current Check-All evidence |
+| Code Commit Confirmation Gate | exact Git safety checks |
+| Auto-loop Commit-only Preauthorization | `auto_loop.py` + `trellis-push` internal commit-only |
+| Deterministic Task Close | `task_progress.py` + `task_lifecycle.py` |
+| Deferred Physical GC | `task_lifecycle.py session-start` |
+| Task Progress Recovery | `task_progress.py` |
+
+The Hub must not duplicate owner procedures, helper schemas, interaction templates, error matrices, or Git path rules.
 <!-- END skill-garden patch trellis-meta-managed-owner-routing v0.6 -->
 <!-- BEGIN skill-garden patch trellis-meta-managed-state-boundary v0.6 -->
 ## Workflow-State Prompt Blocks

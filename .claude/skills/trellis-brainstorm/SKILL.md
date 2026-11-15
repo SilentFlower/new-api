@@ -35,6 +35,8 @@ Use this skill during Phase 1 planning to turn the user's request into clear req
 Use this skill after the user explicitly requests task planning, or after clear complex implementation intent authorizes creating a planning workspace. This authorization covers planning only; it never authorizes `task.py start` or implementation.
 
 Before choosing an approach for non-trivial project work, follow the workflow `Request Triage` Project Knowledge Discovery contract and return here with the matched project-local SOPs and specs.
+
+Before creating or changing a parent/child task tree, load Phase 1.1 via `python3 ./.trellis/scripts/get_context.py --mode phase --step 1.1` and follow its task-tree guidance.
 <!-- END skill-garden patch brainstorm-planning-authorization v0.6 -->
 
 <!-- BEGIN skill-garden patch brainstorm-auto-task-create v0.6 -->
@@ -96,7 +98,7 @@ Recommendations are not default selections. Never choose a recommended product d
 <!-- BEGIN skill-garden patch brainstorm-planning-review-brief v0.6 -->
 Do not manufacture clarification questions when the request and repository evidence already resolve every decision. In that case, proceed directly to the final Brief handoff through `trellis-task-brief`.
 
-The final Brief review is a required phase-transition gate, not a prohibited process question. Task-creation consent and ordinary implementation intent do not satisfy this gate; explicit preauthorization is evaluated only by `trellis-task-brief`.
+The final Brief review is a required phase-transition gate. Task-creation consent and ordinary implementation intent do not satisfy it; `trellis-task-brief` owns explicit preauthorization, background preparation, validated timeout receipts and manual fallback. Follow that owner before ending the turn; do not require a human-only reply when its background branch applies.
 <!-- END skill-garden patch brainstorm-planning-review-brief v0.6 -->
 
 ## Thinking Framework: First Principles Analysis
@@ -221,7 +223,7 @@ Do not start implementation merely because the user originally asked for impleme
 
 ## Planning Handoff
 
-Once the Quality Bar is satisfied, load `trellis-task-brief`, refresh `brief.md` from the final planning artifacts, and display the full Brief in chat. By default, end the current turn and wait for the user's planning review confirmation. Only valid explicit preauthorization for the current final Brief, as defined by `trellis-task-brief`, permits same-turn start within unchanged scope.
+Once the Quality Bar is satisfied, load `trellis-task-brief` and delegate confirmation mode to that owner BEFORE the final reply: refresh the Brief, attempt its eligible background prepare/wait, and display the full returned display. Only exclusions or actual failure use manual confirmation with the reason. Do not impose a separate human-only stop. Preparation does not permit implementation; start only after that owner's valid human/runner authorization or one-time policy_timeout claim plus started receipt.
 
 Ordinary implementation intent expressed before the final artifacts and full Brief are shown authorizes planning only; it cannot be reused as the final review confirmation.
 

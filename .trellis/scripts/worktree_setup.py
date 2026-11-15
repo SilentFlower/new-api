@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -506,6 +507,10 @@ def _flower_call(operation: str, **values: Any) -> dict[str, Any]:
     if not executable or not helper:
         if operation == "status":
             return {"installation": "unchecked", "version": None, "source": None, "reason": "flower-cli-required"}
+        if operation == "setup":
+            target = Path(values["target"])
+            requested = any((target / ".flower" / name).exists() for name in ("plugins.json", "plugin-lock.json", "state.json")) or (target / ".trellis/.flower-manifest.json").exists()
+            return {"action": "pending" if requested else "notRequested", "paths": [], "reason": "flower-cli-required" if requested else None, "message": "安装准备需要使用 Flower CLI"}
         source = Path(values.get("source", "."))
         flower_directory = source / ".flower"
         if operation == "plan" and not flower_directory.is_symlink() and not any(
@@ -538,14 +543,12 @@ def _flower_call(operation: str, **values: Any) -> dict[str, Any]:
     value = payload["result"]
     if operation == "status":
         valid = value.get("installation") in {"complete", "incomplete", "invalid"}
-    elif operation in {"plan", "apply"}:
+    elif operation in {"plan", "apply", "setup"}:
         valid = (
-            value.get("action") in {"inherited", "preserved", "unavailable"}
+            value.get("action") in {"inherited", "preserved", "unavailable", "initialized", "pending", "notRequested"}
             and isinstance(value.get("paths"), list)
             and all(isinstance(item, str) for item in value["paths"])
-            and isinstance(value.get("digest"), str)
-            and value["digest"].startswith("sha256:")
-            and len(value["digest"]) == 71
+            and (operation == "setup" or (isinstance(value.get("digest"), str) and value["digest"].startswith("sha256:") and len(value["digest"]) == 71))
         )
     else:
         valid = value.get("action") == "rolledBack"
@@ -609,6 +612,9 @@ def _analyze(target_arg: str | None) -> dict[str, Any]:
         conflicts.append({"path": ".trellis/.developer", "reason": "local-state-conflict"})
     if runtime_path.is_symlink() or (runtime_path.exists() and not runtime_path.is_dir()):
         conflicts.append({"path": ".trellis/.runtime", "reason": "local-state-conflict"})
+    sessions_path = runtime_path / "sessions"
+    if sessions_path.is_symlink() or (sessions_path.exists() and not sessions_path.is_dir()):
+        conflicts.append({"path": ".trellis/.runtime/sessions", "reason": "local-state-conflict"})
 
     registry_path = _registry_path(context["gitCommonDir"])
     registry_status, registry_data = _read_json(registry_path)
@@ -649,6 +655,7 @@ def _analyze(target_arg: str | None) -> dict[str, Any]:
         reason = "local-runtime-missing"
         actions.append({"command": "prepare", "reason": reason})
 
+    flower = _flower_call("status", target=str(target_root))
     return {
         "status": status,
         "reason": reason,
@@ -668,7 +675,8 @@ def _analyze(target_arg: str | None) -> dict[str, Any]:
         },
         "actions": actions,
         "conflicts": conflicts,
-        "flower": _flower_call("status", target=str(target_root)),
+        "flower": flower,
+        "setup": _inspect_setup(context, status, flower),
     }
 
 
@@ -785,12 +793,16 @@ def _prepare_local(
     inherit_flower: bool = False,
 ) -> dict[str, Any]:
     """初始化当前 worktree 自己的 gitignored 运行态并注册。"""
+    if developer is not None:
+        developer = developer.strip()
+        if not developer or re.search(r"[\x00\r\n]", developer):
+            raise WorktreeSetupError("developer-invalid", "开发者身份不能为空或包含换行")
+    if plan["status"] == "blocked":
+        raise WorktreeSetupError("worktree-local-conflict", "目标 worktree 存在本地路径冲突", conflicts=plan["conflicts"])
     if plan["status"] == "needs-migration":
         raise WorktreeSetupError("migration-required", "检测到旧投影，请先运行 migrate")
     if plan["status"] == "needs-init":
         raise WorktreeSetupError("local-trellis-missing", "当前分支缺少本地 Trellis，请先在目标分支安装")
-    if plan["status"] == "blocked":
-        raise WorktreeSetupError("worktree-local-conflict", "目标 worktree 存在本地路径冲突", conflicts=plan["conflicts"])
 
     target_root = Path(plan["targetRoot"])
     context = _worktree_context(target_root)
@@ -859,6 +871,13 @@ def _prepare_local(
                 )
                 flower_transfer.pop("receipt", None)
                 changed_paths.extend(flower_transfer.get("paths", []))
+            else:
+                try:
+                    flower_transfer = _flower_call("setup", target=str(target_root))
+                except (WorktreeSetupError, OSError) as error:
+                    issue = _setup_issue("flower", error)
+                    flower_transfer = {"action": "pending", "paths": [], **issue}
+                changed_paths.extend(flower_transfer.get("paths", []))
             runtime_sessions = target_root / ".trellis/.runtime/sessions"
             if not runtime_sessions.is_dir():
                 runtime_sessions.mkdir(parents=True, exist_ok=True)
@@ -892,6 +911,11 @@ def _prepare_local(
         "flower": flower_transfer,
         "notInherited": list(NOT_INHERITED_LOCAL_STATE),
     }
+    if flower_transfer["action"] in {"pending", "unavailable"}:
+        setup = result["setup"]
+        setup["status"] = "pending"
+        setup["issues"] = [issue for issue in setup["issues"] if issue["step"] != "flower"] + [{"step": "flower", "reason": flower_transfer.get("reason"), "path": flower_transfer.get("path"), "message": flower_transfer.get("message") or "目标安装信息仍待准备"}]
+        setup["nextActions"] = [{"command": ["flower-trellis", "worktree", "prepare", "--target", str(target_root)]}]
     return result
 
 
@@ -1038,18 +1062,37 @@ def _task_directories(target_root: Path) -> set[str]:
     }
 
 
-def _run_target_python(target_root: Path, script: Path, *args: str) -> None:
-    """使用当前 Python 解释器运行目标分支自己的 Trellis 脚本。"""
-    result = subprocess.run(
-        [sys.executable, "-X", "utf8", str(script), *args],
-        cwd=target_root,
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        timeout=30,
-    )
+def _run_target_python(target_root: Path, script: Path, *args: str) -> str:
+    """隔离来源会话身份，使用当前解释器运行目标脚本并返回输出。"""
+    current = target_root
+    for part in script.relative_to(target_root).parts:
+        current = current / part
+        if current.is_symlink():
+            raise WorktreeSetupError("task-path-conflict", "任务脚本路径不能包含软链", path=str(script.relative_to(target_root)))
+    environment = {
+        key: value for key, value in os.environ.items()
+        if key not in {"TRELLIS_CONTEXT_ID", "OPENCODE_RUN_ID"} and not re.search(r"(?:SESSION_?ID|CONVERSATION_?ID|TRANSCRIPT_PATH|THREAD_ID)$", key)
+    }
+    environment.update({"PYTHONIOENCODING": "utf-8", "PYTHONDONTWRITEBYTECODE": "1"})
+    try:
+        result = subprocess.run(
+            [sys.executable, "-X", "utf8", "-B", str(script), *args],
+            cwd=target_root,
+            env=environment,
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise WorktreeSetupError(
+            "task-command-failed",
+            "目标分支 task 命令超时或无法执行",
+            command=[sys.executable, str(script), *args],
+            error=str(error),
+        ) from error
     if result.returncode != 0:
         raise WorktreeSetupError(
             "task-command-failed",
@@ -1058,6 +1101,7 @@ def _run_target_python(target_root: Path, script: Path, *args: str) -> None:
             stdout=result.stdout.strip(),
             stderr=result.stderr.strip(),
         )
+    return result.stdout
 
 
 def _working_tree_summary(source_root: Path) -> dict[str, Any]:
@@ -1182,6 +1226,81 @@ def _base_repositories(
     return repositories + sorted(submodules, key=lambda item: item["path"])
 
 
+def _setup_issue(step: str, error: Exception) -> dict[str, Any]:
+    """汇总普通准备问题；恢复证据不完整仍保持错误。"""
+    reason = error.reason if isinstance(error, WorktreeSetupError) else "setup-operation-failed"
+    if reason.startswith("registry") or "repair" in reason.lower() or "rollback" in reason.lower():
+        raise error
+    details = error.details if isinstance(error, WorktreeSetupError) else {}
+    return {"step": step, "reason": reason, "path": details.get("path"), "message": str(error)}
+
+
+def _inspect_setup(context: dict[str, Any], status: str, flower: dict[str, Any]) -> dict[str, Any]:
+    """只按目标当前文件诊断本地与安装准备，不保存执行进度。"""
+    target = context["targetRoot"]
+    issues = []
+    if status != "ready-local":
+        issues.append({"step": "local", "reason": status, "path": ".trellis", "message": "目标 Trellis 尚未就绪"})
+    requested = any((target / ".flower" / name).exists() for name in ("plugins.json", "plugin-lock.json", "state.json")) or (target / ".trellis/.flower-manifest.json").exists()
+    if requested and flower.get("installation") != "complete":
+        issues.append({"step": "flower", "reason": flower.get("reason"), "path": flower.get("path"), "message": flower.get("message") or "目标安装信息仍待准备"})
+    command = ["flower-trellis", "init", "--target", str(target)] if status == "needs-init" else ["flower-trellis", "worktree", "prepare", "--target", str(target)]
+    return {"status": "pending" if issues else "ready", "issues": issues, "nextActions": [{"command": command}] if issues else []}
+
+
+def _create_task(context: dict[str, Any], args: argparse.Namespace, developer: str, base_ref: str) -> str:
+    """按目标已知接口尝试一次任务创建，失败保留路径与剩余命令。"""
+    target = context["targetRoot"]
+    script = target / ".trellis/scripts/task.py"
+    tasks = target / ".trellis/tasks"
+    if tasks.is_symlink() or (tasks.exists() and not tasks.is_dir()):
+        raise WorktreeSetupError("task-path-conflict", "任务目录必须是目标真实目录", path=".trellis/tasks")
+    if not script.is_file():
+        raise WorktreeSetupError("task-script-missing", "目标分支没有任务脚本", path=".trellis/scripts/task.py")
+    help_text = _run_target_python(target, script, "create", "--help")
+    commands = _run_target_python(target, script, "--help")
+    if "set-branch" not in commands or ("--base-branch" not in help_text and "set-base-branch" not in commands):
+        raise WorktreeSetupError("task-interface-unsupported", "目标任务接口不能安全设置分支")
+    if "--no-start" not in help_text and any((target / ".trellis/.runtime/cursor-shell").glob("*.json")):
+        raise WorktreeSetupError("task-session-isolation-unavailable", "旧任务脚本存在会话 ticket，请在目标会话创建")
+    before = _task_directories(target)
+    if any(name.endswith("-" + args.task_slug) for name in before):
+        raise WorktreeSetupError("task-target-exists", "目标已有同标识任务，保留现有文档")
+    arguments = ["create", args.task_title, "--slug", args.task_slug, "--assignee", developer]
+    if "--no-start" in help_text:
+        arguments.append("--no-start")
+    if "--base-branch" in help_text:
+        arguments.extend(["--base-branch", base_ref])
+    if args.task_description:
+        arguments.extend(["--description", args.task_description])
+    task_relative = None
+    remaining = []
+    try:
+        try:
+            _run_target_python(target, script, *arguments)
+        finally:
+            created = sorted(_task_directories(target) - before)
+            if len(created) == 1:
+                task_relative = ".trellis/tasks/" + created[0]
+                # create 超时也可能已落盘；只交接设置命令，避免重复创建覆盖文档。
+                remaining = [["set-branch", task_relative, args.branch]]
+                if "set-base-branch" in commands:
+                    remaining.append(["set-base-branch", task_relative, base_ref])
+        if not task_relative:
+            raise WorktreeSetupError("task-create-ambiguous", "无法唯一识别本次创建的任务")
+        while remaining:
+            _run_target_python(target, script, *remaining[0])
+            remaining.pop(0)
+        status, data = _read_json(target / task_relative / "task.json")
+        if status != "ok" or data is None or data.get("status") != "planning" or data.get("branch") != args.branch or data.get("base_branch") != base_ref:
+            raise WorktreeSetupError("task-result-invalid", "任务结果未满足 planning 和分支约束", path=task_relative)
+    except WorktreeSetupError as error:
+        error.details["task"] = task_relative
+        error.details["nextActions"] = [{"command": [sys.executable, "-X", "utf8", "-B", str(script), *item], "cwd": str(target)} for item in remaining]
+        raise
+    return task_relative
+
+
 def _create_plan(args: argparse.Namespace) -> dict[str, Any]:
     """构造无写入的 create 计划及确认指纹。"""
     source_context = _worktree_context(_resolve_start(args.source))
@@ -1197,24 +1316,32 @@ def _create_plan(args: argparse.Namespace) -> dict[str, Any]:
     resolved_commit = _git_output(source_root, "rev-parse", "--verify", f"{effective_base}^{{commit}}")
     if resolved_commit is None:
         raise WorktreeSetupError("create-base-invalid", "base ref 无法解析", base=effective_base)
-    task_entry = _git_run(source_root, "cat-file", "-e", f"{resolved_commit}:.trellis/scripts/task.py")
-    if task_entry.returncode != 0:
-        raise WorktreeSetupError(
-            "local-trellis-missing",
-            "base 提交不包含 `.trellis/scripts/task.py`",
-            base=effective_base,
-            resolvedCommit=resolved_commit,
-        )
-
+    if bool(args.task_title) != bool(args.task_slug):
+        raise WorktreeSetupError("task-arguments-incomplete", "任务标题和标识需要成对提供")
+    task_request = {"title": args.task_title, "slug": args.task_slug, "description": args.task_description} if args.task_title else None
+    if task_request and (not args.task_title.strip() or not re.fullmatch(r"[\w][\w.-]*", args.task_slug)):
+        raise WorktreeSetupError("task-arguments-invalid", "任务标题或标识无效")
+    _git_require(source_root, "check-ref-format", "--branch", args.branch, reason="create-branch-invalid", message="新分支名无效")
+    registry = _load_registry(source_context["gitCommonDir"])
+    conflicts = _registry_registration_conflicts(source_context, registry, task=None)
+    if conflicts:
+        raise WorktreeSetupError(conflicts[0]["reason"], "registry 存在冲突", conflicts=conflicts)
+    if task_request:
+        prospective = ".trellis/tasks/" + datetime.now().strftime("%m-%d-") + args.task_slug
+        if any(entry.get("task") == prospective for entry in registry["worktrees"].values()):
+            raise WorktreeSetupError("task-already-registered", "任务标识已在其它 worktree 注册", task=prospective)
     source_developer = _developer_from_file(source_root)
-    developer = args.developer or source_developer
+    developer = args.developer.strip() if args.developer is not None else source_developer
+    if args.developer is not None and (not developer or re.search(r"[\x00\r\n]", developer)):
+        raise WorktreeSetupError("developer-invalid", "开发者身份不能为空或包含换行")
+    route_transfer = _route_preference_transfer(source_root, target, source_developer, developer) if developer else {"action": "notInherited", "values": {}}
+    issues = []
     if not developer:
-        raise WorktreeSetupError("developer-required", "create 需要 --developer 或来源 worktree 的本地身份")
-    route_transfer = _route_preference_transfer(source_root, target, source_developer, developer)
-    flower_transfer = _flower_call(
-        "plan", source=str(source_root), target=str(target), baseCommit=resolved_commit,
-        sourceDeveloper=source_developer, targetDeveloper=developer,
-    )
+        issues.append({"step": "local", "reason": "developer-required", "path": ".trellis/.developer", "message": "可继续创建工作区，随后使用 prepare --developer <name> 补齐身份"})
+    if _git_run(source_root, "cat-file", "-e", f"{resolved_commit}:.trellis/.version").returncode:
+        issues.append({"step": "local", "reason": "local-trellis-missing", "path": ".trellis", "message": "目标基线未安装 Trellis，创建后可独立初始化"})
+    if task_request and _git_run(source_root, "cat-file", "-e", f"{resolved_commit}:.trellis/scripts/task.py").returncode:
+        issues.append({"step": "task", "reason": "task-script-missing", "path": ".trellis/scripts/task.py", "message": "目标缺少任务脚本，任务将保留为待准备"})
     plan: dict[str, Any] = {
         "status": "confirmation-required",
         "changed": False,
@@ -1243,11 +1370,8 @@ def _create_plan(args: argparse.Namespace) -> dict[str, Any]:
         "targetRoot": _path_text(target),
         "branch": args.branch,
         "repositories": _base_repositories(source_root, source_context, resolved_commit, args.branch),
-        "taskRequest": {
-            "title": args.task_title,
-            "slug": args.task_slug,
-            "description": args.task_description,
-        },
+        "taskRequest": task_request,
+        "setup": {"status": "pending" if issues else "ready", "issues": issues},
         "localStateTransfer": {
             "developer": {
                 "action": "initialized",
@@ -1255,12 +1379,19 @@ def _create_plan(args: argparse.Namespace) -> dict[str, Any]:
                 "sourceName": source_developer,
             },
             "routePreferences": route_transfer,
-            "flower": flower_transfer,
+            "flower": {"action": "pending", "reason": "target-checkout-required", "paths": [], "message": "Git 建立后按目标固定包准备，仅补本地状态和缺失的忽略配置"},
             "initialized": ["session-runtime"],
             "notInherited": list(NOT_INHERITED_LOCAL_STATE),
         },
     }
-    fingerprint_payload = json.dumps(plan, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    dependencies = {
+        "gitCommonDir": plan["source"]["gitCommonDir"], "target": plan["target"], "baseCommit": resolved_commit,
+        "developer": developer, "taskRequest": task_request,
+        "routePreferences": route_transfer.get("values", {}) if route_transfer["action"] == "inherited" else {},
+    }
+    if task_request:
+        dependencies["taskBaseBranch"] = effective_base
+    fingerprint_payload = json.dumps(dependencies, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     fingerprint = hashlib.sha256(fingerprint_payload.encode("utf-8")).hexdigest()
     plan["confirmation"] = {"flag": "--yes", "fingerprint": fingerprint}
     return plan
@@ -1292,133 +1423,61 @@ def _create(args: argparse.Namespace) -> dict[str, Any]:
     base_commit = plan["base"]["resolvedCommit"]
 
     created_worktree = False
-    registry_written = False
-    task_relative: str | None = None
-    rollback_errors: list[str] = []
-    with _registry_lock(source_context["gitCommonDir"]):
-        try:
+    task_relative = None
+    try:
+        with _registry_lock(source_context["gitCommonDir"]):
+            _load_registry(source_context["gitCommonDir"])
             if target.exists() or target.is_symlink():
                 raise WorktreeSetupError("create-target-exists", "create 目标路径已经存在", target=_path_text(target))
             if _git_output(source_root, "show-ref", "--verify", f"refs/heads/{args.branch}") is not None:
                 raise WorktreeSetupError("create-branch-exists", "create 目标分支已经存在", branch=args.branch)
-            _git_require(
-                source_root,
-                "worktree",
-                "add",
-                "-b",
-                args.branch,
-                str(target),
-                base_commit,
-                reason="worktree-create-failed",
-                message="Git worktree 创建失败",
-            )
+            _git_require(source_root, "worktree", "add", "-b", args.branch, str(target), base_commit, reason="worktree-create-failed", message="Git worktree 创建失败")
             created_worktree = True
-            target_plan = _analyze(str(target))
-            if target_plan["status"] == "needs-init":
-                raise WorktreeSetupError(
-                    "local-trellis-missing",
-                    "base 分支不包含本地 Trellis，create 已停止；请先在该分支安装",
-                )
-            if target_plan["status"] not in {"ready-local", "needs-prepare"}:
-                raise WorktreeSetupError(
-                    "worktree-create-not-ready",
-                    "新 worktree 无法进入本地 ready 状态",
-                    status=target_plan["status"],
-                    conflicts=target_plan["conflicts"],
-                )
-            runtime_sessions = target / ".trellis/.runtime/sessions"
-            runtime_sessions.mkdir(parents=True, exist_ok=True)
-            if _developer_from_file(target) is None:
-                _write_developer(target, developer)
-            route_transfer = plan["localStateTransfer"]["routePreferences"]
-            if route_transfer["action"] == "inherited":
-                _write_route_preferences(target, route_transfer["values"])
-
-            flower_transfer = plan["localStateTransfer"]["flower"]
-            if flower_transfer.get("digest"):
-                flower_transfer = _flower_call(
-                    "apply", source=str(source_root), target=str(target), baseCommit=base_commit,
-                    sourceDeveloper=plan["localStateTransfer"]["developer"]["sourceName"],
-                    targetDeveloper=developer, expectedDigest=flower_transfer["digest"],
-                )
-                flower_transfer.pop("receipt", None)
-                plan["localStateTransfer"]["flower"] = flower_transfer
-
-            task_script = target / ".trellis/scripts/task.py"
-            if not task_script.is_file():
-                raise WorktreeSetupError("task-script-missing", "目标分支缺少 `.trellis/scripts/task.py`")
-            before_tasks = _task_directories(target)
-            create_args = [
-                "create",
-                args.task_title,
-                "--slug",
-                args.task_slug,
-                "--assignee",
-                developer,
-                "--base-branch",
-                base_ref,
-                "--no-start",
-            ]
-            if args.task_description:
-                create_args.extend(["--description", args.task_description])
-            _run_target_python(target, task_script, *create_args)
-            created_tasks = sorted(_task_directories(target) - before_tasks)
-            if len(created_tasks) != 1:
-                raise WorktreeSetupError(
-                    "task-create-ambiguous",
-                    "无法唯一识别本轮创建的 task 目录",
-                    createdTasks=created_tasks,
-                )
-            task_relative = f".trellis/tasks/{created_tasks[0]}"
-            _run_target_python(target, task_script, "set-branch", task_relative, args.branch)
-            target_context = _worktree_context(target)
-            _register_worktree(target_context, task=task_relative, developer=developer)
-            registry_written = True
-        except Exception as error:
-            if registry_written:
-                try:
-                    registry = _load_registry(source_context["gitCommonDir"])
-                    target_git_dir = _git_dir(target) if target.exists() else None
-                    if target_git_dir is not None:
-                        worktree_id = hashlib.sha256(_path_text(target_git_dir).encode("utf-8")).hexdigest()[:16]
-                        registry["worktrees"].pop(worktree_id, None)
-                        _write_json_atomic(_registry_path(source_context["gitCommonDir"]), registry)
-                except Exception as rollback_error:
-                    rollback_errors.append(f"registry: {rollback_error}")
-            if created_worktree:
-                result = _git_run(source_root, "worktree", "remove", "--force", str(target), timeout=30)
-                if result.returncode != 0:
-                    rollback_errors.append(f"worktree: {result.stderr.strip()}")
-            if created_worktree:
-                result = _git_run(source_root, "branch", "-D", args.branch, timeout=30)
-                if result.returncode != 0:
-                    rollback_errors.append(f"branch: {result.stderr.strip()}")
-            if isinstance(error, WorktreeSetupError):
-                error.details["rollbackErrors"] = rollback_errors
-                raise
-            raise WorktreeSetupError(
-                "worktree-create-failed",
-                "create 编排失败",
-                error=str(error),
-                rollbackErrors=rollback_errors,
-            ) from error
-
-    target_context = _worktree_context(target)
+            context = _worktree_context(target)
+            _register_worktree(context, developer=developer)
+        try:
+            prepared = _prepare_local(_analyze(str(target)), developer)
+            plan["localStateTransfer"]["flower"] = prepared["localStateTransfer"]["flower"]
+            if plan["localStateTransfer"]["routePreferences"]["action"] == "inherited" and _developer_from_file(target) == plan["localStateTransfer"]["developer"]["sourceName"] and not (target / ROUTE_PREFERENCES_PATH).exists():
+                _write_route_preferences(target, plan["localStateTransfer"]["routePreferences"]["values"])
+            setup = prepared["setup"]
+        except (WorktreeSetupError, OSError) as error:
+            setup = {"status": "pending", "issues": [_setup_issue("local", error)], "nextActions": _analyze(str(target))["setup"]["nextActions"]}
+        if plan["taskRequest"]:
+            try:
+                if not _developer_from_file(target) or _analyze(str(target))["status"] != "ready-local":
+                    raise WorktreeSetupError("task-local-not-ready", "本地 Trellis 就绪后，请在目标新会话创建任务")
+                with _registry_lock(context["gitCommonDir"]):
+                    try:
+                        task_relative = _create_task(context, args, _developer_from_file(target), base_ref)
+                    except WorktreeSetupError as error:
+                        task_relative = error.details.get("task")
+                        raise
+                    finally:
+                        if task_relative:
+                            _register_worktree(context, task=task_relative, developer=developer)
+            except (WorktreeSetupError, OSError, subprocess.SubprocessError) as error:
+                setup["status"] = "pending"
+                setup["issues"].append(_setup_issue("task", error))
+                if isinstance(error, WorktreeSetupError):
+                    setup["nextActions"].extend(error.details.get("nextActions", []))
+    except (WorktreeSetupError, OSError) as error:
+        if created_worktree:
+            if not isinstance(error, WorktreeSetupError):
+                error = WorktreeSetupError("worktree-setup-failed", str(error))
+            error.details.update({"worktreeCreated": True, "targetRoot": str(target), "branch": args.branch})
+        raise error
     return {
         **plan,
-        "status": "created",
-        "changed": True,
-        "requiresConfirmation": False,
-        "head": target_context["head"],
-        "task": task_relative,
-        "registry": _path_text(_registry_path(target_context["gitCommonDir"])),
+        "status": "created" if setup["status"] == "ready" else "created-needs-prepare",
+        "changed": True, "requiresConfirmation": False, "head": base_commit,
+        "task": task_relative, "setup": setup,
+        "registry": _path_text(_registry_path(source_context["gitCommonDir"])),
         "handoff": {
-            "cwd": _path_text(target),
-            "workspaceRoot": _path_text(target),
-            "task": task_relative,
-            "command": f"cd {target}",
-            "requiresNewSession": True,
-            "reason": "新 worktree 需要独立会话，避免继承来源会话运行态",
+            "cwd": str(target), "workspaceRoot": str(target), "task": task_relative,
+            "command": f"cd {target}", "requiresNewSession": True,
+            "reason": "新 worktree 使用独立会话；待准备项在该目录继续",
+            "taskRequest": plan["taskRequest"], "setup": setup,
         },
     }
 
@@ -1675,8 +1734,8 @@ def build_parser() -> argparse.ArgumentParser:
     create_parser.add_argument("--target", required=True, help="new worktree path")
     create_parser.add_argument("--branch", required=True, help="new branch name")
     create_parser.add_argument("--base", help="base commit or branch; defaults to current source branch")
-    create_parser.add_argument("--task-title", required=True, help="planning task title")
-    create_parser.add_argument("--task-slug", required=True, help="planning task slug")
+    create_parser.add_argument("--task-title", help="optional planning task title")
+    create_parser.add_argument("--task-slug", help="optional planning task slug, paired with --task-title")
     create_parser.add_argument("--task-description", help="planning task description")
     create_parser.add_argument("--developer", help="target-local developer identity")
     create_parser.add_argument("--yes", action="store_true", help="execute a previously confirmed create plan")

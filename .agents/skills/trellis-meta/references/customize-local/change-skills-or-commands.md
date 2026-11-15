@@ -64,7 +64,7 @@ Use the ownership evidence, not the directory shape:
 | Shared common | State path with shared ownership | Shared common source; preserve other consumers |
 | Project-local | No managed ownership claim | Edit the project file directly |
 
-For a managed target, the durable sequence is source change -> required preflight -> transaction -> state/provenance update. For a project-private behavior, a differently named local skill or `.trellis/spec/` remains preferable to mutating a public bundled skill.
+For a managed target, the durable sequence is source change -> required preflight -> transaction -> state and Patch application record updates. For a project-private behavior, a differently named local skill or `.trellis/spec/` remains preferable to mutating a public bundled skill.
 <!-- END skill-garden patch trellis-meta-managed-skill-edit-route v0.6 -->
 ## Modify A Command/Prompt/Workflow
 

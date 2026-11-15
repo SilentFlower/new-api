@@ -21,7 +21,7 @@ Native Trellis provides three project-local layers:
 
 Flower adds a conditional management layer when a Plugin is declared and locked:
 
-4. **Plugin management layer**: `.flower/plugins.json` records intent, `.flower/plugin-lock.json` records the resolved immutable graph and granted capabilities, and `.flower/state.json` records owned paths, Patch provenance, and resulting hashes. Planning, preflight, transaction, lock, state, rollback, and uninstall are one lifecycle rather than unrelated local edits.
+4. **Plugin management layer**: `.flower/plugins.json` records intent, `.flower/plugin-lock.json` records the resolved immutable graph and granted capabilities, and `.flower/state.json` records owned paths, applied Patch operations, and resulting hashes. Planning, preflight, transaction, lock, state, rollback, and uninstall are one lifecycle rather than unrelated local edits.
 
 Without matching Plugin state or managed markers, use the native three-layer model. With `flower/skill-garden` ownership, read deployed files to understand current behavior but make durable 0.6 changes through the owning Skill-Garden source and Patch catalog.
 <!-- END skill-garden patch trellis-meta-managed-system-model v0.6 -->
@@ -47,7 +47,7 @@ Without matching Plugin state or managed markers, use the native three-layer mod
 4. **Keep the lifecycle ordered**: Change `vendor/skill-garden/.trellis/0.6/`, run `npm run sync` to refresh `enhancements/0.6/`, regenerate/check compiled targets, then update dogfood through the Flower Plugin lifecycle.
 5. **Keep shared semantics aligned**: Workflow owner changes may require matching skill, hook, helper, or platform entry updates, but each full procedure stays with its owning capability.
 6. **Keep project-specific rules project-local**: Use `.trellis/spec/` or a separately owned local skill; do not turn public `trellis-meta` into a project notebook.
-7. **Preserve evidence and user content**: Respect Plugin ownership, first-backup/provenance records, template conflicts, and current user modifications. Never use `node_modules` as an authoring target.
+7. **Preserve evidence and user content**: Respect Plugin ownership, first-backup and Patch application records, template conflicts, and current user modifications. Never use `node_modules` as an authoring target.
 <!-- END skill-garden patch trellis-meta-managed-customization-principles v0.6 -->
 ## How To Use This Directory
 

@@ -122,6 +122,16 @@ def _normalize_mode(target: str, mode: Any) -> str | None:
     return str(normalized) if normalized in VALID_MODES[target] else None
 
 
+def _inline_default(target: str) -> dict[str, str]:
+    """返回不持久化的内置缺省，避免把默认执行伪装成人工选择。"""
+    return {
+        "status": "hit",
+        "origin": "builtin-default",
+        "source": "builtin-default",
+        "mode": "inline" if target == "implement" else "check-all-inline",
+    }
+
+
 def _current_task(repo_root: Path) -> tuple[str | None, str | None, str | None]:
     """通过 task.py current --source 获取当前任务和 session key。"""
     result = subprocess.run(
@@ -277,7 +287,7 @@ def _auto_route_mode(
         seen.add(key)
         unique_paths.append(path)
     if len(unique_paths) != 1:
-        reason = "no-unique-auto-run"
+        reason = "no-unique-auto-run" if unique_paths else "no-auto-run"
         if stale_paths and not unique_paths:
             reason = "stale-auto-run-pointer"
         return None, stale_paths[0] if stale_paths else None, reason
@@ -288,8 +298,10 @@ def _auto_route_mode(
         return None, path, "auto-run-task-mismatch"
 
     auth = state.get("route_authorization")
-    if not isinstance(auth, dict):
+    if auth is None or isinstance(auth, dict) and target not in auth:
         return None, path, "no-route-authorization"
+    if not isinstance(auth, dict):
+        return None, path, "invalid-auto-route-mode"
 
     mode = _normalize_mode(target, auth.get(target))
     if mode in PREF_MODES[target]:
@@ -614,11 +626,19 @@ def resolve_route(args: argparse.Namespace) -> int:
             }
         )
 
+    # 只有正常缺少可用选择才应用默认；损坏或歧义 run 继续保留诊断。
+    if auto_reason in {"no-auto-run", "stale-auto-run-pointer", "auto-run-task-mismatch", "no-route-authorization"}:
+        return _output(
+            args,
+            {**_inline_default(args.target), "task": current_task},
+            {"context_key": context_key, "wrote_runtime": False},
+        )
+
     return _output(
         args,
         {
             "status": "miss",
-            "reason": "no-valid-decision-pref-or-auto",
+            "reason": auto_reason,
         },
         {
             "path": _rel_path(repo_root, path) if path else None,
@@ -714,7 +734,7 @@ def read_pref(args: argparse.Namespace) -> int:
     if mode not in PREF_MODES[args.target]:
         return _output(
             args,
-            {"status": "miss", "reason": "no-valid-pref", "target": args.target},
+            {**_inline_default(args.target), "target": args.target},
             {"pref_path": _rel_path(repo_root, _pref_path(repo_root))},
         )
     return _output(

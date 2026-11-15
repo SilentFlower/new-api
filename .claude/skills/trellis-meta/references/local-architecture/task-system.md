@@ -105,6 +105,8 @@ completed -> explicit reopen -> in_progress
 ```
 
 Partial pushes, user `commit-only`, and normal helper failures remain `in_progress`. Auto-loop closes an item immediately after its verified internal commit-only chain. Closed tasks are excluded from active pointers, task queues, counts, statusline, and recovery candidates; physical GC only changes storage location and never changes semantic state.
+
+When the user explicitly ends old completed work, `task.py close <task> --retire-reason "<reason>"` records a non-success retirement in `meta.retirement` and preserves the decision digest, review verdict, and unresolved change IDs. This permits closing the old task without accepting rejected decisions. The normal Close gate still blocks explicit rework; retirement does not bypass invalid evidence, incomplete children, dirty delivery, or other semantic blockers.
 <!-- END skill-garden patch trellis-meta-managed-active-task-lifecycle v0.6 -->
 ## JSONL Context
 

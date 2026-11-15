@@ -13,24 +13,15 @@ project_doc_fallback_filenames = ["AGENTS.md"]
 # Codex version. Current Codex also reads supported feature flags from trusted
 # project config; older clients may require user-level settings.
 
-# NOTE: Trellis intentionally does NOT write a [features.multi_agent_v2]
-# block here. Codex CLI changed `features` deserialization between 0.130
-# and 0.131: the structured table form (with max_concurrent_threads_per_session
-# / *_wait_timeout_ms) is only accepted by 0.131+. On 0.130 and earlier —
-# including the codex CLI bundled inside the Codex desktop app — it fails
-# with `data did not match any variant of untagged enum FeatureToml`, which
-# aborts the entire config load and blocks Codex from starting. Codex's own
-# default for multi_agent_v2 is used instead; tune it in your user-level
-# config if needed.
+# Keep multi-agent version settings user-owned. Codex selects the effective
+# runtime from explicit settings, model metadata, and existing session state.
+# A false multi_agent_v2 flag does not guarantee V1; inspect the active session.
+# Use configuration syntax supported by the installed Codex version.
 
-# Pin the subagent recursion depth explicitly instead of relying on Codex's
-# default. #445 removed the per-agent `[features] multi_agent = false` guard
-# (the #240/#241 wait_agent-deadlock structural fix) because native subagent
-# dispatch already caps recursion via `agents.max_depth` — but that key is
-# global/user-level, not settable inside an individual agent's .toml. Pinning
-# it here means an upstream default change, or a user's own global override,
-# can't silently reopen the recursion the #240/#241 fix closed. Project config
-# (this file) takes precedence over user-level `~/.codex/config.toml`.
+# Limit recursive subagent spawning for the V1 runtime.
+# Codex MultiAgentV2 ignores agents.max_depth; this setting does not impose
+# a nesting limit on V2 agents. Verify the active runtime before relying on it.
+# This project-level setting takes precedence over the user-level value.
 [agents]
 max_depth = 1
 [features]

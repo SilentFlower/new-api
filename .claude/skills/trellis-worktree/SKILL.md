@@ -5,83 +5,79 @@ description: "Prepare and diagnose branch-local Trellis usage inside linked Git 
 
 # Trellis Worktree
 
-Use this skill before normal Trellis routing when the current request is about linked worktrees or parallel branch development.
+Use this skill before normal Trellis routing for linked worktrees or parallel branch development. Each worktree loads its own branch-local Trellis, platform files, and runtime. Never share whole directories between worktrees.
 
-Each worktree owns the Trellis and platform files checked out by its branch. Load workflow and platform content only from the target branch. Flower installation records may be inherited through the verified CLI preparation below; never create whole-directory symlinks between worktrees.
+## Create A Workspace
 
-## Workflow
-
-1. Identify the target worktree. Use the explicit path if present; otherwise use the current working directory.
-2. Run external diagnosis first:
-
-```bash
-flower-trellis worktree status --target <target-worktree> --json
-```
-
-3. Route by status:
-   - `ready-local`: inspect `flower.installation` before continuing. If it is `incomplete`, follow Flower Preparation below; Trellis readiness does not prove Flower installation completeness.
-   - `needs-prepare`: run `flower-trellis worktree prepare --target <target-worktree>` with an explicit developer identity when requested. Include the Flower Preparation options when records are incomplete. Add `--inherit-route-prefs` only when the user wants the same developer's normalized personal route defaults.
-   - `needs-init`: initialize Trellis in that branch; do not copy another worktree's version.
-   - `needs-migration`: run `flower-trellis worktree migrate --target <target-worktree> --dry-run` before the real migration.
-   - `blocked` or `error`: stop and report the stable reason and conflict paths.
-4. For a new parallel task, load Trellis package context before requesting the plan:
+1. Resolve the selected project root before choosing a repository. When local Trellis is available, load:
 
 ```bash
 python3 ./.trellis/scripts/get_context.py --mode packages
 ```
 
-   Treat the default package as the selected root repository. Correlate package entries marked as Git repositories with the engine's submodule inventory. Display every additional independent Git package by name and path, and require its base/branch to be confirmed separately after handoff; never infer a child repository base from the root branch.
-5. Request the read-only create plan before planning files exist. Omit `--base` to use the current source branch; detached sources fall back to `HEAD`:
+The default package identifies the project root, not the business submodule currently being discussed. Display each additional independent Git package and correlate Git packages with the engine's selected-commit submodule inventory. Only the selected root gets a new branch; never infer a child repository base from the root branch. Carry forward child bases/branches already specified by the user. Ask only for missing child choices when that repository is actually needed.
+
+2. Request a read-only plan before writing task planning files. Omit `--base` to use the selected source branch; detached sources use `HEAD`. Task arguments are an optional pair:
 
 ```bash
 flower-trellis worktree create --target <path> --branch <branch> [--base <ref>] \
-  --task-title <title> --task-slug <slug>
+  [--task-title <title> --task-slug <slug>] --json
 ```
 
-6. Present one compact confirmation view containing the selected root repository/branch/HEAD, requested and resolved base, target branch/path/task, root dirty warning, selected-commit submodules, independent Git packages, developer initialization, normalized route preference action, Flower transfer source/action/paths and pending target validation, and excluded local state. Flower records are included in the same plan fingerprint; content mismatch after checkout rolls back creation. State explicitly that only the selected root gets the new branch; submodules and independent Git packages are inventory-only.
-7. Ask for exactly one choice: confirm the displayed plan, change its inputs, or cancel. On confirmation, execute the exact plan fingerprint returned by preflight:
+3. Show one compact view: selected repository, resolved base, target branch/path, optional task, planned local writes, preparation issues, and any child repository decisions. Source dirty content is excluded from the base; summarize it without making cleanup or committing an upgrade a prerequisite. Explain that recoverable tool setup issues keep the new Git workspace.
+4. Ask once to confirm the displayed plan, change its inputs, or cancel. On confirmation use the same plan fingerprint:
 
 ```bash
 flower-trellis worktree create --target <path> --branch <branch> [--base <ref>] \
-  --task-title <title> --task-slug <slug> \
-  --yes --plan-fingerprint <fingerprint>
+  [--task-title <title> --task-slug <slug>] \
+  --yes --plan-fingerprint <fingerprint> --json
 ```
 
-8. If the engine returns `create-plan-changed`, show the latest returned plan and require a new confirmation. Never reuse the old fingerprint.
-9. Continue task planning in a new AI session whose cwd/workspace root is the returned handoff directory. Do not continue the source session inside the new worktree.
+A `create-plan-changed` result requires review of the actual changed execution inputs. Unrelated source dirty changes and unselected child branch changes do not require confirmation. Never reuse a fingerprint for changed base commits or additional writes.
+5. Read the result, including `setup.status`, rather than inferring full readiness from exit code 0:
+   - `created`: Git and requested preparation completed.
+   - `created-needs-prepare`: Git exists; report pending steps and use the preparation path below. Do not delete/recreate it or invent a native Git workaround.
+   - `error`: report the stable reason and affected paths. If `worktreeCreated=true`, preserve that directory and its evidence.
+6. Hand off once to a new AI session whose cwd/workspace root is `handoff.cwd`. Include task path/request, pending preparation, and already authorized child bases. Do not continue the source session inside the new worktree. Child preparation can use the user's existing authorization without asking again for the same base.
 
-## Flower Preparation
+## Prepare Or Resume
 
-Use the initiating worktree as the source. In a new session already inside the target, use `git worktree list --porcelain` to locate the same repository's main worktree. If it is the target itself or no suitable source is known, report unavailable evidence; do not combine records from arbitrary branches.
+For an existing directory, diagnose first:
 
 ```bash
-flower-trellis worktree prepare --target <target> --inherit-flower --source <source> [--developer <name>] --json
+flower-trellis worktree status --target <target> --json
 ```
 
-The CLI fills missing `plugins.json`, `plugin-lock.json`, and `state.json` only after matching the source installation and target managed content. It may inherit normalized `settings.json` policy for the same developer. Existing target records take precedence; files remain independent after preparation. Create includes this transfer automatically.
+- `ready-local` means local Trellis is usable. Trellis readiness does not prove Flower installation completeness; inspect `setup` and `flower` separately.
+- `needs-prepare`: initialize or resume target-local state:
 
-Read `localStateTransfer.flower`: `inherited` or `preserved` completes preparation; `unavailable` means installation evidence is still missing, not that the project is up to date. Pure Trellis remains usable. Invalid records, incompatible target versions, disabled/recovery state, or content drift require reporting the reason and paths; do not overwrite records, copy plugin content, or install updates to bypass the conflict. Re-run status after repair.
+```bash
+flower-trellis worktree prepare --target <target> [--developer <name>] --json
+```
 
-## Safety Rules
+Prepare handles local identity/runtime and the target installation only. It never creates or resumes a task. For a task failure, preserve its files and run the returned remaining commands in the target session. Add `--inherit-route-prefs` only when the user wants that optional preference transfer.
+- `needs-init`: the target branch lacks usable Trellis content. Keep the Git workspace and use the normal branch-local initialization flow; do not copy another branch's Trellis or upgrade the source to unblock creation.
+- `needs-migration`: preview with `worktree migrate --target <target> --dry-run` before migration.
+- `blocked`: stop the affected writes for real path, registry, or lock conflicts. Report paths and preserve existing content.
 
-- `status` is read-only.
-- A `create` call without `--yes` is also read-only and must return `confirmation-required` plus a fingerprint.
-- `prepare` initializes target-local state and registry metadata. By default it reads no other worktree. Explicit Flower inheritance requires the same canonical Git common dir and verified installation content. Personal route/settings inheritance additionally requires the same developer and preserves existing target preferences.
-- `migrate` may replace only schema v1 manifest-managed symlinks, and only with content reconstructed from the target branch itself.
-- Do not read the legacy `sourceRoot` as migration content.
-- `create` does not attach or move an existing task.
-- Root tracked, staged, untracked, and conflict state is not included in the selected base commit or stashed. Only the explicitly planned Flower record whitelist may be inherited separately; source plugin content is never copied to make its records match the target.
-- Personal inheritance is limited to normalized `.trellis/.route-prefs.tmp` and Flower update policy. Route preferences accept only legal `implement` and `check` values in fixed order; never copy raw preference bytes or update-check caches.
-- Do not inherit session/current-task state, pre-check/untracked/auto-loop/Ralph state, agent temporary state, Flower control/detached state, `.claude/settings.local.json`, caches, transactions, or backups.
-- Selected-commit submodules are inventory facts. Report initialized source branch/HEAD without fetching, checking out, or copying submodule working trees.
-- `remove` requires a clean worktree with no active task, session, or lock; it preserves the branch.
-- Do not use force, copy directories between worktrees, or treat setup as approval to start, check, commit, merge, or push.
+Default Flower preparation reads only the target's declaration, lock, and state; it never falls back to source records. It may refresh state or generate a missing ignored managed configuration only when the exact fixed package proves existing content needs no change. A stale source state or different source version is not a Git creation prerequisite. Missing packages, incompatible content, or additional approvals remain explicit preparation issues; never report them as an installed/up-to-date project.
 
-## Expected Results
+Explicit record inheritance is still available when needed:
 
-- `ready-local`: local real directories are active for this branch.
-- `needs-init`: the branch lacks versioned Trellis content.
-- `needs-prepare`: local runtime or developer state is missing.
-- `needs-migration`: a valid legacy projection was detected.
-- `blocked`: user paths, symlink drift, registry drift, dirty state, task state, or locks prevent mutation.
-- `error`: Git metadata or an operation failed with a stable reason.
+```bash
+flower-trellis worktree prepare --target <target> --inherit-flower --source <source> --json
+```
+
+Use only a verified same-repository source. This explicit path retains strict source/target installation checks and preserves existing target records. Do not assemble records from unrelated branches, copy private platform configuration, rewrite hashes to approve arbitrary content, or install an update to bypass a conflict.
+
+The registry stores the existing workspace mapping, never a setup request or task recovery cursor. Report each issue and the prerequisite for its recovery. Retry prepare after that prerequisite changes; do not loop the same failing command. Flower-only pending metadata does not prevent valid branch-local Trellis planning. Stop only work that actually depends on the unavailable tool or requires a new user decision.
+
+## Boundaries
+
+- `status` and create without `--yes` do not write project state. Creation preflight checks Git dependencies; target installation preparation runs after checkout without an external repository mirror.
+- Source dirty content, task/session pointers, pre-check/untracked/auto-loop/Ralph state, caches, transactions, backups, and control/detached state are not inherited.
+- Personal route/update policy inheritance remains normalized and limited to the same developer; preserve target preferences.
+- Actual record inheritance requires the same canonical Git common dir and matching managed content. Target preparation uses the existing Plugin transaction and preserves existing versioned files.
+- Submodules and independent Git packages are inventory only until separately selected; do not fetch, checkout, or copy every child repository automatically.
+- Migration uses target HEAD content, never legacy sourceRoot content. Existing remove safety checks and branch preservation remain unchanged.
+- Creating/preparing a workspace never approves task start, implementation, check, commit, merge, or push.

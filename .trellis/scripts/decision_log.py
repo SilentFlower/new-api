@@ -59,7 +59,7 @@ def _load_common_modules(repo_root: Path) -> None:
 
 
 def _resolve_task_dir(repo_root: Path, task: str) -> Path:
-    """把任务引用解析为活动任务目录。
+    """把审查引用解析为活跃、逻辑关闭或已归档的任务目录。
 
     Args:
         repo_root: Trellis 项目根。
@@ -69,15 +69,61 @@ def _resolve_task_dir(repo_root: Path, task: str) -> Path:
         已存在的任务目录绝对路径。
 
     Raises:
-        DecisionLogError: 任务不存在或位于项目外。
+        DecisionLogError: 任务不存在、存在歧义、经过软链或位于任务目录外。
     """
     _load_common_modules(repo_root)
-    from common.task_utils import resolve_active_task_reference  # type: ignore[import-not-found]
+    from common.paths import get_tasks_dir
+    from common.tasks import iter_task_records
 
+    raw = task.strip() if isinstance(task, str) else ""
+    if not raw:
+        raise DecisionLogError("任务引用不能为空")
+    tasks_dir = get_tasks_dir(repo_root)
     try:
-        return resolve_active_task_reference(task, repo_root)
+        records = list(iter_task_records(tasks_dir))
     except ValueError as exc:
         raise DecisionLogError(str(exc)) from exc
+    normalized = raw.replace("\\", "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    candidate = Path(raw)
+    path_reference = candidate.is_absolute() or "/" in normalized or normalized.startswith(".trellis")
+    if path_reference:
+        candidate = candidate if candidate.is_absolute() else repo_root / Path(normalized)
+        try:
+            resolved = candidate.resolve()
+            resolved.relative_to(tasks_dir.resolve())
+        except (OSError, RuntimeError, ValueError) as exc:
+            raise DecisionLogError(f"任务引用必须指向本项目任务目录：{task}") from exc
+        # 检查任务根以下的软链，兼容 Windows 短路径等解析后等价的合法绝对路径。
+        ancestor = candidate
+        try:
+            while ancestor.resolve() != tasks_dir.resolve():
+                if ancestor.is_symlink() or ancestor == ancestor.parent:
+                    raise DecisionLogError(f"任务引用必须指向本项目任务目录，不能经过软链：{task}")
+                ancestor = ancestor.parent
+        except (OSError, RuntimeError) as exc:
+            raise DecisionLogError(f"无法解析任务引用：{task}") from exc
+        matches = [
+            record.directory.resolve()
+            for record in records
+            if record.directory.resolve() == resolved
+        ]
+    else:
+        matches = [
+            record.directory.resolve()
+            for record in records
+            if record.dir_name == raw or record.dir_name.endswith(f"-{raw}")
+        ]
+    matches = sorted(set(matches))
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        names = ", ".join(path.relative_to(tasks_dir.resolve()).as_posix() for path in matches)
+        raise DecisionLogError(f"任务引用存在歧义：{task}；候选：{names}；请使用完整任务路径")
+    if path_reference and candidate.exists():
+        raise DecisionLogError(f"任务引用必须指向本项目任务目录：{task}")
+    raise DecisionLogError(f"任务不存在：{task}")
 
 
 def _validate_event(event: Any, line_number: int) -> dict[str, Any]:
@@ -225,13 +271,13 @@ def _atomic_write_events(task_dir: Path, events: list[dict[str, Any]]) -> None:
 
 
 def decision_review_status(task_dir: Path) -> dict[str, Any]:
-    """返回任务当前决策摘要与 Close 审查状态。
+    """分别返回当前待审查状态与尚未解决的人工返工要求。
 
     Args:
         task_dir: 任务目录。
 
     Returns:
-        包含 decision 数量、digest、最新有效 review 和 Close 门禁状态的对象。
+        包含当前 digest、有效 review、待返工 ID 和 Close 是否允许的对象。
 
     Raises:
         DecisionLogError: 日志损坏。
@@ -241,15 +287,27 @@ def decision_review_status(task_dir: Path) -> dict[str, Any]:
     digest = decision_digest(events)
     decision_ids = [str(event["decision_id"]) for event in decisions]
     valid_review: dict[str, Any] | None = None
-    for event in reversed(events):
-        if event.get("event") != "review":
+    pending_changes: set[str] = set()
+    preceding_decisions: list[dict[str, Any]] = []
+    for event in events:
+        if event["event"] == "decision":
+            preceding_decisions.append(event)
             continue
-        if event.get("decision_digest") != digest:
-            continue
-        if event.get("decision_ids") != decision_ids:
-            continue
-        valid_review = event
-        break
+        preceding_ids = [str(decision["decision_id"]) for decision in preceding_decisions]
+        if (not preceding_ids or event["decision_digest"] != decision_digest(preceding_decisions)
+                or event["decision_ids"] != preceding_ids):
+            raise DecisionLogError("审查记录与其发生时的决策摘要不匹配")
+        if event["verdict"] == "changes-requested":
+            requested = event.get("requested_decision_ids")
+            if (not isinstance(requested, list) or not requested
+                    or any(not isinstance(value, str) or value not in preceding_ids for value in requested)):
+                raise DecisionLogError("返工审查缺少有效的 requested_decision_ids")
+            # 返工要求跨后续新增决策保留，只有覆盖这些决策的 accepted 审查才能解除。
+            pending_changes.update(requested)
+        else:
+            pending_changes.difference_update(preceding_ids)
+        if event["decision_digest"] == digest and event["decision_ids"] == decision_ids:
+            valid_review = event
     verdict = valid_review.get("verdict") if valid_review else None
     return {
         "task": str(task_dir),
@@ -260,8 +318,9 @@ def decision_review_status(task_dir: Path) -> dict[str, Any]:
         "decision_digest": digest,
         "review_verdict": verdict,
         "reviewed_at": valid_review.get("reviewed_at") if valid_review else None,
-        "close_allowed": not decisions or verdict == "accepted",
+        "close_allowed": not pending_changes,
         "needs_review": bool(decisions) and verdict != "accepted",
+        "pending_change_ids": [decision_id for decision_id in decision_ids if decision_id in pending_changes],
         "decisions": decisions,
     }
 
@@ -446,13 +505,26 @@ def cmd_review(args: argparse.Namespace) -> int:
     repo_root = _repo_root()
     if repo_root is None:
         raise DecisionLogError("当前目录不是 Trellis 项目")
-    task_dir = _resolve_task_dir(repo_root, args.task)
-    event = review_decisions(
-        task_dir,
-        verdict=args.verdict,
-        decision_ids=args.decision_id,
-        notes=args.notes or "",
+    _load_common_modules(repo_root)
+    from task_lifecycle import (
+        EXACT_COMMIT_JOURNAL_RELATIVE,
+        GC_JOURNAL_RELATIVE,
+        maintenance_lock,
     )
+
+    # 归档会移动整个任务目录，必须在同一维护锁内重新定位并写入，防止重建旧目录。
+    with maintenance_lock(repo_root) as acquired:
+        if not acquired:
+            raise DecisionLogError("任务维护正在执行，请稍后重试审查")
+        if any((repo_root / journal).exists() for journal in [GC_JOURNAL_RELATIVE, EXACT_COMMIT_JOURNAL_RELATIVE]):
+            raise DecisionLogError("任务维护事务尚未恢复，请先恢复维护操作再审查")
+        task_dir = _resolve_task_dir(repo_root, args.task)
+        event = review_decisions(
+            task_dir,
+            verdict=args.verdict,
+            decision_ids=args.decision_id,
+            notes=args.notes or "",
+        )
     return _print({"status": "reviewed", "task": str(task_dir), "review": event})
 
 
@@ -465,7 +537,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="读取和审查 Trellis AI 决策日志。")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    task_help = "任务完整目录名、项目内路径、允许的绝对路径或唯一短名（例如 cli-invocation-contracts）"
+    task_help = "活跃、已关闭或已归档任务的完整目录名、项目内路径、允许的绝对路径或唯一短名"
 
     status = subparsers.add_parser("status", help="读取任务决策审查状态")
     status.add_argument("--task", required=True, help=task_help)

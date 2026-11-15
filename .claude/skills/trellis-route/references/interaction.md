@@ -13,7 +13,7 @@
 | 3 | 保存默认：Inline | 保存默认：Check-all inline |
 | 4 | 保存默认：Subagent | 保存默认：Check-all subagent |
 
-重选时标题说明当前默认或无默认，1/2 仅覆盖本次，3/4 更新对应默认，并增加 `5. 清除默认`。没有默认时问“本次实现/检查走哪种模式？”；target 含糊只先问目标，不擅自同时修改两种默认。light/full 交给 Check-All，不扩充 mode 选项。
+重选时标题说明当前默认或无默认，1/2 仅覆盖本次，3/4 更新对应默认，并增加 `5. 清除默认`。无默认时主动菜单标明内置 inline；target 含糊只先问目标，不擅自同时修改两种默认。light/full 交给 Check-All，不扩充 mode 选项。
 
 裸数字回复（如 `1` / `2` / `3` / `4`）只有在当前可见的上一条 assistant 消息刚展示同一个 target 的选项，并明确停下等待回答时才有效。compact summary、ordinary summary、SessionStart 摘要、replacement history、历史消息、旧 target 或非紧邻裸数字都不能触发 `write --source numbered-fallback`；没有有效紧邻选项时重新展示并等待。
 
@@ -35,7 +35,7 @@ python3 <skill-dir>/scripts/route_state.py write --target <implement|check> --mo
 python3 <skill-dir>/scripts/route_state.py write-pref --target <implement|check> --mode <mode>
 ```
 
-明确清除指定默认或选项 5 时只清该 target；成功后重新展示无配置选项，不自动选择模式：
+明确清除指定默认或选项 5 时只清该 target；成功后返回入口，以内置 inline 继续，不再弹菜单；已有本任务临时选择仍遵守入口优先级：
 
 ```bash
 python3 <skill-dir>/scripts/route_state.py clear-pref --target <implement|check>
@@ -43,4 +43,4 @@ python3 <skill-dir>/scripts/route_state.py clear-pref --target <implement|check>
 
 helper 保留另一个 target 的个人偏好；task 写入还保留当前 session 的其它字段，并清理属于旧任务的 route 决策。不要手写 JSON 或直接删文件。失败先按入口的异常 reference 核对实际持久化结果；决定已明确但未持久化时简短提示可能在恢复时再次询问。
 
-选择确定后回到入口，在同一回合实际执行。对话只说明一句模式；无需发布结构化 YAML、文件路径或下一轮工具清单。
+选择确定后回到入口，按入口的展示规则在同一回合实际执行。

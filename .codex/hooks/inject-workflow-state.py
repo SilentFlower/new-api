@@ -799,6 +799,15 @@ def main() -> int:
     if breadcrumb is None:
         return 0
 
+    if platform in CONDITIONAL_WORKFLOW_STATE_PLATFORMS and not force_refresh:
+        # Keep the source and tracker fingerprint intact; clean only the emitted copy.
+        breadcrumb = re.sub(
+            r"^<!-- (?:BEGIN|END) skill-garden patch [^<>\r\n]+ -->(?:\r?\n|$)",
+            "",
+            breadcrumb,
+            flags=re.MULTILINE,
+        )
+
     # Kiro (CLI userPromptSubmit / IDE promptSubmit) adds a hook's stdout
     # directly to the conversation context — no JSON envelope. Emit the bare
     # breadcrumb text. Conditionally isolated: all other platforms keep the

@@ -23,7 +23,7 @@ flower-trellis self-check --json --manual --force-remote --target <target>
    - `update_available`：展示当前版本、推荐版本、release notes 摘要和 `commands.recommended`。
    - `project_out_of_sync`：展示当前 Flower/Trellis 与项目记录的差异，并展示 `commands.recommended`。
    - `up_to_date`：说明 CLI 与项目版本记录一致；版本记录不等于受管内容完整性验证。
-   - `project_unknown`：说明 CLI 未发现新版，但项目 Flower 版本无法确认。linked worktree 进入 `trellis-worktree` 的 Flower Preparation，通过 `prepare --inherit-flower --source <source>` 补齐可验证记录后重新检查；来源缺失或冲突时如实报告，不推定需要重装。
+   - `project_unknown`：说明 CLI 未发现新版，但项目 Flower 版本无法确认。linked worktree 进入 `trellis-worktree`，先用目标本地 `prepare --target <target>` 尝试补齐安装信息并重新检查；仅在明确需要来源继承时使用 `--inherit-flower --source <source>`。缺包或冲突如实列为待准备，不阻止可独立进行的 Trellis 工作，也不推定需要升级来源或重装。
    - `disabled` / `offline` / `skipped`：说明原因；不要靠重置缓存伪造可执行状态。
 5. 写入前遵守确认和安全门槛：
    - 用户已明确要求执行升级时，该授权覆盖所指定范围内的项目，不因每个项目的 `safety.reasons` 重复询问；用户只是询问、查看或比较版本时，只展示结果并等待确认。

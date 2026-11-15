@@ -94,7 +94,17 @@ def get_phase_index() -> str:
         r"\[workflow-state:([A-Za-z0-9_-]+)\]\s*\n.*?\n\s*\[/workflow-state:\1\]\n?",
         _re.DOTALL,
     )
-    return tag_re.sub("", section).rstrip() + "\n"
+# BEGIN skill-garden patch workflow-phase-index-output-cleanup v0.6
+    section = tag_re.sub("", section)
+    # Keep ownership markers in workflow.md; omit only their standalone output lines.
+    section = _re.sub(
+        r"^<!-- (?:BEGIN|END) skill-garden patch [^<>\r\n]+ -->(?:\r?\n|$)",
+        "",
+        section,
+        flags=_re.MULTILINE,
+    )
+    return section.rstrip() + "\n"
+# END skill-garden patch workflow-phase-index-output-cleanup v0.6
 
 
 def get_step(step_id: str) -> str:

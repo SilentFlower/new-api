@@ -658,6 +658,12 @@ def main() -> int:
     p_restore.add_argument("task", help="Archived task directory or name")
     p_restore.add_argument("--dry-run", action="store_true", help="Calculate without moving or committing")
     p_restore.add_argument("--json", action="store_true", help="Output machine-readable JSON")
+# BEGIN skill-garden patch task-lifecycle-retirement-option v0.6
+    p_close.add_argument(
+        "--retire-reason",
+        help="Explicit user termination reason; preserve rejected decisions without claiming acceptance",
+    )
+# END skill-garden patch task-lifecycle-retirement-option v0.6
 
     # list
     p_list = subparsers.add_parser("list", help="List tasks")

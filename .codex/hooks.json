@@ -17,6 +17,11 @@
             "type": "command",
             "command": "python3 -X utf8 .trellis/scripts/flower_telemetry_hook.py --platform codex",
             "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "python3 -X utf8 .trellis/scripts/flower_confirmation_hook.py --platform codex",
+            "timeout": 5
           }
         ]
       }
@@ -66,6 +71,18 @@
             "type": "command",
             "command": "python3 -X utf8 .trellis/scripts/flower_update_hook.py",
             "timeout": 30
+          }
+        ]
+      }
+    ],
+    "Interrupt": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 -X utf8 .trellis/scripts/flower_confirmation_hook.py --platform codex",
+            "timeout": 3
           }
         ]
       }

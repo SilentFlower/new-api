@@ -5,63 +5,61 @@ description: "按确认的精确文件范围提交普通变更或完成已就绪
 
 # Trellis Push
 
-`trellis-push` 是 Phase 3.4 唯一的代码提交入口。它只负责生成最小计划、精确提交、普通推送，以及在 task 上触发进度同步或在 untracked 上完成状态清理。
+`trellis-push` 独占 Phase 3.4：精确计划、提交推送、task 进度及 untracked 清理。
 
-## 职责边界
+## 职责与条件入口
 
-- 普通模式默认 `commit + push`。
-- 普通多仓计划可以包含本地确定性生成命令；生成后没有新增计划外文件时沿用同一次确认。
-- 普通模式把当前任务产物与更新后的 `task.json` 纳入同一次确认下的独立任务记录提交。
-- 用户明确要求“只提交不推送”时使用 `commit-only`。
-- auto-loop 可调用内部 `commit-only`，复用本 skill 的仓库发现、动态多仓计划、确定性本地生成、精确提交和失败保留能力；不再次确认、不 push，也不执行 Step 5 的任务进度写入、进度 commit 或 progress push。Auto-Loop runner 在提交成功后原子写入本地 `task.json.progress`、`status=completed`、`completedAt` 与确定性 `closeout`。
-- 不发起、终止或解决分支合并；只允许普通模式完成已经开始、冲突已清零且索引完全可归属的 merge commit。
-- 不处理上线核对、物理 GC、会话日志或自动任务队列状态。
-- 不使用 `git add .`、`git add -A`，不要求工作区整体干净，也不提交计划外文件。
-- untracked 上下文只接受 `stage=push`；该状态只负责路由，不替代本 skill 的正式计划、确认和 Git 安全检查，也不生成任务进度提交。
+人工确认或有效 policy_timeout claim 与 started 回执之前，禁止 `git add`、`git commit` 或 `git push`。准备后台等待不执行 Git 写入。
 
-## 模式
+最终回复前按 `.trellis/scripts/confirmation.md`：已有授权续接；只看计划/停止、本机制自身开发验证或未决风险保持人工。其余必须 项目 `prepare` 完整计划及精确范围；成功后后台 `wait`，原样完整展示 `display` 并结束回合。失败报告实际原因。提醒仅 `claimed=true`、`source=policy_timeout`、`action=execute_git_plan` 且 started 成功进 Step 4，后记终态。准备不需领取，回执不是人工确认，不扩大范围。
 
-| 模式 | 确认 | Git 动作 | 进度同步 |
-| --- | --- | --- | --- |
-| 普通 | 展示最小计划并确认一次 | exact commit；已有 merge 就绪时完成双父提交；然后 push | 有活动任务时立即同步 |
-| 用户 `commit-only` | 展示最小计划并确认一次 | exact local commit | 跳过 |
-| auto-loop 内部 `commit-only` | 复用 auto-loop 预授权 | exact local commit chain | 由 Auto-Loop runner 写本地 progress、完成态与 Close；本 skill 跳过 Step 5 |
+普通模式精确计划确认一次后 commit + push；仅用户要求本地提交才 commit-only，不写任务进度。task 普通计划含独立记录提交。
 
-内部 `commit-only` 不接受超出当前任务证据、runner owned dirty 和 protected-retained 边界的文件，不执行远端推送或其他附加动作。安全条件不满足时返回失败，由调用方决定后续状态。
+- 只提交 planned exact files，保留无关 dirty/staged；不用 `git add .` / `git add -A`，不要求整体 clean。
+- untracked 只接受 `stage=push`，游标不替代证据、计划、确认或 Git 检查；无任务也可普通提交。
+- 不处理上线、队列、日志或物理 GC；不发起、终止或解决合并。只允许普通模式完成已就绪 merge。
+
+| 实际场景 | 先读细则 |
+| --- | --- |
+| 多仓/生成依赖、已有 merge 或历史 GC ahead | [git-special-cases.md](references/git-special-cases.md)；在相关规划或副作用前读取 |
+| 普通 push 且有活动 task | [task-progress.md](references/task-progress.md)；计划前读取，业务 Git 后执行 |
+| taskStatus=completed 的恢复 | [completed-task-recovery.md](references/completed-task-recovery.md)；先完成只读 preflight |
+| validated runner 的内部 commit-only | [auto-loop-commit.md](references/auto-loop-commit.md)；不 push、不执行 Step 5、不渲染交互模板 |
+
+未命中场景不加载其 reference；命中却缺失细则时阻塞，不凭记忆代替。内部 commit-only 只接受 runner 的合法预授权。
 
 ## Step 0：记录完成链证据
 
-除 auto-loop 内部 `commit-only` 外，普通 push 或用户 `commit-only` 已经构成明确 Git 意图。本 skill 在读取 Git 提交计划前只记录当前可用的完成链证据，不补跑、不切换阶段，也不新增确认：
+普通 push 或用户 `commit-only` 已经构成明确 Git 意图；也接受完成链 owner 的合法交接。除 auto-loop 内部 `commit-only` 外，按当前结果与实际 diff 记录：
 
-- Check-All：根据当前标准报告与实际 diff 标记为 `通过`、`通过（已接受风险）`、`未运行`、`已失效`、`存在未处置 findings`、`blocked` 或 `部分验证`。剩余 `CHK-*` 与 `FBK-*` 均为 0 时标记为 `通过`；所有剩余问题都有当前有效的用户风险接受时标记为 `通过（已接受风险）`，并保留问题 ID 与严重度。`[上线后验证]` 不改变 Check-All 的通过状态，但必须作为非阻断风险保留到计划并交给既有 `trellis-release` / `release.md` 流程。没有可验证的当前报告时使用 `未运行`，不得从历史消息、摘要或 dirty 状态猜测通过或风险接受。
-- Update-Spec：根据当前 `spec_update_result` 与实际 diff 标记为 `no-op`、`written`、`needs-review`、`未运行` 或 `已失效`。结果缺失或无法证明仍适用于当前 diff 时使用 `未运行` / `已失效`。
+- Check-All：通过、有效已接受风险、未运行/失效、未处置 findings、blocked 或部分验证；保留 ID/严重度；`[上线后验证]` 作为非阻断风险保留动作、责任、预期。
+- 快速直改：仅无 task/untracked、仍符合 Request Triage 且必要定向验证成功覆盖当前 diff，才记 `不适用（快速直改）` 并列真实命令、结果、范围。验证缺失/失败/失效或范围扩大不得使用；task/tracked 缺检查仍按实际状态列风险，不得伪造通过。
+- Update-Spec：根据当前 `spec_update_result` 与实际 diff 标记 `no-op`、`written`、`needs-review` 或未运行/失效。
 
-上述状态只进入 Step 3 的完成链证据与风险展示，不会阻止读取 Git 状态或生成提交计划。本步骤不得返回 Phase 2.2，不得加载 `trellis-check-all` 或 `trellis-update-spec`，也不得要求用户改写成“跳过检查后 push”。正常 workflow 的 Check-All -> Update-Spec -> Push 顺序仍由 Phase 2.2、Phase 3.3 和各自 owner 推进；`trellis-push` 不反向补做上游阶段。
+禁止从历史、摘要或 dirty 推断通过、风险接受或授权。Step 3 展示证据，不会阻止读取 Git 状态或生成提交计划。本步骤不得返回 Phase 2.2，不得加载 `trellis-check-all` 或 `trellis-update-spec`，不补跑；阶段由各 owner 推进。
 
-auto-loop 内部 `commit-only` 已由 runner 的 `run_check_all -> run_spec_update -> commit_only` 状态机和预授权保证顺序，因此不重复记录或判断本交互证据。
-
-没有活动 task 时运行 `python3 ./.trellis/scripts/untracked_flow.py status --verbose`。命中 untracked 后，记录 work id、summary 和 stage，并要求 `stage=push`；完成链证据仍从当前 Check-All / Update-Spec 结果与实际 diff 获取。`miss` 才按既有“无活动任务”普通 Git 路径处理；损坏状态停止，不从摘要猜测。游标命中不表示 Push 已计划、已确认或已执行。
+无 task 时运行 `python3 ./.trellis/scripts/untracked_flow.py status --verbose`。命中须记录 work id/summary/stage 且要求 `stage=push`；miss 走无任务路径，损坏则停。游标命中不表示 Push 已计划、已确认或已执行。
 
 ## Step 1：发现仓库与任务
 
-候选仓库包括：
+候选仓库：
 
 - 含 `.trellis/` 的父仓根目录。
 - `.trellis/config.yaml` 中 package 路径对应的独立 Git root。
 - 用户明确指定的候选仓库。
 
-同一个 Git root 只保留一次。位于父仓内部但不是独立 Git root 的 package 变更归父仓处理。
+Git root 去重；非独立仓库的 package 归父仓。
 
-为每个候选仓库生成用户可见名称：优先使用 `.trellis/config.yaml` 中匹配的 package 名；没有配置时使用 Git top-level 目录名。`root`、`parent`、`main repo` 只允许作为输入别名，禁止直接显示在计划或结果中。
+仓库展示名取匹配 package 名，否则用 Git top-level 目录名。`root`、`parent`、`main repo` 仅为输入别名，不用于展示。
 
-活动 task 或 untracked work 都是可选上下文：
+task/untracked 均可选：
 
 ```bash
 python3 ./.trellis/scripts/task.py current --source || true
 python3 ./.trellis/scripts/task_progress.py status --json || true
 ```
 
-存在活动任务时，必须额外获取文件级任务状态：
+有活动任务则计划前读 [task-progress.md](references/task-progress.md)，获取文件级状态：
 
 ```bash
 git status --short --untracked-files=all -- <task-dir>
@@ -69,11 +67,11 @@ git status --short --untracked-files=all -- <task-dir>
 
 若 `task_progress.py status` 返回 `taskStatus=completed`，立即按需读取 `references/completed-task-recovery.md`，由该 reference 完成只读 preflight 并返回“恢复计划 / Close 待解阻 / 无需动作 / 阻断”之一。在得到结果前不得进入普通业务规划，也不得重复已经成功的业务 Git 动作。reference 缺失、不可读或证据无法闭合时失败关闭；`task.json.progress` 只作诊断，不能单独选择恢复动作。
 
-不得把默认 `git status --short` 可能返回的 `?? <task-dir>/` 折叠目录当成 exact file、展示条目或 pathspec。无活动 task 时仍可提交相关代码，但不生成任务进度。untracked 命中时，结合当前请求、work summary 和实际 diff 判断业务 `planned` 文件归属，计划同时显示 work id；无法明确归属的文件只能保留或作为风险。存在活动 task 时，结合 `brief.md`、`implement.md`、当前 diff 与本轮执行范围生成一行语义进度；同时识别当前任务目录中已存在且可归属的 dirty/untracked 产物，供 Step 5 生成任务记录 exact files。不得从旧进度推断 Git 动作。
+展开 `?? <task-dir>/` 至真实文件，禁止将折叠目录当成 exact file 或 pathspec。无活动 task 时仍可提交相关代码，但不生成任务进度。untracked 命中时，结合当前请求、work summary 和实际 diff 判断业务 `planned` 文件归属，计划同时显示 work id；无法明确归属的文件只能保留或作为风险。存在活动 task 时，结合 `brief.md`、`implement.md`、当前 diff 与本轮执行范围生成一行语义进度；同时识别当前任务目录中已存在且可归属的 dirty/untracked 产物，供 Step 5 生成任务记录 exact files。不得从旧进度推断 Git 动作。
 
 ## Step 2：预检与文件归属
 
-对每个候选仓库读取：
+逐仓读取：
 
 ```bash
 git status --short
@@ -95,71 +93,39 @@ git rev-list --reverse @{u}..HEAD 2>/dev/null || true
 
 - detached HEAD、分支不可读、未解决冲突、rebase、cherry-pick、revert 或其它非 merge 的未完成 Git 集成状态。
 - `MERGE_HEAD` 存在时仅普通模式可继续，并且必须固定当前 `HEAD` / `MERGE_HEAD`、确认 `git ls-files -u` 为空、全部 staged paths 都属于 planned 且没有 retained staged；否则停止。用户/auto-loop `commit-only` 不适用。
-- 普通推送会携带既无法归属本次任务、也未通过下述自动 GC 审计的历史 ahead commits。
+- 普通推送会携带既无法归属本次任务、也未通过特殊 Git reference 的自动 GC 审计的历史 ahead commits。
 - 无法确定 planned file 是否属于当前请求或活动任务。
 - 内部 `commit-only` 发现 staged 区非空。
 
-### 历史自动 GC 提交
+存在无法归属的历史 ahead 时，先按 [git-special-cases.md](references/git-special-cases.md) 审计候选 GC；仍无法归属则停止。普通路径不运行物理 GC。
 
-仅普通推送及其任务记录发布恢复使用这一默认许可。对 `@{u}..HEAD` 的每个完整提交哈希逐个判断：已由当前任务证据归属的提交沿用原规则；候选自动 GC 提交调用当前平台 `trellis-push` skill 目录中的只读脚本：
-
-```bash
-python3 <skill-dir>/scripts/verify_gc_commit.py --repo <repository-root> --commit <full-sha>
-```
-
-`<skill-dir>` 是当前实际加载的 `.agents/skills/trellis-push` 或 `.claude/skills/trellis-push`，不能从另一平台借用脚本。只有退出码为 0、JSON `status=verified` 且返回的完整 `commit` 与请求哈希一致，才把该提交标为“已验证自动 GC”。脚本逐项验证单父和完整固定消息、无重命名推断的 Git 树、顶层 closed 任务与 UTC 月份归档文件的同 blob/模式映射；支持同批多任务和已有相同归档的去重。它不读取或修改工作区，不凭提交消息单独放行。脚本缺失、执行失败、JSON 损坏、内容改写或任一证据不符都保持未知 ahead 并停止普通推送。
-
-记录已验证 GC 的完整哈希及仓库，作为计划和执行前复核基线。它是用户对纯自动 GC 的默认许可，不属于业务 `planned` 或任务记录 exact files，不增加专项确认，也不自行触发 GC 或单独 push。正常业务提交仍须展示并确认一次 Push 计划；用户 `commit-only` 和 auto-loop 内部 `commit-only` 不因本规则扩大授权。
-
-业务 Git 文件分为两组；普通模式的当前任务记录 exact files 按下方独立提交规则处理：
+业务文件分两组；当前任务记录按下方独立提交：
 
 - `planned`：本轮明确归属且准备提交的 exact files。
 - `retained`：当前存在、但本次明确不提交并保持原状的 dirty paths，包含计划外 untracked、unstaged、staged 文件。clean files 不进入该集合。
 
 普通模式存在活动任务时，当前任务目录中已存在且可归属的 dirty/untracked 产物不进入业务 `planned`，也不进入 `retained`；它们与预计由 helper 更新的 `<task-dir>/task.json` 组成 Step 5 的任务记录 exact files。其他任务目录和无法归属当前任务的文件仍属于 `retained` 或风险，不得顺带提交。
 
-普通 `PUSH` 或 auto-loop 内部 `commit-only` 需要在仓库间运行本地生成命令时，计划必须包含命令、工作目录、依赖顺序和后续仓预计 exact files。执行链可包含任意数量的仓库和生成步骤，不硬编码具体仓库、两仓三阶段或命令名称。
+多仓/生成链先读 [git-special-cases.md](references/git-special-cases.md)。
 
-动态执行链按以下证据优先级生成：
+展示名为“保留未提交的变更（dirty）”，阈值由模板所有；保留 exact paths/状态，摘要不得作 pathspec。未知 ahead、分支/upstream 或归属异常列风险；retained 不默认阻塞。
 
-1. 当前任务 `design.md` / `implement.md` 明确记录的顺序、命令和路径。
-2. 项目 SOP/spec 中的 canonical、生成和分发约定。
-3. 受版本控制的 `package.json`、Makefile 或仓库脚本入口，以及可确认的输入输出路径。
-4. 可验证的 Git/submodule 父子关系。
+计划/基线默认留在上下文；跨进程或恢复才存 gitignored runtime。不生成 `retained.md` 等展示附件，不纳入任务产物或提交；runner 沿用原契约。
 
-上述优先级用于发现意图和执行顺序，不允许用文档覆盖当前仓库事实。命令入口、工作目录和输出路径必须由受版本控制内容验证；任务 artifacts、SOP/spec、脚本实际行为或 Git 关系互相冲突时失败关闭。
-
-命令必须是受版本控制的稳定入口，并且本地、确定性、可重复、无外部副作用。工作目录和预期影响路径必须可审计；只有名称相似、mtime、目录邻近或惯例不足以执行。禁止任意 shell 字符串、管道、重定向、命令替换、push、release、deploy、物理 GC、凭证和生产数据操作；证据不足时失败关闭。
-
-`retained` 只是内部集合名。用户可见输出统一写“保留未提交的变更（dirty）”，按输出 reference 的阈值展示；内部始终保留 exact paths 和 Git 状态，分组摘要不得用于 pathspec 或替代校验。unknown ahead、branch/upstream 异常、归属不确定等真正需要处理的事项单独进入“风险”区；普通 retained dirty 不默认视为阻塞。
-
-普通模式和用户 `commit-only` 的计划与校验基线默认保存在当前执行上下文。仅跨进程校验或中断恢复确需落盘时，才在 Git 忽略的 runtime 目录保存一份必要的临时 JSON；已有可复用记录时不另建副本。不得仅为缩短对话、提供链接或展示完整清单生成 `retained.md` 等清单附件，也不把临时计划写入任务产物或提交范围。auto-loop 沿用 runner 的既有持久化契约，不增加额外清单。
-
-普通模式允许 `retained` 存在。执行前记录计划外 staged set，提交后确认这些 staged 文件仍保持原状。用户明确要求新增文件时，重新生成计划并确认，不能在执行中静默扩大范围。
-
-auto-loop 内部 `commit-only` 也允许 retained dirty 存在，但每个生成/提交步骤前后都必须验证 retained exact paths 的内容摘要不变，并确认它们与 planned/generated paths 不冲突。内部模式仍要求 staged 区为空；计划外 dirty、retained 漂移、未知 staged、无法由当前计划或已记录提交解释的分支/HEAD 漂移，或归属歧义立即停止后续副作用。
-
-已有 merge 会提交整个索引，因此 planned 必须覆盖全部 staged paths，`retained` 中不得存在 `[staged]`；未跟踪或未暂存 retained 仍可保留。
+允许 `retained`；记录并保留计划外 staged set。新增文件须重新计划和确认，不静默扩大范围。
 
 ## Step 3：展示最小计划
 
-确认前禁止 `git add`、`git commit` 或 `git push`。
+普通模式或用户 `commit-only` 在所有计划数据已经收敛、即将展示用户可见计划时，读取 `references/output-templates.md` 的“计划模板”和“共用展示规则”再渲染；已读、未变化且内容仍可用时直接复用。
 
-普通模式或用户 `commit-only` 在所有计划数据已经收敛、即将展示用户可见计划时，必须即时读取 `references/output-templates.md` 的“计划模板”和“共用展示规则”，再按该 reference 渲染。不得在 Skill 入口、仓库发现或预检阶段提前加载该文件；每次实际计划输出都以这次即时读取为准。
+模板缺失、不可读或缺章时报 `阻塞`，不得凭记忆重建、缩写或自制替代模板。
 
-reference 缺失、无法读取或缺少对应章节时停止并报告 `阻塞`，不得凭记忆重建、缩写或自制替代模板。
+多仓只确认一次。已展示生成命令和预计 exact files 时，成功且无列表外新 dirty 沿用原确认；内容/hash/统计变化不重问。其它边界变化按 Step 4 重规划。
 
-普通多仓只确认一次。计划已展示生成命令和预计 exact files 时，命令成功且没有出现预计列表外的新 dirty path 就沿用原确认；内容、hash 或统计变化不重问。其它计划边界变化仍按 Step 4 重新规划。
-
-auto-loop 内部 `commit-only` 不渲染交互式计划或结果，也不再次询问用户，因此不得为了内部执行读取 `references/output-templates.md`。它仍生成同样的逐仓执行数据用于自检、恢复和调用方结果记录，并且只能在当前任务 artifacts、runner owned dirty 和 protected-retained 边界内形成 exact files/message。
 
 ## Step 4：精确提交与推送
 
-每个仓库按计划顺序执行。执行前重新检查 planned files、当前分支、HEAD、upstream、冲突状态、staged、全部 dirty paths 和 retained 摘要；普通推送还须逐个重验计划中已验证 GC 的完整哈希与当前 `@{u}..HEAD`。任一关键条件变化都停止当前执行并重新规划。普通模式仅 `retained` 内容变化时可更新说明；auto-loop 内部模式的 retained 内容必须保持不变。
-
-计划包含本地生成命令时，前置仓成功后按计划执行命令，再复用本节现有预检。命令成功、后续仓全部 dirty paths（auto-loop 内部 `commit-only` 扣除已登记且验证未变化的 retained paths）都在预计 exact files 内且 retained 摘要未漂移时直接继续；否则停止并重新生成计划。预计文件最终 clean 时不强行提交。
-
-auto-loop retry/resume 时，读取调用方提供的已完成仓库提交，逐个验证 repository、commit object、message 和文件集合仍符合当前任务证据，并确认当前分支/HEAD 变化可由这些提交解释。验证通过的提交直接跳过；验证失败立即 blocked，不重复提交。确定性生成入口可以安全重跑，以当前 Git 状态重新规划后续步骤。
+逐仓按序执行，先复核 planned files、分支、HEAD、upstream、冲突、staged、全部 dirty paths 和 retained 摘要；普通推送还须逐个重验计划中已验证 GC 的完整哈希与当前 `@{u}..HEAD`。任一关键条件变化都停止当前执行并重新规划。普通模式仅 `retained` 内容变化时可更新说明。
 
 普通精确提交：
 
@@ -177,25 +143,7 @@ git diff --cached --name-only
 
 commit 只能包含 planned files，执行前的计划外 staged set 必须仍保留。
 
-已有 merge：
-
-```bash
-pre_merge_head="$(git rev-parse HEAD)"
-merge_head="$(git rev-parse MERGE_HEAD)"
-git add -- <exact existing planned files>
-git add -u -- <exact deleted planned files not already staged>
-git diff --cached --check
-git commit -m "<confirmed message>"
-```
-
-merge 中的 `git commit` 不能携带 pathspec。现存 planned 使用 `git add --`；已删除 planned 仅在尚未进入 cached 集合时使用 `git add -u --`。提交前确认 cached path set 与 confirmed planned files 完全相等、`git ls-files -u` 为空且 `git diff --cached --check` 通过。提交后验证：
-
-```bash
-git rev-list --parents -n 1 HEAD
-git diff-tree --no-commit-id --name-only -r HEAD^1 HEAD
-```
-
-结果必须恰好有两个父提交，顺序为记录的 `pre_merge_head`、`merge_head`；first-parent 文件集合必须等于 confirmed planned files。任一验证失败都停止 push，不自动重写提交。
+已有 merge 的提交与双父验证按 [git-special-cases.md](references/git-special-cases.md)；不得套用上方带 pathspec 的普通 commit。
 
 普通模式继续推送当前分支：
 
@@ -207,70 +155,15 @@ git push origin <current-branch>
 
 `commit-only` 到本地提交成功即结束，不推送，也不写远端任务进度。
 
-多仓执行失败时停止后续未开始仓库，保留已经成功的提交/推送，不做回滚。
-
-auto-loop 内部链失败时向调用方返回全部已完成仓库提交和失败位置。只有确定性生成未收敛或仍可安全重新规划的本地预检使用 `commit-repairable`；计划外 dirty、retained 漂移、未知 staged、无法由当前计划或已记录提交解释的分支/HEAD 漂移、归属歧义和外部副作用风险必须立即 blocked。不得 reset、rebase、revert、amend 或撤销成功提交。
-
 ## Step 5：同步任务进度
 
-仅普通模式且存在活动 task 时由本 skill 执行。untracked、用户 `commit-only` 与 auto-loop 内部 `commit-only` 都跳过本 Step；Auto-Loop runner 在 action record/next 后按自身契约写入本地 `task.json.progress`，不属于这里的任务记录提交或推送。全部业务仓库成功后一次原子写入最终 progress 与完成态，再提交并推送任务记录；已有仓库成功而后续仓库失败时只写 partial 进度，明确 completed、失败位置、next 和 notes，状态保持 `in_progress`。尚未发生成功 Git 动作就失败时，不记录虚假的 completed steps；只有父仓仍可安全提交并推送时才允许记录 failure notes。
-
-新进度固定为：
-
-```json
-{
-  "updatedAt": "<ISO 8601>",
-  "completedSteps": ["<已完成步骤>"],
-  "partialStep": "<部分完成步骤或 null>",
-  "nextStep": "<下一步>",
-  "notes": "<可选说明；无说明时为空字符串>"
-}
-```
-
-进度不得保存本轮模式、业务 commit hash 或提交计划。
-
-写入前确认：
-
-- 当前任务 exact files 与首次确认的路径集合一致，没有新增当前任务路径或无法归属的 dirty 内容。
-- 父仓分支、upstream 和冲突状态安全。
-- 对当前 `@{u}..HEAD` 重做 Step 2 归属检查；已验证的自动 GC 可随任务记录推送，其它无法归属的历史 ahead commits 仍停止。
-
-全部业务 commit/push 成功时，通过 helper 用同一份最终 progress 原子写入 `progress`、`status=completed`、`completedAt` 与确定性 `closeout`：
-
-```bash
-python3 ./.trellis/scripts/task_progress.py write \
-  --task <task-dir> \
-  --progress-json '<progress-json>' \
-  --complete \
-  --json
-```
-
-helper 返回 `closeResult=closed|already-closed` 时任务立即退出所有活跃视图；返回 `closeResult=blocked` 时必须保留并展示 `closeBlockers`，但仍可提交已完成的任务记录。部分成功时调用同一 helper，但不得携带 `--complete`，并写入精确恢复位置。用户 `commit-only`、auto-loop 内部 `commit-only` 和尚未发生任何成功业务 Git 动作的失败都不得由本 skill 请求 complete；auto-loop 的本地完成态与 Close 由 Auto-Loop runner 自己写入，不经过本步骤。helper 写入失败时任务保持原状态，不得继续任务记录提交或报告完成。
-
-helper 成功后，只提交并推送首次确认的当前任务 exact files；该集合包含完成态 `task.json`，以及首次计划时已存在且可归属的当前任务 dirty/untracked 产物：
-
-```bash
-git add -- <current-task-exact-files>
-git commit --only -m "chore(task): update <task-name> progress" -- <current-task-exact-files>
-git push origin <current-branch>
-```
-
-该动作属于用户已确认的普通 push 计划，不增加第二次确认。提交后必须验证 commit 只包含首次确认的当前任务 exact files，且 `task.json` 已包含同一份最终 progress、`status=completed`、`completedAt` 与同次 Close 结果；其他任务和无关 dirty/staged 文件保持原状。
-
-失败时保留真实现场，不 reset、amend、revert 或制造 dirty 回滚：
-
-- helper 失败：任务保持 `in_progress`，不得创建任务记录 commit。
-- helper 成功但任务记录 commit 失败：保留本地 `completed` 与当前任务 exact dirty，后续按 Step 1 的任务记录 commit 恢复路径重新验证和确认；不得重复业务提交或 helper 写入。
-- 任务记录 commit 成功但 push 失败：任务目录应为 clean，并保留可归属的 ahead commit；后续只重试该 commit 的 push，不重复业务提交、helper 写入或任务记录 commit。
-- 任务记录 push 成功：本任务产生的当前任务目录变更必须 clean；不得再次写入完成态或 Close。
-
-任何恢复都必须验证当前分支、upstream、HEAD、`@{u}..HEAD`、任务记录 commit message 与 exact file set，以及 `task.json` 的最终完成态。已验证自动 GC 可按 Step 2 默认许可归属；其它未知 ahead 或 dirty 不能当作可恢复任务记录。
+仅普通模式且有活动 task 时执行 [task-progress.md](references/task-progress.md)；该 reference 在计划前加载，业务动作完成后写真实进度及任务记录。untracked、用户或 runner commit-only 均跳过。
 
 ## Step 6：结果
 
 untracked 的全部已确认 Git 动作成功后，最后运行 `python3 ./.trellis/scripts/untracked_flow.py clear --reason completed --work-id <work-id>`。清理成功才报告完成链已结束；任一仓库、push 或清理失败都保留状态并报告恢复位置，禁止因部分成功伪造完成。用户 `commit-only` 的已确认动作全部成功时同样可以完成并清理。
 
-普通模式、用户 `commit-only` 或 untracked 路径在即将展示用户可见结果时，必须再次即时读取 `references/output-templates.md` 的“共用展示规则”、“结果模板”和“结果补充规则”，再按该 reference 渲染。不得依赖 Step 3 曾经读取的模板仍在上下文中。
+普通模式、用户 `commit-only` 或 untracked 展示结果前，读取 `references/output-templates.md` 的“共用展示规则”、“结果模板”和“结果补充规则”；原文未变化且仍可用则复用，变化或缺失才重读。
 
 reference 缺失、无法读取或缺少对应章节时停止并报告 `阻塞`，不得凭记忆重建、缩写或自制替代结果。auto-loop 内部 `commit-only` 不读取或渲染该交互式结果模板，只按 Step 4 的失败保留契约向调用方返回逐仓 commits、files、retained、message 和失败位置，由 `trellis-auto-loop` 完成 `record + next`。
 

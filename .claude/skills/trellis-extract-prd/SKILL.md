@@ -1,10 +1,10 @@
 ---
 name: trellis-extract-prd
-description: "Extract a cohesive task PRD faithfully from a source requirements document, optionally using version task/wave planning as task boundary context; preserve UI copy verbatim and annotate source positions."
+description: "Extract a verifiable task package PRD from source requirements and confirmed version planning, preserving original UI copy while carrying business-operation wave context, responsibilities, handoffs, and engineering acceptance."
 ---
 # Extract PRD — 基于原始需求文档
 
-从原始需求文档中提取指定需求或版本规划中的 task 候选，结构化为 `prd.md`。**正文必须有据可依，禁止自行发挥**；仅允许在「本任务 TL;DR」与「本任务范围」两块做结论性提炼（且必须能在原文或已确认版本规划中找到依据）。
+从原始需求文档中提取指定需求或已确认版本规划的工作包，结构化为 `prd.md`。需求原文与索引忠实保留；TL;DR、Scope 及交付协作说明可依据原文、确认规划和工程证据提炼，不能自行增加业务规则。
 
 ---
 
@@ -12,11 +12,11 @@ description: "Extract a cohesive task PRD faithfully from a source requirements 
 
 1. **原文优先** — 「来源需求原文」「Requirements 索引」「Acceptance Criteria 索引」三节必须引用或指向原始文档原文，不得改写语义
 2. **版本规划约束 task 边界** — 如果存在 `doc/<版本>/任务拆分与waves.md` 或用户提供的版本规划产物，单 task PRD 的 Scope 必须落在该产物中对应 task 候选的范围内
-3. **task 必须内聚** — 单 task PRD 应代表一个可开发、可自测、可验收的闭环；不能把不相关需求塞进来，也不能把一个闭环拆成页面 / 接口 / 字段碎片
-4. **wave 是归属，不是 task** — wave 用来说明本 task 属于哪个版本提测 / 交付批次；不要把 wave 当成 `task.py` 状态或独立任务目录
+3. **task 是内聚工作包** — 有明确输出、工程验证、消费方及集成去向；允许有稳定交接的技术分工。单包无需覆盖整个用户操作链，包内字段、按钮和测试步骤用 Checklist
+4. **wave 对应业务操作结果** — 继承业务角色、起始条件、操作及可验收结果，说明本包贡献和集成责任。Wave 业务验收与 Task 工程完成分别判断，不新增任务状态或强制 Wave 目录
 5. **文案原封不动** — 原始文档中出现的用户可见文案（按钮文字、提示语、Toast、弹窗内容、表头、placeholder 等）必须**逐字引用**，禁止改写、缩略或意译
 6. **标注出处** — 每条需求 / AC 标注来源位置（文档行号、章节编号或页码）
-7. **允许提炼的两个例外** — 「本任务 TL;DR」与「本任务范围」允许做结论性总结，但必须能在原文、版本规划或用户确认中找到依据
+7. **原文与工程信息分离** — TL;DR／Scope 可提炼，责任、交接和工程完成标准须标注确认规划或契约／代码依据，不得混入「来源需求原文」或冒充原始业务 AC
 8. **完整提取** — 该 task 候选 / 需求单元下的所有内容全部提取，不跳不漏
 9. **去重** — 同一条款在 PRD 中只应完整出现一次；Requirements / AC / 关联需求等其他节均以指针形式引用，不复述原文
 10. **散射追踪是参考，不是清单** — 散射追踪成果仅用于知会关联，不得误读为工作范围；必须明确标注「本任务实现」列
@@ -56,19 +56,25 @@ description: "Extract a cohesive task PRD faithfully from a source requirements 
 从版本规划产物中提取：
 - Task ID / task 名称
 - 所属 wave id / 名称
+- Wave 的业务角色、起始条件、操作、可验收结果与集成验收责任
 - ✅ 本 task 范围
 - ❌ 相关但不在本 task 范围
 - 来源需求位置
 - 散射组归属
-- 依赖 task
-- 可验收结果 / 可提测性
+- 当前主责、协作者、已有完成范围与历史交付证据
+- 已核实的仓库／模块边界、共享契约的维护责任
+- 依赖提供方、具体输入／输出、消费方与接收条件
+- 可开工／可联调／可验收前提、本包工程完成标准
 - Task 创建顺序和 slug 建议（如存在）
 
 如果用户要求批量生成多个 task：
 - 必须优先按版本规划产物中的「Task 创建顺序」执行。
 - 如果版本规划产物没有「Task 创建顺序」，必须先补齐或请用户确认顺序；不要按需求文档顺序、Task ID 字面顺序或临时判断直接创建。
-- 同一 wave 的 task 必须连续创建，不能被其他 wave 插开。
+- 本批新建工作包按计划聚合 Wave，再按依赖排列；这是建档顺序，不是所有任务的串行开工门禁。
 - 跨 wave 支撑 task 按版本规划标注放在服务的首个 wave 之前，或作为跨 wave 前置项单独说明。
+- 只创建用户指定的已确认范围；远期候选可保留在版本规划。用户明确要求全量创建时，覆盖全部指定工作包，不擅自改成只建近期。
+
+旧规划缺少协作信息时，读取能找到的依据，未明确项如实标注，不编造人员或契约。发现工作包没有明确输出／验证、与已有任务重复或只有步骤切片时，先回到受影响规划澄清边界；版本规划写了“允许拆分”不能豁免此判断。
 
 如果版本规划产物存在但找不到用户指定的 task 候选：
 - 不要猜测映射
@@ -88,6 +94,7 @@ description: "Extract a cohesive task PRD faithfully from a source requirements 
 - 不要跳过任何子节（即使看起来不重要）
 - 记录提取的起止位置（行号或章节号）
 - 如果版本规划已确认 task 边界，只提取该 task 范围内的来源内容；关联但不在范围的内容放入「关联需求」或「不在范围」
+- 同一业务条款可由多个工作包分担，保留原文指针并注明本包承担的部分及其他归属；不把整个 Wave 的实现和业务验收强加给每个包。
 
 ### Step 3: 识别变更性质（关键一步）
 
@@ -118,7 +125,7 @@ description: "Extract a cohesive task PRD faithfully from a source requirements 
 
 ### Step 5: 创建或定位任务
 
-更新已有任务时，先读取已明确定位的任务目录中的 `task.json` 和 `prd.md`，沿用该目录，不运行 `task.py create`。
+更新已有任务时，先读取已明确定位的 `task.json`、`prd.md` 及相关设计／证据，沿用该目录，不运行 `task.py create`。人员替换保留稳定 ID、历史交付人、已完成范围和证据；提取／改派不改变完成状态，已完成任务返工遵循既有 reopen 流程。
 
 新建任务时，从前述提取结果确定标题、slug 和一句话目标，先调用框架脚本创建任务目录、`task.json` 和默认 `prd.md`：
 
@@ -150,7 +157,7 @@ python3 .trellis/scripts/task.py create "项目列表反馈投标状态" \
   --description "项目列表反馈投标状态"
 ```
 
-不要把日期写入 `--slug`；`task.py create` 会自动添加 `MM-DD-` 前缀。批量创建时，必须按版本规划的「Task 创建顺序」逐个执行上述命令。
+不要把日期写入 `--slug`；`task.py create` 会自动添加 `MM-DD-` 前缀。批量创建按版本规划的「Task 创建顺序」执行；人员变更、跨日期补建或旧 slug 缺排序键，都不自动要求重命名已有目录。
 
 ### Step 6: 写入 PRD 并补充 task.json
 
@@ -179,6 +186,15 @@ PRD 的结构按下列顺序组织：
 - ❌ **相关但不在本任务范围**：
   - <条目> — 归属：<Task ID / Wave / 独立任务 / N/A 原因>
 
+## 交付与协作
+
+- **业务操作与结果**：<本包服务的 Wave 操作、起始条件与可验收结果；无规划则不编造>
+- **主责／协作者**：<已确认责任及身份依据；未明确则注明>
+- **输入 → 输出 → 消费方**：<具体交付、契约／基线指针及接收条件>
+- **依赖与就绪**：<提供方；可开工、可联调、可验收的不同条件及阻断影响>
+- **代码与共享边界**：<已核实模块及共享改动责任；具体实现留给 design／implement>
+- **集成与业务验收责任**：<谁消费本包输出、谁组织 Wave 验收>
+
 ## 来源需求原文
 <按原始文档的子结构组织，使用 blockquote 或分级标题忠实摘录>
 <保留原始编号和层级；用户可见文案逐字引用>
@@ -188,6 +204,11 @@ PRD 的结构按下列顺序组织：
 
 ## Acceptance Criteria（索引）
 - [ ] [<编号>] <一句话摘要> — 详见「来源需求原文」§<编号> / <原文位置>
+
+## 工程完成标准
+
+- [ ] <本包可验证的输出及接收结果> — 依据：<已确认 Scope／契约／代码证据位置>
+- <与 Wave 集成及业务验收的关系；本包自测或合入不能自动代替 Wave 验收>
 
 ## 关联需求（⚠️ 上下文参考，非本任务范围）
 | 需求单元 | 关联内容 | 本任务实现 | 归属 / 位置 |
@@ -200,7 +221,10 @@ PRD 的结构按下列顺序组织：
 - 原始文档路径、提取范围、提取时间
 - 版本规划产物路径、Task ID、Wave ID（如有）
 - 关键文件路径（用于 task.json `relatedFiles`）
+- 已有实现／完成证据、当前责任与历史交付说明（如有）
 ```
+
+「交付与协作」按实际依赖展开，简单工作包可简写；旧材料缺失只报告待补充。工程标准检验本包确认范围和契约，例如接口行为、持久化或消费兼容；不能据此发明新的产品行为。Brief 可从这些材料的既有 Context & Decisions 承接关键交接条件，无需增加固定栏目。
 
 PRD 写入后，根据其中的分析补充该任务现有 `task.json` 中的字段：
 - `dev_type`：`frontend` / `backend` / `fullstack`
@@ -208,6 +232,9 @@ PRD 写入后，根据其中的分析补充该任务现有 `task.json` 中的字
 - `meta.version_plan`：版本规划产物路径（如有）
 - `meta.wave`：所属 wave id / 名称 / 可提测性（如有）
 - `meta.source_requirements`：来源需求编号和位置（如有）
+- `assignee`：仅在真实负责人到开发者标识的映射已核实时，通过项目既有分配入口记录；未核实时不把实名或角色猜作标识，也不把创建器默认值当作已确认分工。
+
+读取现有字段及 schema 后再写入，保留无关 metadata 和历史记录；本 Skill 不增加协作 JSON 协议。
 
 `meta` 示例：
 
@@ -246,6 +273,9 @@ PRD 写入后，根据其中的分析补充该任务现有 `task.json` 中的字
 | **任务边界匹配** | 如存在版本规划产物，Scope 是否严格落在 task 候选范围内 |
 | **Wave 匹配** | PRD / `task.json.meta` 的 wave 是否与版本规划一致 |
 | **创建顺序匹配** | 批量生成时，实际创建顺序和 slug 是否遵循版本规划的「Task 创建顺序」 |
+| **工程与业务分层** | 工程完成标准能否追到确认范围／契约，与原始业务 AC 及 Wave 验收是否分清 |
+| **协作可接手** | 是否能回答谁做、交什么、谁接、何时可开工／联调、谁集成验收 |
+| **创建范围与历史** | 是否遵循用户指定建档范围，保留旧 ID、已完成证据和历史交付人 |
 
 ---
 
@@ -260,11 +290,13 @@ PRD 写入后，根据其中的分析补充该任务现有 `task.json` 中的字
 - ❌ Requirements / AC 小节复述原文内容
 - ❌ 散射追踪结果混入 Scope ✅ 或 Requirements
 - ❌ 有版本规划产物却忽略 task 候选边界，直接按原始需求整段提取成过大的任务
-- ❌ 把一个内聚 task 拆成页面 / 接口 / 字段碎片
+- ❌ 按人员或技术层自动复制 Task，或将无独立输出／验证的字段、按钮、测试步骤变成持久任务
+- ❌ 要求每个有稳定交接的技术工作包独立提供整个业务操作链
+- ❌ 将协作安排、Mock 成功或工程完成标准伪装成原始业务 AC 或 Wave 已验收
 - ❌ 未找到版本规划产物时自行编造 wave id 或 Task ID
 - ❌ 把 wave 当成独立 task 目录或 `task.py` 状态
 - ❌ 批量创建 task 时忽略版本规划的「Task 创建顺序」
-- ❌ slug 缺少 `wNN-tNN` 等稳定排序键，导致同一 wave 的 task 在目录中分散
+- ❌ 为人员分组或自然目录排序重命名历史任务，丢失已有证据；缺材料时编造责任或完成事实
 
 ---
 
@@ -272,7 +304,7 @@ PRD 写入后，根据其中的分析补充该任务现有 `task.json` 中的字
 
 | 入口 | 形态 | 职责 | 时机 |
 |------|------|------|------|
-| `trellis-plan-version` | skill | 版本级需求扫描 + 内聚 task 拆分 + wave 编排 | 版本规划阶段 |
+| `trellis-plan-version` | skill | 全文需求扫描 → 业务操作 Wave → 工作包、交接与容量规划 | 版本规划阶段 |
 | `trellis-brainstorm` | skill（上游） | 对话式需求发现（**无原始文档时**） | 需求模糊时 |
-| `trellis-extract-prd` | skill（本技能） | 基于原始文档严格提取单个内聚 task 的 PRD；如有版本规划，则绑定 Task ID / Wave / 来源需求 | 任务开发前、有正式需求文档时 |
-| `trellis-verify-task` | skill | 校验任务三件套准确性 + 覆盖度 + 跨层一致性；如有版本规划，则追加版本需求 -> task -> wave 对照 | PRD / Design / Implement 生成后 |
+| `trellis-extract-prd` | skill（本技能） | 提取原文与工作包 Scope，继承 Wave 业务结果、责任、交接及工程标准 | 任务开发前、有正式需求文档时 |
+| `trellis-verify-task` | skill | 校验原文、三件套、版本规划和实际关联任务的覆盖、粒度及协作条件 | PRD / Design / Implement 生成后 |

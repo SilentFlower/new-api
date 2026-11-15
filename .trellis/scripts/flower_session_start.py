@@ -10,6 +10,7 @@ import os
 import re
 import subprocess
 import sys
+import tempfile
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
@@ -17,24 +18,32 @@ from pathlib import Path
 PARTS = ("state", "rules", "stages")
 HOOKS = (".codex/hooks/session-start.py", ".claude/hooks/session-start.py")
 MAX_PART_CHARS = 8000
+MAINTENANCE_MESSAGE_MAX_CHARS = 600
+MAINTENANCE_DIAGNOSTIC_RELATIVE = ".trellis/.runtime/task-maintenance-hook.json"
 WORKFLOW_BLOCK = re.compile(r"<trellis-workflow>\n(.*?)\n</trellis-workflow>\n*", re.DOTALL)
 ASTRA_MODEL = "gpt-6-astra"
 SOL_MODEL = "gpt-6-sol"
 SOL_6_1_MODEL = "gpt-6.1-sol"
 MODEL_HINT_MAX_BYTES = 2048
 WORKFLOW_STATE_REFRESH_ARG = "--trellis-session-start-refresh"
+CODE_DESIGN_HINT = """<trellis-code-design>
+Prefer simple, clear code for confirmed needs (KISS, YAGNI). Apply SOLID and DRY when they reduce complexity or duplicated business knowledge; favor clarity if these principles conflict. Reuse project patterns. Avoid premature abstractions, extra layers, excessive splitting, and speculative config or dependencies. Preserve behavior, compatibility, required verification, workflows, review gates, and templates.
+</trellis-code-design>"""
 CODEX_USER_INTERACTION_HINT = """<trellis-codex-user-interaction>
 For questions, use synchronous request_user_input when allowed by the active tool instructions and schema; otherwise ask in the final reply and wait. Do not call request_user_input_async, send_user_message_async, or async equivalents. Show progress in commentary and results in final. Keep existing review/approval gates; never switch modes to unlock a tool or infer consent from silence.
 </trellis-codex-user-interaction>"""
-MODEL_WORKFLOW_HINT_BODY = """Applies only while the active model is {model}; it does not apply after switching models. Perform checks internally, without a routine checklist report. Keep ordinary answers brief.
+CONFIRMATION_HINT = """<trellis-confirmation>
+Before final Brief/Check-All/Push output, follow .trellis/scripts/confirmation.md: resolve --entry, attempt eligible prepare, background wait, full display, end turn. Manual fallback needs an exclusion or actual failure reason. Generic commit intent does not approve a later plan. Execute only on valid human/runner authorization or policy_timeout claim plus started receipt. Human decisions and host approvals stay manual.
+</trellis-confirmation>"""
+MODEL_WORKFLOW_HINT_BODY = """Applies only to active {model}. Keep ordinary replies brief; perform checks internally.
 When executing the current task:
-- Act autonomously within applicable SKILL and WORKFLOW steps. Do not waive required steps, references, review gates or templates because work seems simple, a check seems redundant, or fewer interruptions are preferred.
-- Before a step, review its rules and required references. Reuse material already read in full and unchanged; search matches are not full reads.
-- Preserve required heading levels, section order, and conditional sections in specified templates. General brevity or no-heading preferences apply to ordinary prose and do not justify flattening, shortening, or reshaping a specified template.
-- Resolve conflicts by instruction hierarchy. Follow the owning workflow's phase-transition and review requirements. Permission to begin planning does not approve the final plan.
-- Where the workflow requires review of a displayed plan, a generic request such as "commit and push" starts that workflow; it does not itself confirm a plan produced afterward. Reuse approval of the same plan or an explicit waiver within its scope, including valid auto-loop preauthorization. Otherwise, display the plan and wait for the user's confirmation before acting. Verify the actual user reply; displaying a plan or saying "executing as authorized" is not confirmation.
-- Before claiming "read", "checked", or "complete", verify actual tool records and artifacts. Successful reading and compliant execution are separate facts.
-- When corrected, review the applicable rules, execution records, and actual result before repairing it. If evidence is missing, state uncertainty. Do not invent causes such as "not read", "forgot", or "file missing", or consult unrelated rules in place of the relevant ones."""
+- Follow SKILL and WORKFLOW steps autonomously. Simplicity, redundant checks or fewer interruptions do not waive required steps, references, gates or templates.
+- Before a step, read its rules and required references. Reuse fully read, unchanged material; search matches are not full reads.
+- Preserve required template headings, order and conditional sections. Brevity does not waive structure.
+- Resolve conflicts by instruction hierarchy; follow the owner's phase transitions. Planning intent does not approve a final plan.
+- Generic work/Git intent does not approve a later plan. Follow the gate owner BEFORE ending the turn: eligible prepare, background wait, full display; exclusions or actual failures use manual confirmation. Act only on a verified user reply, valid runner authorization, or policy_timeout claim AND started receipt. Silence and display are not human approval; unresolved decisions and host approvals stay manual.
+- Verify actual tool records and artifacts before claiming read, checked or complete. Reading and compliance are separate facts.
+- When corrected, inspect applicable rules, records and results before repairing. State missing evidence; do not invent causes or substitute unrelated rules."""
 ASTRA_WORKFLOW_HINT = (f'<trellis-astra-workflow-hint model="{ASTRA_MODEL}" version="1">\n'
                        f'{MODEL_WORKFLOW_HINT_BODY.format(model=ASTRA_MODEL)}\n'
                        '</trellis-astra-workflow-hint>')
@@ -206,6 +215,40 @@ def _run_workflow_state_refresh(root: Path, hook: str, hook_input: dict) -> str:
     return context
 
 
+def _maintenance_diagnostic(root: Path, message: str, stdout: str = "", stderr: str = "") -> str:
+    """保存最后一次完整诊断，并返回有长度上限的单行提示。
+
+    @param root: 当前部署项目根目录。
+    @param message: 面向用户的错误或警告。
+    @param stdout: maintenance 子进程的完整标准输出。
+    @param stderr: maintenance 子进程的完整错误输出。
+    @return: 不超过提示预算的摘要，包含诊断位置或保存失败说明。
+    """
+    diagnostic = root / MAINTENANCE_DIAGNOSTIC_RELATIVE
+    temporary = None
+    try:
+        diagnostic.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, temporary = tempfile.mkstemp(prefix=".maintenance-", dir=str(diagnostic.parent))
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump({"message": message, "stdout": stdout, "stderr": stderr}, handle, ensure_ascii=False)
+        os.replace(temporary, str(diagnostic))
+        suffix = f"；完整诊断：{MAINTENANCE_DIAGNOSTIC_RELATIVE}"
+    except OSError:
+        suffix = "；完整诊断保存失败"
+    finally:
+        if temporary is not None:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+    # 原始输出只落盘；systemMessage 和 stderr 都不能再次回显整份文件列表。
+    summary = " ".join(message.splitlines())
+    budget = MAINTENANCE_MESSAGE_MAX_CHARS - len(suffix)
+    if len(summary) > budget:
+        summary = summary[:budget - 1] + "…"
+    return summary + suffix
+
+
 def _run_task_maintenance(root: Path) -> str:
     """运行旧任务收敛与三天物理 GC，并返回紧凑诊断。
 
@@ -226,22 +269,26 @@ def _run_task_maintenance(root: Path) -> str:
             check=False,
         )
     except OSError as error:
-        return f"task maintenance 无法启动：{error}"
-    stderr = result.stderr.decode("utf-8", errors="replace").strip()
-    if stderr:
-        print(stderr, file=sys.stderr)
-    stdout = result.stdout.decode("utf-8-sig").strip()
+        return _maintenance_diagnostic(root, f"task maintenance 无法启动：{error}", stderr=str(error))
+    stderr = result.stderr.decode("utf-8", errors="replace")
+    stdout = result.stdout.decode("utf-8-sig")
     if result.returncode != 0:
-        return f"task maintenance 失败：{stderr or stdout or f'退出码 {result.returncode}'}"
-    if not stdout:
+        return _maintenance_diagnostic(
+            root, f"task maintenance 失败（退出码 {result.returncode}）：{stderr or stdout}", stdout, stderr,
+        )
+    if not stdout.strip():
+        if stderr:
+            return _maintenance_diagnostic(root, "task maintenance：子进程有诊断输出", stdout, stderr)
         return ""
     try:
         payload = json.loads(stdout)
     except json.JSONDecodeError as error:
-        return f"task maintenance 输出损坏：{error}"
+        return _maintenance_diagnostic(root, f"task maintenance 输出损坏：{error}", stdout, stderr)
     if not isinstance(payload, dict):
-        raise ValueError("task maintenance 输出必须为 JSON 对象")
+        return _maintenance_diagnostic(root, "task maintenance 输出必须为 JSON 对象", stdout, stderr)
     if payload.get("status") == "busy":
+        if stderr:
+            return _maintenance_diagnostic(root, "task maintenance：子进程有诊断输出", stdout, stderr)
         return ""
     reconciliation = payload.get("reconciliation") if isinstance(payload.get("reconciliation"), dict) else {}
     gc_result = payload.get("gc") if isinstance(payload.get("gc"), dict) else {}
@@ -266,7 +313,12 @@ def _run_task_maintenance(root: Path) -> str:
     for item in (reconciliation, gc_result):
         if item.get("error"):
             messages.append(str(item["error"]))
-    return "task maintenance：" + "；".join(messages) if messages else ""
+    message = "task maintenance：" + "；".join(messages) if messages else ""
+    if stderr or any(item.get("error") for item in (reconciliation, gc_result)) or len(message) > MAINTENANCE_MESSAGE_MAX_CHARS:
+        return _maintenance_diagnostic(root, message or "task maintenance：子进程有诊断输出", stdout, stderr)
+    if payload.get("status") == "error":
+        return _maintenance_diagnostic(root, f"task maintenance 失败：{payload.get('message') or payload.get('reason')}", stdout, stderr)
+    return message
 
 
 def render_part(root: Path, hook: str, part: str, hook_input: dict) -> dict | None:
@@ -288,15 +340,17 @@ def render_part(root: Path, hook: str, part: str, hook_input: dict) -> dict | No
         if source in ("startup", "resume"):
             maintenance_message = _run_task_maintenance(root)
         if source == "resume":
-            if not maintenance_message:
+            if _load_hook(root, hook).should_skip_injection():
                 return None
-            return {
-                "systemMessage": maintenance_message,
+            result = {
                 "hookSpecificOutput": {
                     "hookEventName": "SessionStart",
-                    "additionalContext": "",
+                    "additionalContext": CONFIRMATION_HINT,
                 },
             }
+            if maintenance_message:
+                result["systemMessage"] = maintenance_message
+            return result
         result = _run_native_hook(root, hook, hook_input)
         if result is None:
             return None
@@ -320,6 +374,13 @@ def render_part(root: Path, hook: str, part: str, hook_input: dict) -> dict | No
                 result.pop("systemMessage", None)
         try:
             workflow_state = _run_workflow_state_refresh(root, hook, hook_input)
+            # 归属标记留在源文件中；注入时仅省略这些整行注释，避免压缩规则措辞。
+            workflow_state = re.sub(
+                r"^<!-- (?:BEGIN|END) skill-garden patch [^<>\r\n]+ -->(?:\r?\n|$)",
+                "",
+                workflow_state,
+                flags=re.MULTILINE,
+            )
             separator = "" if not context or context.endswith("\n") else "\n"
             context = f"{context}{separator}{workflow_state}"
         except Exception as error:
@@ -327,6 +388,8 @@ def render_part(root: Path, hook: str, part: str, hook_input: dict) -> dict | No
             message = f"workflow-state 基线未刷新：{error}"
             result["systemMessage"] = "\n".join(filter(None, [result.get("systemMessage"), message]))
             print(message, file=sys.stderr)
+        if source in ("startup", "clear", "compact"):
+            context = f"{context}\n{CODE_DESIGN_HINT}\n{CONFIRMATION_HINT}"
         if hook == HOOKS[0] and source in ("startup", "clear", "compact"):
             # 交互方式属于 Codex 平台规则，不能因模型切换或关闭模型提示而消失。
             context = f"{context}\n{CODEX_USER_INTERACTION_HINT}"
