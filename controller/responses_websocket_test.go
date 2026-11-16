@@ -547,15 +547,9 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	oldLogConsumeEnabled := common.LogConsumeEnabled
 	oldDataExportEnabled := common.DataExportEnabled
 	oldMemoryCacheEnabled := common.MemoryCacheEnabled
-	oldGuardAcquirer := responsesWebSocketConcurrencyGuardAcquirer
 	common.LogConsumeEnabled = true
 	common.DataExportEnabled = false
 	common.MemoryCacheEnabled = false
-	guardAcquireCalls := 0
-	responsesWebSocketConcurrencyGuardAcquirer = func(c *gin.Context) (*channelUserConcurrencyGuard, *types.NewAPIError) {
-		guardAcquireCalls++
-		return acquireChannelUserConcurrencyGuard(c)
-	}
 	quotaSetting := operation_setting.GetQuotaSetting()
 	oldFreeModelPreConsume := quotaSetting.EnableFreeModelPreConsume
 	quotaSetting.EnableFreeModelPreConsume = false
@@ -571,7 +565,6 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 		common.LogConsumeEnabled = oldLogConsumeEnabled
 		common.DataExportEnabled = oldDataExportEnabled
 		common.MemoryCacheEnabled = oldMemoryCacheEnabled
-		responsesWebSocketConcurrencyGuardAcquirer = oldGuardAcquirer
 		quotaSetting.EnableFreeModelPreConsume = oldFreeModelPreConsume
 		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(savedModelRatios))
 	})
@@ -689,10 +682,12 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	_, firstCompleted, err := clientConn.ReadMessage()
 	require.NoError(t, err)
 	require.Equal(t, "response.completed", gjson.GetBytes(firstCompleted, "type").String())
-	parentUsage, _, err := service.GetChannelUserConcurrencyUsage(t.Context(), parent.Id, 787)
-	require.NoError(t, err)
-	assert.Equal(t, 1, parentUsage)
-	// 连接开始时已持有父渠道租约，解绑只影响后续新连接。
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		parentUsage, _, usageErr := service.GetChannelUserConcurrencyUsage(t.Context(), parent.Id, 787)
+		assert.NoError(collect, usageErr)
+		assert.Zero(collect, parentUsage)
+	}, time.Second, time.Millisecond)
+	// 本轮已释放父渠道名额，解绑后的下一轮读取新的限制归属。
 	relation.ParentChannelId = 0
 	require.NoError(t, service.SaveChannelLimitParent(t.Context(), relation))
 	secondTurn := []byte(`{"type":"response.create","model":"ws-model-b","stream":true,"input":[{"type":"compaction_trigger"}],"client_metadata":{"turn":2}}`)
@@ -703,9 +698,9 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 	_, secondCompleted, err := clientConn.ReadMessage()
 	require.NoError(t, err)
 	require.Equal(t, "response.completed", gjson.GetBytes(secondCompleted, "type").String())
-	parentUsage, _, err = service.GetChannelUserConcurrencyUsage(t.Context(), parent.Id, 787)
+	parentUsage, _, err := service.GetChannelUserConcurrencyUsage(t.Context(), parent.Id, 787)
 	require.NoError(t, err)
-	assert.Equal(t, 1, parentUsage)
+	assert.Zero(t, parentUsage)
 	childUsage, _, err := service.GetChannelUserConcurrencyUsage(t.Context(), channel.Id, 787)
 	require.NoError(t, err)
 	assert.Zero(t, childUsage)
@@ -753,7 +748,6 @@ func TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns(t *testi
 		assert.Zero(t, log.PromptTokens)
 		assert.Zero(t, log.CompletionTokens)
 	}
-	assert.Equal(t, 1, guardAcquireCalls)
 	parentUsage, _, err = service.GetChannelUserConcurrencyUsage(t.Context(), parent.Id, 787)
 	require.NoError(t, err)
 	assert.Zero(t, parentUsage)

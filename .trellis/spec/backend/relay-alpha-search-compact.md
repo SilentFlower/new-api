@@ -230,7 +230,7 @@ responses_compact_passthrough_enabled: boolean
 #### Responses WebSocket 生命周期
 
 - 路由先读取首个 `response.create`，再校验基础 model 权限和选择渠道；同一连接只允许一个 active turn，后续 turn 优先复用当前渠道，并重新校验模型与分组资格。
-- 当前渠道失去资格时，先关闭旧上游并释放连接租约。没有 `previous_response_id` 的完整请求复用首轮选渠与 connector，在同一客户端连接上切换上游；Token 权限、指定渠道、亲和性、Compact 能力与预算检查继续生效。
+- 当前渠道失去资格时，先关闭旧上游并释放尚持有的请求租约。没有 `previous_response_id` 的完整请求复用首轮选渠与 connector，在同一客户端连接上切换上游；Token 权限、指定渠道、亲和性、Compact 能力与预算检查继续生效。
 - 带非空 `previous_response_id` 的增量不得跨渠道转发或删 ID 后当作完整请求发送；返回 `400 previous_response_not_found`、`error.param=previous_response_id` 并关闭连接，由客户端重连后携带完整历史重试。此拒绝发生在本轮预扣与上游发送前。
 - 本地 WS 错误封套包含数字 `status`，与 `NewAPIError.StatusCode` 一致；恢复信号沿用 [OpenAI WebSocket 恢复协议](https://developers.openai.com/api/docs/guides/websocket-mode#reconnect-and-recover)。
 - build 分支的 Responses WebSocket 渠道选择必须由 `middleware/responses_websocket_channel.go` 独立承载，不得为了与 HTTP 共用而重新抽取或改写整个 `middleware.Distribute`。允许保留受测试保护的局部重复。
@@ -238,7 +238,7 @@ responses_compact_passthrough_enabled: boolean
 - 普通 HTTP 分发错误响应只有无可用渠道返回 `model_not_found`；无效请求、Token 权限、禁用指定渠道和渠道上下文初始化错误的 `error.code` 保持为空。WS 内部返回标准 `NewAPIError`，不得用 HTTP code 清洗逻辑替代。
 - Compact turn 在 dial 和预扣前执行渠道门禁；门禁错误不是 channel error，不能进入 connector failover。
 - 普通 turn 继续使用原有模型映射、转换、disabled fields 和 Param Override；只有 Compact turn 分派到独立准备和终态 observer。
-- 每个 turn 独立预扣、结算或退款；`ClearResponsesCompactAudit` 只清理上一轮 `admin_info.responses_compact`，不能删除 quota saturation 等其他管理员字段。
+- 每个 turn 在预扣和发送上游前独立获取并发租约，终态或异常退出时释放；空闲连接继续复用且占用零个请求名额，完整限制契约见 [渠道单用户并发限制契约](./channel-user-concurrency.md)。每个 turn 独立预扣、结算或退款；`ClearResponsesCompactAudit` 只清理上一轮 `admin_info.responses_compact`，不能删除 quota saturation 等其他管理员字段。
 - 普通与 Compact turn 都必须在首个上游响应消息到达事件处理入口时调用 `RelayInfo.SetFirstResponseTime()`；`response.created` 即可触发，不等待正文增量。该方法只记录一次，后续帧不得覆盖；下一轮使用新建的 RelayInfo 独立计时。
 - 消费日志复用 `other.frt = FirstResponseTime.UnixMilli() - StartTime.UnixMilli()`，单位毫秒。没有上游响应时保留未知；Ping/Pong 控制帧不得建立模型首响应，不以总耗时补造或回填历史值。
 
@@ -446,7 +446,7 @@ info.SetFirstResponseTime()
 - 新 key 的单项保存复用 `UpdateOptionsBulk` 的检查错误事务路径，数据库失败必须返回业务失败，不能继续更新内存；不借此重构其他设置的保存行为。
 - 配置 owner 位于 `common/responses_websocket_setting.go`。getter 使用 `OptionMapRWMutex.RLock` 读取站点快照；更新使用同一锁。`constant.ResponsesWebSocketFirstFrameTimeoutSeconds` 仅作启动环境缺省，不能把它改成无保护的热更新变量。
 - 每个新连接在首帧读取前冻结 deadline；保存只影响后续连接，已有连接保持原期限。其他实例沿用现有 `SyncOptions` 周期，不增加即时广播或第二份配置缓存。
-- 首帧读取结束后清除读取期限。后续 type/model 校验、选渠、预扣和主转发状态机保持；没有完整首帧时不选渠、不预扣、不占用上游连接租约。
+- 首帧读取结束后清除读取期限。后续 type/model 校验、选渠、预扣和主转发状态机保持；没有完整首帧时不选渠、不预扣、不占用请求并发租约。
 - 独立首帧错误分类位于 `controller/responses_websocket_first_frame.go`：网络读取超时使用原有 `type=error` 封套，`status=408`、`error.code=responses_websocket_first_frame_timeout`，随后发送关闭码 `1013`。这是升级后 JSON 的状态字段，成功 upgrade 的 HTTP 状态仍为 `101`。
 - Gorilla 读取超时后连接不能恢复读取；调用方必须重新建连并发送完整请求。不得循环重读原连接、伪造 `response.create` 或把内部 `SkipRetry` 当成客户端恢复指令，也不承诺任意客户端都会自动重连。
 - `ErrReadLimit` 保留底层已发送的 `1009`，正常关闭保留关闭握手，其他传输/协议读取失败终止连接；不得追加统一的参数错误或将其全部升级为可恢复超时。

@@ -155,7 +155,7 @@ func TestResponsesWebSocketChannelChangeRecovery(t *testing.T) {
 				require.Equal(t, "resp_primary", gjson.GetBytes(firstResponse, "response.id").String())
 				<-primaryFrames
 
-				// 模拟管理员移动分组后发布能力缓存，原连接仍持有旧渠道与共享父租约
+				// 模拟管理员移动分组后发布能力缓存，原连接保留旧渠道以验证下一轮重选。
 				require.NoError(t, db.Model(&model.Channel{}).Where("id = ?", primary.Id).Update("group", "moved").Error)
 				require.NoError(t, db.Model(&model.Ability{}).Where("channel_id = ?", primary.Id).Update("group", "moved").Error)
 				if tc.alternative {

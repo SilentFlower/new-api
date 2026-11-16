@@ -143,7 +143,9 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 
 - 获取时机固定为：渠道已选定且请求准备完成之后，预扣费和实际上游调用之前。
 - HTTP 流式和非流式请求持有到该次上游响应处理结束；重试前必须释放旧渠道租约，再为新渠道获取。
-- OpenAI Realtime 与 Responses WebSocket 按上游连接持有；复用同一上游的多轮请求只获取一次，连接关闭、客户端断开或续租丢失时释放。Responses WebSocket 因渠道资格变化更换上游时，先释放原租约，再按新渠道解析限制并获取租约，不能同时占用共享父渠道的两个名额。
+- OpenAI Realtime 按上游连接持有租约，连接关闭、客户端断开或续租丢失时释放。
+- Responses WebSocket 按每个活动 `response.create` 请求持有租约；首轮和复用连接的后续轮次都必须在预扣与上游发送前获取。普通及 Compact 回合在成功、失败、取消终态或异常退出时幂等释放；空闲连接保留续接状态且占用零个请求名额。
+- Responses WebSocket 复用连接时通过 `model.CacheGetChannel` 读取当前限制配置，再由 `service.ApplyChannelLimitContext` 刷新父桶与个人覆盖；不重选已建立连接的上游 Key。限制归属在当前回合内冻结，轮间变更影响下一回合。换渠或重试前先释放旧请求租约，不能同时占用共享父渠道的两个名额。
 - 异步任务提交和实时查询只在实际 HTTP 请求期间持有；纯数据库查询和上游后台处理期不持有。
 - Midjourney 从历史任务切回原渠道时，必须同步原渠道 ID 与限制后再获取。
 - 视觉辅助按实际辅助渠道和当前用户独立获取；主渠道必须在视觉辅助预处理完成后再获取，避免同渠道自占两个名额。
@@ -176,6 +178,8 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 | Redis 已启用但不可用 | `503 channel_user_concurrency_unavailable` | 失败关闭，不回退内存、不预扣、不访问上游、不重试、不自动禁用 |
 | 运行中租约续租失败或丢失 | `503 channel_user_concurrency_unavailable`，若响应已提交则终止连接 | 取消实际上游请求或关闭 WebSocket，记录运行时告警和数据库错误日志 |
 | 释放 Redis member 失败 | 保留当前业务结果 | 记录脱敏告警，依赖 TTL 回收 |
+| Responses WebSocket 回合终止后等待下一轮 | 连接继续复用 | 本轮租约已释放，当前请求并发归零 |
+| Responses WebSocket 后续回合达到上限 | `429 channel_user_concurrency_exceeded` | 在本轮预扣和上游发送前拒绝，沿用既有错误封套与连接结束行为 |
 | 当前并发查询发现过期或空租约 | 管理 API 成功 | 清理残留索引，只返回有效并发大于零的用户 |
 | 当前并发查询的 Redis 操作失败 | 本地化通用管理错误 | 服务端记录脱敏诊断，不向客户端暴露 Redis 地址或底层错误 |
 | Task/Midjourney 本地并发错误 | 保留各自协议错误体，并映射 `429/503` | 必须标记本地错误，不能按普通 `429/5xx` 重试 |
@@ -189,7 +193,7 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 
 - Good：渠道 `80` 配置为 `4`，同一用户用多个 Token 保持 4 个请求，第 5 个立即收到 `429`；另一用户仍可进入。
 - Good：首个上游渠道真实失败，释放旧租约后重试到新渠道；两个渠道的计数互不串联。
-- Good：Responses WebSocket 完成普通、Compact、普通三轮请求，整个客户端连接只获取一次租约。
+- Good：Responses WebSocket 完成普通、Compact、普通三轮请求，每轮独立获取与释放租约；回合之间并发归零，同一上游连接继续复用。
 - Good：Redis 续租失败后取消 Vertex OAuth/任务查询或关闭 WebSocket，而不是只修改 Gin context 中未被上游请求使用的值。
 - Good：渠道 `80` 的第 5 个同用户并发请求被拒绝后，管理端错误日志只出现一条记录，并能在管理员信息中看到渠道、用户、限制和稳定错误码。
 - Good：渠道 `80` 的两个有效租约显示当前并发 `2`；最后一个租约释放或过期后，该用户从管理列表消失。
@@ -197,6 +201,7 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 - Base：历史渠道缺少新字段，所有 Relay 路径保持原行为。
 - Base：异步任务提交成功后立即释放；任务在上游继续运行不占并发名额。
 - Base：关闭 `ERROR_LOG_ENABLED` 后不产生数据库错误日志，但运行时日志仍能定位并发拒绝。
+- Bad：把 Responses WebSocket 的连接寿命当成请求寿命，会让空闲连接持续占满名额；正确处理是每轮获取、终态释放并保留连接。
 - Bad：Redis 故障时回退内存，会让多实例分别放行并突破全局上限。
 - Bad：在视觉辅助前先获取主渠道租约，辅助渠道与主渠道相同时可能自阻塞。
 - Bad：Task 本地 `503` 先进入通用 `5xx` 判断再检查 `LocalError`，会错误换渠重试。
@@ -215,7 +220,7 @@ ErrorCodeChannelUserConcurrencyUnavailable = "channel_user_concurrency_unavailab
 - 错误日志：使用真实测试日志库断言 `429/503` 均持久化稳定错误码、用户/渠道/request ID 与管理员审计信息；重复调用统一入口仍只产生一条记录。
 - 日志开关：断言 `ERROR_LOG_ENABLED=false` 时不写数据库，且不改变并发拒绝响应。
 - 上下文传播：断言通用 HTTP、Realtime WebSocket、Claude `count_tokens`、Midjourney、Gemini/Vertex 任务查询及 Vertex OAuth 在取消后不发出上游请求或及时返回取消错误。
-- Responses WebSocket：断言首轮重试释放旧租约，多轮连接只获取一次，断开后释放。
+- Responses WebSocket：使用 `controller/responses_websocket_concurrency_test.go` 验证普通/Compact 终态后计数归零、原连接继续增量续接、后续轮次预扣前拒绝、父桶/个人覆盖/渠道默认上限轮间刷新，以及失败、准备错误和两端断开的释放；保留首轮及后续重试、取消转发、逐轮账务回归和定向 race 检查。
 - 视觉辅助：断言并发拒绝发生在辅助上游和预扣之前。
 - 前端：断言 API/表单 `4 -> 4`、历史 `null -> 0`、创建/更新保留 `0`，非法边界拒绝；运行 i18n 同步、类型检查和构建。
 - 前端可视化：断言并发 Tab 激活时每 5 秒轮询、关闭后停止、内存模式提示、分页收缩回退和查询错误 i18n。

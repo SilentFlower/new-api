@@ -492,6 +492,23 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 					continue
 				}
 				common.SetContextKey(c, constant.ContextKeyOriginalModel, turn.selectionModel)
+				// 连接可继续复用，每轮仍需重新解析限制并在预扣前获取请求名额。
+				limitChannel, channelErr := model.CacheGetChannel(selectedChannel.Id)
+				if channelErr != nil {
+					apiErr := service.ChannelLimitParentAPIError(c, channelErr)
+					writeResponsesWebSocketError(c, clientConn, apiErr)
+					return apiErr
+				}
+				if apiErr := service.ApplyChannelLimitContext(c, limitChannel); apiErr != nil {
+					writeResponsesWebSocketError(c, clientConn, apiErr)
+					return apiErr
+				}
+				concurrencyGuard, apiErr = responsesWebSocketConcurrencyGuardAcquirer(c)
+				if apiErr != nil {
+					writeResponsesWebSocketError(c, clientConn, apiErr)
+					return apiErr
+				}
+				turn.concurrencyGuard = concurrencyGuard
 				payload, apiErr := prepareResponsesWebSocketTurnAttempt(c, turn)
 				if apiErr != nil {
 					writeResponsesWebSocketError(c, clientConn, apiErr)
@@ -517,6 +534,7 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 					upstreamGeneration++
 					startResponsesWebSocketReader(upstreamConn, upstreamGeneration, upstreamResults)
 				}
+				detachChannelUserConcurrencyGuardContext(c, concurrencyGuard)
 				currentTurn = turn
 				continue
 			}
@@ -595,7 +613,15 @@ func proxyResponsesWebSocket(c *gin.Context, clientConn *websocket.Conn, initial
 			if currentTurn != nil {
 				currentTurn.downstreamEventWritten = true
 				if handleResponsesWebSocketUpstreamEvent(c, currentTurn, selectedChannel, result.payload) {
+					// 终态只结束本轮请求，空闲连接继续保留续接缓存。
+					apiErr := finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
+					currentTurn.concurrencyGuard = nil
+					concurrencyGuard = nil
 					currentTurn = nil
+					if apiErr != nil {
+						writeResponsesWebSocketError(c, clientConn, apiErr)
+						return apiErr
+					}
 				}
 			}
 		}

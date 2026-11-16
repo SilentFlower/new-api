@@ -15,7 +15,7 @@ import (
 // 仅处理尚未预扣或发送的新轮次，已有 response ID 的增量由客户端完整重放
 func reconnectResponsesWebSocketTurn(c *gin.Context, turn *responsesWebSocketTurn, upstream *websocket.Conn, guard *channelUserConcurrencyGuard) (*websocket.Conn, *model.Channel, *types.NewAPIError) {
 	_ = upstream.Close()
-	// 两个物理渠道可能共享同一父限制，重选前必须释放旧连接的租约
+	// 两个物理渠道可能共享同一父限制，重选前必须释放旧请求的租约
 	if apiErr := finishChannelUserConcurrencyGuard(c, guard, nil); apiErr != nil {
 		return nil, nil, apiErr
 	}
