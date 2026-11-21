@@ -151,10 +151,7 @@ func countClaudeStreamBillableTools(c *gin.Context, info *relaycommon.RelayInfo,
 }
 
 func HandleStreamFinalResponse(c *gin.Context, info *relaycommon.RelayInfo, claudeInfo *ClaudeResponseInfo) {
-	if claudeInfo.Usage.PromptTokens == 0 {
-		//上游出错
-	}
-	if claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done {
+	if claudeInfo.Usage.LocalResponse == "" && (claudeInfo.Usage.CompletionTokens == 0 || !claudeInfo.Done) {
 		if common.DebugEnabled {
 			common.SysLog("claude response usage is not complete, maybe upstream error")
 		}
@@ -200,14 +197,23 @@ func ClaudeStreamHandler(c *gin.Context, resp *http.Response, info *relaycommon.
 		Usage:        &dto.Usage{},
 	}
 	var err *types.NewAPIError
+	localSummaryReceipt := takeFlower2APILocalSummaryReceipt(resp, info)
+	var localSummary localSummaryStream
 	helper.StreamScannerHandler(c, resp, info, func(data string, sr *helper.StreamResult) {
 		err = HandleStreamResponseData(c, info, claudeInfo, data)
 		if err != nil {
 			sr.Stop(err)
+			return
+		}
+		if localSummaryReceipt {
+			localSummary.observe(data)
 		}
 	})
 	if err != nil {
 		return nil, err
+	}
+	if localSummaryReceipt && localSummary == localSummaryComplete && info.StreamStatus.IsNormalEnd() && !info.StreamStatus.HasErrors() {
+		claudeInfo.Usage.LocalResponse = dto.LocalResponseAGYAgentSummary
 	}
 
 	HandleStreamFinalResponse(c, info, claudeInfo)
@@ -237,6 +243,9 @@ func HandleClaudeResponseData(c *gin.Context, info *relaycommon.RelayInfo, claud
 		claudeInfo.Usage.PromptTokensDetails.CachedCreationTokens = claudeResponse.Usage.CacheCreationInputTokens
 		claudeInfo.Usage.ClaudeCacheCreation5mTokens = claudeResponse.Usage.GetCacheCreation5mTokens()
 		claudeInfo.Usage.ClaudeCacheCreation1hTokens = claudeResponse.Usage.GetCacheCreation1hTokens()
+	}
+	if takeFlower2APILocalSummaryReceipt(httpResp, info) && isFlower2APILocalSummaryJSON(&claudeResponse, data) {
+		claudeInfo.Usage.LocalResponse = dto.LocalResponseAGYAgentSummary
 	}
 	var responseData []byte
 	switch info.RelayFormat {

@@ -228,6 +228,8 @@ type Usage struct {
 	UsageSemantic        string        `json:"usage_semantic,omitempty"`
 	UsageSource          string        `json:"usage_source,omitempty"`
 	BillingUsage         *BillingUsage `json:"billing_usage,omitempty"`
+	// LocalResponse 由中继确认后填写，供内部结算识别。
+	LocalResponse string `json:"-"`
 
 	PromptTokensDetails    InputTokenDetails  `json:"prompt_tokens_details"`
 	CompletionTokenDetails OutputTokenDetails `json:"completion_tokens_details"`

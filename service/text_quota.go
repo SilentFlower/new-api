@@ -396,6 +396,10 @@ func usageSemanticFromUsage(relayInfo *relaycommon.RelayInfo, usage *dto.Usage) 
 }
 
 func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, usage *dto.Usage, extraContent []string) {
+	if usage != nil && usage.LocalResponse == dto.LocalResponseAGYAgentSummary {
+		postLocalAgentSummaryBilling(ctx, relayInfo)
+		return
+	}
 	originUsage := usage
 	billingUsage := effectiveBillingUsage(usage)
 	if usage == nil {
@@ -543,4 +547,36 @@ func PostTextConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, us
 	gopool.Go(func() {
 		perfmetrics.RecordRelaySample(relayInfo, true, int64(summary.CompletionTokens))
 	})
+}
+
+func postLocalAgentSummaryBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) {
+	err, refundTriggered := settleZeroTextQuota(ctx, relayInfo)
+	group := relayInfo.PriceData.GroupRatioInfo
+	other := GenerateTextOtherInfo(ctx, relayInfo, 0, group.GroupRatio, 0, 0, 0, 0, group.GroupSpecialRatio)
+	MergeContextLogOther(ctx, other)
+	other["local_response"] = dto.LocalResponseAGYAgentSummary
+	other["usage_semantic"] = dto.BillingUsageSemanticAnthropic
+	params := model.RecordConsumeLogParams{
+		ChannelId:      relayInfo.ChannelId,
+		ModelName:      ConsumeLogModelName(relayInfo),
+		TokenName:      ctx.GetString("token_name"),
+		Content:        "本地生成的 AGY 工具进度标签",
+		TokenId:        relayInfo.TokenId,
+		UseTimeSeconds: int(time.Since(relayInfo.StartTime).Seconds()),
+		IsStream:       relayInfo.IsStream,
+		Group:          relayInfo.UsingGroup,
+		Other:          other,
+	}
+	if err != nil {
+		logger.LogError(ctx, "AGY 本地进度标签零额结算失败: "+err.Error())
+		if constant.ErrorLogEnabled {
+			adminInfo := ensureLogAdminInfo(other)
+			adminInfo["billing_settlement_failed"] = true
+			adminInfo["billing_refund_fallback_triggered"] = refundTriggered
+			model.RecordErrorLog(ctx, relayInfo.UserId, params.ChannelId, params.ModelName, params.TokenName,
+				"AGY 本地进度标签零额结算失败", params.TokenId, params.UseTimeSeconds, params.IsStream, params.Group, other)
+		}
+		return
+	}
+	model.RecordConsumeLog(ctx, relayInfo.UserId, params)
 }

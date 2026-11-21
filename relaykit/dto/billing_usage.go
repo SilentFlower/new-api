@@ -1,5 +1,8 @@
 package dto
 
+// LocalResponseAGYAgentSummary 表示 Flower2API 在网关本地生成的工具进度标签。
+const LocalResponseAGYAgentSummary = "agy_agent_summary"
+
 const (
 	BillingUsageSourceClaudeMessages = "claude_messages"
 	BillingUsageSourceGeminiChat     = "gemini_chat"

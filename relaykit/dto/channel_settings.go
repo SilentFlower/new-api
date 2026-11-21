@@ -19,6 +19,7 @@ type ChannelSettings struct {
 	ResponsesCompactPassthroughEnabled bool                        `json:"responses_compact_passthrough_enabled,omitempty"`
 	ResponsesReasoningIncludedEnabled  bool                        `json:"responses_reasoning_included_enabled,omitempty"`
 	UseUpstreamModelForBilling         bool                        `json:"use_upstream_model_for_billing,omitempty"`
+	TrustFlower2APILocalResponse       bool                        `json:"trust_flower2api_local_response,omitempty"`
 	SystemPrompt                       string                      `json:"system_prompt,omitempty"`
 	SystemPromptOverride               bool                        `json:"system_prompt_override,omitempty"`
 	VisionAssist                       ChannelVisionAssistSettings `json:"vision_assist,omitempty"`

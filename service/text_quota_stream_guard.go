@@ -32,16 +32,10 @@ func handleClientGoneLocalUsageBilling(ctx *gin.Context, relayInfo *relaycommon.
 	if !shouldSkipClientGoneLocalUsageBilling(ctx, relayInfo, originUsage) {
 		return false
 	}
-	settlementFailed := false
-	refundFallbackTriggered := false
-	if err := SettleBilling(ctx, relayInfo, 0); err != nil {
-		settlementFailed = true
+	err, refundFallbackTriggered := settleZeroTextQuota(ctx, relayInfo)
+	settlementFailed := err != nil
+	if settlementFailed {
 		logger.LogError(ctx, "error settling skipped client_gone local usage billing: "+err.Error())
-		// 零额结算的资金调整失败时，会话仍可能保留预扣状态；只对明确可退款的会话兜底，避免已提交资金后发生二次退款。
-		if relayInfo.Billing != nil && relayInfo.Billing.NeedsRefund() {
-			relayInfo.Billing.Refund(ctx)
-			refundFallbackTriggered = true
-		}
 	}
 	recordClientGoneLocalUsageErrorLog(ctx, relayInfo, summary, originUsage, adminRejectReason, settlementFailed, refundFallbackTriggered)
 	logger.LogWarn(ctx, fmt.Sprintf("handle client_gone local usage billing: userId=%d, channelId=%d, tokenId=%d, model=%s, estimatedQuota=%d, settlementFailed=%t, refundFallbackTriggered=%t",

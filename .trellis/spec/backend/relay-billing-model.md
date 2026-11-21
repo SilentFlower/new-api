@@ -277,3 +277,42 @@ if shouldSkipClientGoneLocalUsageBilling(ctx, relayInfo, originUsage) {
 - 零额结算必须发生在用户/渠道统计、`RecordConsumeLog` 和 tiered billing 消费结算之前。
 - 零额结算错误不能被静默忽略；退款兜底必须以 `NeedsRefund()` 为资金状态门禁。
 - 审计字段放入 `admin_info`，不要暴露给普通用户日志视图。
+
+## 场景：Flower2API 本地进度标签零额结算
+
+### 1. Scope / Trigger
+
+- 修改 Anthropic Messages 的本地回执判定、用量兜底、渠道信任配置或相应的文本结算时适用。
+
+### 2. Signatures
+
+- 现有渠道 `setting` JSON 布尔字段 `trust_flower2api_local_response`，默认关闭。
+- Flower2API 返回 HTTP 200 和响应头 `X-Flower2API-Local-Response: agy_agent_summary`。
+- 内部 `dto.Usage.LocalResponse` 表示中继已确认的本地结果，结算沿 `PostTextConsumeQuota` 到 `SettleBilling(ctx, relayInfo, 0)`。
+
+### 3. Contracts
+
+- 管理员仅在指向可信 Flower2API 端点的渠道上开启信任。Claude 适配器读取当前渠道的设置和单一精确匹配的上游回执，消费该回执后转发协议正文。客户端请求头与用量 JSON 字段均不能设置内部 `LocalResponse`。
+- JSON 要求解析成功、文本内容、`end_turn` 和明确零用量。SSE 要求 `message_start` 零用量、文本增量、`message_delta` 的 `end_turn` 和零用量、`message_stop` 及正常结束。聚合缓存用量、分时缓存用量或服务端工具用量非零时按原路径处理。
+- 已确认本地结果跳过流式输入估算兜底以及文本计费的倍率、阶梯价和工具附加费。准入仍可预扣。确认成功后以零额度结算，通过计费会话归还同一请求的钱包或订阅及令牌预扣。
+- 成功日志的输入、输出和消费额度为 0。`other.local_response=agy_agent_summary` 和上游请求 ID 用于对账。结算错误记为错误日志。仅在 `Billing.NeedsRefund()` 为真时调用退款兜底。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 结果 |
+| --- | --- |
+| 渠道信任、成功回执和完整零用量 | 保持 0 token，结算 0 并归还预扣 |
+| 缺省关闭、回执缺失或重复、流未完成、用量非零 | 使用当前响应解析与结算规则 |
+| 零额结算失败且资金仍可退款 | 退款兜底并记录结算失败 |
+| 零额结算失败且资金已收口 | 记录结算失败，资金状态由原会话持有 |
+
+### 5. Scenarios and Examples
+
+- 正常示例。长工具历史被估算为 `230,753` 输入 token，可信本地进度响应返回明确零用量。零额结算退回当笔预扣。
+- 误用示例。把所有零输出 SSE 都当作本地回包会覆盖普通生成的用量兜底。应用渠道、响应回执、实际用量和终态联合判定。
+
+### 6. Tests Required
+
+- `TestClaudeFlower2APILocalSummaryStreamUsage` 和 `TestClaudeFlower2APILocalSummaryJSONUsage` 验证渠道信任、明确零用量、终态、缺失或重复回执、输入估算以及正常模型用量和缓存。
+- `TestPostTextConsumeQuotaReturnsAgentSummaryReservation` 验证按次、按量和阶梯计费的真实预扣归还。`TestPostTextConsumeQuotaAgentSummarySettlementFailure` 核对故障和退款状态。
+- `TestClaudeLocalSummaryLargeHistorySettlesOnceAsZero` 经过 Messages 计费准备、回环上游及消息适配器，验证大历史估算触发预扣和单次零结算。

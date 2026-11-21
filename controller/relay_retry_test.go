@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	appconstant "github.com/QuantumNous/new-api/constant"
@@ -30,6 +31,7 @@ type billingSettlerStub struct {
 	reserved     int
 	reserveCalls int
 	settled      int
+	settleCalls  int
 	refunded     bool
 }
 
@@ -38,6 +40,7 @@ type billingSettlerStub struct {
 // @return 始终返回 nil。
 func (s *billingSettlerStub) Settle(actualQuota int) error {
 	s.settled = actualQuota
+	s.settleCalls++
 	return nil
 }
 
@@ -162,6 +165,98 @@ func TestPrepareAlphaSearchBillingReservesOneWebSearchCall(t *testing.T) {
 	assert.Nil(t, info.QuotaClamp)
 	require.NotNil(t, info.ToolCallBilling)
 	assert.Equal(t, expected, *info.ToolCallBilling)
+}
+
+func TestClaudeLocalSummaryLargeHistorySettlesOnceAsZero(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	db := setupChannelUserLimitsTestDB(t)
+	service.InitHttpClient()
+	previousCountTokens, previousTimeout := appconstant.CountToken, appconstant.StreamingTimeout
+	previousLogConsume, previousExport := common.LogConsumeEnabled, common.DataExportEnabled
+	appconstant.CountToken, appconstant.StreamingTimeout = true, 30
+	common.LogConsumeEnabled, common.DataExportEnabled = true, false
+	t.Cleanup(func() {
+		appconstant.CountToken, appconstant.StreamingTimeout = previousCountTokens, previousTimeout
+		common.LogConsumeEnabled, common.DataExportEnabled = previousLogConsume, previousExport
+	})
+	const modelName = "gemini-local-summary-fixture"
+	previousModelRatios := ratio_setting.ModelRatio2JSONString()
+	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"gemini-local-summary-fixture":1}`))
+	t.Cleanup(func() {
+		require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(previousModelRatios))
+	})
+
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/v1/messages", r.URL.Path)
+		length, err := io.Copy(io.Discard, r.Body)
+		assert.NoError(t, err)
+		assert.Greater(t, length, int64(600000))
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Flower2API-Local-Response", "agy_agent_summary")
+		_, _ = io.WriteString(w, `data: {"type":"message_start","message":{"id":"msg_fixture","model":"gemini-local-summary-fixture","usage":{"input_tokens":0,"output_tokens":0}}}
+
+data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}
+
+data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Reading sample file"}}
+
+data: {"type":"content_block_stop","index":0}
+
+data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"input_tokens":0,"output_tokens":0}}
+
+data: {"type":"message_stop"}
+
+`)
+	}))
+	t.Cleanup(upstream.Close)
+
+	const channelID, userID = 9510, 9511
+	channel := model.Channel{Id: channelID, Name: "本地计费测试渠道"}
+	channel.SetSetting(dto.ChannelSettings{TrustFlower2APILocalResponse: true})
+	require.NoError(t, db.Create(&channel).Error)
+	var stored model.Channel
+	require.NoError(t, db.First(&stored, channelID).Error)
+	require.True(t, stored.GetSetting().TrustFlower2APILocalResponse)
+	require.False(t, (&model.Channel{}).GetSetting().TrustFlower2APILocalResponse)
+	require.NoError(t, db.Create(&model.User{Id: userID, Username: "local-summary-fixture"}).Error)
+	requestBody, err := common.Marshal(map[string]any{
+		"model": modelName, "stream": true, "max_tokens": 30,
+		"messages": []map[string]any{
+			{"role": "assistant", "content": []map[string]any{{"type": "tool_use", "id": "sample", "name": "lookup", "input": map[string]any{}}}},
+			{"role": "user", "content": []map[string]any{{"type": "tool_result", "tool_use_id": "sample", "content": strings.Repeat("example 12345 data\n", 40000)}}},
+		},
+	})
+	require.NoError(t, err)
+	request := &dto.ClaudeRequest{}
+	require.NoError(t, common.Unmarshal(requestBody, request))
+	c, recorder := newChannelUserLimitTestContext(http.MethodPost, "/v1/messages", string(requestBody), nil)
+	t.Cleanup(func() { common.CleanupBodyStorage(c) })
+	c.Set(common.RequestIdKey, "agy-local-summary-full-history")
+	common.SetContextKey(c, appconstant.ContextKeyChannelType, appconstant.ChannelTypeAnthropic)
+	common.SetContextKey(c, appconstant.ContextKeyChannelId, channelID)
+	common.SetContextKey(c, appconstant.ContextKeyChannelBaseUrl, upstream.URL)
+	common.SetContextKey(c, appconstant.ContextKeyChannelKey, "fixture-upstream-key")
+	common.SetContextKey(c, appconstant.ContextKeyChannelSetting, stored.GetSetting())
+	common.SetContextKey(c, appconstant.ContextKeyOriginalModel, modelName)
+	billing := &billingSettlerStub{settled: -1}
+	info := &relaycommon.RelayInfo{
+		Request: request, OriginModelName: modelName, RelayFormat: types.RelayFormatClaude,
+		UserId: userID, UsingGroup: "default", Billing: billing, StartTime: time.Now(), IsStream: true,
+	}
+	info.InitChannelMeta(c)
+	require.Nil(t, prepareMainRelayBilling(c, info))
+	assert.Greater(t, info.GetEstimatePromptTokens(), 200000)
+	assert.Positive(t, billing.reserved)
+	require.Nil(t, relay.ClaudeHelper(c, info))
+	assert.Zero(t, billing.settled)
+	assert.Equal(t, 1, billing.settleCalls)
+	assert.Contains(t, recorder.Body.String(), "Reading sample file")
+	assert.Contains(t, recorder.Body.String(), "event: message_stop")
+	var logs []model.Log
+	require.NoError(t, db.Where("request_id = ?", "agy-local-summary-full-history").Find(&logs).Error)
+	require.Len(t, logs, 1)
+	assert.Zero(t, logs[0].PromptTokens)
+	assert.Zero(t, logs[0].Quota)
+	assert.Contains(t, logs[0].Other, `"local_response":"agy_agent_summary"`)
 }
 
 func TestPrepareAlphaSearchBillingRejectsSaturationBeforeReserve(t *testing.T) {

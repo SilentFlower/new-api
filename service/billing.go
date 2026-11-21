@@ -93,3 +93,13 @@ func SettleBilling(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, actualQuo
 	}
 	return nil
 }
+
+func settleZeroTextQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo) (error, bool) {
+	err := SettleBilling(ctx, relayInfo, 0)
+	// 仅释放仍处于预扣状态的资金。已经提交的资金阶段由计费会话持有。
+	if err != nil && relayInfo.Billing != nil && relayInfo.Billing.NeedsRefund() {
+		relayInfo.Billing.Refund(ctx)
+		return err, true
+	}
+	return err, false
+}
