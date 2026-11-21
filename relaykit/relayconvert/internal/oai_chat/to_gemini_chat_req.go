@@ -259,6 +259,10 @@ func OpenAIChatRequestToGeminiGenerateContent(c context.Context, textRequest dto
 			} else if val, exists := toolCallIDs[message.ToolCallId]; exists {
 				name = val
 			}
+			// 截断提示只跟随已按原调用 ID 关联的 Read 回填。
+			if fromClaudeMessages && name == "Read" && toolCallIDs[message.ToolCallId] == "Read" {
+				system.readResultInTurn = true
+			}
 			var contentMap map[string]interface{}
 			contentStr := message.StringContent()
 

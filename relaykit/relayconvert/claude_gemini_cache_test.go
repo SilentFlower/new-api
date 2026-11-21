@@ -119,3 +119,52 @@ func TestGeminiPromptHookConversionScope(t *testing.T) {
 		require.Len(t, converted.Contents[0].Parts, 1)
 	})
 }
+
+// TestClaudeGeminiReadTruncationNoticeKeepsCachePrefix 核对截断提示随原工具轮传递及其后续表示。
+// @param t 测试上下文。
+func TestClaudeGeminiReadTruncationNoticeKeepsCachePrefix(t *testing.T) {
+	const notice = "[Truncated: /fixture/large.txt. Showing lines 1–200 of 420 total (24000 tokens). Read with offset=201 limit=200 for the next portion.]"
+	const first = `{"role":"user","content":"读取资料"},{"role":"system","content":"项目环境"}`
+	const request = `{
+		"model":"gemini-test","system":"全局规则",
+		"tools":[{"name":"Read","input_schema":{"type":"object"}},{"name":"Bash","input_schema":{"type":"object"}}],
+		"messages":[%s]
+	}`
+	const toolTurn = `,
+		{"role":"assistant","content":[
+			{"type":"tool_use","id":"read","name":%q,"input":{"file_path":"/fixture/large.txt"}},
+			{"type":"tool_use","id":"check","name":"Bash","input":{}}
+		]},
+		{"role":"user","content":[
+			{"type":"tool_result","tool_use_id":"read","name":"Read","content":"文件片段"},
+			{"type":"tool_result","tool_use_id":"check","content":"检查结果"}
+		]},
+		{"role":"system","content":%s}`
+	arrayNotice := fmt.Sprintf(`[{"type":"text","text":%q,"cache_control":{"type":"ephemeral"}}]`, notice)
+	previous := convertClaudeMessagesForGeminiCache(t, fmt.Sprintf(request, first))
+	converted := convertClaudeMessagesForGeminiCache(t, fmt.Sprintf(request, first+fmt.Sprintf(toolTurn, "Read", arrayNotice)))
+	assert.Equal(t, previous.SystemInstructions, converted.SystemInstructions)
+	assert.Equal(t, previous.Tools, converted.Tools)
+	require.Len(t, converted.Contents, 3)
+	assert.Equal(t, previous.Contents, converted.Contents[:1])
+	parts := converted.Contents[2].Parts
+	require.Len(t, parts, 3)
+	require.NotNil(t, parts[0].FunctionResponse)
+	require.NotNil(t, parts[1].FunctionResponse)
+	assert.Equal(t, "Read", parts[0].FunctionResponse.Name)
+	assert.Equal(t, map[string]interface{}{"content": "文件片段"}, parts[0].FunctionResponse.Response)
+	assert.Equal(t, "Bash", parts[1].FunctionResponse.Name)
+	assert.Equal(t, notice, parts[2].Text)
+
+	history := first + fmt.Sprintf(toolTurn, "Read", fmt.Sprintf(`%q`, notice)) + `,
+		{"role":"assistant","content":"已读取。"},{"role":"user","content":"继续读取。"}`
+	next := convertClaudeMessagesForGeminiCache(t, fmt.Sprintf(request, history))
+	require.Len(t, next.Contents, 5)
+	assert.Equal(t, converted.Contents, next.Contents[:len(converted.Contents)])
+	assert.Equal(t, previous.SystemInstructions, next.SystemInstructions)
+
+	unrelated := convertClaudeMessagesForGeminiCache(t, fmt.Sprintf(request, first+fmt.Sprintf(toolTurn, "Bash", arrayNotice)))
+	require.NotNil(t, unrelated.SystemInstructions)
+	assert.Equal(t, "全局规则\n项目环境\n"+notice, unrelated.SystemInstructions.Parts[0].Text)
+	assert.Len(t, unrelated.Contents[2].Parts, 2)
+}

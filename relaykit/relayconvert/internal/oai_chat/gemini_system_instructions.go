@@ -1,6 +1,7 @@
 package oaichat
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -8,16 +9,20 @@ import (
 
 const userPromptSubmitContextPrefix = "UserPromptSubmit hook additional context: "
 
+var readTruncationNotice = regexp.MustCompile(`^\[Truncated: .*\blines [0-9]+[-–][0-9]+ of [0-9]+ total\b.*\bRead with offset=[0-9]+ limit=[0-9]+\b.*\]$`)
+
 // geminiSystemInstructions 收集 Gemini 的全局指令和 Claude 当轮补充上下文。
 type geminiSystemInstructions struct {
 	fromClaudeMessages bool
 	global             []string
 	turnContext        []dto.GeminiPart
+	readResultInTurn   bool
 }
 
 func (s *geminiSystemInstructions) handleMessage(message *dto.Message, contents []dto.GeminiChatContent) bool {
 	if message.Role == "assistant" || message.Role == "model" {
 		s.appendTurnContext(contents)
+		s.readResultInTurn = false
 		return false
 	}
 	if message.Role != "system" && message.Role != "developer" {
@@ -40,7 +45,8 @@ func (s *geminiSystemInstructions) handleMessage(message *dto.Message, contents 
 	}
 	value := text.String()
 	userTurn := len(contents) > 0 && contents[len(contents)-1].Role == "user"
-	if message.Role == "system" && userTurn && strings.HasPrefix(value, userPromptSubmitContextPrefix) {
+	if message.Role == "system" && userTurn && (strings.HasPrefix(value, userPromptSubmitContextPrefix) ||
+		(s.readResultInTurn && readTruncationNotice.MatchString(value))) {
 		// 等同一轮分批到达的工具结果归位，保持回填顺序和已完成历史的缓存前缀。
 		s.turnContext = append(s.turnContext, dto.GeminiPart{Text: value})
 	} else {
