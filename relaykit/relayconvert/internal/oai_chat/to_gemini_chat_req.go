@@ -13,7 +13,13 @@ import (
 	kitutil "github.com/QuantumNous/new-api/relaykit/relayconvert/kitutil"
 )
 
-func OpenAIChatRequestToGeminiGenerateContent(c context.Context, textRequest dto.GeneralOpenAIRequest, info convmeta.Meta) (*dto.GeminiChatRequest, error) {
+// OpenAIChatRequestToGeminiGenerateContent 将 Chat 请求转换为 Gemini。
+// @param c 请求上下文。
+// @param textRequest 已解析的 Chat 请求。
+// @param info 转换元数据。
+// @param fromClaudeMessages 请求是否由 Claude Messages 中转。
+// @return Gemini 请求或转换错误。
+func OpenAIChatRequestToGeminiGenerateContent(c context.Context, textRequest dto.GeneralOpenAIRequest, info convmeta.Meta, fromClaudeMessages bool) (*dto.GeminiChatRequest, error) {
 	opts := convmeta.OptionsOf(info)
 	geminiRequest := dto.GeminiChatRequest{
 		Contents: make([]dto.GeminiChatContent, 0, len(textRequest.Messages)),
@@ -235,10 +241,9 @@ func OpenAIChatRequestToGeminiGenerateContent(c context.Context, textRequest dto
 	}
 
 	toolCallIDs := make(map[string]string)
-	var systemContent []string
+	system := geminiSystemInstructions{fromClaudeMessages: fromClaudeMessages}
 	for _, message := range textRequest.Messages {
-		if message.Role == "system" || message.Role == "developer" {
-			systemContent = append(systemContent, message.StringContent())
+		if system.handleMessage(&message, geminiRequest.Contents) {
 			continue
 		}
 		if message.Role == "tool" || message.Role == "function" {
@@ -397,15 +402,7 @@ func OpenAIChatRequestToGeminiGenerateContent(c context.Context, textRequest dto
 		}
 	}
 
-	if len(systemContent) > 0 {
-		geminiRequest.SystemInstructions = &dto.GeminiChatContent{
-			Parts: []dto.GeminiPart{
-				{
-					Text: strings.Join(systemContent, "\n"),
-				},
-			},
-		}
-	}
+	system.apply(&geminiRequest)
 
 	return &geminiRequest, nil
 }

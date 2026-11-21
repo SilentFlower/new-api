@@ -24,7 +24,7 @@ func GeminiGenerateContentRequestToOpenAIChat(geminiRequest *dto.GeminiChatReque
 }
 
 func OpenAIChatRequestToGeminiGenerateContent(c context.Context, textRequest dto.GeneralOpenAIRequest, info convmeta.Meta) (*dto.GeminiChatRequest, error) {
-	return oaichat.OpenAIChatRequestToGeminiGenerateContent(c, textRequest, info)
+	return oaichat.OpenAIChatRequestToGeminiGenerateContent(c, textRequest, info, false)
 }
 
 func ApplyGeminiThinkingConfig(geminiRequest *dto.GeminiChatRequest, info convmeta.Meta, oaiRequest ...dto.GeneralOpenAIRequest) {

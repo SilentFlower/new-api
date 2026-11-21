@@ -245,6 +245,9 @@ func executeRequestSteps(c context.Context, info convmeta.Meta, from types.Relay
 			return nil, err
 		}
 
+		if from == types.RelayFormatClaude && target == types.RelayFormatGemini && spec.ID == ConverterOpenAIChatToGeminiContent {
+			spec.Convert = convertClaudeChatPivotToGemini
+		}
 		var step RequestStep
 		current, step, err = executeRequestStep(c, info, spec, current)
 		if err != nil {
@@ -452,6 +455,14 @@ func convertGeminiRequestToOpenAI(_ context.Context, info convmeta.Meta, request
 }
 
 func convertOpenAIRequestToGemini(c context.Context, info convmeta.Meta, request any) (any, error) {
+	return convertChatRequestToGemini(c, info, request, false)
+}
+
+func convertClaudeChatPivotToGemini(c context.Context, info convmeta.Meta, request any) (any, error) {
+	return convertChatRequestToGemini(c, info, request, true)
+}
+
+func convertChatRequestToGemini(c context.Context, info convmeta.Meta, request any, fromClaudeMessages bool) (any, error) {
 	openAIRequest, ok := request.(*dto.GeneralOpenAIRequest)
 	if !ok {
 		if value, ok := request.(dto.GeneralOpenAIRequest); ok {
@@ -461,7 +472,7 @@ func convertOpenAIRequestToGemini(c context.Context, info convmeta.Meta, request
 	if openAIRequest == nil {
 		return nil, fmt.Errorf("expected OpenAI chat completions request, got %T", request)
 	}
-	return oaichat.OpenAIChatRequestToGeminiGenerateContent(c, *openAIRequest, info)
+	return oaichat.OpenAIChatRequestToGeminiGenerateContent(c, *openAIRequest, info, fromClaudeMessages)
 }
 
 func convertOpenAIResponsesRequestToClaudeMessages(c context.Context, info convmeta.Meta, request any) (any, error) {

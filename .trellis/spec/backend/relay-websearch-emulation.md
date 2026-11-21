@@ -140,6 +140,9 @@ func syncAnthropicReasoningEffortFromRequestBody(info *relaycommon.RelayInfo, re
   - Claude 短路必须发生在 `adaptor.ConvertClaudeRequest`、`RemoveDisabledFields`、`ApplyParamOverride`、`NewOutboundJSONBody` 和 `adaptor.DoRequest` 之前；Chat 短路必须发生在 Chat-to-Responses、请求透传、`adaptor.ConvertOpenAIRequest`、参数覆盖和上游 body 构造之前。
   - Chat 渠道显式启用本地模拟后，即使全局或渠道开启请求透传，本地模拟仍优先；未启用时必须完全跳过本地 provider。
   - 搜索结果、响应 ID、时间戳和 provider 返回内容只能出现在响应侧，不能写回 `request`、`RelayInfo.RequestBody`、`ParamOverride` 或待转发上游 body。
+- Claude Messages 转 Gemini 的缓存前缀
+  - 原始格式为 Claude Messages、目标格式为 Gemini 时，Chat 中转按顺序合并同一条 `system` 或 `developer` 消息的文本块。非空普通指令逐条汇入全局 `systemInstruction`，空文本省略。
+  - 当前最后一条 Gemini 内容为用户消息时，以 `UserPromptSubmit hook additional context: ` 开头的历史 `system` 文本随该轮用户内容发出。分批工具结果先归位，钩子文本在下一条模型消息前或请求末尾追加。
 - Reasoning Effort 日志同步：
   - 只对 `ChannelTypeAnthropic` 生效；非 Anthropic 渠道、空 `RelayInfo` 或尚未初始化 `ChannelMeta` 时不得修改日志字段。
   - 透传 body 路径必须读取解析后的 `ClaudeRequest.OutputConfig`，不能重新编码或修改原始 body。
@@ -215,6 +218,7 @@ func syncAnthropicReasoningEffortFromRequestBody(info *relaycommon.RelayInfo, re
   - 查询提取只取最后一条 `user` 消息文本。
   - 响应包含 `server_tool_use`、`web_search_tool_result`、`usage.server_tool_use.web_search_requests=1`。
   - 纯 WebSearch helper 不修改原始 Claude 请求对象，防止污染上游请求体。
+  - `TestClaudeGeminiKeepsSystemTextBlocks` 核对系统文本块和空值。 `TestClaudeGeminiPromptHookPreservesCachePrefixAfterToolResults` 比较三种钩子表示、分批工具回填和续轮前缀。 `TestGeminiPromptHookConversionScope` 核对 Claude 顶层指令和普通 Chat 来源。
   - Chat predicate 覆盖 `web_search_options`、空/非空 `tools`、缺失/`null`/空/非空/畸形 `functions`；薄层复核确认入口同时具备 `RelayModeChatCompletions` 门禁。
   - Chat 查询提取覆盖字符串、文本块、最后一条非 user 和请求对象不变。
   - Chat 非流式响应断言 `chat.completion`、assistant、stop、usage；流式响应断言 start、摘要、stop、usage 开关和 `[DONE]`。
