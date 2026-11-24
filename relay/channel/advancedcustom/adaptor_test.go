@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -15,11 +17,56 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/relayconvert"
 	"github.com/QuantumNous/new-api/relaykit/types"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting/model_setting"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// TestNativeGeminiSlowStream 校验等待响应头和首个数据块期间的 Gemini 客户端可见字节。
+// @param t 测试上下文。
+func TestNativeGeminiSlowStream(t *testing.T) {
+	service.InitHttpClient()
+	settings := operation_setting.GetGeneralSetting()
+	enabled, interval, timeout := settings.PingIntervalEnabled, settings.PingIntervalSeconds, constant.StreamingTimeout
+	settings.PingIntervalEnabled, settings.PingIntervalSeconds, constant.StreamingTimeout = true, 1, 30
+	t.Cleanup(func() {
+		settings.PingIntervalEnabled, settings.PingIntervalSeconds, constant.StreamingTimeout = enabled, interval, timeout
+	})
+
+	const path = "/v1beta/models/gemini-test:streamGenerateContent"
+	const data = "data: " + `{"candidates":[{"content":{"parts":[{"text":"完成"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1,"totalTokenCount":3}}` + "\n\n"
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// 两段静默各跨过一个心跳周期，覆盖请求发送器与响应扫描器。
+		time.Sleep(1500 * time.Millisecond)
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.(http.Flusher).Flush()
+		time.Sleep(1500 * time.Millisecond)
+		_, _ = io.WriteString(w, data)
+	}))
+	t.Cleanup(upstream.Close)
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, path+"?alt=sse", nil)
+	info, err := relaycommon.GenRelayInfo(c, types.RelayFormatGemini, &dto.GeminiChatRequest{}, nil)
+	require.NoError(t, err)
+	info.ChannelMeta = advancedCustomRelayInfo(&dto.AdvancedCustomConfig{
+		Routes: []dto.AdvancedCustomRoute{{IncomingPath: path, UpstreamPath: path}},
+	}).ChannelMeta
+	info.ChannelBaseUrl = upstream.URL
+	adaptor := &Adaptor{}
+	adaptor.Init(info)
+	result, err := adaptor.DoRequest(c, info, strings.NewReader("{}"))
+	require.NoError(t, err)
+	response := result.(*http.Response)
+	defer response.Body.Close()
+	_, apiErr := adaptor.DoResponse(c, response, info)
+	require.Nil(t, apiErr)
+	assert.Equal(t, data, recorder.Body.String())
+}
 
 func TestAdaptorUsesExactRouteAndQueryAuth(t *testing.T) {
 	adaptor := &Adaptor{}

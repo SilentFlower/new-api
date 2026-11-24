@@ -48,6 +48,7 @@ func initialRelayRequestError(err error) *types.NewAPIError
 
 - SSE keepalive payload 固定使用 `helper.PingData` 写出的 `: PING\n\n`；该 payload 是 comment，不代表业务 chunk、终态、usage 或计费信息。
 - `ping_interval_enabled=false` 或 `RelayInfo.DisablePing=true` 时不得发送流式 ping。
+- 原生 Gemini 流式入口在 `GenRelayInfoGemini` 设置 `DisablePing=true`。Google Gen AI Python SDK 2.22.0 会把独立的 SSE 注释交给 JSON 解析器。该约定按客户端协议生效，覆盖高级自定义渠道的响应头等待和流正文读取。
 - `ping_interval_seconds <= 0` 时回退到 `relay/helper.DefaultPingInterval`。
 - 非流式 JSON 响应继续走 `StartNonStreamKeepAlive` 的 `\n` 前导空白契约；不得复用 SSE comment。
 - `UsesUpstreamStream()` 必须排除历史 Responses Compact unary 上游桥接，避免等待 unary 响应时提前按真实上游流处理。
@@ -79,6 +80,7 @@ func initialRelayRequestError(err error) *types.NewAPIError
 | 长期无有效业务 data | `StreamEndReasonTimeout`，收到的业务响应计数不增加 |
 | 上游返回 `data: [DONE]` 或裸 `[DONE]` | `StreamEndReasonDone`，停止 scanner |
 | `ping_interval_enabled=false` 或 `DisablePing=true` | 不发送本地 SSE ping，业务流转发保持原行为 |
+| 原生 Gemini 经高级自定义渠道，等待响应头与首个数据块各超过心跳间隔 | 客户端收到上游 Gemini 的 `data:` 事件，保留内容、结束原因及用量 |
 | 历史 Responses Compact unary bridge | 不按 upstream stream TTFB ping 处理，继续使用 Compact bridge 自身契约 |
 
 ### 5. Good / Base / Bad Cases
@@ -101,6 +103,7 @@ func initialRelayRequestError(err error) *types.NewAPIError
 - 请求体读取阶段：`io.ErrUnexpectedEOF` 和 oversized body 分别映射到 `400/413 read_request_body_failed` 且 `skipRetry`。
 - 非流式边界：保留 `relay-nonstream-keepalive.md` 的允许列表、空白 payload、状态码提交和最终 JSON 可解析测试。
 - 回归命令：
+  - `go test ./relay/channel/advancedcustom -run '^TestNativeGeminiSlowStream$' -count=1`
   - `go test ./relay/helper ./relay/channel ./controller`
   - `go test -race ./relay/helper -run 'StreamScannerHandler_(PingSentDuringSlowUpstream|UpstreamCommentsDoNotResetIdleTimeout|PingDoesNotResetIdleTimeout)' -count=1`
   - `go test -race ./relay/channel -run 'TestDoRequestSendsStreamPingWhileWaitingForUpstreamHeaders' -count=1`
