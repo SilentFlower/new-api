@@ -457,10 +457,14 @@ func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) 
 	return info
 }
 
+// GenRelayInfoGemini 根据客户端入口初始化 Gemini 转发信息。
+// @param c 请求上下文。@param request 已校验的请求。@return 本次转发信息。
 func GenRelayInfoGemini(c *gin.Context, request dto.Request) *RelayInfo {
 	info := genBaseRelayInfo(c, request)
 	info.RelayFormat = types.RelayFormatGemini
 	info.ShouldIncludeUsage = false
+	// Google Gen AI SDK 会把 SSE 注释当成 JSON，所有渠道都应遵循客户端入口的约定。
+	info.DisablePing = info.IsStream
 
 	return info
 }
