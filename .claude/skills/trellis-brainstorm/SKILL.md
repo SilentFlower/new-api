@@ -159,6 +159,8 @@ Lightweight tasks may omit `design.md` and `implement.md`; they may not skip evi
 
 <!-- BEGIN skill-garden patch brainstorm-planning-summary-shape v0.6 -->
 The final Brief must cover a one-sentence Goal, a Scope limited to included changes, Non-Goals, Context & Decisions, Acceptance, and one-hop Next Step; include Technical Overview only when the planning artifacts define a technical mechanism, and Risks only when relevant.
+
+Keep it a concise handoff. Follow `trellis-task-brief` for prominent limits, major decisions, their concrete user impact, and bold labels; keep detailed designs, test matrices, and decision ledgers in the planning artifacts.
 <!-- END skill-garden patch brainstorm-planning-summary-shape v0.6 -->
 
 ## Artifact Rules
@@ -214,6 +216,10 @@ Before declaring planning ready:
 - `prd.md` contains testable acceptance criteria.
 - `prd.md` has passed the PRD convergence pass: no unresolved temporary brainstorm sections, no duplicate facts across sections, and no lost anchors, decisions, or acceptance mappings.
 - Repository-answerable questions have already been answered through inspection.
+- New or inherited blocking conditions have an explicit basis, protected interest, necessity, alternatives, and effect on the user outcome. Existing behavior is evidence of the current implementation, not approval of a product constraint.
+- Excluding normal use, rejecting it, or requiring manual handling is treated as a product trade-off. Unresolved choices follow the existing convergence gate; preserve applicable authorization and data-protection contracts.
+- Acceptance follows the complete user operation across necessary related entry points and recovery or upgrade handoffs. Check exclusions and partial fixes for remaining blockers or mutual waiting; independent business expansion still follows scope management.
+- Important limits, major decisions, and their user impact are recorded in the planning artifacts for the Brief to summarize; local component success alone does not establish the final user outcome.
 - Blocking open questions are empty.
 - Complex tasks have `design.md` and `implement.md`.
 - Sub-agent-dispatch tasks have real curated entries in both `implement.jsonl` and `check.jsonl`; seed-only manifests are not ready.

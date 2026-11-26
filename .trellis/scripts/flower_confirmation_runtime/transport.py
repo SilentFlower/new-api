@@ -182,6 +182,19 @@ class CodexTransport:
             self.close()
             raise
 
+    def control_connection(self):
+        """读取 Linux 控制连接实际对端的进程身份。
+
+        @return: 同用户的共享 App Server PID 与当前连接在本端的 socket inode。
+        """
+        if self.proxy is not None or self.socket is None or not hasattr(socket, "SO_PEERCRED"):
+            raise ValueError("当前连接缺少 Linux Codex 对端凭据")
+        credentials = struct.Struct("=iII")
+        pid, uid, _ = credentials.unpack(self.socket.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, credentials.size))
+        if pid <= 0 or uid != os.getuid():
+            raise ValueError("Codex 共享服务进程身份不匹配")
+        return pid, str(os.fstat(self.socket.fileno()).st_ino)
+
     def _receive(self, deadline):
         remaining = deadline - time.monotonic()
         if remaining <= 0:

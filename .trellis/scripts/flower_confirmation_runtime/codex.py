@@ -10,11 +10,10 @@ import sys
 import time
 from collections import OrderedDict
 from pathlib import Path
-from uuid import uuid4
 
-from flower_tui_lifetime import bind_origin, check_binding, check_frontend_coverage, open_binding
+from flower_tui_lifetime import bind_embedded, bind_origin, check_binding, check_frontend_coverage, open_binding
 from .session_log import DISPLAY_BYTES, RECORD_BYTES, SessionLog
-from .store import ACTIVE, ConfirmationStore, confirmation_id, now_ms, wake_id, wake_message
+from .store import ACTIVE, ConfirmationStore, confirmation_id, native_id, now_ms, text_content, validate_turn_origin, wake_id, wake_message
 from .transport import CodexTransport, RpcError
 from .windows_process import check_listener_coverage, hook_frontend, listener_identity, open_identity
 
@@ -35,18 +34,22 @@ def record_event(payload):
     frontend = hook_frontend("codex.exe") if sys.platform == "win32" else None
     def apply(old):
         value = old or {"version": 2, "sessionId": session_id, "generation": 0,
-                        "lastHumanMessageId": None, "request": None}
+                        "inputSeq": 0, "request": None}
+        if (value.get("turnOrigin") or {}).get("turnId") != payload.get("turn_id"):
+            value.pop("turnOrigin", None)
         value["native"] = {"version": 2, "project": str(project), "sessionId": session_id,
                            "at": now_ms(), "turnId": payload.get("turn_id")}
         if frontend is not None:
             value["native"]["hookProcess"] = frontend
         request = value.get("request")
         internal = (payload["hook_event_name"] == "UserPromptSubmit" and request
-                    and request["state"] in ("dispatching", "queued") and payload.get("prompt") == wake_message(request["id"]))
+                    and request["state"] in ("dispatching", "queued")
+                    and wake_id({"type": "userMessage", "clientId": request["id"], "content": payload.get("prompt")}) == request["id"])
         # Hook 缺少 client_id，仅暂缓精确提醒取消；claim 仍核对原生记录来源。
         if not internal:
+            value.pop("turnOrigin", None)
             value["generation"] += 1
-            value["lastHumanMessageId"] = str(uuid4())
+            value["inputSeq"] = value.get("inputSeq", 0) + 1
             if request and request["state"] in ACTIVE:
                 request.update(state="cancelled", error="turn_interrupted" if payload["hook_event_name"] == "Interrupt" else "user_replied")
         return value
@@ -96,6 +99,9 @@ class CodexClient:
         self.session_log = SessionLog()
         self.log_start = None
         self.prepare_turn = None
+        self.prepare_origin = None
+        self.prepare_baseline = 0
+        self.input_events = 0
         self.humans = []
         self.seen = OrderedDict()
         self.window_fd = None
@@ -106,8 +112,9 @@ class CodexClient:
         params = packet.get("params") or {}
         item = params.get("item") or {}
         if (params.get("threadId") == self.session_id and packet.get("method") in ("item/started", "item/completed")
-                and item.get("type") == "userMessage" and not wake_id(item) and item.get("id") not in self.seen):
-            identifier = confirmation_id(item.get("id"))
+                and item.get("type") == "userMessage" and isinstance(item.get("id"), str)
+                and item["id"] and not wake_id(item) and item["id"] not in self.seen):
+            identifier = native_id(item.get("id"))
             self.seen[identifier] = True
             self.humans.append(identifier)
             while len(self.seen) > 4096:
@@ -139,9 +146,17 @@ class CodexClient:
     def snapshot(self):
         """被动读取精确线程及消息来源，观察前台退出。
 
-        @return: 人工基线、当前回合及内部唤醒快照。
+        @return: 输入序号、当前回合及内部唤醒快照。
         """
         return self._snapshot(preparing=False)
+
+    def _thread(self):
+        thread = self.rpc("thread/read", {"threadId": self.session_id, "includeTurns": False})["thread"]
+        if thread.get("id") != self.session_id or Path(thread["cwd"]).resolve(strict=True) != self.project:
+            raise ValueError("Codex 目标会话或项目目录不匹配")
+        if thread.get("archived") or (thread.get("status") or {}).get("type") == "systemError":
+            raise ValueError("Codex 目标线程处于错误状态")
+        return thread
 
     def _snapshot(self, preparing):
         if self.window_fd is not None:
@@ -153,76 +168,79 @@ class CodexClient:
                 else:
                     check_binding(self.window)
                 self.checked_at = time.monotonic()
-        thread = self.rpc("thread/read", {"threadId": self.session_id, "includeTurns": False})["thread"]
-        if thread.get("id") != self.session_id or Path(thread["cwd"]).resolve(strict=True) != self.project:
-            raise ValueError("Codex 目标会话或项目目录不匹配")
-        if thread.get("archived") or (thread.get("status") or {}).get("type") == "systemError":
-            raise ValueError("Codex 目标线程处于错误状态")
+        thread = self._thread()
         state = self.store.read() or {}
         request = state.get("request") or {}
         file = self._rollout_path(thread.get("path"))
+        native = state.get("native") or {}
         if preparing:
-            native = state.get("native") or {}
             if (native.get("version") != 2 or native.get("project") != str(self.project)
-                    or native.get("sessionId") != self.session_id or not native.get("turnId")):
+                    or native.get("sessionId") != self.session_id):
                 raise ValueError("当前会话尚未收到确认输入 Hook，保持人工确认")
-            turn_id = confirmation_id(native["turnId"])
-            if self.prepare_turn != turn_id:
-                def matches(entry):
-                    event = entry.get("payload")
-                    return (entry.get("type") == "event_msg" and isinstance(event, dict)
-                            and event.get("type") in ("task_started", "turn_started")
-                            and event.get("turn_id") == turn_id and event.get("thread_id") in (None, self.session_id))
+            saved = state.get("turnOrigin")
+            origin = None if isinstance(saved, dict) and saved.get("version") == 1 else validate_turn_origin(saved, "codex", self.session_id)
+            if self.prepare_turn is None:
+                if origin and origin["inputSeq"] == state.get("inputSeq", 0):
+                    if origin.get("hookTurnId") != native.get("turnId"):
+                        raise ValueError("Codex 当前回合来源已变化")
+                    self.verify_window(origin["windowBinding"])
+                    self._resume_rollout(file, origin["logStart"], origin["turnId"], origin["inputSeq"])
+                    self._read_rollout(file)
+                    SessionLog.verify(origin["logObservation"], self.session_log.observation)
+                    self.prepare_origin = {key: value for key, value in origin.items() if key != "logObservation"}
+                else:
+                    boundary = SessionLog.checkpoint(file)
+                    found = {}
 
-                start = SessionLog.locate(file, turn_id, matches)
-                prior = ({key: request.get(key) for key in ("id", "baselineMessageId")}
-                         if request.get("state") == "consumed" else {})
-                self._resume_rollout(file, start, turn_id, prior=prior)
-                source = self._read_rollout(file)
-                if source.get("turn") != {"id": turn_id, "status": "inProgress"} or not source.get("inputAnchor"):
-                    raise ValueError("Codex 缺少可核验的当前回合输入")
-                identifier, internal = source["inputAnchor"]
-
-                def matches_input(entry):
-                    event = entry.get("payload")
-                    if (entry.get("type") != "event_msg" or not isinstance(event, dict)
-                            or event.get("type") != "item_completed" or event.get("turn_id") != turn_id
-                            or event.get("thread_id") not in (None, self.session_id)):
+                    def current_turn(entry):
+                        event = entry.get("payload")
+                        if (entry.get("type") == "event_msg" and isinstance(event, dict)
+                                and event.get("type") in ("task_started", "turn_started")
+                                and event.get("thread_id") in (None, self.session_id)):
+                            found.update(event)
+                            return True
                         return False
-                    item = event.get("item")
-                    return (isinstance(item, dict) and item.get("type") == "UserMessage" and item.get("id") == identifier
-                            and self._wake_id(item) == internal)
 
-                # 同回合在 prepare 之前的插话是基线；从其完整记录之后观察新的输入。
-                self._resume_rollout(file, SessionLog.locate(file, identifier, matches_input), turn_id,
-                                     baseline=source["humanId"])
-                self.prepare_turn = turn_id
+                    start = SessionLog.locate(file, "Codex 当前活动回合", current_turn)
+                    if start["offset"] > boundary["offset"]:
+                        raise ValueError("准备期间 Codex 当前回合已变化")
+                    turn_id = native_id(found.get("turn_id"))
+                    attribution = found.get("turn_attribution") or {}
+                    if native.get("turnId") not in (None, turn_id) and attribution.get("turn_trigger") != "daemon_recovery":
+                        raise ValueError("Codex 当前回合与宿主输入事件不符")
+                    self._resume_rollout(file, start, turn_id, state.get("inputSeq", 0))
+                    current = self._read_rollout(file)["turn"]
+                    if current != {"id": turn_id, "status": "inProgress"}:
+                        raise ValueError("Codex 当前回合未处于活动状态")
+                    self._resume_rollout(file, boundary, turn_id, state.get("inputSeq", 0))
+                    self.prepare_origin = {"version": 2, "platform": "codex", "sessionId": self.session_id,
+                                           "turnId": turn_id, "inputSeq": self.prepare_baseline,
+                                           "kind": "native", "hookTurnId": native.get("turnId"), "logStart": boundary}
+                self.prepare_turn = self.prepare_origin["turnId"]
             record = self._read_rollout(file)
-            if (record.get("base") is None or record.get("newHuman") or record.get("rolledBack")
-                    or record.get("turn") != {"id": turn_id, "status": "inProgress"}):
-                raise ValueError("Codex 当前回合或人工输入已变化，或缺少可核验的当前回合输入")
+            if (record.get("inputCount") or record.get("rolledBack")
+                    or record.get("turn") != {"id": self.prepare_turn, "status": "inProgress"}):
+                raise ValueError("Codex 当前回合或人工输入已变化")
         elif request:
             start = (request.get("contract") or {}).get("codexLogStart")
             if not start:
                 raise ValueError("Codex 请求缺少当前确认的记录起点，保持人工确认")
             if self.log_start != start:
-                self._resume_rollout(file, start, request["originTurnId"], baseline=confirmation_id(request["baselineMessageId"]))
+                self._resume_rollout(file, start, request["originTurnId"], request.get("inputSeq", state.get("inputSeq", 0)))
             self.prepare_turn = None
             record = self._read_rollout(file)
         else:
             record = self._read_rollout(file)
-        if not record["humanId"]:
-            raise ValueError("Codex 会话没有可核验的人工消息基线")
-        self.seen[record["humanId"]] = True
         humans, self.humans = self.humans, []
+        self.input_events += len(humans)
         wake = record["wake"]
         if wake and wake["turnId"] != (record["turn"] or {}).get("id"):
             wake = None
-        if record.get("newHuman"):
-            humans = [*humans, record["newHuman"]]
-        return {"humanId": record["humanId"], "humanEvents": humans, "turn": record["turn"],
+        sequence = max(state.get("inputSeq", 0), self.prepare_baseline + max(record.get("inputCount", 0), self.input_events))
+        return {"inputSeq": sequence, "turn": record["turn"], "hookTurnId": native.get("turnId"),
                 "status": thread.get("status"), "wake": wake, "logObservation": self.session_log.observation,
-                "codexLogStart": self.log_start, "prepareBaseline": record.get("base")}
+                "codexLogStart": self.log_start, "prepareBaseline": self.prepare_baseline,
+                "turnOrigin": self.prepare_origin if preparing else None}
 
     def read_rollout(self, filename):
         """按文件身份增量读取原生 JSONL，保留未完成行。
@@ -233,7 +251,7 @@ class CodexClient:
         return self._read_rollout(self._rollout_path(filename))
 
     def _rollout_path(self, filename):
-        if not isinstance(filename, str) or not Path(filename).name.endswith("-" + self.session_id + ".jsonl"):
+        if not isinstance(filename, str) or not filename:
             raise ValueError("Codex 未提供精确会话记录路径")
         file = Path(filename)
         try:
@@ -242,7 +260,7 @@ class CodexClient:
             raise ValueError("Codex 会话记录路径越界")
         return file
 
-    def _resume_rollout(self, file, start, turn_id, baseline=None, prior=None):
+    def _resume_rollout(self, file, start, turn_id, sequence):
         # 首条身份记录独立于当前回合；只读这一行，保留线程身份约束。
         if start["identity"][0] != str(file):
             raise ValueError("Codex 会话记录路径已变化")
@@ -256,14 +274,16 @@ class CodexClient:
         header = json.loads(line)
         if header.get("type") != "session_meta" or (header.get("payload") or {}).get("id") != self.session_id:
             raise ValueError("Codex 会话记录标识不符")
-        self.session_log.resume(start, {"verified": True, "humanId": baseline, "base": baseline,
-                                        "anchorTurn": turn_id, "prior": prior or {}, "findingInput": baseline is None,
-                                        "turn": {"id": turn_id, "status": "inProgress"}, "wake": None,
-                                        "displays": OrderedDict()})
+        self.session_log.resume(start, {"verified": True, "inputCount": 0,
+                                        "anchorTurn": turn_id, "turn": {"id": turn_id, "status": "inProgress"},
+                                        "wake": None, "displays": OrderedDict()})
         self.log_start = start
+        self.prepare_baseline = sequence
+        self.input_events = 0
+        self.humans = []
 
     def _read_rollout(self, file):
-        initial = {"verified": False, "humanId": None, "turn": None, "wake": None, "displays": OrderedDict()}
+        initial = {"verified": False, "inputCount": 0, "turn": None, "wake": None, "displays": OrderedDict()}
         record, _ = self.session_log.read(file, initial, self._consume_rollout)
         if not record["verified"]:
             raise ValueError("Codex 缺少原生会话身份记录")
@@ -277,15 +297,19 @@ class CodexClient:
         return wake_id({"type": "userMessage", "content": item.get("content"), "clientId": item.get("client_id")})
 
     def _consume_rollout(self, record, entry):
+        if not isinstance(entry, dict):
+            return
         if entry.get("type") == "session_meta":
-            if (entry.get("payload") or {}).get("id") != self.session_id:
+            if not record["verified"] and (entry.get("payload") or {}).get("id") != self.session_id:
                 raise ValueError("Codex 会话记录标识不符")
             record["verified"] = True
         if entry.get("type") != "event_msg":
             return
         event = entry.get("payload") or {}
+        if not isinstance(event, dict):
+            return
         if event.get("thread_id") and event["thread_id"] != self.session_id:
-            raise ValueError("Codex 记录中混入其他会话事件")
+            return
         kind = event.get("type")
         if kind in ("task_started", "turn_started"):
             record["turn"] = {"id": event.get("turn_id"), "status": "inProgress"}
@@ -294,42 +318,26 @@ class CodexClient:
         if kind == "turn_aborted" and (not event.get("turn_id") or event.get("turn_id") == (record["turn"] or {}).get("id")):
             record["turn"] = {"id": (record["turn"] or {}).get("id"), "status": "interrupted"}
         if kind == "thread_rolled_back":
-            record.update(humanId=None, turn=None, wake=None)
+            record.update(turn=None, wake=None)
             record["displays"].clear()
-            if record.get("anchorTurn"):
-                record["rolledBack"] = True
+            record["rolledBack"] = True
         if kind != "item_completed":
             return
         item = event.get("item") or {}
+        if not isinstance(item, dict):
+            return
         if item.get("type") == "UserMessage":
             internal = self._wake_id(item)
             if internal:
                 record["wake"] = {"requestId": internal, "turnId": event.get("turn_id")}
-                if record.get("anchorTurn") and record.get("base") is None:
-                    prior = record["prior"]
-                    if event.get("turn_id") != record["anchorTurn"] or prior.get("id") != internal:
-                        raise ValueError("Codex 当前回合的队列唤醒来源不符")
-                    record["base"] = record["humanId"] = confirmation_id(prior.get("baselineMessageId"))
-                    record["inputAnchor"] = (confirmation_id(item.get("id")), internal)
             else:
-                identifier = confirmation_id(item.get("id"))
-                if record.get("anchorTurn"):
-                    if record.get("findingInput"):
-                        if event.get("turn_id") != record["anchorTurn"]:
-                            raise ValueError("Codex 当前回合缺少可核验的人工输入")
-                        record["base"] = identifier
-                        record["inputAnchor"] = (identifier, None)
-                    elif record["base"] != identifier:
-                        record.setdefault("newHuman", identifier)
-                record["humanId"] = identifier
-        if not record.get("findingInput") and item.get("type") == "AgentMessage" and item.get("phase") == "final_answer":
-            parts = item.get("content")
-            if not isinstance(parts, list) or any(part.get("type") != "Text" or not isinstance(part.get("text"), str) for part in parts):
-                raise ValueError("Codex 最终正文结构不可核验")
+                record["inputCount"] = record.get("inputCount", 0) + 1
+        if item.get("type") == "AgentMessage" and item.get("phase") == "final_answer":
+            text = text_content(item.get("content"))
             turn_id = event.get("turn_id")
             previous = record["displays"].get(turn_id, "")
             if previous is not None:
-                text = previous + "".join(part["text"] for part in parts)
+                text = previous + text
                 # 超大历史正文不应阻塞后续回合；该回合自身仍无法通过完整展示核验。
                 record["displays"][turn_id] = text if len(text.encode("utf-8")) <= DISPLAY_BYTES else None
             while len(record["displays"]) > 8:
@@ -341,8 +349,7 @@ class CodexClient:
         @param turn_id: 原展示回合。
         @return: 完整正文。
         """
-        snapshot = self.snapshot()
-        self.humans[:0] = snapshot.get("humanEvents", [])
+        self.snapshot()
         display = self.rollout["displays"].get(turn_id)
         if display is None:
             raise ValueError("Codex 原始最终展示缺失或超过核验预算")
@@ -357,12 +364,14 @@ class CodexClient:
             raise ValueError("当前会话缺少唯一可核验的原生 TUI 服务，保持人工确认")
         return servers[0]["httpOrigin"]
 
-    def _coverage(self):
+    def _coverage(self, binding):
         result = self.rpc("thread/loaded/list", {"limit": 1000})
         threads = result.get("data")
-        if result.get("nextCursor") or not isinstance(threads, list) or not 0 < len(threads) <= 1000:
+        embedded = "writerLock" in binding
+        if (result.get("nextCursor") or not isinstance(threads, list) or len(threads) > 1000
+                or (self.session_id in threads) == embedded):
             raise ValueError("无法核验全部已加载原生会话")
-        origins = set()
+        origins = {binding["origin"]} if embedded else set()
         for thread_id in threads:
             current = self.rpc("mcpServerStatus/list", {"threadId": thread_id, "serverName": "codex_tui", "detail": "toolsAndAuthOnly", "limit": 5})
             if current.get("nextCursor"):
@@ -376,7 +385,8 @@ class CodexClient:
                 raise ValueError("Windows Codex 前台归属不唯一")
             check_listener_coverage(owners, self.executable, {Path(item["exe"]) for item in identities})
         else:
-            check_frontend_coverage(list(origins))
+            check_frontend_coverage(list(origins), home=self.home, session_id=self.session_id,
+                                    control=self.transport.control_connection())
 
     def _windows_binding(self, origin):
         from flower_tui_lifetime import parse_origin
@@ -404,13 +414,17 @@ class CodexClient:
         """
         native = (ConfirmationStore(self.project, self.session_id, "codex").read() or {}).get("native") or {}
         if (native.get("version") != 2 or native.get("project") != str(self.project)
-                or native.get("sessionId") != self.session_id or not turn_id or native.get("turnId") != turn_id):
+                or native.get("sessionId") != self.session_id or not turn_id):
             raise ValueError("当前会话尚未收到确认输入 Hook，重开原生客户端后使用；本次保持人工确认")
+        if self.platform == "linux" and (self._thread().get("status") or {}).get("type") == "notLoaded":
+            binding = bind_embedded(self.home, self.session_id, self.transport.control_connection())
+            self._coverage(binding)
+            return binding
         origin = self._origin()
         binding = self._windows_binding(origin) if self.platform == "win32" else bind_origin(origin)
         if self._origin() != origin:
             raise ValueError("准备期间前台窗口绑定已改变")
-        self._coverage()
+        self._coverage(binding)
         return binding
 
     def verify_window(self, binding):
@@ -419,6 +433,12 @@ class CodexClient:
         @param binding: 原请求的窗口身份。
         @return: None；任何漂移均拒绝。
         """
+        if self.platform == "linux" and "writerLock" in binding:
+            if ((self._thread().get("status") or {}).get("type") != "notLoaded"
+                    or bind_embedded(self.home, self.session_id, self.transport.control_connection()) != binding):
+                raise ValueError("原内置 Codex 窗口或会话写锁已改变")
+            self._coverage(binding)
+            return
         if self._origin() != binding.get("origin"):
             raise ValueError("原前台窗口绑定已改变")
         if self.platform == "win32":
@@ -430,7 +450,7 @@ class CodexClient:
             os.close(fd)
         if self._origin() != binding["origin"]:
             raise ValueError("核验期间前台窗口绑定已改变")
-        self._coverage()
+        self._coverage(binding)
 
     def observe_window(self, binding):
         """为 worker 持有自己的内核退出句柄。

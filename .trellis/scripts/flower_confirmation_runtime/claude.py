@@ -9,15 +9,16 @@ from pathlib import Path
 from uuid import uuid4
 
 from .session_log import DISPLAY_BYTES, SessionLog
-from .store import ACTIVE, ConfirmationStore, confirmation_id, now_ms, wake_message
+from .store import ACTIVE, ConfirmationStore, confirmation_id, native_id, now_ms, text_content, validate_turn_origin, wake_message
 from .windows_process import hook_frontend, open_identity
 
 
 def _task_notice(text):
-    if not isinstance(text, str) or not text.startswith("<task-notification>\n") or not text.endswith("\n</task-notification>"):
+    matches = {value.strip() for value in re.findall(r"<task-id>\s*([^<>]+?)\s*</task-id>", text_content(text))}
+    if len(matches) != 1:
         return None
-    matches = re.findall(r"<task-id>([A-Za-z0-9_-]{1,100})</task-id>", text)
-    return matches[0] if len(matches) == 1 else None
+    identifier = matches.pop()
+    return identifier or None
 
 
 def _wait_command(command, project, session_id, request_id):
@@ -67,20 +68,20 @@ def record_event(payload, *, platform=None):
     @return: 空输出或本请求的原生唤醒上下文。
     """
     event = payload.get("hook_event_name")
-    if event not in ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"):
+    if payload.get("agent_id") or event not in ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"):
         return {}
     project = Path(payload["cwd"]).resolve(strict=True)
     if not (project / ".trellis/scripts/confirmation_policy.py").is_file():
         return {}
     session_id = confirmation_id(payload["session_id"])
     transcript = payload.get("transcript_path")
-    if not isinstance(transcript, str) or Path(transcript).name != session_id + ".jsonl":
+    if not isinstance(transcript, str) or not transcript:
         raise ValueError("Claude 缺少精确会话记录路径")
     store = ConfirmationStore(project, session_id, "claude")
     frontend = hook_frontend("claude.exe") if (platform or sys.platform) == "win32" else None
     reminders = []
     def apply(old):
-        value = old or {"version": 2, "sessionId": session_id, "generation": 0, "lastHumanMessageId": None, "request": None}
+        value = old or {"version": 2, "sessionId": session_id, "generation": 0, "inputSeq": 0, "request": None}
         native = value.get("native") or {"version": 1, "project": str(project), "sessionId": session_id,
                                          "tasks": {}, "runId": str(uuid4())}
         if native.get("project") != str(project) or native.get("sessionId") != session_id:
@@ -99,6 +100,7 @@ def record_event(payload, *, platform=None):
                 if previous:
                     previous.close()
                     native["ambiguous"] = True
+                    value.pop("turnOrigin", None)
                     value["generation"] += 1
                     if request and request["state"] in ACTIVE:
                         request.update(state="cancelled", error="frontend_ambiguous")
@@ -109,26 +111,31 @@ def record_event(payload, *, platform=None):
                 raise ValueError("Windows Claude Hook 未绑定唯一的原始前台")
         native.update(transcript=transcript, at=now_ms())
         if event == "SessionStart":
-            native.update(runId=str(uuid4()), ended=False, tasks={}, humanId=None, turn=None)
+            value.pop("turnOrigin", None)
+            native.update(runId=str(uuid4()), ended=False, tasks={}, turn=None)
             value["generation"] += 1
             if request and request["state"] in ACTIVE:
                 request.update(state="cancelled", error="session_restarted")
         elif event == "UserPromptSubmit":
-            prompt_id = confirmation_id(payload.get("prompt_id"))
+            prompt_id = native_id(payload.get("prompt_id"))
+            if (value.get("turnOrigin") or {}).get("turnId") != prompt_id:
+                value.pop("turnOrigin", None)
             task_id = _task_notice(payload.get("prompt"))
             owned = native.get("tasks", {}).get(task_id)
+            previous_turn = (native.get("turn") or {}).get("id")
             native.update(turn={"id": prompt_id, "status": "inProgress"}, ended=False)
             if owned:
                 native["notification"] = {"taskId": task_id, "requestId": owned, "promptId": prompt_id}
                 reminders.append(wake_message(owned, "claude"))
-            elif native.get("humanId") != prompt_id:
-                native["humanId"] = prompt_id
-                value["lastHumanMessageId"] = prompt_id
+            elif previous_turn != prompt_id:
+                value.pop("turnOrigin", None)
+                # Hook 也承载 peer 新回合；序号只使旧计划失效，不授予人工批准。
+                value["inputSeq"] = value.get("inputSeq", 0) + 1
                 value["generation"] += 1
                 if request and request["state"] in ACTIVE:
                     request.update(state="cancelled", error="user_replied")
         elif event == "Stop":
-            prompt_id = confirmation_id(payload.get("prompt_id"))
+            prompt_id = native_id(payload.get("prompt_id"))
             text = payload.get("last_assistant_message")
             if not isinstance(text, str) or len(text.encode("utf-8")) > DISPLAY_BYTES:
                 raise ValueError("Claude 最终展示正文不可核验")
@@ -139,13 +146,13 @@ def record_event(payload, *, platform=None):
                         or not _wait_command(task.get("command"), project, session_id, request["id"])):
                     continue
                 task_id = task.get("id")
-                if not isinstance(task_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", task_id):
-                    raise ValueError("Claude 原生任务 ID 无效")
+                native_id(task_id)
                 native["tasks"][task_id] = request["id"]
                 request["nativeTaskId"] = task_id
             for identifier in list(native["tasks"])[:-8]:
                 del native["tasks"][identifier]
         else:
+            value.pop("turnOrigin", None)
             native["ended"] = True
             value["generation"] += 1
             if request and request["state"] in ACTIVE:
@@ -178,6 +185,7 @@ class ClaudeClient:
         self.session_log = SessionLog()
         self.log_start = None
         self.prepare_turn = None
+        self.prepare_origin = None
         self.frontend = None
 
     def connect(self):
@@ -192,7 +200,7 @@ class ClaudeClient:
         confirmation_id(native.get("runId"))
 
     def prepare_snapshot(self):
-        """核对当前回合，以该回合的完整记录作为本次观察起点。
+        """核对当前回合并冻结本次新增记录的观察边界。
 
         @return: 本次准备的会话快照及冻结起点。
         """
@@ -201,7 +209,7 @@ class ClaudeClient:
     def snapshot(self):
         """增量核验 transcript 的真实人工和任务通知来源。
 
-        @return: 人工基线、当前回合、通知和 runId。
+        @return: 输入序号、当前回合、通知和 runId。
         """
         return self._snapshot(preparing=False)
 
@@ -219,41 +227,31 @@ class ClaudeClient:
             if self.frontend.exited() or self.frontend.identity != identity:
                 raise ValueError("frontend_exited")
         file = Path(native["transcript"])
-        if file.name != self.session_id + ".jsonl":
-            raise ValueError("Claude 缺少精确会话记录路径")
         hook_notice = native.get("notification") or {}
         if preparing:
             turn = native.get("turn") or {}
-            prompt_id = confirmation_id(turn.get("id"))
+            prompt_id = native_id(turn.get("id"))
             if turn.get("status") != "inProgress":
                 raise ValueError("正式确认必须由当前活动回合准备")
             key = (native["runId"], prompt_id)
+            saved = state.get("turnOrigin")
+            origin = None if isinstance(saved, dict) and saved.get("version") == 1 else validate_turn_origin(saved, "claude", self.session_id)
+            if origin and origin["inputSeq"] == state.get("inputSeq", 0) and origin["turnId"] != prompt_id:
+                raise ValueError("Claude 当前回合来源已变化")
             if self.prepare_turn != key or self.log_start is None:
-                baseline = None
-
-                def matches(entry):
-                    nonlocal baseline
-                    if entry.get("promptId") != prompt_id:
-                        return False
-                    evidence = {"humanId": None, "notifications": {}}
-                    self._consume_transcript(evidence, entry)
-                    if evidence["humanId"] == prompt_id:
-                        baseline = prompt_id
-                        return True
-                    task_id = hook_notice.get("taskId")
-                    previous = state.get("request") or {}
-                    if (previous.get("state") == "consumed"
-                            and hook_notice.get("requestId") == previous["id"]
-                            and native.get("tasks", {}).get(task_id) == previous["id"]
-                            and task_id == previous.get("queueId")
-                            and hook_notice.get("promptId") == evidence["notifications"].get(task_id) == prompt_id):
-                        # 已核对的内部唤醒沿用前一个请求的人工基线。
-                        baseline = confirmation_id(previous.get("baselineMessageId"))
-                        return True
-                    return False
-
-                start = SessionLog.locate(file, prompt_id, matches)
-                self._resume_log(start, baseline)
+                if origin and origin["turnId"] == prompt_id and origin["inputSeq"] == state.get("inputSeq", 0):
+                    if origin["runId"] != native["runId"] or origin.get("frontend") != native.get("frontend"):
+                        raise ValueError("Claude 当前回合来源属于旧运行或窗口")
+                    self._resume_log(origin["logStart"], origin["inputSeq"])
+                    self.session_log.read(file, {}, self._consume_transcript)
+                    SessionLog.verify(origin["logObservation"], self.session_log.observation)
+                    self.prepare_origin = {key: value for key, value in origin.items() if key != "logObservation"}
+                else:
+                    start = SessionLog.checkpoint(file)
+                    self._resume_log(start, state.get("inputSeq", 0))
+                    self.prepare_origin = {"version": 2, "platform": "claude", "sessionId": self.session_id,
+                                           "turnId": prompt_id, "inputSeq": self.prepare_baseline, "kind": "native",
+                                           "runId": native["runId"], "frontend": native.get("frontend"), "logStart": start}
                 self.prepare_turn = key
         else:
             request = state.get("request") or {}
@@ -261,57 +259,51 @@ class ClaudeClient:
             if not start:
                 raise ValueError("Claude 请求缺少当前确认的记录起点，保持人工确认")
             if self.log_start != start:
-                self._resume_log(start, confirmation_id(request.get("baselineMessageId")))
+                self._resume_log(start, request.get("inputSeq", state.get("inputSeq", 0)))
             self.prepare_turn = None
-        initial = {"humanId": None, "notifications": {}}
-        record, observation = self.session_log.read(file, initial, self._consume_transcript)
-        human_id = record["humanId"]
+        record, observation = self.session_log.read(file, {}, self._consume_transcript)
         task_id = hook_notice.get("taskId")
         prompt_id = record["notifications"].get(task_id)
         request_id = native.get("tasks", {}).get(task_id)
         notification = ({"taskId": task_id, "requestId": request_id, "promptId": prompt_id}
                         if prompt_id and request_id else None)
-        if not human_id:
-            raise ValueError("Claude 缺少真实人工输入基线；关闭记录的会话保持人工确认")
         pending = (hook_notice.get("promptId") == (native.get("turn") or {}).get("id")
                    and hook_notice.get("requestId") == native.get("tasks", {}).get(hook_notice.get("taskId"))
                    and bool(hook_notice.get("requestId"))
                    and (notification or {}).get("promptId") != hook_notice.get("promptId"))
-        return {"humanId": human_id, "turn": native.get("turn"), "notification": notification,
+        sequence = max(state.get("inputSeq", 0), self.prepare_baseline + record["inputCount"])
+        return {"inputSeq": sequence, "turn": native.get("turn"), "notification": notification,
                 "notificationPending": pending, "runId": native.get("runId"), "logObservation": observation,
-                "claudeLogStart": self.log_start, "prepareBaseline": self.prepare_baseline}
+                "claudeLogStart": self.log_start, "prepareBaseline": self.prepare_baseline,
+                "turnOrigin": self.prepare_origin if preparing else None}
 
-    def _resume_log(self, start, baseline):
-        self.session_log.resume(start, {"humanId": baseline, "notifications": {}})
+    def _resume_log(self, start, sequence):
+        self.session_log.resume(start, {"inputCount": 0, "notifications": {}})
         self.log_start = start
-        self.prepare_baseline = baseline
+        self.prepare_baseline = sequence
 
     def _consume_transcript(self, record, entry):
+        if not isinstance(entry, dict):
+            return
         if entry.get("type") != "user" or entry.get("isSidechain") or entry.get("sessionId") != self.session_id:
             return
-        kind = (entry.get("origin") or {}).get("kind")
-        turn_origin = entry.get("turnOrigin")
-        other = (isinstance(kind, str) and kind and kind not in ("human", "task-notification", "task_notification")
-                 and ("turnOrigin" not in entry or turn_origin == kind))
-        transcript_only = (kind == "task-notification" and entry.get("queueTranscriptOnly") is True
-                           and ("turnOrigin" not in entry or turn_origin == "task_notification"))
-        if other or transcript_only:
-            # 一致的其它来源与只写日志的通知都不提供人工输入或唤醒证据。
-            return
-        # Windows 原生记录可能只写结构化 origin；出现 turnOrigin 时仍要求两者一致。
-        only_origin = self.platform == "win32" and "turnOrigin" not in entry
-        if kind == "human" and (only_origin or entry.get("turnOrigin") == "human"):
-            record["humanId"] = confirmation_id(entry.get("promptId"))
-        elif kind == "task-notification" and (only_origin or entry.get("turnOrigin") == "task_notification"):
-            task_id = _task_notice((entry.get("message") or {}).get("content"))
-            if task_id:
+        prompt_id = entry.get("promptId")
+        origin = entry.get("origin")
+        kind = origin.get("kind") if isinstance(origin, dict) else None
+        if not kind:
+            kind = entry.get("turnOrigin")
+        # 只提取必要的正向证据；新增上下文记录不会让整个自动流程失败。
+        if kind == "human":
+            record["inputCount"] = record.get("inputCount", 0) + 1
+        elif kind in ("task-notification", "task_notification") and entry.get("queueTranscriptOnly") is not True:
+            message = entry.get("message")
+            task_id = _task_notice(message.get("content") if isinstance(message, dict) else None)
+            if task_id and isinstance(prompt_id, str) and prompt_id:
                 notices = record["notifications"]
                 notices.pop(task_id, None)
                 notices[task_id] = entry.get("promptId")
                 if len(notices) > 8:
                     del notices[next(iter(notices))]
-        elif isinstance((entry.get("message") or {}).get("content"), str) and not entry.get("isCompactSummary"):
-            raise ValueError("Claude 消息来源字段不可核验，保持人工确认")
 
     def assistant_text(self, turn_id):
         """读取 Stop 绑定的原始展示。

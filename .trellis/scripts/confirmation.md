@@ -17,19 +17,25 @@
 
 ## 准备与完整展示
 
-Codex 保持普通 `codex` / `codex resume` 与默认共享服务。通过当前根会话内置 codex_tui 的本机监听者绑定原前台；需要新输入 Hook 已实际加载。Windows 复用当前 Codex 映像的本机代理接入已有控制端点。缺少服务、出生身份或可靠退出能力时保持人工。Claude 保持原来的普通 TUI；Windows 同时核验原生 Hook 的前台进程。
+Codex 保持普通 `codex` / `codex resume` 并使用已有本机控制服务。共享会话通过 `codex_tui` 的本机监听者绑定原前台。Linux/WSL 的内置会话通过精确会话写锁及原监听者绑定前台，再由本机原生队列唤醒。需要输入 Hook 已实际加载；同会话双开、归属不明、缺少队列服务或无法观测原进程退出时保持人工。Windows 复用当前 Codex 映像的本机代理接入已有控制端点；Claude 使用普通 TUI 和原生后台通知。
 
 先从项目根执行 `python3 .trellis/scripts/flower_confirmation_hook.py --entry`，读取实际返回的 `entry` argv，后续在其后追加 `prepare`、`wait` 等子命令。入口固定为项目内 `.trellis/scripts/flower_confirmation.py`，内部复用当前 Python 解释器，仅依赖标准库和项目脚本。`entry=null` 或工具失败才报告实际原因；不能用无 stdout 的 `test -f` 推断入口不存在。确认阶段无需 Node、npm、全局 Flower 或额外 pip 安装。
 
 1. 在 gitignored `.trellis/.runtime/` 为当前平台和会话写一个 JSON 材料文件，路径不得复用于并行会话。不要把它放入提交集合，不生成公开报告附件。使用结构化文件写入，用户正文和 message 不拼入 shell。
-2. JSON 的公共字段为 `kind: brief|check|push`、`task`。Brief 必须指定目标活动任务的精确相对路径，正文读取该任务 `brief.md`；当前会话允许尚未绑定任务，已有绑定须与目标一致。会话绑定另行冻结，等待期间变化使旧确认失效。Check/Push 使用当前精确任务相对路径，无任务为 null，另提供完整标准报告/计划的 `body`。
+2. JSON 的公共字段为 `kind: brief|check|push`、`task`。Brief 必须指定目标活动任务的精确相对路径，正文读取该任务 `brief.md`；三类材料均由 task 声明确认目标，允许与准备时会话绑定不同。会话绑定另行冻结，等待期间变化使旧确认失效。Check/Push 无任务为 null，另提供完整标准报告/计划的 `body`。
 3. Check 必填 `reportVersion`、`dispositionVersion`（非空版本字符串）及 `findings: [{id:"CHK-001",status:"pending"}]`；status 只接受 pending/accepted/resolved。必须覆盖当前全部条目，禁止只传准备修复的子集来改变默认动作。
 4. Push 必填 `mode: push|commit-only`、`evidence: {check:passed|accepted|focused,spec:no-op|written,unresolvedRisks:0}` 和有序 `repositories`。每仓包含 `root`、实际 `branch`、完整 `head`（初始空仓为 null）、实际 `upstream`（没有为 null）、精确 `message`、完整 `files` 路径列表。把已展示的生成命令、任务记录 exact files 与顺序一并保存在输入中，不在领取后扩大范围。
 5. 从项目根执行 `python3 -X utf8 .trellis/scripts/flower_confirmation.py prepare --platform codex|claude --input <相对路径>`；用户明确指定本次时长时加 `--seconds <正整数秒>`。仅 `prepared=true` 可继续，任何错误或 false 保持原人工提示。
 6. 两端运行同一个 `python3 -X utf8 .trellis/scripts/flower_confirmation.py wait --platform <平台> --session <prepare.sessionId> --request <UUID>`。Claude 用 Bash `run_in_background:true`。Codex 用原生 `exec_command` 短 `yield_time_ms`（例如 1000）启动，取得持续运行的 terminal session 后结束当前回合；不等待命令完成、不轮询、不启动子代理、不用 clock.sleep。后台 worker 到期会经原生同会话队列唤醒。
 7. 最终回复完整展示 prepare 返回的 `display`；它包含标准正文和本次时长/默认动作。可在前后补必要说明，但不能省略、改写 display。后台会核验原回合最终正文，展示完成才开始计时；工具启动和生成时间不扣减等待时间。
 
-Git 整仓快照、仅用于哈希的文件以及两端会话记录不按总字节数拒绝。需要解析或展示的单条记录、材料和状态各有读取预算。Git 命令、Push 快照和策略检查分别使用超时预算，失败时展示实际阶段及原因。等待原回合完成展示与唤醒后等待领取分别过期；两者与用户设定的倒计时独立。
+Git 整仓快照、仅用于哈希的文件以及两端会话记录不按总字节数拒绝。需要解析或展示的单条记录、材料和状态各有读取预算。Git 命令、Push 快照和策略检查分别使用超时预算，失败时展示实际阶段及原因。展示与领取不另设固定过期时间，许可时效由人工新输入、材料变化、原窗口和运行状态决定。用户设定的倒计时仍在完整展示后开始。
+
+Codex 原生 daemon_recovery 回合使用当前已核验的原生回合与输入事件序号准备确认；本次展示绑定当前恢复回合，并重新准备和计时。
+
+会话记录只提取本次必要的输入、原生通知和最终正文。新增字段、未知附加事件、技能说明和内容分块不单独触发人工确认。通知文案和重复来源字段不充当执行门槛；以明确的原生身份及当前请求关系核验，必要证据缺失时在实际使用处处理。
+
+Claude 与 Codex 的准备使用当前会话的输入事件序号，不要求历史真实人工消息 ID。序号只用于发现准备后的输入变化，不能作为人工批准。主会话处理子代理回传或原生恢复后可以准备新确认；触发新回合的输入事件使旧等待失效，按当前材料重新展示并独立计时。新用户消息、中断、材料或原窗口变化仍作废旧许可。日志从本次冻结的完整行边界增量核验展示和精确唤醒，不为建立人工消息基线回溯旧会话。
 
 ## 到期领取与原流程续接
 

@@ -25,6 +25,7 @@ from common.tasks import normalize_closeout
 VERSION = 1
 INPUT_BYTES = 1024 * 1024
 DOCUMENT_BYTES = 512 * 1024
+TASK_METADATA_BYTES = 8 * 1024 * 1024
 HASH_CHUNK = 64 * 1024
 GIT_TIMEOUT = 10
 SNAPSHOT_TIMEOUT = 30
@@ -343,19 +344,19 @@ def inspect_confirmation(root, input_path, platform, session_id, seconds=None):
         raise ValueError("未知确认种类")
     active = resolve_active_task(root, {"session_id": session_id}, platform,
                                  allow_single_session_fallback=False, allow_environment_context=False)
-    task = material.get("task") if kind == "brief" else active.task_path
+    task = material.get("task")
     if kind == "brief":
-        # Brief 先确认再 start，因此目标任务来自材料；会话绑定另行冻结以检测等待期间的切换。
+        # 材料声明确认目标，会话绑定作为独立事实冻结，允许准备时二者不同。
         if active.source_type != "session" or active.stale:
             raise ValueError("Brief 确认的当前会话任务状态无效")
         if not isinstance(task, str) or not re.fullmatch(r"\.trellis/tasks/[^/]+", task):
             raise ValueError("Brief 确认必须指定活动任务目录")
-    if (kind != "brief" or active.task_path is not None) and material.get("task") != active.task_path:
-        raise ValueError("确认材料与当前会话任务不符")
+    if task is not None and (not isinstance(task, str) or not re.fullmatch(r"\.trellis/tasks/[^/]+", task)):
+        raise ValueError("确认任务必须是项目内的精确任务目录或 null")
     task_manual_only = False
     task_files = {}
     if task:
-        metadata_bytes = _bytes(_inside(root, task + "/task.json"))
+        metadata_bytes = _bytes(_inside(root, task + "/task.json"), limit=TASK_METADATA_BYTES)
         task_metadata = json.loads(metadata_bytes.decode("utf-8"))
         if not isinstance(task_metadata, dict) or not isinstance(task_metadata.get("meta", {}), dict):
             raise ValueError("任务元数据无效")
@@ -381,8 +382,7 @@ def inspect_confirmation(root, input_path, platform, session_id, seconds=None):
     if len(body.encode("utf-8")) > DOCUMENT_BYTES:
         raise ValueError("确认正文超过 512 KiB 展示预算")
     facts = {"task": task, "taskFiles": task_files, "inputHash": hashlib.sha256(input_bytes).hexdigest()}
-    if kind == "brief":
-        facts["sessionTask"] = active.task_path
+    facts["sessionTask"] = active.task_path
     count = 0
     if kind == "check":
         if not all(isinstance(material.get(key), str) and material[key] for key in ("reportVersion", "dispositionVersion")):

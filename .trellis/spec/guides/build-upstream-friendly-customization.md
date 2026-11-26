@@ -113,6 +113,14 @@ build 分支定制下，复用优先级如下：
 - [ ] 有意复制的镜像流程已覆盖权限、选择、错误和状态初始化等全部同步复核点。
 - [ ] 合并涉及前端功能或 i18n 时，已按[前端 i18n 与上游合并规范](../frontend/i18n-merge-guidelines.md)验证父分支键并集、源码缺键和七语言值退化，未用整包 `ours` / `theirs` 解决语言文件。
 
+### 合并上游时：Responses 长输入分词与预扣费技术债
+
+2026-11-26，`build-bak` 在处理长输入 `POST /v1/responses` 时，预扣费调用 `EstimateRequestToken` 对输入分词。两次 CPU 采样中，`tiktoken-go/tokenizer v0.6.2` 的分词路径占进程用户态样本的 62%–85%，热点为 `mergePairs`。线上 Compose 覆盖文件以 `CountToken: "false"` 临时降载。这个全局开关使请求侧输入 token 估算返回 `0`，会降低长请求的预扣，并影响上游缺失 `usage` 时依赖输入估算的结算。[长输入报告 #6159](https://github.com/QuantumNous/new-api/issues/6159) · [早期分词问题 #1295](https://github.com/QuantumNous/new-api/issues/1295)
+
+- [ ] 下次合并上游升级分支时，确认目标提交包含 `v1.0.0-rc.42` 的 TokenKit 长片段分段计数，并检查合并后的预扣费确实走该路径。完整引入 TokenKit 时核对 Go 1.26 工具链、镜像构建，以及 GPT 模型编码和媒体估算口径。[TokenKit 提交](https://github.com/QuantumNous/new-api/commit/bb28f2ccad3f6286a9dc4a0ad9e20f571f57533b)
+- [ ] 用同一批脱敏的长输入与并发配置对比分词 CPU、预扣延迟及分段边界的计数差异。分别记录容器 CPU 和虚拟机 `steal`，让两次结果可以对照。
+- [ ] 回归完整 `usage` 的结算、缺失 `usage` 的输入兜底，以及流式 `client_gone` 的零额结算和审计。上游 Responses 断流修复仍依赖 `GetEstimatePromptTokens()`，合并时核对本地[流式计费契约](../backend/relay-billing-model.md#场景流式-client_gone-本地估算-usage-零额结算)。验证通过后，在升级记录中明确是否恢复生产 `CountToken=true` 及回滚方式。[Responses 断流计费修复 #7427](https://github.com/QuantumNous/new-api/pull/7427)
+
 ## Good / Base / Bad
 
 - Good：新建 `compactpassthrough` 模块实现检测后的转发、计费快照和响应观测；原有 Relay 主循环只增加一次分派调用。

@@ -10,12 +10,12 @@ import time
 from uuid import uuid4
 
 from .session_log import SessionLog
-from .store import ACTIVE, CLAIM_BUDGET, DISPLAY_BUDGET, confirmation_id, message_hash, now_ms, read_json
+from .store import ACTIVE, confirmation_id, message_hash, now_ms, read_json, validate_turn_origin
 
 
 ACTION_NAMES = {"implement": "按当前完整 Brief 开工", "repair_all_and_recheck": "修复当前全部待处置问题并重检",
                 "execute_git_plan": "执行当前已展示的精确 Git 计划"}
-CONTRACT_VERSION = 3
+CONTRACT_VERSION = 4
 POLICY_TIMEOUT = 40
 POLICY_OUTPUT_BYTES = 16 * 1024 * 1024
 
@@ -93,21 +93,21 @@ def _normalize_display(text):
 
 
 def _observe(store, request_id, snapshot, *, observed=None):
-    identifiers = snapshot.get("humanEvents", []) + [snapshot.get("humanId")]
-
-    def is_new(identifier, request, state):
-        return identifier and identifier not in (state.get("lastHumanMessageId"), request["baselineMessageId"])
-
-    # 等待轮询只用已读状态跳过无变化的观察；新消息必须按锁内最新状态重新判断。
-    if observed is not None and not any(is_new(identifier, observed["request"], observed) for identifier in identifiers):
+    sequence = snapshot["inputSeq"]
+    if type(sequence) is not int or sequence < 0:
+        raise ValueError("宿主输入序号无效")
+    # 常规观察保持只读；落盘滞后的原生输入在同一状态锁内补记。
+    if observed is None:
+        observed = store.read()
+    if (observed is not None and (observed.get("request") or {}).get("id") == request_id
+            and sequence <= observed.get("inputSeq", 0)):
         return observed
 
     def apply(request, state):
-        for identifier in identifiers:
-            if not is_new(identifier, request, state):
-                continue
-            state["lastHumanMessageId"] = identifier
+        if sequence > state.get("inputSeq", 0):
+            state["inputSeq"] = sequence
             state["generation"] += 1
+            state.pop("turnOrigin", None)
             if request["state"] in ACTIVE:
                 request.update(state="cancelled", error="user_replied")
     return store.change(request_id, apply)
@@ -167,18 +167,31 @@ def prepare(store, client, input_path, seconds=None):
     lifetime = ({"windowBinding": client.capture_window(snapshot["turn"]["id"])} if store.platform == "codex"
                 else {"runId": confirmation_id(snapshot.get("runId"))})
     current = observe_prepare()
-    human_events = snapshot.get("humanEvents", []) + current.get("humanEvents", [])
-    if current["humanId"] != snapshot["humanId"] or any(identifier != snapshot["humanId"] for identifier in human_events):
+    if (type(snapshot.get("inputSeq")) is not int or snapshot["inputSeq"] < 0
+            or type(current.get("inputSeq")) is not int
+            or current["inputSeq"] != snapshot["inputSeq"]):
         raise ValueError("准备期间出现新人工输入")
     log_start = "codexLogStart" if store.platform == "codex" else "claudeLogStart"
     if snapshot.get(log_start):
         if (current.get(log_start) != snapshot[log_start]
-                or current["humanId"] != current["prepareBaseline"]):
+                or current["inputSeq"] != current["prepareBaseline"]):
             raise ValueError("准备期间确认回合或人工输入已变化")
         lifetime[log_start] = current[log_start]
     if snapshot.get("logObservation"):
         SessionLog.verify(snapshot["logObservation"], current.get("logObservation"))
         lifetime["logObservation"] = current["logObservation"]
+    origin = current.get("turnOrigin")
+    if origin != snapshot.get("turnOrigin"):
+        raise ValueError("准备期间当前回合来源已变化")
+    if origin:
+        if store.platform == "codex" and origin.get("windowBinding") is not None and origin["windowBinding"] != lifetime["windowBinding"]:
+            raise ValueError("准备期间当前回合的原窗口身份已变化")
+        origin = {**origin, "logObservation": current["logObservation"],
+                  **({"windowBinding": lifetime["windowBinding"]} if store.platform == "codex" else {})}
+        validate_turn_origin(origin, store.platform, store.session_id)
+        if (origin["turnId"] != current["turn"]["id"] or origin["inputSeq"] != current["inputSeq"]
+                or origin["logStart"] != lifetime.get(log_start)):
+            raise ValueError("当前回合来源与准备基线不符")
     # 状态只保存整个计划的摘要；领取时用同一材料重算并返回原有完整上下文。
     contract = {"version": CONTRACT_VERSION, "platform": store.platform, "input": input_path, "secondsOverride": seconds,
                 "frozenDigest": _frozen_digest(frozen), **lifetime}
@@ -186,15 +199,17 @@ def prepare(store, client, input_path, seconds=None):
     def apply(old):
         native = (old or {}).get("native") or {}
         if ((old or {}).get("generation", 0) != generation
+                or (old or {}).get("inputSeq", 0) != current["inputSeq"]
                 or lifetime.get("claudeLogStart") and native.get("turn") != current.get("turn")
-                or lifetime.get("codexLogStart") and native.get("turnId") != current["turn"]["id"]):
+                or lifetime.get("codexLogStart") and native.get("turnId") != current.get("hookTurnId")):
             raise ValueError("准备期间确认代次已变化")
         if old and old.get("request"):
             previous.append(old["request"])
         next_generation = generation + 1
         return {"version": 2, "sessionId": store.session_id, "generation": next_generation,
-                "lastHumanMessageId": snapshot["humanId"], **({"native": old["native"]} if old and old.get("native") else {}),
-                "request": {"id": str(uuid4()), "generation": next_generation, "baselineMessageId": snapshot["humanId"],
+                "inputSeq": snapshot["inputSeq"], **({"native": old["native"]} if old and old.get("native") else {}),
+                **({"turnOrigin": origin} if origin else {}),
+                "request": {"id": str(uuid4()), "generation": next_generation, "inputSeq": snapshot["inputSeq"],
                             "seconds": frozen["seconds"], "message": frozen["action"], "messageSha256": message_hash(frozen["action"]),
                             "originTurnId": snapshot["turn"]["id"], "state": "prepared", "createdAt": now_ms(), "deadline": None,
                             "queueId": None, "wakeTurnId": None, "workerToken": None, "receipt": None, "error": None,
@@ -254,6 +269,8 @@ def wait(store, client, request_id, interrupted=lambda: False, notify=lambda val
     request = (store.read() or {}).get("request") or {}
     if request.get("id") != request_id or (request.get("contract") or {}).get("version") != CONTRACT_VERSION:
         raise ValueError("正式请求不存在，保持人工确认")
+    if request["state"] not in ACTIVE:
+        return request
     token = str(uuid4())
     def own(current, state):
         if current["state"] == "prepared" and not current.get("workerToken"):
@@ -287,8 +304,6 @@ def wait(store, client, request_id, interrupted=lambda: False, notify=lambda val
             if time.monotonic() - began > 2 * 86400:
                 raise ValueError("worker_lifetime_exceeded")
             if request["state"] == "prepared":
-                if time.monotonic() - began > DISPLAY_BUDGET:
-                    raise ValueError("display_completion_unverified")
                 turn = snapshot.get("turn") or {}
                 if turn.get("id") == request["originTurnId"] and turn.get("status") == "inProgress":
                     time.sleep(0.05)
@@ -308,7 +323,8 @@ def wait(store, client, request_id, interrupted=lambda: False, notify=lambda val
                 _observe(store, request_id, client.snapshot())
                 dispatch = []
                 def begin_dispatch(current, state):
-                    if current["state"] == "waiting" and state["generation"] == current["generation"]:
+                    if (current["state"] == "waiting" and state["generation"] == current["generation"]
+                            and state["inputSeq"] == current["inputSeq"]):
                         current["state"] = "dispatching"
                         dispatch.append(True)
                 store.change(request_id, begin_dispatch)
@@ -324,7 +340,7 @@ def wait(store, client, request_id, interrupted=lambda: False, notify=lambda val
                     def record_queue(current, state):
                         current["queueId"] = queued["id"]
                         if current["state"] == "dispatching":
-                            current.update(state="queued", claimDeadline=now_ms() + CLAIM_BUDGET * 1000)
+                            current.update(state="queued")
                     value = store.change(request_id, record_queue)
                     current = (value or {}).get("request") or {}
                     if current.get("id") != request_id or current["state"] != "queued":
@@ -333,8 +349,6 @@ def wait(store, client, request_id, interrupted=lambda: False, notify=lambda val
                         notify({"event": "queued", "requestId": request_id, "queueId": queued["id"]})
                     if client.delivery_on_exit:
                         return current
-            elif request["state"] == "queued" and now_ms() > request["claimDeadline"]:
-                raise ValueError("claim_expired")
             time.sleep(0.05)
     except Exception as error:
         def fail(current, state):
@@ -391,9 +405,9 @@ def claim(store, client, request_id):
             if current["state"] != "queued":
                 result = denied(current["state"])
                 return
-            if (state["generation"] != current["generation"] or state["lastHumanMessageId"] != current["baselineMessageId"]
+            if (state["generation"] != current["generation"] or state["inputSeq"] != current["inputSeq"]
                     or claude_turn and ((state.get("native") or {}).get("turn") or {}).get("id") != claude_turn
-                    or now_ms() > current["claimDeadline"] or message_hash(current["message"]) != current["messageSha256"]):
+                    or message_hash(current["message"]) != current["messageSha256"]):
                 current.update(state="failed", error="claim_validation_failed")
                 result = denied("claim_validation_failed")
                 return
@@ -433,7 +447,7 @@ def record_result(store, client, request_id, receipt, outcome):
         _validate(store, client, current, "start", snapshot)
         snapshot = client.snapshot()
         _observe(store, request_id, snapshot)
-        if snapshot["humanId"] != current["baselineMessageId"]:
+        if snapshot["inputSeq"] != current["inputSeq"]:
             raise ValueError("人工输入已变化，不能开始旧默认动作")
     recorded = []
     def apply(request, state):
@@ -442,7 +456,7 @@ def record_result(store, client, request_id, receipt, outcome):
         if outcome == "started":
             native = state.get("native") or {}
             run_id = request["contract"].get("runId")
-            if (state["generation"] != request["generation"] or state["lastHumanMessageId"] != request["baselineMessageId"]
+            if (state["generation"] != request["generation"] or state["inputSeq"] != request["inputSeq"]
                     or request.get("wakeTurnId") and (native.get("turn") or {}).get("id") != request["wakeTurnId"]
                     or (run_id and (native.get("runId") != run_id or native.get("ended"))) or request.get("execution")):
                 return

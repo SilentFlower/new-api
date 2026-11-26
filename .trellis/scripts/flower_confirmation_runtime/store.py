@@ -19,8 +19,6 @@ ACTIVE = frozenset(("prepared", "waiting", "dispatching", "queued"))
 STATES = ACTIVE | {"cancelled", "failed", "delivery_unknown", "consumed"}
 MAX_BYTES = 1024 * 1024
 STATE_BYTES = 2 * 1024 * 1024
-DISPLAY_BUDGET = 300
-CLAIM_BUDGET = 300
 UUID = re.compile(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", re.I)
 
 
@@ -32,6 +30,17 @@ def confirmation_id(value):
     """
     if not isinstance(value, str) or not UUID.fullmatch(value):
         raise ValueError("必须提供精确的 UUID 会话或请求标识")
+    return value
+
+
+def native_id(value):
+    """读取原生不透明标识，资源预算由状态与日志层控制。
+
+    @param value: 原生回合、消息或任务标识。
+    @return: 原始非空字符串。
+    """
+    if not isinstance(value, str) or not value:
+        raise ValueError("原生标识必须为非空字符串")
     return value
 
 
@@ -53,20 +62,34 @@ def wake_message(request_id, platform="codex"):
             "不得仅因旧提醒失效要求人工再确认，也不得重试领取旧请求或执行旧动作。")
 
 
+def text_content(content):
+    """提取正文文本，附加内容块不参与文本核验。
+
+    @param content: 原生字符串或内容块列表。
+    @return: 拼接的文本，未知结构为空。
+    """
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    return "".join(part if isinstance(part, str) else part.get("text", "") for part in content
+                   if isinstance(part, str) or isinstance(part, dict) and isinstance(part.get("text"), str))
+
+
 def wake_id(item):
-    """核对内部正文与 Codex 原生 clientId。
+    """按稳定请求标记与原生 clientId 识别通知。
 
     @param item: 原生 userMessage。
     @return: 匹配的请求 UUID，普通消息返回 None。
     """
-    content = item.get("content")
-    if item.get("type") != "userMessage" or not isinstance(content, list) or len(content) != 1:
+    if item.get("type") != "userMessage":
         return None
-    part = content[0]
-    text = part.get("text") if isinstance(part, dict) and part.get("type") == "text" else None
-    match = re.match(r"^\[flower-confirmation:v2:([0-9a-f-]{36})\]", text, re.I) if isinstance(text, str) else None
-    if match and UUID.fullmatch(match[1]) and item.get("clientId") == match[1] and text == wake_message(match[1]):
-        return match[1]
+    content = text_content(item.get("content"))
+    identifiers = set(re.findall(r"\[flower-confirmation:v2:([0-9a-f-]{36})\]", content, re.I))
+    if len(identifiers) == 1:
+        identifier = identifiers.pop()
+        if UUID.fullmatch(identifier) and item.get("clientId") == identifier:
+            return identifier
     return None
 
 
@@ -76,6 +99,38 @@ def now_ms():
     @return: 当前 Unix 毫秒数。
     """
     return int(time.time() * 1000)
+
+
+def validate_turn_origin(origin, platform, session_id):
+    """校验独立来源的范围和有界结构，许可仍由当前请求决定。
+
+    @param origin: 可选的当前回合来源。
+    @param platform: 精确平台。
+    @param session_id: 精确原生会话。
+    @return: 已校验来源或 None。
+    """
+    if origin is None:
+        return None
+    if (not isinstance(origin, dict) or type(origin.get("version")) is not int or origin["version"] != 2
+            or origin.get("platform") != platform or origin.get("sessionId") != session_id
+            or origin.get("kind") != "native"):
+        raise ValueError("当前回合来源版本、平台或会话不符")
+    native_id(origin.get("turnId"))
+    if type(origin.get("inputSeq")) is not int or origin["inputSeq"] < 0:
+        raise ValueError("当前回合来源缺少有效输入序号")
+    for key in ("logStart", "logObservation"):
+        point = origin.get(key)
+        if (not isinstance(point, dict) or not isinstance(point.get("identity"), list) or len(point["identity"]) != 3
+                or not isinstance(point["identity"][0], str)
+                or any(type(point.get(name)) is not int or point[name] < 0 for name in ("size", "modified", "offset"))
+                or point["offset"] > point["size"] or not isinstance(point.get("anchor"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", point["anchor"])):
+            raise ValueError("当前回合来源缺少有效日志边界")
+    if platform == "claude":
+        confirmation_id(origin.get("runId"))
+    elif not isinstance(origin.get("windowBinding"), dict):
+        raise ValueError("当前回合来源缺少原始窗口身份")
+    return origin
 
 
 def message_hash(message):
@@ -147,7 +202,7 @@ def _retry_windows_permission(operation):
             time.sleep(0.01)
 
 
-def _write_json(file, value, limit=MAX_BYTES):
+def _write_json(file, value, limit=MAX_BYTES, *, durable=True):
     raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
     if len(raw) > limit:
         raise ValueError("确认状态超出大小限制")
@@ -158,7 +213,8 @@ def _write_json(file, value, limit=MAX_BYTES):
         with os.fdopen(fd, "wb") as stream:
             stream.write(raw)
             stream.flush()
-            os.fsync(stream.fileno())
+            if durable:
+                os.fsync(stream.fileno())
         _retry_windows_permission(lambda: os.replace(str(temporary), str(file)))
     finally:
         try:
@@ -227,12 +283,17 @@ class ConfirmationStore:
                 or value.get("sessionId") != self.session_id or type(value.get("generation")) is not int
                 or not 0 <= value["generation"] <= 9007199254740991):
             raise ValueError("确认状态版本、会话或结构无效")
+        if "inputSeq" in value and (type(value["inputSeq"]) is not int or value["inputSeq"] < 0):
+            raise ValueError("确认状态输入序号无效")
         request = value.get("request")
         if request:
             if (not isinstance(request, dict) or request.get("state") not in STATES
                     or type(request.get("generation")) is not int or request["generation"] > value["generation"]):
                 raise ValueError("确认请求结构无效")
             confirmation_id(request.get("id"))
+            if "inputSeq" in request and (type(request["inputSeq"]) is not int or request["inputSeq"] < 0
+                    or type(value.get("inputSeq")) is not int or request["inputSeq"] > value["inputSeq"]):
+                raise ValueError("确认请求输入序号无效")
         elif not isinstance(value.get("native"), dict):
             raise ValueError("确认状态缺少原生来源")
         return value
@@ -266,7 +327,8 @@ class ConfirmationStore:
                 time.sleep(0.01)
                 continue
             try:
-                _write_json(lock / "owner.json", {"pid": os.getpid(), "token": token})
+                # 锁归属只需跨进程可见；省去临时元数据落盘，缩短持锁时间。
+                _write_json(lock / "owner.json", {"pid": os.getpid(), "token": token}, durable=False)
             except BaseException:
                 lock.rmdir()
                 raise
@@ -344,6 +406,8 @@ def cancel_project(project, reason="project_disabled"):
             store = ConfirmationStore(project, file.stem, platform)
             def apply(value):
                 nonlocal count
+                if value:
+                    value.pop("turnOrigin", None)
                 if value and value.get("request"):
                     value["generation"] += 1
                     if value["request"]["state"] in ACTIVE:

@@ -335,6 +335,7 @@ def _env_platform_name(platform_name: str | None) -> str | None:
     return _ENV_PLATFORM_ALIASES.get(platform_name, platform_name)
 
 
+# BEGIN skill-garden patch active-task-host-identity v0.6
 def _lookup_env_context_key(platform_name: str | None) -> str | None:
     """Resolve a context key from platform-provided environment variables.
 
@@ -344,6 +345,20 @@ def _lookup_env_context_key(platform_name: str | None) -> str | None:
     are present, there is no session-scoped active task.
     """
     env_platform_name = _env_platform_name(platform_name)
+    if env_platform_name is None:
+        candidates = {
+            _CONTEXT_KEY_PLATFORM_ALIASES.get(name, name)
+            for table in (_ENV_SESSION_KEYS, _ENV_CONVERSATION_KEYS, _ENV_TRANSCRIPT_KEYS)
+            for name, keys in table
+            if any(_string_value(os.environ.get(key)) for key in keys)
+        }
+        if len(candidates) > 1:
+            # Inherited variables may describe an outer tool; use the nearest host.
+            try:
+                from flower_session_host import select_platform
+            except ImportError as error:
+                raise ValueError("Multiple platform identities require an explicit platform or TRELLIS_CONTEXT_ID") from error
+            env_platform_name = select_platform(candidates)
 
     for name, keys in _iter_env_keys(_ENV_SESSION_KEYS, env_platform_name):
         for key in keys:
@@ -364,6 +379,7 @@ def _lookup_env_context_key(platform_name: str | None) -> str | None:
                 return _context_key(name, "transcript", value)
 
     return None
+# END skill-garden patch active-task-host-identity v0.6
 
 
 def _find_repo_root_from_cwd() -> Path | None:

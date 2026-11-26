@@ -151,10 +151,11 @@ def _parents():
 def hook_frontend(executable):
     """沿真实 Hook 进程祖先链识别同用户前台。
 
-    @param executable: 预期原生宿主可执行文件名。
+    @param executable: 预期原生宿主可执行文件名或允许的名称元组。
     @return: 原生宿主的冻结身份。
     """
     parents = _parents()
+    executables = (executable,) if isinstance(executable, str) else executable
     pid = os.getpid()
     younger = None
     for _ in range(16):
@@ -164,7 +165,7 @@ def hook_frontend(executable):
             born = int(identity["created"])
             if younger is not None and born > younger:
                 raise ValueError("Windows Hook 祖先进程编号已复用")
-            if Path(identity["exe"]).name == executable:
+            if Path(identity["exe"]).name in executables:
                 return identity
             younger = born
         finally:
