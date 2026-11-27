@@ -176,7 +176,7 @@ func (info *RelayInfo) SetFirstResponseTime()
 func GenRelayInfoResponses(c *gin.Context, request *dto.OpenAIResponsesRequest) *RelayInfo
 func RecordRelayChannelUserQuotaUsage(ctx context.Context, relayInfo *relaycommon.RelayInfo, quota int)
 
-func SelectResponsesWebSocketChannel(c *gin.Context, modelName string) (*model.Channel, *types.NewAPIError)
+func SelectResponsesWebSocketChannel(c *gin.Context, modelName string, retryParam *service.RetryParam) (*model.Channel, *types.NewAPIError)
 func ValidateResponsesWebSocketModelAccess(c *gin.Context, modelName string) *types.NewAPIError
 func ResponsesWebSocketChannelSupportsModel(channel *model.Channel, modelName string) bool
 
@@ -195,6 +195,7 @@ responses_compact_passthrough_enabled: boolean
 #### 检测、选渠与能力门禁
 
 - `POST /v1/responses/compact` 是 `v1_path`；裸 `POST /v1/responses` 根据 `compaction_trigger`、`stream:true` 和精确 beta token 区分 `v1_body_bridge` / `v2_http`；`GET /v1/responses` 的 `response.create` 使用同一规则检测 `v2_websocket`。
+- WS 的平铺帧从顶层读取 `stream` 和 `input`。包装帧从同一个 `response` 对象读取这两个字段。命中 V2 后，按完整原始帧发送，保留封套的 `event_id`、未知字段和显式零值。
 - 所有 Compact 模式的 Token 权限、分组、亲和性、首次选渠和真实上游失败后的重试都使用请求中的基础模型，不得生成、查询或要求配置 `*-openai-compact` 模型。
 - 能力开关不能参与选渠筛选。必须先按普通分发和亲和性选定渠道，再读取所选渠道的 `responses_compact_passthrough_enabled`。
 - 开关关闭返回 `503 responses_compact_passthrough_disabled`，同时设置 `skipRetry` 和 `noRecordErrorLog`；不得换渠、清理亲和性、auto-ban、发起上游请求或预扣。
@@ -230,6 +231,9 @@ responses_compact_passthrough_enabled: boolean
 #### Responses WebSocket 生命周期
 
 - 路由先读取首个 `response.create`，再校验基础 model 权限和选择渠道；同一连接只允许一个 active turn，后续 turn 优先复用当前渠道，并重新校验模型与分组资格。
+- 新连接和复用连接遵循同一轮次重试规则。完整输入的首帧明确报告可重试的业务错误时，按当前亲和性、指定渠道和重试次数决定是否换渠。重试复用同一笔预扣，成功日志记在最终渠道。
+- 收到可交付帧、取消、带上游用量或输出的失败帧，或携带 `previous_response_id` 时，保留当前轮次结果。发送后直接断线时关闭客户端连接，关闭码为 1011。
+- 失败轮次的退款须在向客户端发终态前对下一轮鉴权和预扣可见。内部 POST 已移除握手头，计费会话使用实际客户端连接识别 WS。并发鉴权在预扣期间标记耗尽的有效 Key，退款转正时恢复可用。管理员停用及到期的 Key 继续拒绝请求。
 - 当前渠道失去资格时，先关闭旧上游并释放尚持有的请求租约。没有 `previous_response_id` 的完整请求复用首轮选渠与 connector，在同一客户端连接上切换上游；Token 权限、指定渠道、亲和性、Compact 能力与预算检查继续生效。
 - 带非空 `previous_response_id` 的增量不得跨渠道转发或删 ID 后当作完整请求发送；返回 `400 previous_response_not_found`、`error.param=previous_response_id` 并关闭连接，由客户端重连后携带完整历史重试。此拒绝发生在本轮预扣与上游发送前。
 - 本地 WS 错误封套包含数字 `status`，与 `NewAPIError.StatusCode` 一致；恢复信号沿用 [OpenAI WebSocket 恢复协议](https://developers.openai.com/api/docs/guides/websocket-mode#reconnect-and-recover)。
@@ -314,7 +318,7 @@ responses_compact_passthrough_enabled: boolean
 - HTTP 同渠道降级：三种 HTTP Compact 模式覆盖来源超限后切换目标成功、跨渠道保持来源 429、目标预算耗尽和能力关闭；断言只有顶层 `model` 改变，目标模型唯一计费和累计，失败时零上游、零扣费、零消费日志且不第三跳。
 - HTTP：使用真实 `httptest` 上游断言 OpenAI/Codex 路径矩阵、原始 body、Channel Authorization、客户端 Cookie/Authorization 过滤、JSON/SSE 原始响应和安全响应头。
 - usage：覆盖完整非零、完整显式零、缺失/null、不完整、负数、超过 `common.MaxQuota`、总数不一致、失败终态和不完整流；断言只结算一次或退款。
-- WebSocket：覆盖原始 frame、基础模型计费、开关关闭不 failover、多 turn 普通/Compact 交替、completed 非法 usage 退款、失败/取消/断连退款。
+- WebSocket：用平铺与包装帧逐字节比对上游请求。验证仅够一轮时失败后立即续轮、首帧过载换渠、歧义断线的备用调用为零以及最终渠道只结算一次。覆盖原始 frame、基础模型计费、开关关闭不 failover、多 turn 普通/Compact 交替、completed 非法 usage 退款、失败/取消/断连退款。
 - WebSocket 首响应：使用 `GenRelayInfoResponses` 等生产入口初始化夹具，避免手写 RelayInfo 遗漏私有首次标记；覆盖 `response.created`、后续帧不覆盖、逐轮重建、仅 Ping/Pong 和真实连接每轮消费日志。对应 `TestResponsesWebSocketFirstResponseTiming*` 与 `TestProxyResponsesWebSocketSupportsOrdinaryCompactAndOrdinaryTurns`。
 - WebSocket 选渠：覆盖 Token 权限、指定渠道启用/禁用、亲和性命中、亲和性失效清理、auto group、随机选渠的 Advanced Custom path/model 过滤、context 初始化和后续 turn 当前渠道能力。
 - WebSocket 变更恢复：在缓存开启和关闭时覆盖完整请求重选、增量恢复后完整重放、无可用替代渠道、Token 权限拒绝；使用共享父并发上限验证先释放旧租约，再获取新租约，并核对实际转发历史与逐轮消费日志归属。

@@ -272,16 +272,18 @@ func TestRestoreConnectionContextRejectsChangedAdvancedCustomRoute(t *testing.T)
 	require.True(t, ok)
 	session := &responsesWSSession{lockedChannelID: channel.Id, lockedModel: "ws-model", lockedKey: "sk-test", lockedRoute: route,
 		lockedContext: map[constant.ContextKey]any{constant.ContextKeyChannelBaseUrl: channel.GetBaseURL(), constant.ContextKeyChannelHeaderOverride: channel.GetHeaderOverride()}}
-	require.Nil(t, session.restoreConnectionContext(c, "ws-model"))
+	_, restoreErr := session.restoreConnectionContext(c, "ws-model")
+	require.Nil(t, restoreErr)
 
 	// Request-level edits (model list, explicit none converter) keep the connection.
 	channel.SetOtherSettings(dto.ChannelOtherSettings{AdvancedCustom: &dto.AdvancedCustomConfig{Routes: []dto.AdvancedCustomRoute{{IncomingPath: "/v1/responses", UpstreamPath: "/v1/responses", Converter: "none", Models: []string{"ws-model", "other-model"}}}}})
 	require.NoError(t, database.Model(channel).Update("settings", channel.OtherSettings).Error)
-	require.Nil(t, session.restoreConnectionContext(c, "ws-model"))
+	_, restoreErr = session.restoreConnectionContext(c, "ws-model")
+	require.Nil(t, restoreErr)
 
 	channel.SetOtherSettings(dto.ChannelOtherSettings{AdvancedCustom: &dto.AdvancedCustomConfig{Routes: []dto.AdvancedCustomRoute{{IncomingPath: "/v1/responses", UpstreamPath: "/v2/responses"}}}})
 	require.NoError(t, database.Model(channel).Update("settings", channel.OtherSettings).Error)
-	apiErr := session.restoreConnectionContext(c, "ws-model")
+	_, apiErr := session.restoreConnectionContext(c, "ws-model")
 	require.NotNil(t, apiErr)
 	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
 	assert.ErrorContains(t, apiErr, "upstream route changed")
@@ -327,7 +329,7 @@ func TestResponsesWSChannelRoutingRequiresExplicitOptIn(t *testing.T) {
 	require.NoError(t, database.Model(enabled).Update("setting", enabled.Setting).Error)
 	model.InitChannelCache()
 	session := &responsesWSSession{lockedChannelID: enabled.Id, lockedModel: "ws-model"}
-	apiErr = session.restoreConnectionContext(c, "ws-model")
+	_, apiErr = session.restoreConnectionContext(c, "ws-model")
 	require.NotNil(t, apiErr)
 	assert.Equal(t, http.StatusForbidden, apiErr.StatusCode)
 	channel, apiErr = middleware.SelectResponsesWebSocketChannel(c, "ws-model", params)

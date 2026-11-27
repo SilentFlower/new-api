@@ -11,6 +11,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	appdto "github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relaykit/dto"
@@ -28,6 +29,7 @@ import (
 
 // 验证完整 Relay 路由中的一次降级、拒绝与恢复，不绕开预扣或并发收口。
 func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
+	require.NoError(t, i18n.Init())
 	previous, err := common.Marshal(ratio_setting.GetModelRatioCopy())
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"gpt-4o-mini":2}`))

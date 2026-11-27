@@ -28,6 +28,7 @@ import (
 	"github.com/QuantumNous/new-api/service"
 	"github.com/QuantumNous/new-api/setting"
 	"github.com/QuantumNous/new-api/setting/config"
+	"github.com/QuantumNous/new-api/setting/operation_setting"
 	"github.com/alicebob/miniredis/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/go-redis/redis/v8"
@@ -1452,11 +1453,65 @@ func TestResponsesWebSocketPreRoutingRejectionsFollowHealthClassification(t *tes
 	}
 }
 
+// TestResponsesWebSocketRefundBeforeNextTurn 验证客户端收到失败终态后可以立即复用仅够一次预扣的余额。
+// @param t 测试上下文。
+func TestResponsesWebSocketRefundBeforeNextTurn(t *testing.T) {
+	for _, useRedis := range []bool{false, true} {
+		t.Run(fmt.Sprintf("redis=%t", useRedis), func(t *testing.T) {
+			const create = `{"type":"response.create","model":"ws-billing","input":"hello"}`
+			fixture := newResponsesWSBillingTest(t, `tier("request", fixed(0.002))`, func(ws *websocket.Conn, _ *http.Request) {
+				for _, terminal := range []string{
+					`{"type":"response.failed","response":{"id":"one","status":"failed"}}`,
+					`{"type":"response.completed","response":{"id":"two","usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}}`,
+				} {
+					if _, _, err := ws.ReadMessage(); err != nil {
+						return
+					}
+					if err := ws.WriteMessage(websocket.TextMessage, []byte(terminal)); err != nil {
+						return
+					}
+				}
+				_, _, _ = ws.ReadMessage()
+			})
+			previousRetry, previousRedis := common.RetryTimes, common.RedisEnabled
+			common.RetryTimes, common.RedisEnabled = 0, useRedis
+			t.Cleanup(func() { common.RetryTimes, common.RedisEnabled = previousRetry, previousRedis })
+			require.NoError(t, model.DB.Model(fixture.user).Update("quota", 1000).Error)
+			require.NoError(t, model.DB.Model(fixture.token).Update("remain_quota", 1000).Error)
+			// 握手已缓存夹具的初始额度，使下一次读取从设置好的余额开始。
+			require.NoError(t, common.RDB.FlushDB(t.Context()).Err())
+			require.NoError(t, fixture.client.WriteMessage(websocket.TextMessage, []byte(create)))
+			require.Equal(t, "response.failed", readResponsesWSTestEvent(t, fixture.client)["type"])
+			require.NoError(t, fixture.client.WriteMessage(websocket.TextMessage, []byte(create)))
+			require.Equal(t, "response.completed", readResponsesWSTestEvent(t, fixture.client)["type"])
+			fixture.closeAndWait(t)
+			require.NoError(t, model.DB.First(fixture.user, fixture.user.Id).Error)
+			require.NoError(t, model.DB.First(fixture.token, fixture.token.Id).Error)
+			assert.Zero(t, fixture.user.Quota)
+			assert.Zero(t, fixture.token.RemainQuota)
+			assert.Equal(t, 1000, fixture.token.UsedQuota)
+		})
+	}
+}
+
 // TestResponsesWebSocketRetryBeforeDelivery 验证首个业务错误可以换渠，已交付的内容只发送一次。
 // @param t 测试上下文。
 func TestResponsesWebSocketRetryBeforeDelivery(t *testing.T) {
-	for _, partial := range []bool{false, true} {
-		t.Run(fmt.Sprintf("partial=%t", partial), func(t *testing.T) {
+	for _, tc := range []struct {
+		name                                                   string
+		reuse, partial, previous, disconnect, strict, hasUsage bool
+	}{
+		{name: "新连接首帧过载"},
+		{name: "已有输出", partial: true},
+		{name: "复用连接首帧过载", reuse: true},
+		{name: "复用连接已有输出", reuse: true, partial: true},
+		{name: "增量请求依赖原渠道", reuse: true, previous: true},
+		{name: "严格亲和保留原渠道", reuse: true, strict: true},
+		{name: "首个失败帧已有用量", reuse: true, hasUsage: true},
+		{name: "首帧前断开", disconnect: true},
+		{name: "复用连接首帧前断开", reuse: true, disconnect: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			const failure = `{"type":"response.failed","response":{"id":"first","status":"failed","error":{"type":"server_error","code":"server_is_overloaded","message":"retry later"}}}`
 			var primary, secondary atomic.Int32
 			fixture := newResponsesWSBillingTest(t, `tier("request", fixed(0.002))`, func(ws *websocket.Conn, r *http.Request) {
@@ -1468,13 +1523,39 @@ func TestResponsesWebSocketRetryBeforeDelivery(t *testing.T) {
 					assert.NoError(t, ws.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.completed","response":{"id":"second","status":"completed","usage":{"input_tokens":10,"output_tokens":1,"total_tokens":11}}}`)))
 				} else {
 					primary.Add(1)
-					if partial {
+					if tc.reuse {
+						warmup := `{"type":"response.completed","response":{"id":"warmup","usage":{"input_tokens":1,"output_tokens":0,"total_tokens":1}}}`
+						if !assert.NoError(t, ws.WriteMessage(websocket.TextMessage, []byte(warmup))) {
+							return
+						}
+						if _, _, err := ws.ReadMessage(); !assert.NoError(t, err) {
+							return
+						}
+						primary.Add(1)
+					}
+					if tc.disconnect {
+						return
+					}
+					if tc.partial {
 						assert.NoError(t, ws.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.output_text.delta","delta":"partial"}`)))
 					}
-					assert.NoError(t, ws.WriteMessage(websocket.TextMessage, []byte(failure)))
+					frame := failure
+					if tc.hasUsage {
+						frame = strings.Replace(failure, `"status":"failed"`, `"status":"failed","usage":{"input_tokens":10,"output_tokens":1,"total_tokens":11}`, 1)
+					}
+					assert.NoError(t, ws.WriteMessage(websocket.TextMessage, []byte(frame)))
 				}
 				_, _, _ = ws.ReadMessage()
 			})
+			if tc.strict {
+				affinity := operation_setting.GetChannelAffinitySetting()
+				saved := *affinity
+				t.Cleanup(func() { *affinity = saved })
+				*affinity = operation_setting.ChannelAffinitySetting{Enabled: true, DefaultTTLSeconds: 60, Rules: []operation_setting.ChannelAffinityRule{{
+					Name: "ws-strict-refund", SessionMode: "strict", ModelRegex: []string{"^ws-billing$"},
+					KeySources: []operation_setting.ChannelAffinityKeySource{{Type: "context_int", Key: "id"}},
+				}}}
+			}
 			savedRetries := common.RetryTimes
 			common.RetryTimes = 1
 			t.Cleanup(func() { common.RetryTimes = savedRetries })
@@ -1483,21 +1564,44 @@ func TestResponsesWebSocketRetryBeforeDelivery(t *testing.T) {
 			peer.SetSetting(fixture.channel.GetSetting())
 			require.NoError(t, model.DB.Create(peer).Error)
 			require.NoError(t, model.DB.Create(&model.Ability{ChannelId: peer.Id, Group: peer.Group, Model: peer.Models, Enabled: true}).Error)
-			require.NoError(t, fixture.client.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.create","model":"ws-billing","input":"retry test"}`)))
-			event := readResponsesWSTestEvent(t, fixture.client)
-			if partial {
-				assert.Equal(t, "partial", event["delta"])
+			const complete = `{"type":"response.create","model":"ws-billing","input":"retry test"}`
+			quotas := []int{}
+			primaryCalls := 1
+			if tc.reuse {
+				require.NoError(t, fixture.client.WriteMessage(websocket.TextMessage, []byte(complete)))
+				require.Equal(t, "response.completed", readResponsesWSTestEvent(t, fixture.client)["type"])
+				quotas = append(quotas, 1000)
+				primaryCalls++
+			}
+			request := complete
+			if tc.previous {
+				request = `{"type":"response.create","model":"ws-billing","previous_response_id":"warmup","input":"continue"}`
+			}
+			require.NoError(t, fixture.client.WriteMessage(websocket.TextMessage, []byte(request)))
+			switch {
+			case tc.disconnect:
+				_, _, err := fixture.client.ReadMessage()
+				assert.True(t, websocket.IsCloseError(err, websocket.CloseInternalServerErr), "%v", err)
+			case tc.partial:
+				assert.Equal(t, "partial", readResponsesWSTestEvent(t, fixture.client)["delta"])
 				assert.Equal(t, "response.failed", readResponsesWSTestEvent(t, fixture.client)["type"])
-				fixture.closeAndWait(t)
-				assertResponsesWSAccounting(t, fixture, nil)
+			case tc.previous || tc.strict || tc.hasUsage:
+				assert.Equal(t, "response.failed", readResponsesWSTestEvent(t, fixture.client)["type"])
+			default:
+				assert.Equal(t, "response.completed", readResponsesWSTestEvent(t, fixture.client)["type"])
+				quotas = append(quotas, 1000)
+			}
+			fixture.closeAndWait(t)
+			assertResponsesWSAccounting(t, fixture, quotas)
+			assert.EqualValues(t, primaryCalls, primary.Load())
+			if tc.disconnect || tc.partial || tc.previous || tc.strict || tc.hasUsage {
 				assert.Zero(t, secondary.Load())
 			} else {
-				assert.Equal(t, "response.completed", event["type"], "%v", event)
-				fixture.closeAndWait(t)
-				assertResponsesWSAccounting(t, fixture, []int{1000})
 				assert.EqualValues(t, 1, secondary.Load())
+				var log model.Log
+				require.NoError(t, model.LOG_DB.Where("type = ?", model.LogTypeConsume).Order("id DESC").First(&log).Error)
+				assert.Equal(t, peer.Id, log.ChannelId)
 			}
-			assert.EqualValues(t, 1, primary.Load())
 		})
 	}
 }

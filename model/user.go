@@ -1338,6 +1338,11 @@ func GetUserSetting(id int, fromDB bool) (settingMap dto.UserSetting, err error)
 	return userBase.GetSetting(), nil
 }
 
+// IncreaseUserQuota 为钱包回补额度，使下一次预扣读取到已退余额。
+// @param id 用户 ID。
+// @param quota 非负的回补额度。
+// @param db 是否要求直接写入数据库。
+// @return 额度校验或持久化错误。
 func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 	if quota < 0 {
 		return errors.New("quota cannot be negative")
@@ -1345,23 +1350,38 @@ func IncreaseUserQuota(id int, quota int, db bool) (err error) {
 	if err := common.ValidateWalletQuota(quota); err != nil {
 		return err
 	}
-	if !db && common.BatchUpdateEnabled {
-		addNewRecord(BatchUpdateTypeUserQuota, id, quota)
-		gopool.Go(func() {
-			if err := cacheIncrUserQuota(id, int64(quota)); err != nil {
-				common.SysLog(common.LogText("failed to increase user quota: %s", err.Error()))
-			}
-		})
+	if db {
+		if err := increaseUserQuota(id, quota); err != nil {
+			return err
+		}
+		syncCreditUserQuotaCache(id, quota, "wallet")
 		return nil
 	}
+	// 余额由数据库校验时，退款也要在返回前落库。只有命中实时余额的缓存才能延迟落库。
+	if !common.RedisEnabled {
+		return increaseUserQuota(id, quota)
+	}
+	result, cacheErr := cacheApplyUserQuotaDelta(id, int64(quota))
+	if cacheErr != nil {
+		common.SysLog(common.LogText("failed to increase user quota: %s", cacheErr.Error()))
+	}
+	if result == cacheQuotaOK && common.BatchUpdateEnabled {
+		addNewRecord(BatchUpdateTypeUserQuota, id, quota)
+		return nil
+	}
+	if result != cacheQuotaOK {
+		if err := flushPendingQuota(BatchUpdateTypeUserQuota, id); err != nil {
+			return err
+		}
+	}
 	if err := increaseUserQuota(id, quota); err != nil {
+		if result == cacheQuotaOK {
+			if _, rollbackErr := cacheApplyUserQuotaDelta(id, -int64(quota)); rollbackErr != nil {
+				common.SysError(common.LogText("failed to compensate user quota credit: %s", rollbackErr.Error()))
+			}
+		}
 		return err
 	}
-	gopool.Go(func() {
-		if err := cacheIncrUserQuota(id, int64(quota)); err != nil {
-			common.SysLog(common.LogText("failed to increase user quota: %s", err.Error()))
-		}
-	})
 	return nil
 }
 
@@ -1385,9 +1405,17 @@ func increaseUserQuota(id int, quota int) (err error) {
 	return ErrWalletQuotaLimitExceeded
 }
 
+// DecreaseUserQuota 按实际消费扣减钱包余额。
+// @param id 用户 ID。
+// @param quota 非负的扣减额度。
+// @param db 是否要求直接写入数据库。
+// @return 额度校验或持久化错误。
 func DecreaseUserQuota(id int, quota int, db bool) (err error) {
 	if quota < 0 {
 		return errors.New("quota cannot be negative")
+	}
+	if !common.RedisEnabled {
+		return decreaseUserQuota(id, quota)
 	}
 	gopool.Go(func() {
 		err := cacheDecrUserQuota(id, int64(quota))

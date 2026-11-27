@@ -129,7 +129,8 @@ func (s *BillingSession) Refund(c *gin.Context) {
 		}
 	}
 	// 下一轮可在同一连接上立即预扣，退款须先对钱包和令牌都可见。
-	if c != nil && c.Request != nil && websocket.IsWebSocketUpgrade(c.Request) {
+	// 每轮内部 POST 会移除握手头，实际客户端连接仍保存在 RelayInfo。
+	if s.relayInfo.ClientWs != nil || (c != nil && c.Request != nil && websocket.IsWebSocketUpgrade(c.Request)) {
 		refund()
 		return
 	}

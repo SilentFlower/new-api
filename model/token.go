@@ -259,7 +259,9 @@ func validateUserToken(key string, fromDB bool) (token *Token, err error) {
 		if !token.UnlimitedQuota && token.RemainQuota <= 0 {
 			if !common.RedisEnabled {
 				token.Status = common.TokenStatusExhausted
-				err := token.SelectUpdate()
+				// 退款和停用都可能与鉴权并发，旧的零余额快照只能更新仍符合条件的行。
+				err := DB.Model(&Token{}).Where("id = ? AND status = ? AND unlimited_quota = ? AND remain_quota <= 0",
+					token.Id, common.TokenStatusEnabled, false).Update("status", common.TokenStatusExhausted).Error
 				if err != nil {
 					common.SysLog(common.LogText("failed to update token status%s", err.Error()))
 				}
@@ -303,6 +305,16 @@ func GetTokenByKey(key string, fromDB bool) (token *Token, err error) {
 			return token, nil
 		}
 		// Don't return error - fall through to DB
+	}
+	if common.RedisEnabled && common.BatchUpdateEnabled {
+		// 缓存重建前按令牌 ID 刷出本节点的预扣，防止把预扣前的余额再次发布。
+		var id int
+		if err := DB.Model(&Token{}).Where(commonKeyCol+" = ?", key).Select("id").Take(&id).Error; err != nil {
+			return nil, err
+		}
+		if err := flushPendingQuota(BatchUpdateTypeTokenQuota, id); err != nil {
+			return nil, err
+		}
 	}
 	token = &Token{}
 	if err = DB.Where(commonKeyCol+" = ?", key).First(token).Error; err != nil {
@@ -393,48 +405,80 @@ func DeleteTokenById(id int, userId int) (err error) {
 	return token.Delete()
 }
 
+// IncreaseTokenQuota 同步归还令牌可用额度并冲回对应的已用额度。
+// @param tokenId 令牌 ID。
+// @param key 定位缓存的令牌值。
+// @param quota 非负的回补额度。
+// @return 额度校验或持久化错误。
 func IncreaseTokenQuota(tokenId int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota cannot be negative")
 	}
-	if common.RedisEnabled {
-		gopool.Go(func() {
-			// 守卫式增量：哈希不存在时跳过，由下次读取从数据库水合，
-			// 绝不创建只有配额字段的残缺哈希。
-			if _, err := cacheApplyTokenQuotaDelta(tokenId, key, int64(quota)); err != nil {
-				common.SysLog(common.LogText("failed to increase token quota: %s", err.Error()))
-			}
-		})
+	if !common.RedisEnabled {
+		return increaseTokenQuota(tokenId, quota)
 	}
-	if common.BatchUpdateEnabled {
+	result, cacheErr := cacheApplyTokenQuotaDelta(tokenId, key, int64(quota))
+	if cacheErr != nil {
+		common.SysLog(common.LogText("failed to increase token quota: %s", cacheErr.Error()))
+	}
+	if result == cacheQuotaOK && common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeTokenQuota, tokenId, quota)
 		return nil
 	}
-	return increaseTokenQuota(tokenId, quota)
+	if result != cacheQuotaOK {
+		if err := flushPendingQuota(BatchUpdateTypeTokenQuota, tokenId); err != nil {
+			return err
+		}
+	}
+	if err := increaseTokenQuota(tokenId, quota); err != nil {
+		if result == cacheQuotaOK {
+			if _, rollbackErr := cacheApplyTokenQuotaDelta(tokenId, key, -int64(quota)); rollbackErr != nil {
+				common.SysError(common.LogText("failed to compensate token quota credit: %s", rollbackErr.Error()))
+			}
+		}
+		return err
+	}
+	return nil
 }
 
 func increaseTokenQuota(id int, quota int) (err error) {
-	err = DB.Model(&Token{}).Where("id = ?", id).Updates(
-		map[string]any{
-			"remain_quota":  gorm.Expr("remain_quota + ?", quota),
-			"used_quota":    gorm.Expr("used_quota - ?", quota),
-			"accessed_time": common.GetTimestamp(),
-		},
-	).Error
-	return err
+	updates := map[string]any{
+		"remain_quota":  gorm.Expr("remain_quota + ?", quota),
+		"used_quota":    gorm.Expr("used_quota - ?", quota),
+		"accessed_time": common.GetTimestamp(),
+	}
+	if quota <= 0 || common.RedisEnabled {
+		return DB.Model(&Token{}).Where("id = ?", id).Updates(updates).Error
+	}
+	// 另一请求可能在预扣期间把 Key 标为耗尽。在同一事务内只恢复刚由非正变为正数的有效 Key。
+	return DB.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&Token{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+			return err
+		}
+		return tx.Model(&Token{}).
+			Where("id = ? AND status = ? AND remain_quota > 0 AND remain_quota <= ?", id, common.TokenStatusExhausted, quota).
+			Where("(expired_time = -1 OR expired_time >= ?)", common.GetTimestamp()).
+			Update("status", common.TokenStatusEnabled).Error
+	})
 }
 
+// DecreaseTokenQuota 扣减令牌余额并累计已用额度。
+// @param id 令牌 ID。
+// @param key 定位缓存的令牌值。
+// @param quota 非负的扣减额度。
+// @return 额度校验或持久化错误。
 func DecreaseTokenQuota(id int, key string, quota int) (err error) {
 	if quota < 0 {
 		return errors.New("quota cannot be negative")
 	}
-	if common.RedisEnabled {
-		gopool.Go(func() {
-			if _, err := cacheApplyTokenQuotaDelta(id, key, int64(-quota)); err != nil {
-				common.SysLog(common.LogText("failed to decrease token quota: %s", err.Error()))
-			}
-		})
+	if !common.RedisEnabled {
+		return decreaseTokenQuota(id, quota)
 	}
+	gopool.Go(func() {
+		if _, err := cacheApplyTokenQuotaDelta(id, key, int64(-quota)); err != nil {
+			common.SysLog(common.LogText("failed to decrease token quota: %s", err.Error()))
+		}
+	})
 	if common.BatchUpdateEnabled {
 		addNewRecord(BatchUpdateTypeTokenQuota, id, -quota)
 		return nil

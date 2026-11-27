@@ -109,14 +109,15 @@ type responsesWSSession struct {
 	workers        sync.WaitGroup
 	closeOnce      sync.Once
 
-	clientWriteMu sync.Mutex
-	targetWriteMu sync.Mutex
-	connectionMu  sync.Mutex
-	target        *websocket.Conn
-	targetDone    chan struct{}
-	unregister    func()
-	stateMu       sync.Mutex
-	current       *responsesWSCallState
+	clientWriteMu    sync.Mutex
+	targetWriteMu    sync.Mutex
+	connectionMu     sync.Mutex
+	target           *websocket.Conn
+	targetDone       chan struct{}
+	targetReaderDone chan struct{}
+	unregister       func()
+	stateMu          sync.Mutex
+	current          *responsesWSCallState
 
 	// clientWriteBudget is guarded by clientWriteMu.
 	clientWriteBudget helper.StreamWriteBudget
@@ -335,7 +336,6 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 	service.GetChannelConstraints(c).AddFilter(appdto.ChannelFilter{Kind: appdto.FilterRequestPath, RequestPath: c.Request.URL.Path})
 
 	// 每轮重新读取限制与计价，拨号重试时复用原预扣会话。
-	var pendingControl, sentControl []byte
 	prepareAttempt := func() *types.NewAPIError {
 		if err := checkChannelUserQuotaLimits(c); err != nil {
 			return err
@@ -369,10 +369,12 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		}
 		return buildResponsesWSCreatePayload(c, info, create.Request, create.Generate, create.StreamID, create.Body)
 	}
+	var channel *appmodel.Channel
 	if s.lockedChannelID != 0 {
-		if restoreErr := s.restoreConnectionContext(c, modelName); restoreErr != nil {
-			if !errors.Is(restoreErr.Err, errResponsesWSChannelMoved) {
-				return restoreErr
+		channel, apiErr = s.restoreConnectionContext(c, modelName)
+		if apiErr != nil {
+			if !errors.Is(apiErr.Err, errResponsesWSChannelMoved) {
+				return apiErr
 			}
 			s.retireTarget()
 			if create.Request.PreviousResponseID != "" {
@@ -381,166 +383,107 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			}
 		}
 	}
-	if s.lockedChannelID != 0 {
-		info = relaycommon.GenRelayInfoResponses(c, &create.Request)
-		info.IsStream = true
-		info.SetRequestPluginIngress(ingressSteps, ingressRecord)
-		common.SetContextKey(c, appconstant.ContextKeyIsStream, true)
-		if apiErr = prepareAttempt(); apiErr != nil {
-			return apiErr
-		}
-		billingPrepared = true
-		var payload []byte
-		payload, apiErr = buildPayload()
-		if apiErr != nil {
-			recordResponsesWSPluginError(c, info, apiErr)
-			return apiErr
-		}
-		s.lockedModel = modelName
-		if err := s.writeTarget(websocket.TextMessage, payload); err != nil {
-			state.closeCode = websocket.CloseInternalServerErr
-			return types.NewError(err, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
-		}
-	} else {
-		retry := &service.RetryParam{Ctx: c, TokenGroup: common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup), ModelName: modelName, RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0)}
-		for ; retry.GetRetry() <= common.RetryTimes; retry.IncreaseRetry() {
-			var channel *appmodel.Channel
+	retry := &service.RetryParam{Ctx: c, TokenGroup: common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup), ModelName: modelName, RequestPath: c.Request.URL.Path, Retry: common.GetPointer(0)}
+	for {
+		reuse := s.lockedChannelID != 0
+		if !reuse {
 			channel, apiErr = middleware.SelectResponsesWebSocketChannel(c, modelName, retry)
 			if apiErr != nil {
 				state.closeCode = websocket.CloseInternalServerErr
 				return apiErr
 			}
-			service.AppendUsedChannel(c, channel.Id)
-			if info == nil {
-				info = relaycommon.GenRelayInfoResponses(c, &create.Request)
-				info.IsStream = true
-				info.SetRequestPluginIngress(ingressSteps, ingressRecord)
-				common.SetContextKey(c, appconstant.ContextKeyIsStream, true)
-			}
-			if apiErr = prepareAttempt(); apiErr != nil {
-				return apiErr
-			}
-			billingPrepared = true
-			info.RetryIndex = retry.GetRetry()
+		}
+		service.AppendUsedChannel(c, channel.Id)
+		if info == nil {
+			info = relaycommon.GenRelayInfoResponses(c, &create.Request)
+			info.ClientWs = s.client
+			info.IsStream = true
+			info.SetRequestPluginIngress(ingressSteps, ingressRecord)
+			common.SetContextKey(c, appconstant.ContextKeyIsStream, true)
+		}
+		if apiErr = prepareAttempt(); apiErr != nil {
+			return apiErr
+		}
+		billingPrepared = true
+		info.RetryIndex = retry.GetRetry()
+		if !reuse {
 			policy.BeginAttempt(channel, info.UsingGroup)
-			var payload []byte
-			payload, apiErr = buildPayload()
-			if apiErr != nil {
-				recordResponsesWSPluginError(c, info, apiErr)
-				return apiErr
-			}
+		}
+		payload, payloadErr := buildPayload()
+		if payloadErr != nil {
+			recordResponsesWSPluginError(c, info, payloadErr)
+			return payloadErr
+		}
+		var dialErr error
+		if !reuse {
 			adaptor := GetAdaptor(info.ApiType)
 			adaptor.Init(info)
-			target, dialErr := relaychannel.DoWssRequest(adaptor, c, info, nil)
-			var first []responsesWSMessage
+			var target *websocket.Conn
+			target, dialErr = relaychannel.DoWssRequest(adaptor, c, info, nil)
 			if dialErr == nil {
 				if !s.setTarget(target) {
 					return types.NewError(context.Canceled, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
 				}
-				if err := s.writeTarget(websocket.TextMessage, payload); err != nil {
-					s.retireTarget()
-					return types.NewError(err, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
-				}
-				// 首个业务错误只有在没有续接 ID 且尚未向客户端写入时才可换渠。
-				if retry.GetRetry() < common.RetryTimes && create.Request.PreviousResponseID == "" {
-					firstFrame := make(chan responsesWSMessage, 1)
-					limit := int64(helper.DefaultMaxScannerBufferSize)
-					if appconstant.StreamScannerMaxBufferMB > 0 {
-						limit = int64(appconstant.StreamScannerMaxBufferMB) << 20
-					}
-					target.SetReadLimit(limit)
-					idle := time.Duration(appconstant.StreamingTimeout) * time.Second
-					if idle <= 0 {
-						idle = 300 * time.Second
-					}
-					_ = target.SetReadDeadline(time.Now().Add(idle))
-					s.workers.Go(func() {
-						kind, body, err := target.ReadMessage()
-						firstFrame <- responsesWSMessage{kind: kind, body: body, err: err}
-					})
-					var lost <-chan struct{}
-					if guard != nil {
-						lost = guard.lease.LostSignal()
-					}
-					// 客户端在首帧前也能取消。发出取消后重试会重复执行同一轮。
-				waitFirst:
-					for {
-						select {
-						case message := <-firstFrame:
-							first = []responsesWSMessage{message}
-							break waitFirst
-						case control := <-state.controls:
-							if pendingControl != nil || sentControl != nil {
-								s.sendError(control.eventID, control.streamID, newResponsesWSInvalidRequestError(errors.New("a response control event is already pending")))
-							} else if create.StreamID == "" && control.streamID == "" && ojson.GetBytesNoCopy(control.body, "response_id").String() == "" {
-								if err := s.writeTarget(websocket.TextMessage, control.body); err != nil {
-									s.retireTarget()
-									return types.NewError(err, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
-								}
-								sentControl = control.body
-							} else {
-								pendingControl = control.body
-							}
-						case <-lost:
-							s.retireTarget()
-							state.closeCode = websocket.CloseInternalServerErr
-							return newChannelUserConcurrencyError(service.ErrChannelUserConcurrencyUnavailable)
-						case <-c.Request.Context().Done():
-							s.retireTarget()
-							return types.NewError(c.Request.Context().Err(), types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
-						}
-					}
-					_ = target.SetReadDeadline(time.Time{})
-					body := first[0].body
-					if first[0].err == nil && sentControl == nil && pendingControl == nil && (ojson.GetBytesNoCopy(body, "stream_id").String() == "" || ojson.GetBytesNoCopy(body, "stream_id").String() == create.StreamID) {
-						if rejected, _ := responsesWebSocketUpstreamBusinessError(body); rejected != nil && service.DecideRelayRetry(c, rejected, common.RetryTimes-retry.GetRetry()).Action == "retry" {
-							dialErr = rejected
-							s.retireTarget()
-						}
-					}
-				}
+				s.bindResponsesChannel(c, channel, info, modelName)
+				s.startTargetReader(target)
 			}
-			if dialErr != nil {
-				apiErr = service.NormalizeViolationFeeError(types.NewError(dialErr, types.ErrorCodeDoRequestFailed))
-				service.ResetStatusCode(apiErr, c.GetString("status_code_mapping"))
-				info.LastError = apiErr
-				decision := service.DecideRelayRetry(c, apiErr, common.RetryTimes-retry.GetRetry())
-				service.RecordPolicyFailure(c, channel.Id, apiErr, decision)
-				service.ProcessChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, info.ApiKey, channel.GetAutoBan()), apiErr, info)
-				if decision.Action == "retry" {
-					if lost := finishChannelUserConcurrency(c, guard, nil); lost != nil {
-						return lost
-					}
-					guard = nil
-					continue
-				}
+		}
+		remaining := common.RetryTimes - retry.GetRetry()
+		if dialErr != nil {
+			apiErr = service.NormalizeViolationFeeError(types.NewError(dialErr, types.ErrorCodeDoRequestFailed))
+			service.ResetStatusCode(apiErr, c.GetString("status_code_mapping"))
+		} else {
+			s.lockedModel = modelName
+			if err := s.writeTarget(websocket.TextMessage, payload); err != nil {
+				state.closeCode = websocket.CloseInternalServerErr
+				return types.NewError(err, types.ErrorCodeBadResponse, types.ErrOptionWithSkipRetry())
+			}
+			var retryable bool
+			apiErr, stopErr, retryable = s.readResponsesTurn(c, state, create, info, guard, remaining)
+			if !retryable {
 				return apiErr
 			}
-			s.lockedModel, s.lockedChannelID, s.lockedGroup = modelName, channel.Id, info.UsingGroup
-			s.lockedKey, s.lockedKeyIndex = info.ApiKey, info.ChannelMultiKeyIndex
-			s.lockedRoute, _ = connectionOtherSettings(c, channel).AdvancedCustom.MatchPathForModel(c.Request.URL.Path, modelName)
-			s.lockedContext = make(map[appconstant.ContextKey]any)
-			for _, key := range []appconstant.ContextKey{
-				appconstant.ContextKeyChannelId, appconstant.ContextKeyChannelName, appconstant.ContextKeyChannelType,
-				appconstant.ContextKeyChannelCreateTime, appconstant.ContextKeyChannelSetting, appconstant.ContextKeyChannelOtherSetting,
-				appconstant.ContextKeyChannelParamOverride, appconstant.ContextKeyChannelHeaderOverride, appconstant.ContextKeyChannelOrganization,
-				appconstant.ContextKeyChannelAutoBan, appconstant.ContextKeyChannelModelMapping, appconstant.ContextKeyChannelStatusCodeMapping,
-				appconstant.ContextKeyChannelIsMultiKey, appconstant.ContextKeyChannelMultiKeyIndex, appconstant.ContextKeyChannelKey, appconstant.ContextKeyChannelBaseUrl,
-				appconstant.ContextKeyUpstreamRequestOrigin, appconstant.ContextKeyProviderPlugin,
-			} {
-				if value, ok := c.Get(string(key)); ok {
-					s.lockedContext[key] = value
-				}
-			}
-			s.registerChannelClose(channel.Id)
-			s.startTargetReader(target, first...)
-			apiErr = nil
-			break
+			s.retireTarget()
 		}
-		if apiErr != nil {
+		info.LastError = apiErr
+		decision := service.DecideRelayRetry(c, apiErr, remaining)
+		service.RecordPolicyFailure(c, channel.Id, apiErr, decision)
+		service.ProcessChannelError(c, *types.NewChannelError(channel.Id, channel.Type, channel.Name, channel.ChannelInfo.IsMultiKey, info.ApiKey, channel.GetAutoBan()), apiErr, info)
+		if remaining <= 0 || decision.Action != "retry" || create.Request.PreviousResponseID != "" {
 			return apiErr
 		}
+		if lost := finishChannelUserConcurrency(c, guard, nil); lost != nil {
+			return lost
+		}
+		guard = nil
+		retry.IncreaseRetry()
 	}
+}
+
+// bindResponsesChannel 保存物理连接的信息，供后续轮次重新校验和复用。
+func (s *responsesWSSession) bindResponsesChannel(c *gin.Context, channel *appmodel.Channel, info *relaycommon.RelayInfo, modelName string) {
+	s.lockedModel, s.lockedChannelID, s.lockedGroup = modelName, channel.Id, info.UsingGroup
+	s.lockedKey, s.lockedKeyIndex = info.ApiKey, info.ChannelMultiKeyIndex
+	s.lockedRoute, _ = connectionOtherSettings(c, channel).AdvancedCustom.MatchPathForModel(c.Request.URL.Path, modelName)
+	s.lockedContext = make(map[appconstant.ContextKey]any)
+	for _, key := range []appconstant.ContextKey{
+		appconstant.ContextKeyChannelId, appconstant.ContextKeyChannelName, appconstant.ContextKeyChannelType,
+		appconstant.ContextKeyChannelCreateTime, appconstant.ContextKeyChannelSetting, appconstant.ContextKeyChannelOtherSetting,
+		appconstant.ContextKeyChannelParamOverride, appconstant.ContextKeyChannelHeaderOverride, appconstant.ContextKeyChannelOrganization,
+		appconstant.ContextKeyChannelAutoBan, appconstant.ContextKeyChannelModelMapping, appconstant.ContextKeyChannelStatusCodeMapping,
+		appconstant.ContextKeyChannelIsMultiKey, appconstant.ContextKeyChannelMultiKeyIndex, appconstant.ContextKeyChannelKey, appconstant.ContextKeyChannelBaseUrl,
+		appconstant.ContextKeyUpstreamRequestOrigin, appconstant.ContextKeyProviderPlugin,
+	} {
+		if value, ok := c.Get(string(key)); ok {
+			s.lockedContext[key] = value
+		}
+	}
+	s.registerChannelClose(channel.Id)
+}
+
+// readResponsesTurn 处理当前物理渠道的一轮响应，只允许首个明确业务拒绝进入重试。
+func (s *responsesWSSession) readResponsesTurn(c *gin.Context, state *responsesWSCallState, create responsesWSCreateRequest, info *relaycommon.RelayInfo, guard *channelUserConcurrencyGuard, remaining int) (apiErr, stopErr *types.NewAPIError, retry bool) {
+	var pendingControl, sentControl []byte
 
 	// The request plugins' reply check reads the text of the response before
 	// the client gets it; without a reply or report instance the events go
@@ -582,14 +525,14 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 	settle := func(completed bool) {
 		// 已确认沿用 build-bak 的轮次账务规则，失败、断连和缺失 usage 都退回本轮预扣。
 		if !completed {
-			if compact.IsCompact() {
+			if info.IsResponsesCompact() {
 				refundResponsesCompactPassthrough(c, info, cmp.Or(compactObserver.terminalType, "interrupted"))
 			} else if info.Billing != nil {
 				info.Billing.Refund(c)
 			}
 			return
 		}
-		if !compact.IsCompact() {
+		if !info.IsResponsesCompact() {
 			ConsumeResponsesQuota(c, info, accumulator.Finish())
 			return
 		}
@@ -613,6 +556,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 	if guard != nil {
 		leaseLost = guard.lease.LostSignal()
 	}
+	first := true
 	accepted := false
 	// cancelled is set once the response.cancel of a stop went upstream.
 	cancelled := false
@@ -620,7 +564,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 		select {
 		case <-leaseLost:
 			state.closeCode = websocket.CloseInternalServerErr
-			return newChannelUserConcurrencyError(service.ErrChannelUserConcurrencyUnavailable)
+			return newChannelUserConcurrencyError(service.ErrChannelUserConcurrencyUnavailable), stopErr, false
 		case incoming := <-state.inbox:
 			idle.Reset(timeout)
 			if incoming.err != nil {
@@ -628,14 +572,33 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonScannerErr, incoming.err)
 				state.closeCode, state.closeReason = websocket.CloseInternalServerErr, "upstream connection closed"
 				settle(false)
-				return nil
+				return nil, stopErr, false
 			}
-			info.SetFirstResponseTime()
 			var event struct {
 				dto.ResponsesStreamResponse
-				StreamID string `json:"stream_id"`
+				StreamID   string `json:"stream_id"`
+				ResponseID string `json:"response_id"`
 			}
-			if err := common.Unmarshal(incoming.body, &event); err != nil {
+			decodeErr := common.Unmarshal(incoming.body, &event)
+			sameStream := event.StreamID == "" || event.StreamID == create.StreamID
+			if decodeErr == nil && sameStream && s.lastResponseID != "" && ((event.Response != nil && event.Response.ID == s.lastResponseID) || (event.Type == "error" && event.ResponseID == s.lastResponseID)) {
+				continue
+			}
+			// 换渠只接受本轮首个明确的拒绝。任何已交付的帧、续接请求或取消都关闭重试窗口。
+			canReplay := first && remaining > 0 && create.Request.PreviousResponseID == "" &&
+				pendingControl == nil && sentControl == nil && len(state.controls) == 0
+			hasUpstreamWork := event.Response != nil && (len(event.Response.Output) > 0 || event.Response.Usage != nil)
+			if canReplay && decodeErr == nil && sameStream && !hasUpstreamWork {
+				if rejected, _ := responsesWebSocketUpstreamBusinessError(incoming.body); rejected != nil {
+					service.ResetStatusCode(rejected, c.GetString("status_code_mapping"))
+					if service.ShouldRetryRelayError(c, rejected, remaining) {
+						return rejected, nil, true
+					}
+				}
+			}
+			first = false
+			info.SetFirstResponseTime()
+			if decodeErr != nil {
 				info.StreamStatus.RecordError("invalid upstream websocket event")
 			} else {
 				if event.Type != "error" && event.StreamID != "" && event.StreamID != create.StreamID {
@@ -644,17 +607,9 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 					}
 					continue
 				}
-				// A repeated terminal from the previous response must never finish
-				// a subsequent request on this persistent connection.
-				if event.Response != nil && event.Response.ID != "" && event.Response.ID == s.lastResponseID {
-					continue
-				}
 				if event.Type == "error" {
 					var rejection responsesWSErrorEvent
 					_ = common.Unmarshal(incoming.body, &rejection)
-					if rejection.ResponseID != "" && rejection.ResponseID == s.lastResponseID {
-						continue
-					}
 					terminal, ambiguous, controlError := responsesWSErrorEndsRequest(rejection, create.StreamID, responseID, sentControl)
 					if !terminal {
 						// A stopped response sends nothing more before its error.
@@ -681,7 +636,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 							}
 							info.StreamStatus.MarkFailed(code, rejection.Error.Type, rejection.Status)
 						}
-						if compact.IsCompact() {
+						if info.IsResponsesCompact() {
 							service.ObserveResponsesOutcome(info, &event.ResponsesStreamResponse)
 							compactObserver.observe(string(incoming.body), info)
 						} else {
@@ -694,7 +649,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 							state.closeCode = websocket.CloseInternalServerErr
 						}
 						settle(false)
-						return nil
+						return nil, stopErr, false
 					}
 					if rejection.Error == nil {
 						// An error frame without an error object still describes the
@@ -705,7 +660,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 					if rejected.StatusCode < 400 || rejected.StatusCode > 599 {
 						rejected.StatusCode = http.StatusBadRequest
 					}
-					return rejected
+					return rejected, stopErr, false
 				}
 				if strings.HasPrefix(event.Type, "response.") {
 					if !accepted {
@@ -717,7 +672,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 						responseID = event.Response.ID
 					}
 				}
-				if compact.IsCompact() {
+				if info.IsResponsesCompact() {
 					service.ObserveResponsesOutcome(info, &event.ResponsesStreamResponse)
 					compactObserver.observe(string(incoming.body), info)
 				} else {
@@ -732,7 +687,7 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 				info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonDone, nil)
 				state.terminal = terminalOf(incoming)
 				settle((event.Type == "response.completed" || event.Type == "response.done") && event.Response != nil && event.Response.Usage != nil && !info.StreamStatus.ResponseFailed())
-				return nil
+				return nil, stopErr, false
 			}
 			if stopErr == nil {
 				if socket != nil && incoming.kind == websocket.TextMessage {
@@ -788,11 +743,11 @@ func (s *responsesWSSession) runCall(c *gin.Context, state *responsesWSCallState
 			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonTimeout, context.DeadlineExceeded)
 			state.closeCode, state.closeReason = websocket.CloseInternalServerErr, "upstream response timed out"
 			settle(false)
-			return nil
+			return nil, stopErr, false
 		case <-s.ctx.Done():
 			info.StreamStatus.SetEndReason(relaycommon.StreamEndReasonClientGone, s.ctx.Err())
 			settle(false)
-			return nil
+			return nil, stopErr, false
 		}
 	}
 }
@@ -827,12 +782,12 @@ func responsesWSErrorEndsRequest(event responsesWSErrorEvent, streamID, response
 	return true, len(control) > 0 && event.ResponseID == "", false
 }
 
-func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model string) *types.NewAPIError {
+func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model string) (*appmodel.Channel, *types.NewAPIError) {
 	// The channel type is not rechecked: a locked channel keeps its type, and
 	// the FilterResponsesWebSocket rules were applied when it was selected.
 	channel, err := appmodel.CacheGetChannel(s.lockedChannelID)
 	if err != nil || channel == nil || channel.Status != common.ChannelStatusEnabled || !channel.GetSetting().ResponsesWebSocketEnabled {
-		return types.NewErrorWithStatusCode(errors.New("Responses WebSocket is disabled for this channel"), types.ErrorCode(appdto.FilterResponsesWebSocket), http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		return nil, types.NewErrorWithStatusCode(errors.New("Responses WebSocket is disabled for this channel"), types.ErrorCode(appdto.FilterResponsesWebSocket), http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	keyEnabled := channel.Key == s.lockedKey
 	if channel.ChannelInfo.IsMultiKey {
@@ -841,16 +796,16 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 		keyEnabled = s.lockedKeyIndex >= 0 && s.lockedKeyIndex < len(keys) && keys[s.lockedKeyIndex] == s.lockedKey && (status == 0 || status == common.ChannelStatusEnabled)
 	}
 	if !keyEnabled {
-		return types.NewErrorWithStatusCode(errors.New("the upstream connection credential is no longer enabled"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		return nil, types.NewErrorWithStatusCode(errors.New("the upstream connection credential is no longer enabled"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	// Changes that alter the physical upstream connection require a new
 	// handshake. Request-level settings can be refreshed without rotating keys.
 	if channel.GetBaseURL() != s.lockedContext[appconstant.ContextKeyChannelBaseUrl] ||
 		!reflect.DeepEqual(channel.GetHeaderOverride(), s.lockedContext[appconstant.ContextKeyChannelHeaderOverride]) {
-		return types.NewErrorWithStatusCode(errors.New("upstream connection settings changed; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		return nil, types.NewErrorWithStatusCode(errors.New("upstream connection settings changed; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	if previous, ok := s.lockedContext[appconstant.ContextKeyChannelSetting].(dto.ChannelSettings); ok && previous.Proxy != channel.GetSetting().Proxy {
-		return types.NewErrorWithStatusCode(errors.New("upstream proxy changed; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		return nil, types.NewErrorWithStatusCode(errors.New("upstream proxy changed; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	// An advanced custom connection was dialed through the route matched for
 	// this model. Only the fields that shape the upstream handshake force a
@@ -864,23 +819,28 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 	if strings.TrimSpace(route.UpstreamPath) != strings.TrimSpace(s.lockedRoute.UpstreamPath) ||
 		route.IsNative() != s.lockedRoute.IsNative() ||
 		!reflect.DeepEqual(route.Auth, s.lockedRoute.Auth) {
-		return types.NewErrorWithStatusCode(errors.New("upstream route changed; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		return nil, types.NewErrorWithStatusCode(errors.New("upstream route changed; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 	}
 	if pin, found, _ := service.GetChannelConstraints(c).ResolvedPin(); found {
 		if pin.ChannelId != s.lockedChannelID {
-			return types.NewErrorWithStatusCode(errors.New("channel pin changed; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+			return nil, types.NewErrorWithStatusCode(errors.New("channel pin changed; reconnect required"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
 	} else {
 		group := common.GetContextKeyString(c, appconstant.ContextKeyUsingGroup)
+		// 内部 POST 的策略上下文逐轮重建。复用物理连接时同样要恢复本轮的严格亲和规则。
+		preferred, bound := service.GetPreferredChannelByAffinity(c, model, group)
+		if bound && preferred != s.lockedChannelID && service.ShouldSkipRetryAfterChannelAffinityFailure(c) {
+			return nil, types.NewErrorWithStatusCode(errResponsesWSChannelMoved, types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+		}
 		if group == "auto" {
 			if !slices.Contains(service.GetRequestAutoGroups(c, common.GetContextKeyString(c, appconstant.ContextKeyUserGroup)), s.lockedGroup) {
-				return types.NewErrorWithStatusCode(errors.New("the connection group is no longer allowed"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+				return nil, types.NewErrorWithStatusCode(errors.New("the connection group is no longer allowed"), types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 			}
 			group = s.lockedGroup
 			common.SetContextKey(c, appconstant.ContextKeyAutoGroup, group)
 		}
 		if !appmodel.IsChannelEnabledForGroupModel(group, model, s.lockedChannelID) {
-			return types.NewErrorWithStatusCode(errResponsesWSChannelMoved, types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
+			return nil, types.NewErrorWithStatusCode(errResponsesWSChannelMoved, types.ErrorCodeAccessDenied, http.StatusForbidden, types.ErrOptionWithSkipRetry())
 		}
 	}
 	for key, value := range s.lockedContext {
@@ -892,12 +852,12 @@ func (s *responsesWSSession) restoreConnectionContext(c *gin.Context, model stri
 	common.SetContextKey(c, appconstant.ContextKeyChannelModelMapping, channel.GetModelMapping())
 	common.SetContextKey(c, appconstant.ContextKeyChannelStatusCodeMapping, channel.GetStatusCodeMapping())
 	if err := service.ApplyChannelLimitContext(c, channel); err != nil {
-		return err
+		return nil, err
 	}
 	policy := service.RequestPolicy(c)
 	policy.BeginAttempt(channel, s.lockedGroup)
 	policy.AddEvent(service.PolicyEvent{ChannelID: channel.Id, Decision: service.PolicyDecision{Action: "select", Reason: "pinned_channel", Source: "channel_constraint"}})
-	return nil
+	return channel, nil
 }
 
 // connectionOtherSettings is the channel's other settings as its requests use
@@ -995,9 +955,11 @@ func buildResponsesWSCreatePayload(c *gin.Context, info *relaycommon.RelayInfo, 
 	return event, nil
 }
 
-func (s *responsesWSSession) startTargetReader(target *websocket.Conn, first ...responsesWSMessage) {
+func (s *responsesWSSession) startTargetReader(target *websocket.Conn) {
 	s.connectionMu.Lock()
 	done := s.targetDone
+	readerDone := make(chan struct{})
+	s.targetReaderDone = readerDone
 	s.connectionMu.Unlock()
 	limit := int64(helper.DefaultMaxScannerBufferSize)
 	if appconstant.StreamScannerMaxBufferMB > 0 {
@@ -1005,19 +967,15 @@ func (s *responsesWSSession) startTargetReader(target *websocket.Conn, first ...
 	}
 	target.SetReadLimit(limit)
 	s.workers.Go(func() {
+		defer close(readerDone)
 		for {
-			var incoming responsesWSMessage
-			if len(first) > 0 {
-				incoming, first = first[0], nil
-			} else {
-				incoming.kind, incoming.body, incoming.err = target.ReadMessage()
-			}
+			kind, body, err := target.ReadMessage()
+			incoming := responsesWSMessage{kind: kind, body: body, err: err}
 			select {
 			case <-done:
 				return
 			default:
 			}
-			kind, body, err := incoming.kind, incoming.body, incoming.err
 			if state := s.getCurrent(); state != nil {
 				select {
 				case <-done:
@@ -1089,17 +1047,21 @@ func (s *responsesWSSession) setTarget(target *websocket.Conn) bool {
 // retireTarget 仅在当前轮尚未向客户端交付输出时释放失效的物理连接。
 func (s *responsesWSSession) retireTarget() {
 	s.connectionMu.Lock()
-	target, unregister := s.target, s.unregister
+	target, unregister, readerDone := s.target, s.unregister, s.targetReaderDone
 	if s.targetDone != nil {
 		close(s.targetDone)
 	}
-	s.target, s.unregister, s.targetDone = nil, nil, nil
+	s.target, s.unregister, s.targetDone, s.targetReaderDone = nil, nil, nil, nil
 	s.connectionMu.Unlock()
 	if unregister != nil {
 		unregister()
 	}
 	if target != nil {
 		_ = target.Close()
+	}
+	// 等旧连接的读取协程退出，防止迟到的帧进入下一次尝试。
+	if readerDone != nil {
+		<-readerDone
 	}
 	s.lockedModel, s.lockedGroup, s.lockedKey, s.lastResponseID = "", "", "", ""
 	s.lockedChannelID, s.lockedKeyIndex, s.lockedContext = 0, 0, nil
@@ -1321,6 +1283,9 @@ func responsesWebSocketUpstreamBusinessError(payload []byte) (*types.NewAPIError
 	errorResult := gjson.GetBytes(payload, "response.error")
 	if !errorResult.Exists() {
 		errorResult = gjson.GetBytes(payload, "error")
+	}
+	if !errorResult.IsObject() {
+		return nil, eventType
 	}
 	message := strings.TrimSpace(gjson.Get(errorResult.Raw, "message").String())
 	if message == "" {

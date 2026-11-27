@@ -138,9 +138,44 @@ func TestRedisBatchReserveNeverFallsBackToStaleDatabaseBalance(t *testing.T) {
 	assert.Equal(t, 7, reloadedToken.UsedQuota)
 }
 
+// TestQuotaRefundAfterCacheEviction 验证缓存预扣排队期间丢失缓存仍可足额退还。
+// @param t 测试上下文。
+func TestQuotaRefundAfterCacheEviction(t *testing.T) {
+	truncateTables(t)
+	resetBatchUpdateTestState(t)
+	server := useUserCacheMiniRedis(t)
+	common.BatchUpdateEnabled = true
+	user := createReserveTestUser(t, common.MaxWalletQuota)
+	token := createReserveTestToken(t, 100)
+	ok, err := TryReserveUserQuota(user.Id, 100)
+	require.NoError(t, err)
+	require.True(t, ok)
+	ok, err = TryReserveTokenQuota(token.Id, token.Key, 100, false)
+	require.NoError(t, err)
+	require.True(t, ok)
+	server.Del(getUserCacheKey(user.Id))
+	server.Del(getTokenCacheKey(token.Key))
+	// 鉴权可能先于退款重新水合令牌。钱包则直接在冷缓存下退款，覆盖两种先后顺序。
+	_, err = ValidateUserToken(token.Key)
+	require.ErrorIs(t, err, ErrTokenInvalid)
+	require.NoError(t, IncreaseUserQuota(user.Id, 100, false))
+	require.NoError(t, IncreaseTokenQuota(token.Id, token.Key, 100))
+	available, err := GetUserQuota(user.Id, false)
+	require.NoError(t, err)
+	assert.Equal(t, common.MaxWalletQuota, available)
+	key, err := ValidateUserToken(token.Key)
+	require.NoError(t, err)
+	assert.Equal(t, 100, key.RemainQuota)
+	batchUpdate()
+	assert.Equal(t, common.MaxWalletQuota, getUserQuotaFromDB(t, user.Id))
+	assert.Equal(t, 100, getTokenFromDB(t, token.Id).RemainQuota)
+	assert.Zero(t, getTokenFromDB(t, token.Id).UsedQuota)
+}
+
 func TestBatchUpdateAccumulatesTwoMaximumRequestCharges(t *testing.T) {
 	truncateTables(t)
 	resetBatchUpdateTestState(t)
+	useUserCacheMiniRedis(t)
 	common.BatchUpdateEnabled = true
 
 	user := createReserveTestUser(t, common.MaxQuota*2+100)

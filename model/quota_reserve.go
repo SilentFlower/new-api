@@ -140,6 +140,32 @@ func persistTokenQuotaDelta(id int, delta int) error {
 	return nil
 }
 
+// flushPendingQuota 在 Redis 余额失效时，将本账户的待记额度先写回数据库。
+// 周期刷盘会移走整个队列，互斥保证冷缓存退款不会抢在已经取走的预扣之前入账。
+func flushPendingQuota(kind, id int) error {
+	if !common.BatchUpdateEnabled {
+		return nil
+	}
+	batchFlushMu.RLock()
+	defer batchFlushMu.RUnlock()
+	batchUpdateLocks[kind].Lock()
+	defer batchUpdateLocks[kind].Unlock()
+	delta := batchUpdateStores[kind][id]
+	if delta == 0 {
+		return nil
+	}
+	var err error
+	if kind == BatchUpdateTypeTokenQuota {
+		err = increaseTokenQuota(id, delta)
+	} else {
+		err = DB.Model(&User{}).Where("id = ?", id).Update("quota", gorm.Expr("quota + ?", delta)).Error
+	}
+	if err == nil {
+		delete(batchUpdateStores[kind], id)
+	}
+	return err
+}
+
 func reserveUserQuotaDB(id int, quota int) (bool, error) {
 	result := DB.Model(&User{}).
 		Where("id = ? AND quota >= ?", id, quota).
@@ -173,6 +199,11 @@ func TryReserveUserQuota(id int, quota int) (bool, error) {
 	}
 
 	result, err := cacheTryReserveUserQuota(id, int64(quota))
+	if err != nil {
+		if flushErr := flushPendingQuota(BatchUpdateTypeUserQuota, id); flushErr != nil {
+			return false, flushErr
+		}
+	}
 	if err == nil && result == cacheQuotaMiss {
 		if _, hydrateErr := GetUserCache(id); hydrateErr == nil {
 			result, err = cacheTryReserveUserQuota(id, int64(quota))
@@ -214,6 +245,11 @@ func TryReserveTokenQuota(id int, key string, quota int, unlimited bool) (bool, 
 	}
 
 	result, err := cacheTryReserveTokenQuota(id, key, int64(quota))
+	if err != nil {
+		if flushErr := flushPendingQuota(BatchUpdateTypeTokenQuota, id); flushErr != nil {
+			return false, flushErr
+		}
+	}
 	if err == nil && result == cacheQuotaMiss {
 		if _, hydrateErr := GetTokenByKey(key, true); hydrateErr == nil {
 			result, err = cacheTryReserveTokenQuota(id, key, int64(quota))

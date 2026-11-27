@@ -114,6 +114,66 @@ func TestAuthCacheIntegrityDatabaseMatrix(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, cacheQuotaOK, quotaResult)
 
+			t.Run("refund_while_token_exhausted", func(t *testing.T) {
+				resetBatchUpdateTestState(t)
+				common.BatchUpdateEnabled = true
+				previousRedis := common.RedisEnabled
+				common.RedisEnabled = false
+				t.Cleanup(func() { common.RedisEnabled = previousRedis })
+
+				for _, tc := range []struct {
+					name       string
+					status     int
+					expired    bool
+					wantStatus int
+				}{
+					{"预扣期间鉴权耗尽", common.TokenStatusExhausted, false, common.TokenStatusEnabled},
+					{"管理员停用", common.TokenStatusDisabled, false, common.TokenStatusDisabled},
+					{"已标为过期", common.TokenStatusExpired, true, common.TokenStatusExpired},
+					{"预扣期间到期", common.TokenStatusExhausted, true, common.TokenStatusExhausted},
+				} {
+					t.Run(tc.name, func(t *testing.T) {
+						wallet := createReserveTestUser(t, 100)
+						key := Token{UserId: wallet.Id, Key: common.GetUUID(), Status: common.TokenStatusEnabled, ExpiredTime: -1, RemainQuota: 100}
+						require.NoError(t, db.Create(&key).Error)
+						t.Cleanup(func() {
+							assert.NoError(t, db.Unscoped().Delete(&key).Error)
+							assert.NoError(t, db.Unscoped().Delete(&wallet).Error)
+						})
+						ok, err := TryReserveUserQuota(wallet.Id, 100)
+						require.NoError(t, err)
+						require.True(t, ok)
+						ok, err = TryReserveTokenQuota(key.Id, key.Key, 100, false)
+						require.NoError(t, err)
+						require.True(t, ok)
+						_, err = ValidateUserToken(key.Key)
+						require.ErrorIs(t, err, ErrTokenInvalid)
+						require.Equal(t, common.TokenStatusExhausted, getTokenFromDB(t, key.Id).Status)
+						if tc.status != common.TokenStatusExhausted {
+							require.NoError(t, db.Model(&key).Update("status", tc.status).Error)
+						}
+						if tc.expired {
+							require.NoError(t, db.Model(&key).Update("expired_time", 1).Error)
+						}
+						require.NoError(t, IncreaseUserQuota(wallet.Id, 100, false))
+						require.NoError(t, IncreaseTokenQuota(key.Id, key.Key, 100))
+						assert.Equal(t, 100, getUserQuotaFromDB(t, wallet.Id))
+						_, err = ValidateUserToken(key.Key)
+						if tc.wantStatus == common.TokenStatusEnabled {
+							require.NoError(t, err)
+						} else {
+							require.ErrorIs(t, err, ErrTokenInvalid)
+						}
+						batchUpdate()
+						after := getTokenFromDB(t, key.Id)
+						assert.Equal(t, 100, after.RemainQuota)
+						assert.Zero(t, after.UsedQuota)
+						assert.Equal(t, tc.wantStatus, after.Status)
+						assert.Equal(t, 100, getUserQuotaFromDB(t, wallet.Id))
+					})
+				}
+			})
+
 			t.Run("token_identity_and_permissions", func(t *testing.T) {
 				for _, fields := range []map[string]any{
 					{"UserId": user.Id + 1},

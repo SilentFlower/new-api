@@ -31,11 +31,19 @@ func DetectResponsesCompactMode(method string, requestPath string, headers http.
 	if transport == ResponsesTransportHTTP && method == http.MethodPost && isResponsesCompactPath(normalizedPath) {
 		return relayconstant.ResponsesCompactModeV1Path
 	}
-	if !isBareResponsesPath(normalizedPath) || !hasCompactionTrigger(body) {
+	if !isBareResponsesPath(normalizedPath) || !gjson.ValidBytes(body) {
+		return relayconstant.ResponsesCompactModeNone
+	}
+	prefix := ""
+	if transport == ResponsesTransportWebSocket && gjson.GetBytes(body, "response").IsObject() {
+		// 与 response.create 解码一致，两个信号必须来自同一业务对象。
+		prefix = "response."
+	}
+	if !hasCompactionTrigger(gjson.GetBytes(body, prefix+"input")) {
 		return relayconstant.ResponsesCompactModeNone
 	}
 
-	isRemoteV2 := gjson.GetBytes(body, "stream").Bool() && headerContainsToken(headers, "x-codex-beta-features", remoteCompactionV2Feature)
+	isRemoteV2 := gjson.GetBytes(body, prefix+"stream").Bool() && headerContainsToken(headers, "x-codex-beta-features", remoteCompactionV2Feature)
 	if transport == ResponsesTransportWebSocket {
 		if method == http.MethodGet && isRemoteV2 {
 			return relayconstant.ResponsesCompactModeV2WebSocket
@@ -59,11 +67,7 @@ func isBareResponsesPath(path string) bool {
 	return path == "/v1/responses" || path == "/responses"
 }
 
-func hasCompactionTrigger(body []byte) bool {
-	if len(body) == 0 || !gjson.ValidBytes(body) {
-		return false
-	}
-	input := gjson.GetBytes(body, "input")
+func hasCompactionTrigger(input gjson.Result) bool {
 	if !input.IsArray() {
 		return false
 	}

@@ -12,23 +12,26 @@ import (
 
 // TestResponsesCompactWebSocketRawFrameAndTerminalUsage 核对普通渠道上的原始 Compact 帧和无效用量退款。
 func TestResponsesCompactWebSocketRawFrameAndTerminalUsage(t *testing.T) {
+	const flat = `{"type":"response.create", "stream":true,"model":"ws-billing","input":[{"type":"compaction_trigger"}],"future":{"off":false,"zero":0}}`
+	const wrapped = `{"type":"response.create","event_id":"compact", "response":{"stream":true,"model":"ws-billing","input":[{"type":"compaction_trigger"}],"future":{"off":false,"zero":0}}}`
 	for _, tc := range []struct {
-		name, usage string
-		enabled     bool
-		wantQuota   []int
+		name, raw, usage string
+		enabled          bool
+		wantQuota        []int
 	}{
-		{"渠道未开启", "null", false, nil},
-		{"缺少用量", "null", true, nil},
-		{"有效用量", `{"input_tokens":2,"output_tokens":3,"total_tokens":5}`, true, []int{1000}},
+		{"渠道未开启", flat, "null", false, nil},
+		{"包装帧渠道未开启", wrapped, "null", false, nil},
+		{"缺少用量", flat, "null", true, nil},
+		{"包装帧有效用量", wrapped, `{"input_tokens":2,"output_tokens":3,"total_tokens":5}`, true, []int{1000}},
+		{"有效用量", flat, `{"input_tokens":2,"output_tokens":3,"total_tokens":5}`, true, []int{1000}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			const raw = `{"type":"response.create", "stream":true,"model":"ws-billing","input":[{"type":"compaction_trigger"}],"future":{"off":false,"zero":0}}`
 			fixture := newResponsesWSBillingTest(t, "tier(\"request\", fixed(0.002))", func(ws *websocket.Conn, _ *http.Request) {
 				_, frame, err := ws.ReadMessage()
 				if !assert.NoError(t, err) {
 					return
 				}
-				assert.Equal(t, raw, string(frame))
+				assert.Equal(t, tc.raw, string(frame))
 				_ = ws.WriteMessage(websocket.TextMessage, []byte(`{"type":"response.completed","response":{"id":"compact","usage":`+tc.usage+`}}`))
 				_, _, _ = ws.ReadMessage()
 			})
@@ -36,7 +39,7 @@ func TestResponsesCompactWebSocketRawFrameAndTerminalUsage(t *testing.T) {
 			settings.ResponsesCompactPassthroughEnabled = tc.enabled
 			fixture.channel.SetSetting(settings)
 			require.NoError(t, model.DB.Model(fixture.channel).Update("setting", fixture.channel.Setting).Error)
-			require.NoError(t, fixture.client.WriteMessage(websocket.TextMessage, []byte(raw)))
+			require.NoError(t, fixture.client.WriteMessage(websocket.TextMessage, []byte(tc.raw)))
 			event := readResponsesWSTestEvent(t, fixture.client)
 			if tc.enabled {
 				assert.Equal(t, "response.completed", event["type"])

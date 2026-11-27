@@ -107,6 +107,12 @@ func GetUserCache(userId int) (*UserBase, error) {
 	// Redis misses and read failures both fall back to the shared database. A
 	// version fence newer than the database is the one exception: allowing that
 	// snapshot would re-authorize a user while a restrictive update is pending.
+	// 冷缓存将采用数据库快照，先让本节点排队的余额变动对该快照可见。
+	if common.RedisEnabled {
+		if err := flushPendingQuota(BatchUpdateTypeUserQuota, userId); err != nil {
+			return nil, err
+		}
+	}
 	user, err := GetUserById(userId, false)
 	if err != nil {
 		return nil, err
