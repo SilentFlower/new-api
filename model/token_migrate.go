@@ -25,6 +25,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
 )
 
@@ -58,10 +59,10 @@ func GetTokensForMigration(ids []int, userId int) ([]Token, error) {
 }
 
 // RefreshTokenCache 暴露给 controller 层，用于在迁移事务提交后刷新 Redis 缓存。
-// 内部仍然走 cacheSetToken，保持与项目其他写入路径一致。
+// 清除旧签名缓存，让下次读取按数据库里已提交的新归属重建。
 // 注意：传入的 token 必须是「已经更新过 UserId 的副本」。
 func RefreshTokenCache(token Token) error {
-	return cacheSetToken(token)
+	return invalidateTokenCacheForMutation(token.Key)
 }
 
 // MigrateTokenOwnership 在事务内将指定令牌的 user_id 由 srcUserId 切换到 newUserId。
@@ -88,6 +89,15 @@ func MigrateTokenOwnership(tx *gorm.DB, tokenId, srcUserId, newUserId int) error
 		return errors.New("srcUserId 与 newUserId 相同，无需迁移")
 	}
 
+	if common.RedisEnabled {
+		var token Token
+		if err := lockForUpdate(tx).Select("id", commonKeyCol).First(&token, "id = ? AND user_id = ?", tokenId, srcUserId).Error; err != nil {
+			return err
+		}
+		if err := invalidateTokenCacheForMutation(token.Key); err != nil {
+			return err
+		}
+	}
 	result := tx.Model(&Token{}).
 		Where("id = ? AND user_id = ?", tokenId, srcUserId).
 		Update("user_id", newUserId)

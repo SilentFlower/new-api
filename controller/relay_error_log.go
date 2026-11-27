@@ -35,25 +35,17 @@ func recordRelayErrorLog(c *gin.Context, err *types.NewAPIError) {
 	tokenId := c.GetInt("token_id")
 	userGroup := c.GetString("group")
 	channelId := c.GetInt("channel_id")
-	other := make(map[string]interface{})
+	other := model.NewLogOther()
 	if c.Request != nil && c.Request.URL != nil {
-		other["request_path"] = c.Request.URL.Path
+		other.SetPublic("request_path", c.Request.URL.Path)
 	}
-	other["error_type"] = err.GetErrorType()
-	other["error_code"] = err.GetErrorCode()
-	other["status_code"] = err.StatusCode
-	other["channel_id"] = channelId
-	other["channel_name"] = c.GetString("channel_name")
-	other["channel_type"] = c.GetInt("channel_type")
-	adminInfo := make(map[string]interface{})
-	adminInfo["use_channel"] = c.GetStringSlice("use_channel")
-	isMultiKey := common.GetContextKeyBool(c, constant.ContextKeyChannelIsMultiKey)
-	if isMultiKey {
-		adminInfo["is_multi_key"] = true
-		adminInfo["multi_key_index"] = common.GetContextKeyInt(c, constant.ContextKeyChannelMultiKeyIndex)
-	}
-	service.AppendChannelAffinityAdminInfo(c, adminInfo)
-	other["admin_info"] = adminInfo
+	other.SetPublic("error_type", err.GetErrorType())
+	other.SetPublic("error_code", err.GetErrorCode())
+	other.SetPublic("status_code", err.StatusCode)
+	other.SetPublic("channel_id", channelId)
+	other.SetPublic("channel_name", c.GetString("channel_name"))
+	other.SetPublic("channel_type", c.GetInt("channel_type"))
+	service.AppendRelayLogAdminInfo(c, nil, other)
 	service.MergeContextLogOther(c, other)
 	startTime := common.GetContextKeyTime(c, constant.ContextKeyRequestStartTime)
 	if startTime.IsZero() {

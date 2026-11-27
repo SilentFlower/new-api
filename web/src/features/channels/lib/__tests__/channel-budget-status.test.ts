@@ -26,10 +26,7 @@ import {
   groupChannelBudgetCounters,
 } from '../channel-budget-status'
 
-const testModule = 'bun:test'
-const { test } = (await import(testModule)) as {
-  test: typeof import('node:test').test
-}
+import { test } from 'vitest'
 
 function row(overrides: Partial<ChannelBudgetRow>): ChannelBudgetRow {
   return {

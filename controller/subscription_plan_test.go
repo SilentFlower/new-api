@@ -14,8 +14,9 @@ import (
 )
 
 type subscriptionPlanTestEnvelope struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
+	Success    bool             `json:"success"`
+	MessageKey string           `json:"message_key"`
+	Params     map[string]int64 `json:"message_params"`
 }
 
 func performAdminSubscriptionPlanRequest(t *testing.T, method string, path string, body string, handler gin.HandlerFunc) subscriptionPlanTestEnvelope {
@@ -63,7 +64,8 @@ func TestAdminSubscriptionPlanUpsertRejectsOversizedCustomResetPeriod(t *testing
 		t.Run(testCase.name, func(t *testing.T) {
 			envelope := performAdminSubscriptionPlanRequest(t, testCase.method, testCase.path, string(body), testCase.handler)
 			assert.False(t, envelope.Success)
-			assert.Equal(t, "自定义重置周期参数无效", envelope.Message)
+			assert.Equal(t, "Custom reset cycle must be between 1 and {{max}} seconds", envelope.MessageKey)
+			assert.Equal(t, model.MaxSubscriptionResetCustomSeconds, envelope.Params["max"])
 		})
 	}
 

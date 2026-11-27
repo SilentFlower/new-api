@@ -348,3 +348,5 @@ func TestPostTextConsumeQuotaDoesNotRefundClientGoneLocalUsageAfterFundingSettle
 	assert.Equal(t, true, adminInfo["billing_settlement_failed"])
 	assert.Equal(t, false, adminInfo["billing_refund_fallback_triggered"])
 }
+
+func (s *textQuotaGuardBillingStub) ReserveBeforeSubmit(quota int) error { return s.Reserve(quota) }

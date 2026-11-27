@@ -52,7 +52,7 @@ import { useUpdateOption } from '../hooks/use-update-option'
 const maxResponsesWebSocketFirstFrameTimeoutSeconds = 9_223_372_036
 
 const thinkingBlacklistExample = JSON.stringify(
-  ['moonshotai/kimi-k2-thinking', 'kimi-k2-thinking'],
+  ['moonshotai/kimi-k2-thinking', 'kimi-k2-thinking', 're:.*@sha256:.*'],
   null,
   2
 )
@@ -256,7 +256,7 @@ export function GlobalSettingsCard({ defaultValues }: GlobalSettingsCardProps) {
                 </FormControl>
                 <FormDescription>
                   {t(
-                    'Models listed here will not automatically append or remove -thinking / -nothinking suffixes.'
+                    'Models listed here skip automatic -thinking / -nothinking suffix handling. Matched names are also exempt from @-modifier parsing and 400 validation. Prefix an entry with re: to match the full model name as a Go regular expression, for example re:.*@sha256:.*'
                   )}
                 </FormDescription>
                 <FormMessage />

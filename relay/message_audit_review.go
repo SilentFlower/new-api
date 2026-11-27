@@ -195,12 +195,12 @@ func recordMessageAuditReviewModelLog(c *gin.Context, input service.MessageAudit
 	}
 	model.RecordConsumeLog(c, logUserID, model.RecordConsumeLogParams{
 		ChannelId: channel.Id, ModelName: input.Model, TokenName: "message-audit-review",
-		Quota: 0, Content: "消息审计 AI 审核渠道调用", TokenId: 0,
+		Quota: 0, Content: []*common.Message{common.NewMessage("消息审计 AI 审核渠道调用")}, TokenId: 0,
 		UseTimeSeconds: useTimeSeconds, IsStream: false, Group: "audit", Other: other,
 	})
 }
 
-func messageAuditReviewModelLogOther(input service.MessageAuditReviewModelRequest, response service.MessageAuditReviewModelResponse, err error) map[string]interface{} {
+func messageAuditReviewModelLogOther(input service.MessageAuditReviewModelRequest, response service.MessageAuditReviewModelResponse, err error) *model.LogOther {
 	protocol := messageAuditReviewProtocol(input)
 	other := map[string]interface{}{
 		"request_path":    "/internal/message-audit/review",
@@ -255,8 +255,10 @@ func messageAuditReviewModelLogOther(input service.MessageAuditReviewModelReques
 	if input.TaskID != "" {
 		adminInfo["task_id"] = input.TaskID
 	}
-	other["admin_info"] = adminInfo
-	return other
+	result := model.NewLogOther()
+	result.MergePublic(other)
+	result.MergeAdmin(adminInfo)
+	return result
 }
 
 func messageAuditReviewProtocol(input service.MessageAuditReviewModelRequest) string {

@@ -65,12 +65,10 @@ func TestResponsesCompactAuditMergesIntoAdminInfoWithoutSecrets(t *testing.T) {
 	}
 
 	SetResponsesCompactAudit(c, info, "completed")
-	other := map[string]interface{}{
-		"admin_info": map[string]interface{}{"use_channel": []string{"17"}},
-	}
+	other := model.NewLogOther()
+	other.SetAdmin("use_channel", []string{"17"})
 	MergeContextLogOther(c, other)
-
-	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	adminInfo, ok := other.Snapshot()["admin_info"].(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, []string{"17"}, adminInfo["use_channel"])
 	audit, ok := adminInfo[responsesCompactAuditKey].(map[string]interface{})
@@ -82,7 +80,7 @@ func TestResponsesCompactAuditMergesIntoAdminInfoWithoutSecrets(t *testing.T) {
 	assert.Equal(t, "compact-upstream", audit["channel_name"])
 	assert.Equal(t, "completed", audit["outcome"])
 	assert.Equal(t, "upstream-request-id", audit["upstream_request_id"])
-	assert.NotContains(t, common.MapToJsonStr(other), "secret")
+	assert.NotContains(t, other.JSONString(), "secret")
 }
 
 func TestClearResponsesCompactAuditPreservesOtherLogFields(t *testing.T) {
@@ -163,4 +161,8 @@ func TestResponsesCompactAuditPersistsInConsumeLog(t *testing.T) {
 	assert.Equal(t, "completed", audit["outcome"])
 	assert.Equal(t, "/v1/responses", audit["upstream_path"])
 	assert.NotContains(t, logs[0].Other, "secret")
+}
+
+func (s *responsesCompactAuditBillingStub) ReserveBeforeSubmit(quota int) error {
+	return s.Reserve(quota)
 }

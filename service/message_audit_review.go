@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"github.com/QuantumNous/new-api/tokenkit"
 	"io"
 	"regexp"
 	"slices"
@@ -798,7 +799,7 @@ func loadMessageAuditReviewFiles(payload MessageAuditReviewPayload) ([]messageAu
 			Messages: splitMessageAuditReviewMessages(detail.Messages, payload.Config.Model),
 		}
 		data, _ := common.Marshal(file.Messages)
-		file.EstimatedTokens = CountTextToken(string(data), payload.Config.Model)
+		file.EstimatedTokens = tokenkit.Count(payload.Config.Model, string(data))
 		files = append(files, file)
 	}
 	return files, nil
@@ -848,7 +849,7 @@ func splitMessageAuditReviewMessages(messages []MessageAuditMessage, reviewModel
 	result := make([]messageAuditReviewMessage, 0, len(messages))
 	for _, message := range messages {
 		data, _ := common.Marshal(message)
-		if CountTextToken(string(data), reviewModel) <= messageAuditReviewToolResultLimit/2 {
+		if tokenkit.Count(reviewModel, string(data)) <= messageAuditReviewToolResultLimit/2 {
 			result = append(result, messageAuditReviewMessage{
 				Sequence: message.Sequence, PartCount: 1, Role: message.Role,
 				ContentType: message.ContentType, Content: message.Content,
@@ -865,7 +866,7 @@ func splitMessageAuditReviewMessages(messages []MessageAuditMessage, reviewModel
 		for start := 0; start < len(runes); {
 			end := min(start+6000, len(runes))
 			// 单条消息也必须可以分页读取，因此按真实分词结果逐步收缩分片。
-			for end > start+1 && CountTextToken(string(runes[start:end]), reviewModel) > messageAuditReviewToolResultLimit/2 {
+			for end > start+1 && tokenkit.Count(reviewModel, string(runes[start:end])) > messageAuditReviewToolResultLimit/2 {
 				end = start + (end-start)/2
 			}
 			parts = append(parts, string(runes[start:end]))
@@ -882,11 +883,19 @@ func splitMessageAuditReviewMessages(messages []MessageAuditMessage, reviewModel
 }
 
 func messageAuditReviewTools() []dto.ToolCallRequest {
+	// 工具模式只包含静态的字符串、布尔值和整数。
+	schema := func(fields map[string]any) common.RawMessage {
+		data, err := common.Marshal(fields)
+		if err != nil {
+			panic(err)
+		}
+		return data
+	}
 	return []dto.ToolCallRequest{
-		{Type: "function", Function: dto.FunctionRequest{Name: "list_files", Description: "列出本次固定审核资料和服务端任务概览。", Parameters: map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false}}},
-		{Type: "function", Function: dto.FunctionRequest{Name: "read_file", Description: "按虚拟分片游标读取一个虚拟文件。连续扫描时优先使用较大的 limit；服务端会按安全 Token 上限缩小实际返回，并通过 next_cursor 告知续读位置。", Parameters: map[string]any{"type": "object", "properties": map[string]any{"file_id": map[string]any{"type": "string"}, "cursor": map[string]any{"type": "integer", "minimum": 0, "maximum": messageAuditReviewMaxToolCursor}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": messageAuditReviewReadFileMaxLimit}}, "required": []string{"file_id", "cursor", "limit"}, "additionalProperties": false}}},
-		{Type: "function", Function: dto.FunctionRequest{Name: "search_files", Description: "在固定资料集中进行大小写不敏感的字面量搜索。服务端会按安全 Token 上限缩小实际返回。", Parameters: map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "minLength": 2, "maxLength": 128}, "file_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20}, "cursor": map[string]any{"type": "integer", "minimum": 0, "maximum": messageAuditReviewMaxToolCursor}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": messageAuditReviewSearchMaxLimit}}, "required": []string{"query", "cursor", "limit"}, "additionalProperties": false}}},
-		{Type: "function", Function: dto.FunctionRequest{Name: "search_files_regex", Description: "使用受限 RE2 正则在固定资料集中搜索，不访问真实文件系统。服务端会按安全 Token 上限缩小实际返回。", Parameters: map[string]any{"type": "object", "properties": map[string]any{"pattern": map[string]any{"type": "string", "minLength": 1, "maxLength": messageAuditReviewRegexMaxLength}, "case_sensitive": map[string]any{"type": "boolean"}, "file_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20}, "cursor": map[string]any{"type": "integer", "minimum": 0, "maximum": messageAuditReviewMaxToolCursor}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": messageAuditReviewSearchMaxLimit}}, "required": []string{"pattern", "cursor", "limit"}, "additionalProperties": false}}},
+		{Type: "function", Function: dto.FunctionRequest{Name: "list_files", Description: "列出本次固定审核资料和服务端任务概览。", Parameters: schema(map[string]any{"type": "object", "properties": map[string]any{}, "additionalProperties": false})}},
+		{Type: "function", Function: dto.FunctionRequest{Name: "read_file", Description: "按虚拟分片游标读取一个虚拟文件。连续扫描时优先使用较大的 limit；服务端会按安全 Token 上限缩小实际返回，并通过 next_cursor 告知续读位置。", Parameters: schema(map[string]any{"type": "object", "properties": map[string]any{"file_id": map[string]any{"type": "string"}, "cursor": map[string]any{"type": "integer", "minimum": 0, "maximum": messageAuditReviewMaxToolCursor}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": messageAuditReviewReadFileMaxLimit}}, "required": []string{"file_id", "cursor", "limit"}, "additionalProperties": false})}},
+		{Type: "function", Function: dto.FunctionRequest{Name: "search_files", Description: "在固定资料集中进行大小写不敏感的字面量搜索。服务端会按安全 Token 上限缩小实际返回。", Parameters: schema(map[string]any{"type": "object", "properties": map[string]any{"query": map[string]any{"type": "string", "minLength": 2, "maxLength": 128}, "file_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20}, "cursor": map[string]any{"type": "integer", "minimum": 0, "maximum": messageAuditReviewMaxToolCursor}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": messageAuditReviewSearchMaxLimit}}, "required": []string{"query", "cursor", "limit"}, "additionalProperties": false})}},
+		{Type: "function", Function: dto.FunctionRequest{Name: "search_files_regex", Description: "使用受限 RE2 正则在固定资料集中搜索，不访问真实文件系统。服务端会按安全 Token 上限缩小实际返回。", Parameters: schema(map[string]any{"type": "object", "properties": map[string]any{"pattern": map[string]any{"type": "string", "minLength": 1, "maxLength": messageAuditReviewRegexMaxLength}, "case_sensitive": map[string]any{"type": "boolean"}, "file_ids": map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "maxItems": 20}, "cursor": map[string]any{"type": "integer", "minimum": 0, "maximum": messageAuditReviewMaxToolCursor}, "limit": map[string]any{"type": "integer", "minimum": 1, "maximum": messageAuditReviewSearchMaxLimit}}, "required": []string{"pattern", "cursor", "limit"}, "additionalProperties": false})}},
 	}
 }
 
@@ -902,7 +911,7 @@ func marshalMessageAuditReviewToolResult(result any, usedCalls int, usedTokens i
 		if err != nil {
 			return nil, 0, err
 		}
-		resultTokens := CountTextToken(string(data), reviewModel)
+		resultTokens := tokenkit.Count(reviewModel, string(data))
 		if resultTokens == lastTokens {
 			return data, resultTokens, nil
 		}
@@ -913,7 +922,7 @@ func marshalMessageAuditReviewToolResult(result any, usedCalls int, usedTokens i
 	if err != nil {
 		return nil, 0, err
 	}
-	return data, CountTextToken(string(data), reviewModel), nil
+	return data, tokenkit.Count(reviewModel, string(data)), nil
 }
 
 func prepareMessageAuditReviewModelRequest(input MessageAuditReviewModelRequest) (MessageAuditReviewModelRequest, error) {
@@ -1103,7 +1112,7 @@ func messageAuditReviewBoundedMessageWindow(messages []messageAuditReviewMessage
 	for end > cursor {
 		window := messages[cursor:end]
 		data, _ := common.Marshal(window)
-		tokens := CountTextToken(string(data), reviewModel)
+		tokens := tokenkit.Count(reviewModel, string(data))
 		if tokens <= messageAuditReviewToolResultLimit {
 			return end, window, tokens
 		}
@@ -1117,7 +1126,7 @@ func messageAuditReviewBoundedSearchWindow(matches []map[string]any, cursor int,
 	for end > cursor {
 		window := matches[cursor:end]
 		data, _ := common.Marshal(window)
-		tokens := CountTextToken(string(data), reviewModel)
+		tokens := tokenkit.Count(reviewModel, string(data))
 		if tokens <= messageAuditReviewToolResultLimit {
 			return end, window, tokens
 		}

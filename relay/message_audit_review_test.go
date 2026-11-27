@@ -104,7 +104,7 @@ func TestMessageAuditReviewModelLogOtherKeepsDiagnosticsSafe(t *testing.T) {
 		ToolCalls: []service.MessageAuditReviewToolCall{{
 			Name: "read_file", Arguments: `{"file_id":"request:secret","cursor":0,"limit":1}`,
 		}},
-	}, &service.MessageAuditReviewModelError{Stage: "upstream_http", HTTPStatus: 415})
+	}, &service.MessageAuditReviewModelError{Stage: "upstream_http", HTTPStatus: 415}).Snapshot()
 
 	assert.Equal(t, "/internal/message-audit/review", other["request_path"])
 	assert.Equal(t, "text_tool_fallback", other["review_protocol"])
@@ -118,7 +118,7 @@ func TestMessageAuditReviewModelLogOtherKeepsDiagnosticsSafe(t *testing.T) {
 	assert.Equal(t, true, adminInfo["message_audit_review"])
 	assert.Equal(t, "audsess_safe", adminInfo["audit_session_id"])
 
-	mergedOther := messageAuditReviewModelLogOther(service.MessageAuditReviewModelRequest{Protocol: "merged_context"}, service.MessageAuditReviewModelResponse{}, nil)
+	mergedOther := messageAuditReviewModelLogOther(service.MessageAuditReviewModelRequest{Protocol: "merged_context"}, service.MessageAuditReviewModelResponse{}, nil).Snapshot()
 	assert.Equal(t, "merged_context", mergedOther["review_protocol"])
 }
 

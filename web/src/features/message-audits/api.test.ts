@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { test } from 'vitest'
 
 import { api } from '@/lib/api'
 
@@ -33,7 +33,7 @@ test('当前清理任务查询复用系统任务 current 接口', async () => {
   let requestedType = ''
   api.get = (async (url, config) => {
     requestedUrl = url
-    requestedType = String(config?.params?.type ?? '')
+    requestedType = String((config?.params as Record<string, unknown> | undefined)?.type ?? '')
     return {
       data: {
         success: true,
@@ -66,8 +66,8 @@ test('推断会话查询通过 audit_session_id 获取单次请求', async () =>
   let requestedSessionId = ''
   let requestedPage = 0
   api.get = (async (_url, config) => {
-    requestedSessionId = String(config?.params?.audit_session_id ?? '')
-    requestedPage = Number(config?.params?.p ?? 0)
+    requestedSessionId = String((config?.params as Record<string, unknown> | undefined)?.audit_session_id ?? '')
+    requestedPage = Number((config?.params as Record<string, unknown> | undefined)?.p ?? 0)
     return {
       data: {
         success: true,

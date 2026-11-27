@@ -10,6 +10,7 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -29,7 +30,8 @@ func setupUserBillingSummaryRouteTestDB(t *testing.T) *gorm.DB {
 	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
 	require.NoError(t, err)
 	model.DB, model.LOG_DB = db, db
-	require.NoError(t, db.AutoMigrate(&model.User{}, &model.SubscriptionPlan{}, &model.UserSubscription{}))
+	require.NoError(t, db.AutoMigrate(&model.User{}, &model.SubscriptionPlan{}, &model.UserSubscription{}, &model.Option{}, &model.AuditLog{}, &model.UserAccessToken{}))
+	require.NoError(t, model.EnsureLegacyAccessTokenRetireAt(common.GetTimestamp()))
 
 	t.Cleanup(func() {
 		model.DB, model.LOG_DB = previousDB, previousLogDB
@@ -102,5 +104,42 @@ func TestUserBillingSummaryRouteRequiresAdminAndAllowsAdmin(t *testing.T) {
 			assert.Equal(t, test.wantStatus, recorder.Code)
 			assert.Contains(t, recorder.Body.String(), test.wantBody)
 		})
+	}
+}
+
+// TestCustomRoutesRespectScopedAccessTokens 验证账务及工作流端口同时要求正确的角色和令牌权限。
+// @param t 测试上下文。
+func TestCustomRoutesRespectScopedAccessTokens(t *testing.T) {
+	db := setupUserBillingSummaryRouteTestDB(t)
+	engine := gin.New()
+	SetApiRouter(engine)
+	for i, tc := range []struct {
+		role                int
+		scope, method, path string
+		want                int
+	}{
+		{common.RoleAdminUser, "billing:read", "POST", "/api/user/billing-summary", http.StatusOK},
+		{common.RoleAdminUser, "profile:read", "POST", "/api/user/billing-summary", http.StatusForbidden},
+		{common.RoleCommonUser, "billing:read", "POST", "/api/user/billing-summary", http.StatusForbidden},
+		{common.RoleAdminUser, "ops:write", "POST", "/api/token/workflow/issue", http.StatusForbidden},
+		{common.RoleRootUser, "billing:read", "GET", "/api/token/workflow/status", http.StatusForbidden},
+	} {
+		user := model.User{Username: fmt.Sprintf("pat-%d", i), AffCode: fmt.Sprintf("aff-%d", i), Role: tc.role, Group: "default", Status: common.UserStatusEnabled}
+		require.NoError(t, db.Create(&user).Error)
+		suffix, err := common.GenerateRandomCharsKey(43)
+		require.NoError(t, err)
+		raw := model.AccessTokenPrefix + suffix
+		token := model.UserAccessToken{Name: "兼容验证", TokenHash: model.AccessTokenFingerprint(raw), TokenHint: model.AccessTokenHint(raw)}
+		require.NoError(t, token.SetScopes([]string{tc.scope}))
+		require.NoError(t, model.CreateUserAccessToken(user.Id, &token, service.AccessTokenMaxPerUser))
+		req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(fmt.Sprintf(`{"user_ids":[%d]}`, user.Id)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer "+raw)
+		recorder := httptest.NewRecorder()
+		engine.ServeHTTP(recorder, req)
+		require.Equal(t, tc.want, recorder.Code, tc.path)
+		if tc.want == http.StatusOK {
+			assert.Contains(t, recorder.Body.String(), `"success":true`)
+		}
 	}
 }

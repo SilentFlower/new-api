@@ -16,7 +16,7 @@ import (
 // @return 最小请求对象；请求非法时返回错误。
 func GetAndValidateAlphaSearchRequest(c *gin.Context) (*dto.AlphaSearchRequest, error) {
 	request := &dto.AlphaSearchRequest{}
-	if err := common.UnmarshalBodyReusable(c, request); err != nil {
+	if err := common.UnmarshalBodyReusableNoCopy(c, request); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(request.Model) == "" {
@@ -40,9 +40,9 @@ func GetAndValidateAlphaSearchRequest(c *gin.Context) (*dto.AlphaSearchRequest, 
 	if modelFieldCount != 1 {
 		return nil, errors.New("model must be specified exactly once")
 	}
-	if exceedsMaxTokensLimit(request.MaxOutputTokens) {
+	if ExceedsMaxTokensLimit(request.MaxOutputTokens) {
 		return nil, errors.New("max_output_tokens is invalid")
 	}
-	request.RawBody = append(request.RawBody[:0], body...)
+	request.RawBody = body
 	return request, nil
 }

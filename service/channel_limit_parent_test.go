@@ -203,7 +203,7 @@ func TestChannelLimitParentTaskSettlementUsesPersistedOwnerAndLegacyFallback(t *
 				relation.ParentChannelId = 0
 				require.NoError(t, SaveChannelLimitParent(t.Context(), relation))
 			}
-			RecalculateTaskQuota(t.Context(), &stored, 350, "父渠道归属验证")
+			RecalculateTaskQuota(t.Context(), &stored, 350, common.NewMessage("父渠道归属验证"))
 			parentUsed, _, _, err := GetChannelUserDailyQuotaUsage(t.Context(), parent.Id, 79077)
 			require.NoError(t, err)
 			childUsed, _, _, err := GetChannelUserDailyQuotaUsage(t.Context(), child.Id, 79077)

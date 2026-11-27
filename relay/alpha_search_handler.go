@@ -12,11 +12,12 @@ import (
 	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
+	"github.com/QuantumNous/new-api/relay/requestplugin"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
 
+	"github.com/MoeForge/moego/ojson"
 	"github.com/gin-gonic/gin"
-	"github.com/tidwall/sjson"
 )
 
 var alphaSearchHopByHopHeaders = map[string]struct{}{
@@ -52,11 +53,25 @@ func AlphaSearchHelper(c *gin.Context, info *relaycommon.RelayInfo) *types.NewAP
 	defer closer.Close()
 	info.UpstreamRequestBodySize = body.Size()
 
-	req, err := newAlphaSearchUpstreamRequest(c, info, adaptor, body, body.Size())
-	if err != nil {
-		return types.NewOpenAIError(errors.New("upstream error: build request failed"), types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+	var httpResp *http.Response
+	if info.ApiType == appconstant.APITypeProviderPlugin {
+		// 供应商插件的签名与转换依赖最终请求字节，交由实际适配器发送。
+		var result any
+		result, err = adaptor.DoRequest(c, info, body)
+		if err == nil {
+			var ok bool
+			httpResp, ok = result.(*http.Response)
+			if !ok || httpResp == nil {
+				return types.NewError(errors.New("invalid upstream response"), types.ErrorCodeBadResponse)
+			}
+		}
+	} else {
+		req, buildErr := newAlphaSearchUpstreamRequest(c, info, adaptor, body, body.Size())
+		if buildErr != nil {
+			return types.NewOpenAIError(errors.New("upstream error: build request failed"), types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
+		}
+		httpResp, err = channel.DoRequestWithoutErrorLog(c, req, info)
 	}
-	httpResp, err := channel.DoRequestWithoutErrorLog(c, req, info)
 	if err != nil {
 		newAPIError := types.NewOpenAIError(err, types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
 		newAPIError.SetMessage("upstream error: do request failed")
@@ -95,9 +110,13 @@ func prepareAlphaSearchRequestBody(c *gin.Context, info *relaycommon.RelayInfo) 
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
 	}
-	jsonData, err := sjson.SetBytes(append([]byte(nil), rawBody...), "model", info.UpstreamModelName)
+	jsonData, err := buildAlphaSearchRequestBody(rawBody, info.OriginModelName, info.UpstreamModelName)
 	if err != nil {
 		return nil, types.NewError(err, types.ErrorCodeConvertRequestFailed, types.ErrOptionWithSkipRetry())
+	}
+	var pluginErr *types.NewAPIError
+	if jsonData, pluginErr = requestplugin.Outbound(c, info, jsonData); pluginErr != nil {
+		return nil, pluginErr
 	}
 	if len(info.ParamOverride) > 0 {
 		jsonData, err = relaycommon.ApplyParamOverrideWithRelayInfo(jsonData, info)
@@ -105,13 +124,16 @@ func prepareAlphaSearchRequestBody(c *gin.Context, info *relaycommon.RelayInfo) 
 			return nil, newAPIErrorFromParamOverride(err)
 		}
 	}
+	if pluginErr = requestplugin.Egress(c, info, jsonData); pluginErr != nil {
+		return nil, pluginErr
+	}
 	return jsonData, nil
 }
 
 func buildAlphaSearchUpstreamURL(c *gin.Context, info *relaycommon.RelayInfo, adaptor channel.Adaptor) (string, error) {
 	requestURL := "/v1/alpha/search"
 	var fullRequestURL string
-	if info.ApiType == appconstant.APITypeAdvancedCustom {
+	if info.ApiType == appconstant.APITypeAdvancedCustom || info.ApiType == appconstant.APITypeProviderPlugin {
 		resolvedURL, err := adaptor.GetRequestURL(info)
 		if err != nil {
 			return "", err
@@ -160,15 +182,8 @@ func newAlphaSearchUpstreamRequest(c *gin.Context, info *relaycommon.RelayInfo, 
 	if req.Header.Get("Accept") == "" {
 		req.Header.Set("Accept", "application/json")
 	}
-	headerOverride, err := channel.ResolveHeaderOverride(info, c)
-	if err != nil {
+	if err := channel.ApplyHeaderOverride(info, c, req); err != nil {
 		return nil, err
-	}
-	for key, value := range headerOverride {
-		req.Header.Set(key, value)
-		if strings.EqualFold(key, "Host") {
-			req.Host = value
-		}
 	}
 	channel.ApplyUpstreamBodyMetadata(req, body)
 	info.UpstreamRequestURLPath = req.URL.EscapedPath()
@@ -215,10 +230,12 @@ func buildAlphaSearchRequestBody(rawBody []byte, originModel, upstreamModel stri
 	if upstreamModel == "" || upstreamModel == originModel {
 		return rawBody, nil
 	}
-	var body map[string]any
-	if err := common.Unmarshal(rawBody, &body); err != nil {
+	if !ojson.ValidBytes(rawBody) || !ojson.GetBytesNoCopy(rawBody, "@this").IsObject() {
+		return nil, errors.New("alpha search request body must be a JSON object")
+	}
+	body := ojson.NewDoc(rawBody)
+	if err := relaycommon.SetJSONMember(body, "", "model", upstreamModel); err != nil {
 		return nil, err
 	}
-	body["model"] = upstreamModel
-	return common.Marshal(body)
+	return body.Bytes(), nil
 }

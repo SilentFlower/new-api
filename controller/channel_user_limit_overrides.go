@@ -160,7 +160,7 @@ func SetChannelUserLimitOverride(c *gin.Context) {
 		return
 	}
 	var raw map[string]any
-	if err := c.ShouldBindBodyWithJSON(&raw); err != nil {
+	if err := common.UnmarshalBodyReusable(c, &raw); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}
@@ -172,7 +172,7 @@ func SetChannelUserLimitOverride(c *gin.Context) {
 		}
 	}
 	var input service.ChannelUserLimitOverrideInput
-	if err := c.ShouldBindBodyWithJSON(&input); err != nil {
+	if err := common.UnmarshalBodyReusable(c, &input); err != nil {
 		common.ApiErrorI18n(c, i18n.MsgInvalidParams)
 		return
 	}

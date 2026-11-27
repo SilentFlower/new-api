@@ -959,11 +959,15 @@ func extractOpenAIVisionAssistImages(request *dto.GeneralOpenAIRequest) []Vision
 			if image == nil || image.Url == "" {
 				continue
 			}
+			detail := image.Detail
+			if detail == "" {
+				detail = "high"
+			}
 			images = append(images, VisionAssistImage{
 				Index:        len(images) + 1,
 				MessageIndex: i,
 				Source:       types.NewFileSourceFromData(image.Url, image.MimeType),
-				Detail:       image.Detail,
+				Detail:       detail,
 				MimeType:     image.MimeType,
 			})
 		}

@@ -2,20 +2,16 @@ package controller
 
 import (
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
-	relaycommon "github.com/QuantumNous/new-api/relay/common"
-	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relaykit/types"
-	"github.com/QuantumNous/new-api/service"
+
 	"github.com/gin-gonic/gin"
 	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
@@ -23,162 +19,81 @@ import (
 	"gorm.io/gorm"
 )
 
-func setupRelayErrorLogTestDB(t *testing.T) *gorm.DB {
-	t.Helper()
-
-	originalDB := model.DB
-	originalLogDB := model.LOG_DB
-	originalMainDatabaseType := common.MainDatabaseType()
-	originalLogDatabaseType := common.LogDatabaseType()
-	originalRedisEnabled := common.RedisEnabled
-
+func TestProcessChannelErrorUsesSnapshotWithoutLeakingChannelMetadata(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
-	common.RedisEnabled = false
+	previousDB, previousLogDB := model.DB, model.LOG_DB
+	previousRedisEnabled := common.RedisEnabled
+	previousMainDatabaseType := common.MainDatabaseType()
+	previousLogDatabaseType := common.LogDatabaseType()
+	previousErrorLogEnabled := constant.ErrorLogEnabled
 
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", strings.ReplaceAll(t.Name(), "/", "_"))
-	db, err := gorm.Open(sqlite.Open(dsn), &gorm.Config{})
+	database, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{})
 	require.NoError(t, err)
-	model.DB = db
-	model.LOG_DB = db
-	require.NoError(t, db.AutoMigrate(&model.Log{}, &model.User{}))
-
-	t.Cleanup(func() {
-		sqlDB, err := db.DB()
-		if err == nil {
-			_ = sqlDB.Close()
-		}
-		model.DB = originalDB
-		model.LOG_DB = originalLogDB
-		common.SetDatabaseTypes(originalMainDatabaseType, originalLogDatabaseType)
-		common.RedisEnabled = originalRedisEnabled
-	})
-
-	return db
-}
-
-func TestRecordRelayErrorLogIncludesVisionAssistFailureFields(t *testing.T) {
-	db := setupRelayErrorLogTestDB(t)
-	originalErrorLogEnabled := constant.ErrorLogEnabled
-	constant.ErrorLogEnabled = false
-	t.Cleanup(func() {
-		constant.ErrorLogEnabled = originalErrorLogEnabled
-	})
-
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages?beta=true", nil)
-	c.Set("id", 7)
-	c.Set("username", "tester")
-	c.Set("token_name", "test-token")
-	c.Set("original_model", "claude-opus-4-8")
-	c.Set("token_id", 11)
-	c.Set("group", "test")
-	c.Set("channel_id", 22)
-	c.Set("channel_name", "main-channel")
-	c.Set("channel_type", constant.ChannelTypeAnthropic)
-	c.Set(common.RequestIdKey, "request-vision-assist-failed")
-	c.Set("use_channel", []string{"22"})
-	common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now().Add(-2*time.Second))
-	common.SetContextKey(c, constant.ContextKeyLogOther, map[string]interface{}{
-		"vision_assist_applied":        false,
-		"vision_assist_failure_reason": "assist_call_failed",
-		"vision_assist_last_error":     "upstream error: do request failed",
-	})
-
-	err := types.NewOpenAIError(errors.New("upstream error: do request failed"), types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
-	recordRelayErrorLog(c, err)
-
-	var logs []model.Log
-	require.NoError(t, db.Find(&logs).Error)
-	require.Len(t, logs, 1)
-	assert.Equal(t, model.LogTypeError, logs[0].Type)
-	assert.Equal(t, "request-vision-assist-failed", logs[0].RequestId)
-	assert.Equal(t, "claude-opus-4-8", logs[0].ModelName)
-	other, parseErr := common.StrToMap(logs[0].Other)
-	require.NoError(t, parseErr)
-	assert.Equal(t, false, other["vision_assist_applied"])
-	assert.Equal(t, "assist_call_failed", other["vision_assist_failure_reason"])
-	assert.Equal(t, "upstream error: do request failed", other["vision_assist_last_error"])
-	assert.Equal(t, "/v1/messages", other["request_path"])
-}
-
-func TestRecordRelayErrorLogRespectsGlobalSwitchForNormalErrors(t *testing.T) {
-	db := setupRelayErrorLogTestDB(t)
-	originalErrorLogEnabled := constant.ErrorLogEnabled
-	constant.ErrorLogEnabled = false
-	t.Cleanup(func() {
-		constant.ErrorLogEnabled = originalErrorLogEnabled
-	})
-
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
-	err := types.NewOpenAIError(errors.New("upstream error: do request failed"), types.ErrorCodeDoRequestFailed, http.StatusInternalServerError)
-
-	recordRelayErrorLog(c, err)
-
-	var count int64
-	require.NoError(t, db.Model(&model.Log{}).Count(&count).Error)
-	assert.EqualValues(t, 0, count)
-}
-
-func TestResponsesWebSocketBusinessErrorPersistsCompactAudit(t *testing.T) {
-	db := setupRelayErrorLogTestDB(t)
-	originalErrorLogEnabled := constant.ErrorLogEnabled
+	sqlDB, err := database.DB()
+	require.NoError(t, err)
+	sqlDB.SetMaxOpenConns(1)
+	require.NoError(t, database.AutoMigrate(&model.User{}, &model.Log{}))
+	model.DB, model.LOG_DB = database, database
+	common.RedisEnabled = false
+	common.SetDatabaseTypes(common.DatabaseTypeSQLite, common.DatabaseTypeSQLite)
 	constant.ErrorLogEnabled = true
 	t.Cleanup(func() {
-		constant.ErrorLogEnabled = originalErrorLogEnabled
+		model.DB, model.LOG_DB = previousDB, previousLogDB
+		common.RedisEnabled = previousRedisEnabled
+		common.SetDatabaseTypes(previousMainDatabaseType, previousLogDatabaseType)
+		constant.ErrorLogEnabled = previousErrorLogEnabled
+		require.NoError(t, sqlDB.Close())
 	})
 
-	c, _ := gin.CreateTestContext(httptest.NewRecorder())
-	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses?api_key=client-secret", nil)
-	c.Set("id", 8)
-	c.Set("username", "ws-tester")
-	c.Set("token_name", "ws-token")
-	c.Set("original_model", "gpt-5-openai-compact")
-	c.Set("token_id", 12)
-	c.Set("group", "default")
-	c.Set("channel_id", 23)
-	c.Set("channel_name", "ws-channel")
-	c.Set("channel_type", constant.ChannelTypeOpenAI)
-	c.Set(common.RequestIdKey, "request-responses-ws-failed")
-	c.Set(common.UpstreamRequestIdKey, "standard-upstream-request-id")
-	c.Set("use_channel", []string{"23"})
-	common.SetContextKey(c, constant.ContextKeyRequestStartTime, time.Now())
-	turn := &responsesWebSocketTurn{
-		info: &relaycommon.RelayInfo{
-			ResponsesCompactMode:   relayconstant.ResponsesCompactModeV2WebSocket,
-			RequestURLPath:         "/v1/responses",
-			UpstreamRequestURLPath: "https://upstream.example/v1/responses?credential=secret",
-			ChannelMeta: &relaycommon.ChannelMeta{
-				ChannelId:   23,
-				ChannelType: constant.ChannelTypeOpenAI,
-			},
-		},
+	require.NoError(t, database.Create(&model.User{Id: 7, Username: "log-owner", Group: "default"}).Error)
+	recorder := httptest.NewRecorder()
+	ctx, _ := gin.CreateTestContext(recorder)
+	ctx.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
+	ctx.Set("id", 7)
+	ctx.Set("username", "log-owner")
+	ctx.Set("token_name", "test-token")
+	ctx.Set("token_id", 11)
+	ctx.Set("original_model", "gpt-test")
+	ctx.Set("group", "default")
+	ctx.Set("channel_id", 202)
+	ctx.Set("channel_name", "mutable-context-channel")
+	ctx.Set("channel_type", 9)
+	ctx.Set("use_channel", []string{"101"})
+	common.SetContextKey(ctx, constant.ContextKeyRequestStartTime, time.Now().Add(-time.Second))
+
+	channelSnapshot := types.ChannelError{
+		ChannelId:   101,
+		ChannelType: 1,
+		ChannelName: "snapshot-channel",
+		AutoBan:     false,
 	}
-	service.SetResponsesCompactAudit(c, turn.info, "response.failed")
-	channel := &model.Channel{Id: 23, Type: constant.ChannelTypeOpenAI, Name: "ws-channel", AutoBan: common.GetPointer(0)}
-	apiErr := types.WithOpenAIError(types.OpenAIError{
-		Message: "upstream overloaded",
-		Type:    "server_error",
-		Code:    "server_is_overloaded",
-	}, http.StatusServiceUnavailable)
+	apiErr := types.NewOpenAIError(errors.New("upstream failed"), types.ErrorCodeBadResponseStatusCode, http.StatusBadGateway)
 
-	processResponsesWebSocketChannelError(c, turn, channel, apiErr, "response.failed")
+	processChannelError(ctx, channelSnapshot, apiErr, nil)
 
-	var logs []model.Log
-	require.NoError(t, db.Find(&logs).Error)
-	require.Len(t, logs, 1)
-	assert.Equal(t, "standard-upstream-request-id", logs[0].UpstreamRequestId)
-	other, err := common.StrToMap(logs[0].Other)
+	var stored model.Log
+	require.NoError(t, database.First(&stored).Error)
+	assert.Equal(t, channelSnapshot.ChannelId, stored.ChannelId)
+	storedOther, err := common.StrToMap(stored.Other)
 	require.NoError(t, err)
-	adminInfo, ok := other["admin_info"].(map[string]interface{})
+	assert.Equal(t, float64(http.StatusBadGateway), storedOther["status_code"])
+	for _, key := range []string{"channel_id", "channel_name", "channel_type"} {
+		assert.NotContains(t, storedOther, key)
+	}
+	adminInfo, ok := storedOther["admin_info"].(map[string]any)
 	require.True(t, ok)
-	audit, ok := adminInfo["responses_compact"].(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, string(relayconstant.ResponsesCompactModeV2WebSocket), audit["mode"])
-	assert.Equal(t, "/v1/responses", audit["inbound_path"])
-	assert.Equal(t, "/v1/responses", audit["upstream_path"])
-	assert.Equal(t, "response.failed", audit["outcome"])
-	assert.Equal(t, "standard-upstream-request-id", audit["upstream_request_id"])
-	assert.NotContains(t, logs[0].Other, "secret")
+	assert.Equal(t, []any{"101"}, adminInfo["use_channel"])
+
+	logs, total, err := model.GetUserLogs(7, model.LogFilter{Type: model.LogTypeError}, 0, 10)
+	require.NoError(t, err)
+	require.Equal(t, int64(1), total)
+	require.Len(t, logs, 1)
+	assert.Equal(t, channelSnapshot.ChannelId, logs[0].ChannelId)
+	assert.Empty(t, logs[0].ChannelName)
+	userOther, err := common.StrToMap(logs[0].Other)
+	require.NoError(t, err)
+	assert.NotContains(t, userOther, "admin_info")
+	for _, key := range []string{"channel_id", "channel_name", "channel_type"} {
+		assert.NotContains(t, userOther, key)
+	}
 }

@@ -89,15 +89,15 @@ func TestBillingModelNameFreezeAndClear(t *testing.T) {
 		},
 	}
 
-	assert.Equal(t, "upstream-model", info.BillingModelName())
+	assert.Equal(t, "upstream-model", info.GetBillingModelName())
 	info.FreezeBillingModelName(" frozen-model ")
 	assert.Equal(t, "frozen-model", info.FrozenBillingModelName())
-	assert.Equal(t, "frozen-model", info.BillingModelName())
+	assert.Equal(t, "frozen-model", info.GetBillingModelName())
 
 	info.UpstreamModelName = "changed-upstream-model"
-	assert.Equal(t, "frozen-model", info.BillingModelName())
+	assert.Equal(t, "frozen-model", info.GetBillingModelName())
 
 	info.ClearBillingModelName()
 	assert.Empty(t, info.FrozenBillingModelName())
-	assert.Equal(t, "changed-upstream-model", info.BillingModelName())
+	assert.Equal(t, "changed-upstream-model", info.GetBillingModelName())
 }

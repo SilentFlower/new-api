@@ -50,13 +50,14 @@ func TestGetWorkflowAccountStatusRejectsStaleTokenCache(t *testing.T) {
 	require.NoError(t, DB.Create(&token).Error)
 	stale := token
 	stale.UserId = user.Id + 100
-	require.NoError(t, cacheSetToken(stale))
+	require.NoError(t, cacheSetTokenForTest(stale))
 
 	status, err := GetWorkflowAccountStatus(user.Username, token.Name)
 	require.NoError(t, err)
 	require.False(t, status.Tokens[0].EffectiveStateMatches)
 
-	require.NoError(t, cacheSetToken(token))
+	require.NoError(t, common.RDB.Del(t.Context(), getTokenCacheKey(token.Key)).Err())
+	require.NoError(t, cacheSetTokenForTest(token))
 	status, err = GetWorkflowAccountStatus(user.Username, token.Name)
 	require.NoError(t, err)
 	require.True(t, status.Tokens[0].EffectiveStateMatches)

@@ -92,7 +92,7 @@ func TestResponsesWebSocketOptionSyncRejectsInvalidHistory(t *testing.T) {
 	db := useResponsesWebSocketOptionTestDB(t)
 	require.NoError(t, db.Create(&Option{Key: key, Value: "0"}).Error)
 
-	loadOptionsFromDatabase()
+	require.NoError(t, LoadOptionsFromDatabase())
 	assert.Equal(t, "120", common.OptionMap[key])
 	InitOptionMap()
 	assert.Equal(t, "120", common.OptionMap[key])

@@ -18,50 +18,8 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 
-import { Window } from 'happy-dom'
 
-const bunTestModule = 'bun:test'
-const { test, afterEach, afterAll } = await import(bunTestModule)
-const domWindow = new Window()
-for (const key of [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLButtonElement',
-  'HTMLInputElement',
-  'HTMLSelectElement',
-  'HTMLLabelElement',
-  'HTMLDivElement',
-  'HTMLSpanElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'KeyboardEvent',
-  'PointerEvent',
-  'MouseEvent',
-  'FocusEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'IntersectionObserver',
-  'DOMRect',
-  'ShadowRoot',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-  'localStorage',
-  'sessionStorage',
-] as const) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
-Object.defineProperty(globalThis, 'self', {
-  configurable: true,
-  value: domWindow,
-})
+import { test, afterEach } from 'vitest'
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { QueryClient, QueryClientProvider, notifyManager } =
@@ -156,7 +114,7 @@ async function selectParent(value: string) {
   await act(async () => {
     select.value = value
     select.dispatchEvent(
-      new domWindow.Event('change', { bubbles: true }) as unknown as Event
+      new window.Event('change', { bubbles: true }) as unknown as Event
     )
   })
 }
@@ -186,7 +144,6 @@ afterEach(async () => {
   client.put = originalPut
   document.body.replaceChildren()
 })
-afterAll(() => domWindow.close())
 
 test('当前父渠道不在候选页时仍保留其名称和 ID，同名候选可区分', async () => {
   setupRequests()

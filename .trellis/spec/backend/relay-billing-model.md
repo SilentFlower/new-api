@@ -316,3 +316,33 @@ if shouldSkipClientGoneLocalUsageBilling(ctx, relayInfo, originUsage) {
 - `TestClaudeFlower2APILocalSummaryStreamUsage` 和 `TestClaudeFlower2APILocalSummaryJSONUsage` 验证渠道信任、明确零用量、终态、缺失或重复回执、输入估算以及正常模型用量和缓存。
 - `TestPostTextConsumeQuotaReturnsAgentSummaryReservation` 验证按次、按量和阶梯计费的真实预扣归还。`TestPostTextConsumeQuotaAgentSummarySettlementFailure` 核对故障和退款状态。
 - `TestClaudeLocalSummaryLargeHistorySettlesOnceAsZero` 经过 Messages 计费准备、回环上游及消息适配器，验证大历史估算触发预扣和单次零结算。
+
+## 阶梯文本预扣与 Responses WebSocket 退款
+
+### 适用范围
+
+文本请求进入阶梯表达式预扣，或普通 Responses WebSocket 在单轮内产生预扣、结算和退款时，按以下规则核对。
+
+### 入口
+
+`relay/helper.ModelPriceHelper` 计算预留额度。`GET /v1/responses` 使用逐轮结算。`(*BillingSession).Refund` 归还该轮占用的钱包或订阅额度及令牌额度。
+
+### 配置与结果
+
+`quota_setting.pre_consume_multiplier` 默认是 1。阶梯预扣按预计输入费用乘以该倍率计算，预计输出 token 为 0。最终消费按实际适用价格和用量结算。WebSocket 已受理的失败轮次在发送终态、允许下一轮进入之前归还预扣。
+
+### 边界与错误
+
+| 条件 | 预期 |
+|---|---|
+| 客户端显式声明输出上限 | 保留协议上限校验。单独增大输出上限时，阶梯文本预扣保持一致。 |
+| 普通 WebSocket 收到 `response.created` 后失败、取消、断开或完成事件缺少 usage | 归还本轮预扣。钱包及令牌均可立即用于下一轮。 |
+| 一轮已输出内容后发生可重试上游错误 | 结束并退款。已交付内容保持单次。 |
+
+### 可复核样例
+
+分组倍率 1、每单位 500,000 额度、表达式 `tier("base", p * 3 + c * 15)`。1,000 个输入 token 在默认预扣倍率下预留 1,500 额度。对缺省输出上限套用历史 8,192 token 得到的 62,940 额度会错误拦截低余额用户。普通 WebSocket 固定价 0.002 轮次先收到 `response.created`、再收到 `response.failed` 时，退回该轮 1,000 额度。HTTP SSE 有单独的终态和计费规则。
+
+### 回归断言
+
+`TestModelPriceHelperTieredInputPreConsumeMultiplier` 比较显式与缺省输出上限、免费组和预扣倍率。`TestResponsesStreamOutcomesPreserveAccounting` 分传输方式核对消费日志、用户余额及 Key 余额。`TestResponsesWebSocketRetryBeforeDelivery` 验证首帧失败换渠和已交付后失败退款。

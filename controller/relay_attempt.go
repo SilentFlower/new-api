@@ -3,7 +3,6 @@ package controller
 import (
 	"fmt"
 	"net/http"
-	"strings"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -13,7 +12,6 @@ import (
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
-	"github.com/QuantumNous/new-api/setting"
 
 	"github.com/gin-gonic/gin"
 	"github.com/samber/lo"
@@ -128,22 +126,13 @@ func resetMainRelayAttemptFields(relayInfo *relaycommon.RelayInfo, originModelNa
 
 func prepareMainRelayBilling(c *gin.Context, relayInfo *relaycommon.RelayInfo) *types.NewAPIError {
 	request := relayInfo.Request
-	needSensitiveCheck := setting.ShouldCheckPromptSensitive()
 	needCountToken := constant.CountToken
 	// Token 计数和敏感词都关闭时，避免为大请求拼接完整 CombineText。
 	var meta *types.TokenCountMeta
-	if needSensitiveCheck || needCountToken {
+	if needCountToken {
 		meta = request.GetTokenCountMeta()
 	} else {
 		meta = fastTokenCountMetaForPricing(request)
-	}
-
-	if needSensitiveCheck && meta != nil {
-		contains, words := service.CheckSensitiveText(meta.CombineText)
-		if contains {
-			logger.LogWarn(c, fmt.Sprintf("user sensitive words detected: %s", strings.Join(words, ", ")))
-			return types.NewError(fmt.Errorf("sensitive words detected"), types.ErrorCodeSensitiveWordsDetected, types.ErrOptionWithSkipRetry())
-		}
 	}
 
 	tokens, err := service.EstimateRequestToken(c, meta, relayInfo)

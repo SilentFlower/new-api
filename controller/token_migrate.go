@@ -176,7 +176,7 @@ func MigrateTokensToAccounts(c *gin.Context) {
 
 		// 写审计日志：仅记录令牌名 / id / 新用户名 / 新用户 id，不含密码。
 		model.RecordLog(srcUserId, model.LogTypeManage,
-			fmt.Sprintf("迁移令牌 %s (id=%d) 到新用户 %s (id=%d)", tk.Name, tk.Id, newUsername, newUserId))
+			common.NewMessage("迁移令牌 {{token}} (id={{token_id}}) 到新用户 {{user}} (id={{user_id}})", map[string]any{"token": tk.Name, "token_id": tk.Id, "user": newUsername, "user_id": newUserId}))
 		logger.LogInfo(c.Request.Context(),
 			fmt.Sprintf("token migrate success: src_user=%d, token_id=%d, new_user_id=%d, new_username=%s",
 				srcUserId, tk.Id, newUserId, newUsername))

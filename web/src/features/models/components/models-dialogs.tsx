@@ -18,9 +18,10 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import { DescriptionDialog } from './dialogs/description-dialog'
 import { MissingModelsDialog } from './dialogs/missing-models-dialog'
+import { ModelSquareOrderDialog } from './dialogs/model-square-order-dialog'
 import { PrefillGroupManagement } from './dialogs/prefill-group-management'
+import { PriceSyncDialog } from './dialogs/price-sync-dialog'
 import { SyncWizardDialog } from './dialogs/sync-wizard-dialog'
-import { UpstreamConflictDialog } from './dialogs/upstream-conflict-dialog'
 import { VendorMutateDialog } from './dialogs/vendor-mutate-dialog'
 import { ModelMutateDrawer } from './drawers/model-mutate-drawer'
 import { useModels } from './models-provider'
@@ -37,15 +38,25 @@ export function ModelsDialogs() {
 
   return (
     <>
+      <PriceSyncDialog
+        open={open === 'price-sync'}
+        onOpenChange={(value) => !value && setOpen(null)}
+      />
       {/* Model Create/Update Drawer */}
       <ModelMutateDrawer
-        open={open === 'create-model' || open === 'update-model'}
+        open={
+          open === 'create-model' ||
+          open === 'update-model' ||
+          open === 'price-model'
+        }
+        initialSection={open === 'price-model' ? 'pricing' : 'metadata'}
         onOpenChange={(v) => !v && setOpen(null)}
         currentRow={currentRow}
       />
 
       {/* Vendor Create/Update Dialog */}
       <VendorMutateDialog
+        key={`${open}-${currentVendor?.id ?? 'new'}`}
         open={open === 'create-vendor' || open === 'update-vendor'}
         onOpenChange={(v) => !v && setOpen(null)}
         currentVendor={open === 'update-vendor' ? currentVendor : null}
@@ -63,9 +74,8 @@ export function ModelsDialogs() {
         onOpenChange={(v) => !v && setOpen(null)}
       />
 
-      {/* Upstream Conflict Dialog */}
-      <UpstreamConflictDialog
-        open={open === 'upstream-conflict'}
+      <ModelSquareOrderDialog
+        open={open === 'model-square-order'}
         onOpenChange={(v) => !v && setOpen(null)}
       />
 

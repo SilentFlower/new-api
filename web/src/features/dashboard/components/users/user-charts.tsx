@@ -47,6 +47,7 @@ import {
   getRollingDateRange,
   type TimeGranularity,
 } from '@/lib/time'
+import { requireServerSuccess } from '@/lib/server-error-message'
 import { VCHART_OPTION } from '@/lib/vchart'
 
 let themeManagerPromise: Promise<
@@ -190,8 +191,8 @@ export function UserCharts(props: UserChartsProps) {
       dashboardFilters.groups,
       dashboardFilters.token_names,
     ],
-    queryFn: () =>
-      getUserQuotaDataByUsers(buildQueryParams(timeRange, dashboardFilters)),
+    queryFn: async () =>
+      requireServerSuccess(await getUserQuotaDataByUsers(buildQueryParams(timeRange, dashboardFilters))),
     select: (res) => (res.success ? res.data : []),
     staleTime: 60_000,
   })

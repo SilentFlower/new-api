@@ -46,5 +46,8 @@ func deleteChannelsMatchingStatus(ids []int, statuses []int64) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
+	if deleted > 0 {
+		BumpSyncTopic(SyncTopicChannels)
+	}
 	return deleted, nil
 }

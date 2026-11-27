@@ -2,6 +2,7 @@ package channel
 
 import (
 	"context"
+	"github.com/QuantumNous/new-api/model"
 	"net/http"
 	"testing"
 
@@ -14,7 +15,7 @@ type contextTaskFetcherStub struct {
 	received context.Context
 }
 
-func (s *contextTaskFetcherStub) FetchTaskWithContext(ctx context.Context, _ string, _ string, _ map[string]any, _ string) (*http.Response, error) {
+func (s *contextTaskFetcherStub) FetchTaskWithContext(ctx context.Context, _ string, _ string, _ *model.Task, _ string) (*http.Response, error) {
 	s.received = ctx
 	return nil, ctx.Err()
 }
@@ -24,7 +25,7 @@ type legacyTaskFetcherStub struct {
 	called bool
 }
 
-func (s *legacyTaskFetcherStub) FetchTask(_ string, _ string, _ map[string]any, _ string) (*http.Response, error) {
+func (s *legacyTaskFetcherStub) FetchTask(_ string, _ string, _ *model.Task, _ string) (*http.Response, error) {
 	s.called = true
 	return &http.Response{StatusCode: http.StatusOK}, nil
 }

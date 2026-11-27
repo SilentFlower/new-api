@@ -80,7 +80,7 @@ func TestShouldRetryAfterKeepAliveCommittedResponse(t *testing.T) {
 	require.NoError(t, err)
 	relayErr := types.NewError(errors.New("channel unavailable"), types.ErrorCodeChannelNoAvailableKey)
 
-	assert.True(t, shouldRetry(c, relayErr, 1))
+	assert.True(t, service.ShouldRetryRelayError(c, relayErr, 1))
 }
 
 func TestInitialRelayRequestErrorClassifiesUnexpectedEOF(t *testing.T) {
@@ -132,7 +132,7 @@ func TestShouldRetryAlphaSearchUpstreamError(t *testing.T) {
 	apiErr := relay.AlphaSearchHelper(c, info)
 
 	require.NotNil(t, apiErr)
-	assert.True(t, shouldRetry(c, apiErr, 1))
+	assert.True(t, service.ShouldRetryRelayError(c, apiErr, 1))
 }
 
 func TestPrepareAlphaSearchBillingReservesOneWebSearchCall(t *testing.T) {
@@ -161,7 +161,7 @@ func TestPrepareAlphaSearchBillingReservesOneWebSearchCall(t *testing.T) {
 	assert.Equal(t, expected.TotalQuota, billing.reserved)
 	assert.Equal(t, expected.TotalQuota, info.FinalPreConsumedQuota)
 	assert.Equal(t, expected.TotalQuota, info.PriceData.Quota)
-	assert.Equal(t, "gpt-5", info.BillingModelName())
+	assert.Equal(t, "gpt-5", info.GetBillingModelName())
 	assert.Nil(t, info.QuotaClamp)
 	require.NotNil(t, info.ToolCallBilling)
 	assert.Equal(t, expected, *info.ToolCallBilling)
@@ -342,3 +342,5 @@ func TestResponsesCompactV2RetryUsesBaseSelectionAndEachChannelsOwnModelMapping(
 	assert.Equal(t, "gpt-5.2", secondRequest.Model)
 	assert.Equal(t, ratio_setting.WithCompactModelSuffix("gpt-5.2"), info.OriginModelName)
 }
+
+func (s *billingSettlerStub) ReserveBeforeSubmit(quota int) error { return s.Reserve(quota) }

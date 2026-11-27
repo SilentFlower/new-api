@@ -99,7 +99,7 @@ func TestResponsesStreamStatusProtocolTerminals(t *testing.T) {
 			require.NotNil(t, usage)
 			assert.Equal(t, tc.wantPrompt, usage.PromptTokens)
 			assert.Equal(t, tc.wantCompletion, usage.CompletionTokens)
-			other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 1, 0, 1)
+			other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 1, 0, 1).Snapshot()
 			status, ok := other["stream_status"].(map[string]interface{})
 			require.True(t, ok)
 			wantStatus := "ok"
@@ -160,7 +160,7 @@ func TestResponsesStreamStatusPreservesTransportErrors(t *testing.T) {
 
 			require.Nil(t, apiErr)
 			assert.Equal(t, expected, info.StreamStatus.EndReason)
-			other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 1, 0, 1)
+			other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 1, 0, 1).Snapshot()
 			status, ok := other["stream_status"].(map[string]interface{})
 			require.True(t, ok)
 			assert.Equal(t, "error", status["status"])

@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	appdto "github.com/QuantumNous/new-api/dto"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
@@ -84,7 +87,7 @@ func newResponsesWebSocketConcurrencyFixture(t *testing.T) *responsesWebSocketCo
 		Status: common.ChannelStatusEnabled, BaseURL: &baseURL, Models: "ws-concurrency-model", Group: "default",
 		UserConcurrencyLimit: common.GetPointer(1), AutoBan: common.GetPointer(0),
 	}
-	f.channel.SetSetting(dto.ChannelSettings{ResponsesCompactPassthroughEnabled: true})
+	f.channel.SetSetting(dto.ChannelSettings{ResponsesCompactPassthroughEnabled: true, ResponsesWebSocketEnabled: true})
 	require.NoError(t, db.Create(f.channel).Error)
 	require.NoError(t, db.Create(&model.User{Id: f.userID, Username: "ws-concurrency-user"}).Error)
 	var handlers sync.WaitGroup
@@ -96,8 +99,8 @@ func newResponsesWebSocketConcurrencyFixture(t *testing.T) *responsesWebSocketCo
 		common.SetContextKey(c, constant.ContextKeyUserQuota, common.QuotaRemindThreshold+1)
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
 		common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
-		common.SetContextKey(c, constant.ContextKeyTokenSpecificChannelId, fmt.Sprint(f.channel.Id))
-		RelayResponsesWebSocket(c)
+		service.GetChannelConstraints(c).AddPin(appdto.ChannelPin{ChannelId: f.channel.Id, Source: appdto.PinSourceToken, Rank: appdto.PinRankToken})
+		serveResponsesWSTestSession(c)
 	})
 	f.proxy = httptest.NewServer(engine)
 	t.Cleanup(func() {
@@ -160,7 +163,7 @@ func TestResponsesWebSocketConcurrencyReleasesBetweenTurns(t *testing.T) {
 			if compact {
 				input = `[{"type":"compaction_trigger"}]`
 			}
-			first := []byte(fmt.Sprintf(`{"type":"response.create","model":"ws-concurrency-model","input":%s}`, input))
+			first := []byte(fmt.Sprintf(`{"type":"response.create","model":"ws-concurrency-model","stream":true,"input":%s}`, input))
 			require.NoError(t, client.WriteMessage(websocket.TextMessage, first))
 			request := f.nextRequest(t)
 			f.awaitUsage(t, f.channel.Id, 1)
@@ -171,13 +174,13 @@ func TestResponsesWebSocketConcurrencyReleasesBetweenTurns(t *testing.T) {
 			assert.JSONEq(t, string(completed), string(response))
 			f.awaitUsage(t, f.channel.Id, 0)
 
-			second := []byte(fmt.Sprintf(`{"type":"response.create","model":"ws-concurrency-model","previous_response_id":"resp_first","input":%s}`, input))
+			second := []byte(fmt.Sprintf(`{"type":"response.create","model":"ws-concurrency-model","stream":true,"previous_response_id":"resp_first","input":%s}`, input))
 			require.NoError(t, client.WriteMessage(websocket.TextMessage, second))
 			next := f.nextRequest(t)
 			assert.Same(t, request.conn, next.conn)
 			assert.Equal(t, "resp_first", gjson.GetBytes(next.payload, "previous_response_id").String())
 			f.awaitUsage(t, f.channel.Id, 1)
-			require.NoError(t, next.conn.WriteMessage(websocket.TextMessage, completed))
+			require.NoError(t, next.conn.WriteMessage(websocket.TextMessage, []byte(strings.Replace(string(completed), "resp_first", "resp_second", 1))))
 			_, _, err = client.ReadMessage()
 			require.NoError(t, err)
 			f.awaitUsage(t, f.channel.Id, 0)
@@ -233,7 +236,7 @@ func TestResponsesWebSocketConcurrencyReleasesTerminalErrors(t *testing.T) {
 				if compact {
 					input = `[{"type":"compaction_trigger"}]`
 				}
-				payload := []byte(fmt.Sprintf(`{"type":"response.create","model":"ws-concurrency-model","input":%s}`, input))
+				payload := []byte(fmt.Sprintf(`{"type":"response.create","model":"ws-concurrency-model","stream":true,"input":%s}`, input))
 				require.NoError(t, client.WriteMessage(websocket.TextMessage, payload))
 				request := f.nextRequest(t)
 				f.awaitUsage(t, f.channel.Id, 1)
@@ -242,7 +245,11 @@ func TestResponsesWebSocketConcurrencyReleasesTerminalErrors(t *testing.T) {
 				require.NoError(t, request.conn.WriteMessage(websocket.TextMessage, event))
 				_, received, err := client.ReadMessage()
 				require.NoError(t, err)
-				assert.JSONEq(t, string(event), string(received))
+				if terminal == "error" {
+					assert.Equal(t, "error", gjson.GetBytes(received, "type").String())
+				} else {
+					assert.JSONEq(t, string(event), string(received))
+				}
 				f.awaitUsage(t, f.channel.Id, 0)
 				require.NoError(t, client.WriteMessage(websocket.TextMessage, payload))
 				next := f.nextRequest(t)

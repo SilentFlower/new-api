@@ -15,7 +15,7 @@ func TestExchangeJwtForAccessTokenUsesRequestContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := exchangeJwtForAccessTokenWithProxyContext(ctx, "signed-jwt", "")
+	_, _, err := exchangeJwtForAccessToken(ctx, "signed-jwt", "")
 
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), context.Canceled.Error())

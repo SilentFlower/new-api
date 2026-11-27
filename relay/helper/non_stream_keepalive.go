@@ -18,6 +18,7 @@ import (
 var jsonKeepAlivePayload = []byte("\n")
 
 type nonStreamKeepAliveWriter struct {
+	writeBudget StreamWriteBudget
 	gin.ResponseWriter
 	context                 *gin.Context
 	mutex                   sync.Mutex
@@ -138,7 +139,7 @@ func (w *nonStreamKeepAliveWriter) writeKeepAlivePayload() bool {
 	header.Set("Content-Type", "application/json")
 	header.Set("X-Accel-Buffering", "no")
 	header.Del("Content-Length")
-	ExtendWriteDeadline(w.context)
+	_ = http.NewResponseController(w.context.Writer).SetWriteDeadline(w.writeBudget.Deadline(time.Now(), len(jsonKeepAlivePayload)))
 	if _, err := w.ResponseWriter.Write(jsonKeepAlivePayload); err != nil {
 		return false
 	}

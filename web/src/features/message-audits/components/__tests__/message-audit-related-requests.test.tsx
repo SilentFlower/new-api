@@ -17,37 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { after, test } from 'node:test'
+import { test } from 'vitest'
 
-import { Window } from 'happy-dom'
 
 import dayjs from '@/lib/dayjs'
-
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLButtonElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'MouseEvent',
-  'CustomEvent',
-  'MutationObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -76,9 +49,6 @@ const reactTestGlobals = globalThis as typeof globalThis & {
 }
 reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
 
-after(() => {
-  domWindow.close()
-})
 
 test('关联视觉辅助调用显示时间、模型、状态和请求 ID，并可打开详情', async () => {
   const capturedAt = dayjs('2026-08-16 12:34:56').unix()

@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 
-import { Window } from 'happy-dom'
 
 import type {
   ChannelBudgetUsageView,
@@ -31,56 +30,7 @@ import type {
 } from '../../../types'
 
 // 运行时使用 Bun 测试 API，避免 node:test 在全量执行时把后续文件误判为嵌套测试。
-const bunTestModule = 'bun:test'
-const { afterAll, afterEach, test } = (await import(bunTestModule)) as {
-  afterAll: typeof import('node:test').after
-  afterEach: typeof import('node:test').afterEach
-  test: typeof import('node:test').test
-}
-
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLButtonElement',
-  'HTMLInputElement',
-  'HTMLLabelElement',
-  'HTMLSelectElement',
-  'HTMLDivElement',
-  'HTMLSpanElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'KeyboardEvent',
-  'PointerEvent',
-  'MouseEvent',
-  'FocusEvent',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'IntersectionObserver',
-  'DOMRect',
-  'ShadowRoot',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-  'localStorage',
-  'sessionStorage',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
-Object.defineProperty(globalThis, 'self', {
-  configurable: true,
-  value: domWindow,
-})
+import { afterEach, test } from 'vitest'
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -292,7 +242,7 @@ async function pressEscape(element: HTMLElement) {
   await act(async () => {
     element.focus()
     element.dispatchEvent(
-      new domWindow.KeyboardEvent('keydown', {
+      new window.KeyboardEvent('keydown', {
         key: 'Escape',
         bubbles: true,
       }) as unknown as Event
@@ -303,13 +253,13 @@ async function pressEscape(element: HTMLElement) {
 async function changeInput(input: HTMLInputElement, value: string) {
   await act(async () => {
     const valueSetter = Object.getOwnPropertyDescriptor(
-      domWindow.HTMLInputElement.prototype,
+      window.HTMLInputElement.prototype,
       'value'
     )?.set
     assert.ok(valueSetter)
     valueSetter.call(input, value)
     input.dispatchEvent(
-      new domWindow.Event('input', { bubbles: true }) as unknown as Event
+      new window.Event('input', { bubbles: true }) as unknown as Event
     )
   })
 }
@@ -470,9 +420,6 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-afterAll(() => {
-  domWindow.close()
-})
 
 test('关联子渠道能查看继承来源，但预算新增操作为只读', async () => {
   setOperator(true)

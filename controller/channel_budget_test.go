@@ -192,8 +192,8 @@ func TestChannelBudgetUsageAndOverrideContract(t *testing.T) {
 	}
 
 	// 从实际持久化的管理日志核对前后值，失败的写请求不得产生成功审计。
-	var logs []model.Log
-	require.NoError(t, model.LOG_DB.Where("type = ?", model.LogTypeManage).Order("id ASC").Find(&logs).Error)
+	var logs []model.AuditLog
+	require.NoError(t, model.LOG_DB.Where("category = ?", model.AuditCategoryOperation).Order("id ASC").Find(&logs).Error)
 	expected := []struct {
 		action, budgetID, before, after string
 		userID                          int
@@ -218,7 +218,7 @@ func TestChannelBudgetUsageAndOverrideContract(t *testing.T) {
 				} `json:"params"`
 			} `json:"op"`
 		}
-		require.NoError(t, common.UnmarshalJsonStr(logs[i].Other, &other))
+		require.NoError(t, common.UnmarshalJsonStr(common.GetJsonString(logs[i].Other), &other))
 		assert.Equal(t, want.action, other.Op.Action)
 		assert.Equal(t, 80, other.Op.Params.ChannelID)
 		assert.Equal(t, want.budgetID, other.Op.Params.BudgetID)

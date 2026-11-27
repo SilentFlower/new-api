@@ -19,7 +19,6 @@ For commercial licensing, please contact support@quantumnous.com
 import { TokenLeakScanSettingsSection } from '@/features/token-leak-scan/components/token-leak-scan-settings-section'
 
 import { RateLimitSection } from '../request-limits/rate-limit-section'
-import { SensitiveWordsSection } from '../request-limits/sensitive-words-section'
 import { SSRFSection } from '../request-limits/ssrf-section'
 import { TokenLimitSection } from '../request-limits/token-limit-section'
 import type { SecuritySettings } from '../types'
@@ -43,19 +42,7 @@ const SECURITY_SECTIONS = [
       />
     ),
   },
-  {
-    id: 'sensitive-words',
-    titleKey: 'Sensitive Words',
-    build: (settings: SecuritySettings) => (
-      <SensitiveWordsSection
-        defaultValues={{
-          CheckSensitiveEnabled: settings.CheckSensitiveEnabled,
-          CheckSensitiveOnPromptEnabled: settings.CheckSensitiveOnPromptEnabled,
-          SensitiveWords: settings.SensitiveWords,
-        }}
-      />
-    ),
-  },
+
   {
     id: 'ssrf',
     titleKey: 'SSRF Protection',

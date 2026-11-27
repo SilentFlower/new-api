@@ -19,7 +19,7 @@ import (
 // @return 可用目标或明确的本地拒绝。
 func ResolveChannelLimitFallbackTarget(c *gin.Context, fallback dto.ChannelLimitFallback) (*model.Channel, *types.NewAPIError) {
 	deny := types.NewOpenAIError(errors.New("channel limit fallback target is unavailable or unauthorized"), types.ErrorCodeChannelLimitFallbackUnavailable, http.StatusForbidden, types.ErrOptionWithSkipRetry())
-	if _, pinned := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId); pinned {
+	if _, pinned, _ := GetChannelConstraints(c).ResolvedPin(); pinned {
 		return nil, deny
 	}
 	if common.GetContextKeyBool(c, constant.ContextKeyTokenModelLimitEnabled) {

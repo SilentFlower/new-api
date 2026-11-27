@@ -17,42 +17,10 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { after, test } from 'node:test'
+import { test } from 'vitest'
 
-import { Window } from 'happy-dom'
 
 import type { ChannelFormValues } from '../../../../lib'
-
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLButtonElement',
-  'HTMLInputElement',
-  'HTMLSelectElement',
-  'HTMLTextAreaElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'MouseEvent',
-  'PointerEvent',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -90,7 +58,6 @@ function Harness() {
   )
 }
 
-after(() => domWindow.close())
 
 test('渠道历史推理计数开关有可访问标签，点击后同步表单并可关闭', async () => {
   const container = document.createElement('div')

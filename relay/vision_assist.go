@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/QuantumNous/new-api/tokenkit"
 	"io"
 	"net/http"
 	"strings"
@@ -165,7 +166,7 @@ func callVisionAssistModelWithAuditWriter(c *gin.Context, info *relaycommon.Rela
 		}
 		return nil, apiErr
 	}
-	service.PostTextConsumeQuota(c, assistInfo, usage, []string{"视觉辅助识别"})
+	service.PostTextConsumeQuota(c, assistInfo, usage, []*common.Message{common.NewMessage("视觉辅助识别")})
 
 	if len(images) == 0 {
 		return nil, nil
@@ -463,7 +464,7 @@ func parseVisionAssistOpenAIResponse(body []byte, info *relaycommon.RelayInfo) (
 	}
 	if usage.TotalTokens == 0 {
 		usage.PromptTokens = info.GetEstimatePromptTokens()
-		usage.CompletionTokens = service.EstimateTokenByModel(info.OriginModelName, text)
+		usage.CompletionTokens = tokenkit.Count(info.OriginModelName, text)
 		usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 	}
 	return text, &usage, nil
@@ -530,7 +531,7 @@ func fillVisionAssistUsageFallback(usage *dto.Usage, info *relaycommon.RelayInfo
 		return
 	}
 	usage.PromptTokens = info.GetEstimatePromptTokens()
-	usage.CompletionTokens = service.EstimateTokenByModel(info.OriginModelName, text)
+	usage.CompletionTokens = tokenkit.Count(info.OriginModelName, text)
 	usage.TotalTokens = usage.PromptTokens + usage.CompletionTokens
 }
 

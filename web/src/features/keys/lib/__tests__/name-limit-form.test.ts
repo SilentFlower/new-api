@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, test } from 'node:test'
+import { describe, test } from 'vitest'
 import type { TFunction } from 'i18next'
 
 import { API_KEY_FORM_DEFAULT_VALUES, getApiKeyFormSchema } from '../api-key-form'

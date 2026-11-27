@@ -4,7 +4,6 @@ import (
 	"errors"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/bytedance/gopkg/util/gopool"
 
 	"gorm.io/gorm"
 )
@@ -231,6 +230,9 @@ func DisableTokenForLeakFinding(findingID int64) (*TokenLeakFinding, *Token, err
 			return err
 		}
 		if storedToken.Status != common.TokenStatusDisabled {
+			if err := invalidateTokenCacheForMutation(storedToken.Key); err != nil {
+				return err
+			}
 			result := tx.Model(&Token{}).
 				Where("id = ? AND user_id = ?", storedToken.Id, storedToken.UserId).
 				Update("status", common.TokenStatusDisabled)
@@ -251,13 +253,10 @@ func DisableTokenForLeakFinding(findingID int64) (*TokenLeakFinding, *Token, err
 	if err != nil {
 		return nil, nil, err
 	}
-	if token != nil && common.RedisEnabled {
-		cachedToken := *token
-		gopool.Go(func() {
-			if err := cacheSetToken(cachedToken); err != nil {
-				common.SysLog("failed to update token cache: " + err.Error())
-			}
-		})
+	if token != nil {
+		if err := invalidateTokenCacheForMutation(token.Key); err != nil {
+			return finding, token, err
+		}
 	}
 	return finding, token, nil
 }

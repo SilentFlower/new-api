@@ -3,12 +3,14 @@ package controller
 import (
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/pkg/jsplugin"
 	"github.com/QuantumNous/new-api/relay"
 	"github.com/QuantumNous/new-api/relay/channel/ai360"
 	"github.com/QuantumNous/new-api/relay/channel/lingyiwanwu"
@@ -33,7 +35,7 @@ var channelId2Models map[int][]string
 
 func init() {
 	// https://platform.openai.com/docs/models/model-endpoint-compatibility
-	for i := 0; i < constant.APITypeDummy; i++ {
+	for i := range constant.APITypeDummy {
 		if i == constant.APITypeAIProxyLibrary {
 			continue
 		}
@@ -97,6 +99,9 @@ func init() {
 	for i := 1; i <= constant.ChannelTypeDummy; i++ {
 		apiType, success := common.ChannelType2APIType(i)
 		if !success || apiType == constant.APITypeAIProxyLibrary {
+			if models := channelTypePluginModels(i); len(models) > 0 {
+				channelId2Models[i] = models
+			}
 			continue
 		}
 		meta := &relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{
@@ -105,10 +110,29 @@ func init() {
 		adaptor := relay.GetAdaptor(apiType)
 		adaptor.Init(meta)
 		channelId2Models[i] = adaptor.GetModelList()
+		if len(channelId2Models[i]) == 0 {
+			if models := channelTypePluginModels(i); len(models) > 0 {
+				channelId2Models[i] = models
+			}
+		}
 	}
 	openAIModels = lo.UniqBy(openAIModels, func(m dto.OpenAIModels) string {
 		return m.Id
 	})
+}
+
+// channelTypePluginModels lists the models of every plugin declaring a
+// built-in channel type, each once, in plugin key order.
+func channelTypePluginModels(channelType int) []string {
+	var models []string
+	for _, plugin := range jsplugin.DefaultRegistry.PluginsByChannelType(channelType) {
+		for _, name := range plugin.Meta.Models {
+			if !slices.Contains(models, name) {
+				models = append(models, name)
+			}
+		}
+	}
+	return models
 }
 
 func channelOwnerName(channelType int) string {
@@ -132,7 +156,7 @@ func channelOwnerName(channelType int) string {
 func getPreferredModelOwners(modelNames []string, groups []string) map[string]string {
 	channelTypes, err := model.GetPreferredModelOwnerChannelTypes(modelNames, groups)
 	if err != nil {
-		common.SysLog(fmt.Sprintf("GetPreferredModelOwnerChannelTypes error: %v", err))
+		common.SysLog(common.LogText("GetPreferredModelOwnerChannelTypes error: %v", err))
 		return map[string]string{}
 	}
 
@@ -242,7 +266,7 @@ func ListModels(c *gin.Context, modelType int) {
 	models := service.GetGroupsEnabledModels(ownerGroups)
 	for _, modelName := range models {
 		if modelLimitEnable {
-			matchingName := ratio_setting.FormatMatchingModelName(modelName)
+			matchingName := ratio_setting.RoutingMatchModelName(modelName)
 			if !tokenModelLimit[modelName] && !tokenModelLimit[matchingName] {
 				continue
 			}
@@ -314,9 +338,18 @@ func ChannelListModels(c *gin.Context) {
 }
 
 func DashboardListModels(c *gin.Context) {
+	modelsByChannel := make(map[int][]string, len(channelId2Models))
+	for channelType, models := range channelId2Models {
+		modelsByChannel[channelType] = append([]string(nil), models...)
+	}
+	for channelType := 1; channelType <= constant.ChannelTypeDummy; channelType++ {
+		if models := channelTypePluginModels(channelType); len(models) > 0 {
+			modelsByChannel[channelType] = models
+		}
+	}
 	c.JSON(200, gin.H{
 		"success": true,
-		"data":    channelId2Models,
+		"data":    modelsByChannel,
 	})
 }
 

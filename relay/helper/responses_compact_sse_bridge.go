@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 const responsesCompactSSEBridgeContextKey = "responses_compact_sse_bridge"
 
 type responsesCompactSSEBridge struct {
+	writeBudget          StreamWriteBudget
 	context              *gin.Context
 	mutex                sync.Mutex
 	stopOnce             sync.Once
@@ -109,7 +111,7 @@ func (b *responsesCompactSSEBridge) writePing() bool {
 		return false
 	}
 	b.setEventStreamHeadersLocked()
-	ExtendWriteDeadline(b.context)
+	_ = http.NewResponseController(b.context.Writer).SetWriteDeadline(b.writeBudget.Deadline(time.Now(), len(": PING\n\n")))
 	written, err := b.context.Writer.Write([]byte(": PING\n\n"))
 	if written > 0 {
 		b.payloadWritten = true
@@ -142,7 +144,7 @@ func (b *responsesCompactSSEBridge) writeEvent(eventType string, payload any) er
 		return b.context.Request.Context().Err()
 	}
 	b.setEventStreamHeadersLocked()
-	ExtendWriteDeadline(b.context)
+	_ = http.NewResponseController(b.context.Writer).SetWriteDeadline(b.writeBudget.Deadline(time.Now(), len(eventData)))
 	written, err := b.context.Writer.Write(eventData)
 	if written > 0 {
 		b.payloadWritten = true

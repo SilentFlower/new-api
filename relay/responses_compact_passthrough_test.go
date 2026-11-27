@@ -539,3 +539,7 @@ func TestParseResponsesCompactPassthroughUsageAcceptsExplicitZeroValues(t *testi
 	assert.Zero(t, usage.CompletionTokens)
 	assert.Zero(t, usage.TotalTokens)
 }
+
+func (s *responsesCompactPassthroughBillingStub) ReserveBeforeSubmit(quota int) error {
+	return s.Reserve(quota)
+}

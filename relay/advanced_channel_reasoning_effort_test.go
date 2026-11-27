@@ -126,7 +126,7 @@ func TestAdvancedChannelReasoningEffortHandlers(t *testing.T) {
 				info.InitChannelMeta(c)
 				adaptor := GetAdaptor(info.ApiType)
 				adaptor.Init(info)
-				_, apiErr := chatCompletionsViaResponses(c, info, adaptor, info.Request.(*dto.GeneralOpenAIRequest))
+				_, apiErr := textRequestViaResponses(c, info, adaptor, info.Request.(*dto.GeneralOpenAIRequest))
 				return apiErr
 			}},
 	}
@@ -233,9 +233,9 @@ func TestAdvancedChannelReasoningEffortHandlers(t *testing.T) {
 					assert.Equal(t, "冻结计费模型", info.FrozenBillingModelName())
 					other := service.GenerateTextOtherInfo(c, info, 1, 1, 1, 0, 1, 0, 1)
 					if want == "" {
-						assert.NotContains(t, other, "reasoning_effort")
+						assert.NotContains(t, other.Snapshot(), "reasoning_effort")
 					} else {
-						assert.Equal(t, want, other["reasoning_effort"])
+						assert.Equal(t, want, other.Snapshot()["reasoning_effort"])
 					}
 				})
 			}

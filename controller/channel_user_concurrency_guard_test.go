@@ -178,7 +178,7 @@ func TestShouldRetryTaskRelaySkipsLocalConcurrencyErrors(t *testing.T) {
 				LocalError: true,
 			}
 
-			assert.False(t, shouldRetryTaskRelay(c, 80, taskErr, 1))
+			assert.False(t, decideTaskRetry(c, taskErr, 1).Action == "retry")
 		})
 	}
 }

@@ -25,6 +25,12 @@ func shouldSkipClientGoneLocalUsageBilling(ctx *gin.Context, relayInfo *relaycom
 	if relayInfo.StreamStatus.EndReason != relaycommon.StreamEndReasonClientGone {
 		return false
 	}
+	// 回复过滤插件也会主动取消上游，这时客户端仍在线，仍按主线计费。
+	for _, record := range relayInfo.RequestPluginRecord {
+		if record.Stage == "reply" && record.Rejected != nil {
+			return false
+		}
+	}
 	return common.GetContextKeyBool(ctx, constant.ContextKeyLocalCountTokens)
 }
 
@@ -58,8 +64,8 @@ func recordClientGoneLocalUsageErrorLog(ctx *gin.Context, relayInfo *relaycommon
 	model.RecordErrorLog(ctx, relayInfo.UserId, relayInfoChannelID(relayInfo), summary.ModelName, summary.TokenName, content, relayInfo.TokenId, int(summary.UseTimeSeconds), relayInfo.IsStream, relayInfo.UsingGroup, other)
 }
 
-func buildClientGoneLocalUsageErrorOther(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, summary textQuotaSummary, originUsage *dto.Usage, adminRejectReason string, settlementFailed bool, refundFallbackTriggered bool) map[string]interface{} {
-	var other map[string]interface{}
+func buildClientGoneLocalUsageErrorOther(ctx *gin.Context, relayInfo *relaycommon.RelayInfo, summary textQuotaSummary, originUsage *dto.Usage, adminRejectReason string, settlementFailed bool, refundFallbackTriggered bool) *model.LogOther {
+	var other *model.LogOther
 	if summary.IsClaudeUsageSemantic {
 		other = GenerateClaudeOtherInfo(ctx, relayInfo,
 			summary.ModelRatio, summary.GroupRatio, summary.CompletionRatio,
@@ -68,37 +74,28 @@ func buildClientGoneLocalUsageErrorOther(ctx *gin.Context, relayInfo *relaycommo
 			summary.CacheCreationTokens5m, summary.CacheCreationRatio5m,
 			summary.CacheCreationTokens1h, summary.CacheCreationRatio1h,
 			summary.ModelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
-		other["usage_semantic"] = "anthropic"
+		other.SetPublic("usage_semantic", "anthropic")
 	} else {
 		other = GenerateTextOtherInfo(ctx, relayInfo, summary.ModelRatio, summary.GroupRatio, summary.CompletionRatio, summary.CacheTokens, summary.CacheRatio, summary.ModelPrice, relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio)
 	}
 	appendUsageBillingPathForLog(other, true, originUsage)
 	if adminRejectReason != "" {
-		other["reject_reason"] = adminRejectReason
+		other.SetAdmin("reject_reason", adminRejectReason)
 	}
 	if cacheWriteTokens := cacheWriteTokensTotal(summary); cacheWriteTokens > 0 {
-		other["cache_write_tokens"] = cacheWriteTokens
+		other.SetPublic("cache_write_tokens", cacheWriteTokens)
 	}
 	MergeContextLogOther(ctx, other)
-	adminInfo := ensureLogAdminInfo(other)
-	adminInfo["billing_skipped_reason"] = clientGoneLocalUsageBillingSkippedReason
-	adminInfo["estimated_quota"] = summary.Quota
-	adminInfo["estimated_prompt_tokens"] = summary.PromptTokens
-	adminInfo["estimated_completion_tokens"] = summary.CompletionTokens
+
+	other.SetAdmin("billing_skipped_reason", clientGoneLocalUsageBillingSkippedReason)
+	other.SetAdmin("estimated_quota", summary.Quota)
+	other.SetAdmin("estimated_prompt_tokens", summary.PromptTokens)
+	other.SetAdmin("estimated_completion_tokens", summary.CompletionTokens)
 	if settlementFailed {
-		adminInfo["billing_settlement_failed"] = true
-		adminInfo["billing_refund_fallback_triggered"] = refundFallbackTriggered
+		other.SetAdmin("billing_settlement_failed", true)
+		other.SetAdmin("billing_refund_fallback_triggered", refundFallbackTriggered)
 	}
 	return other
-}
-
-func ensureLogAdminInfo(other map[string]interface{}) map[string]interface{} {
-	adminInfo, ok := other["admin_info"].(map[string]interface{})
-	if !ok || adminInfo == nil {
-		adminInfo = map[string]interface{}{}
-		other["admin_info"] = adminInfo
-	}
-	return adminInfo
 }
 
 func relayInfoChannelID(relayInfo *relaycommon.RelayInfo) int {

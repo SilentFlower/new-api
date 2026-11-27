@@ -37,7 +37,7 @@ func TestResponsesWebSocketFirstFrameTimeout(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			router := gin.New()
-			router.GET("/v1/responses", RelayResponsesWebSocket)
+			router.GET("/v1/responses", serveResponsesWSTestSession)
 			server := httptest.NewServer(router)
 			t.Cleanup(server.Close)
 

@@ -57,12 +57,7 @@ func TestChannelLimitParentVideoLookupRejectsSharedConcurrency(t *testing.T) {
 				c.Request = httptest.NewRequest(http.MethodGet, "/v1/videos/local-task/content", nil)
 				common.SetContextKey(c, constant.ContextKeyUserId, 79503)
 				task := &model.Task{ChannelId: child.Id, TaskID: taskcommon.EncodeLocalTaskID("operations/parent-video-test"), PrivateData: model.TaskPrivateData{Key: "local-test-key"}}
-				var lookupErr error
-				if channelType == constant.ChannelTypeGemini {
-					_, lookupErr = getGeminiVideoURL(c, child, task, "local-test-key")
-				} else {
-					_, lookupErr = getVertexVideoURL(c, child, task)
-				}
+				_, lookupErr := legacyGoogleVideoURL(c, child, task)
 				var apiErr *types.NewAPIError
 				require.ErrorAs(t, lookupErr, &apiErr)
 				if broken {
@@ -75,9 +70,9 @@ func TestChannelLimitParentVideoLookupRejectsSharedConcurrency(t *testing.T) {
 				assert.Zero(t, calls.Load())
 				if !broken && channelType == constant.ChannelTypeGemini {
 					require.NoError(t, leases[0].Release(t.Context()))
-					url, err := getGeminiVideoURL(c, child, task, "local-test-key")
+					url, err := legacyGoogleVideoURL(c, child, task)
 					require.NoError(t, err)
-					assert.Equal(t, "https://video.example/result.mp4?key=local-test-key", url)
+					assert.Equal(t, "https://video.example/result.mp4", url)
 					assert.EqualValues(t, 1, calls.Load())
 					usage, _, err := service.GetChannelUserConcurrencyUsage(t.Context(), parent.Id, 79503)
 					require.NoError(t, err)

@@ -17,40 +17,9 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { after, describe, test } from 'node:test'
+import { describe, test } from 'vitest'
 
-import { Window } from 'happy-dom'
 import type { ComponentProps } from 'react'
-
-const domWindow = new Window({ url: 'http://localhost' })
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLInputElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Text',
-  'Range',
-  'DOMRect',
-  'Event',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-  'localStorage',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -80,13 +49,13 @@ reactTestGlobals.IS_REACT_ACT_ENVIRONMENT = true
  */
 function changeTimeout(input: HTMLInputElement, value: string): void {
   const setter = Object.getOwnPropertyDescriptor(
-    domWindow.HTMLInputElement.prototype,
+    window.HTMLInputElement.prototype,
     'value'
   )?.set
   assert.ok(setter)
   setter.call(input, value)
   input.dispatchEvent(
-    new domWindow.Event('input', { bubbles: true }) as unknown as Event
+    new window.Event('input', { bubbles: true }) as unknown as Event
   )
 }
 
@@ -114,7 +83,6 @@ function globalDefaults(
 }
 
 describe('Responses WebSocket 首帧设置', () => {
-  after(() => domWindow.close())
 
   test('读取服务端有效值并在刷新后展示新的值', async () => {
     const container = document.createElement('div')
@@ -185,7 +153,7 @@ describe('Responses WebSocket 首帧设置', () => {
         await act(async () => {
           changeTimeout(input, value)
           form.dispatchEvent(
-            new domWindow.Event('submit', {
+            new window.Event('submit', {
               bubbles: true,
               cancelable: true,
             }) as unknown as Event
@@ -250,7 +218,7 @@ describe('Responses WebSocket 首帧设置', () => {
       await act(async () => changeTimeout(input, '180'))
       await act(async () => {
         form.dispatchEvent(
-          new domWindow.Event('submit', {
+          new window.Event('submit', {
             bubbles: true,
             cancelable: true,
           }) as unknown as Event

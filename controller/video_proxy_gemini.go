@@ -3,6 +3,7 @@ package controller
 import (
 	"fmt"
 	"io"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -11,93 +12,74 @@ import (
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
 	relaychannel "github.com/QuantumNous/new-api/relay/channel"
+	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/service"
-
 	"github.com/gin-gonic/gin"
 )
 
-func getGeminiVideoURL(c *gin.Context, channel *model.Channel, task *model.Task, apiKey string) (string, error) {
-	if channel == nil || task == nil {
-		return "", fmt.Errorf("invalid channel or task")
+// legacyGoogleVideoURL 还原旧任务的结果，缺少已保存的媒体时通过当前任务插件查询一次。
+func legacyGoogleVideoURL(c *gin.Context, ch *model.Channel, task *model.Task) (string, error) {
+	if saved := strings.TrimSpace(task.GetResultURL()); saved != "" && !isTaskMediaFallbackLoop(saved, task.TaskID) {
+		return saved, nil
 	}
-
-	if url := extractGeminiVideoURLFromTaskData(task); url != "" {
-		return ensureAPIKey(url, apiKey), nil
+	parse := extractGeminiVideoURLFromPayload
+	if ch.Type == constant.ChannelTypeVertexAi {
+		parse = extractVertexVideoURLFromPayload
 	}
-
-	baseURL := constant.ChannelBaseURLs[channel.Type]
-	if channel.GetBaseURL() != "" {
-		baseURL = channel.GetBaseURL()
+	if saved := parse(task.Data); saved != "" {
+		return saved, nil
 	}
-
-	adaptor := relay.GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(channel.Type)))
+	common.SetContextKey(c, constant.ContextKeyChannelId, ch.Id)
+	if err := service.ApplyChannelLimitContext(c, ch); err != nil {
+		return "", err
+	}
+	guard, limitErr := acquireChannelUserConcurrencyGuard(c)
+	if limitErr != nil {
+		return "", limitErr
+	}
+	defer func() { _ = finishChannelUserConcurrencyGuard(c, guard, nil) }()
+	adaptor := relay.GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(ch.Type)))
 	if adaptor == nil {
-		return "", fmt.Errorf("gemini task adaptor not found")
+		return "", errTaskArtifactPluginUnavailable
 	}
-
-	if apiKey == "" {
-		return "", fmt.Errorf("api key not available for task")
+	baseURL := ch.GetBaseURL()
+	if baseURL == "" {
+		baseURL = constant.GetChannelBaseURL(ch.Type)
 	}
-
-	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
-	if apiErr := service.ApplyChannelLimitContext(c, channel); apiErr != nil {
-		return "", apiErr
+	key := task.PrivateData.Key
+	if key == "" && ch.Type == constant.ChannelTypeVertexAi {
+		key = getVertexTaskKey(ch, task)
 	}
-	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrencyGuard(c)
-	if concurrencyErr != nil {
-		return "", concurrencyErr
+	if key == "" {
+		return "", fmt.Errorf("历史视频任务缺少上游凭据")
 	}
-	defer func() {
-		_ = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
-	}()
-
-	proxy := channel.GetSetting().Proxy
-	resp, err := relaychannel.FetchTaskWithContext(c.Request.Context(), adaptor, baseURL, apiKey, map[string]any{
-		"task_id": task.GetUpstreamTaskID(),
-		"action":  task.Action,
-	}, proxy)
+	settings := ch.GetSetting()
+	adaptor.Init(&relaycommon.RelayInfo{ChannelMeta: &relaycommon.ChannelMeta{ChannelType: ch.Type, ChannelId: ch.Id, ApiKey: key, ChannelBaseUrl: baseURL, ChannelSetting: settings, HeadersOverride: ch.GetHeaderOverride()}})
+	resp, err := relaychannel.FetchTaskWithContext(c.Request.Context(), adaptor, baseURL, key, task, settings.Proxy)
 	if err != nil {
-		return "", fmt.Errorf("fetch task failed: %w", err)
+		return "", err
 	}
 	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("历史视频任务查询返回 HTTP %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(taskMediaDataURLMaxEncodedBytes)+1))
+	if lost := finishChannelUserConcurrencyGuard(c, guard, nil); lost != nil {
+		guard = nil
+		return "", lost
+	}
+	guard = nil
 	if err != nil {
-		return "", fmt.Errorf("read task response failed: %w", err)
+		return "", err
 	}
-	concurrencyErr = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
-	concurrencyGuard = nil
-	if concurrencyErr != nil {
-		return "", concurrencyErr
+	if len(body) > taskMediaDataURLMaxEncodedBytes {
+		return "", errTaskMediaRequestRejected
 	}
-
-	taskInfo, parseErr := adaptor.ParseTaskResult(body)
-	if parseErr == nil && taskInfo != nil && taskInfo.RemoteUrl != "" {
-		return ensureAPIKey(taskInfo.RemoteUrl, apiKey), nil
+	if result := parse(body); result != "" {
+		return result, nil
 	}
-
-	if url := extractGeminiVideoURLFromPayload(body); url != "" {
-		return ensureAPIKey(url, apiKey), nil
-	}
-
-	if parseErr != nil {
-		return "", fmt.Errorf("parse task result failed: %w", parseErr)
-	}
-
-	return "", fmt.Errorf("gemini video url not found")
+	return "", fmt.Errorf("历史任务缺少视频结果")
 }
-
-func extractGeminiVideoURLFromTaskData(task *model.Task) string {
-	if task == nil || len(task.Data) == 0 {
-		return ""
-	}
-	var payload map[string]any
-	if err := common.Unmarshal(task.Data, &payload); err != nil {
-		return ""
-	}
-	return extractGeminiVideoURLFromMap(payload)
-}
-
 func extractGeminiVideoURLFromPayload(body []byte) string {
 	var payload map[string]any
 	if err := common.Unmarshal(body, &payload); err != nil {
@@ -152,7 +134,8 @@ func extractGeminiVideoURLFromGeneratedSamples(gvr map[string]any) string {
 	if gvr == nil {
 		return ""
 	}
-	if samples, ok := gvr["generatedSamples"].([]any); ok {
+	for _, field := range []string{"generatedSamples", "generatedVideos"} {
+		samples, _ := gvr[field].([]any)
 		for _, sample := range samples {
 			if sm, ok := sample.(map[string]any); ok {
 				if video, ok := sm["video"].(map[string]any); ok {
@@ -164,83 +147,6 @@ func extractGeminiVideoURLFromGeneratedSamples(gvr map[string]any) string {
 		}
 	}
 	return ""
-}
-
-func getVertexVideoURL(c *gin.Context, channel *model.Channel, task *model.Task) (string, error) {
-	if channel == nil || task == nil {
-		return "", fmt.Errorf("invalid channel or task")
-	}
-	if url := strings.TrimSpace(task.GetResultURL()); url != "" && !isTaskProxyContentURL(url, task.TaskID) {
-		return url, nil
-	}
-	if url := extractVertexVideoURLFromTaskData(task); url != "" {
-		return url, nil
-	}
-
-	baseURL := constant.ChannelBaseURLs[channel.Type]
-	if channel.GetBaseURL() != "" {
-		baseURL = channel.GetBaseURL()
-	}
-
-	adaptor := relay.GetTaskAdaptor(constant.TaskPlatform(strconv.Itoa(channel.Type)))
-	if adaptor == nil {
-		return "", fmt.Errorf("vertex task adaptor not found")
-	}
-
-	key := getVertexTaskKey(channel, task)
-	if key == "" {
-		return "", fmt.Errorf("vertex key not available for task")
-	}
-
-	common.SetContextKey(c, constant.ContextKeyChannelId, channel.Id)
-	if apiErr := service.ApplyChannelLimitContext(c, channel); apiErr != nil {
-		return "", apiErr
-	}
-	concurrencyGuard, concurrencyErr := acquireChannelUserConcurrencyGuard(c)
-	if concurrencyErr != nil {
-		return "", concurrencyErr
-	}
-	defer func() {
-		_ = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
-	}()
-
-	resp, err := relaychannel.FetchTaskWithContext(c.Request.Context(), adaptor, baseURL, key, map[string]any{
-		"task_id": task.GetUpstreamTaskID(),
-		"action":  task.Action,
-	}, channel.GetSetting().Proxy)
-	if err != nil {
-		return "", fmt.Errorf("fetch task failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("read task response failed: %w", err)
-	}
-	concurrencyErr = finishChannelUserConcurrencyGuard(c, concurrencyGuard, nil)
-	concurrencyGuard = nil
-	if concurrencyErr != nil {
-		return "", concurrencyErr
-	}
-
-	taskInfo, parseErr := adaptor.ParseTaskResult(body)
-	if parseErr == nil && taskInfo != nil && strings.TrimSpace(taskInfo.Url) != "" {
-		return taskInfo.Url, nil
-	}
-	if url := extractVertexVideoURLFromPayload(body); url != "" {
-		return url, nil
-	}
-	if parseErr != nil {
-		return "", fmt.Errorf("parse task result failed: %w", parseErr)
-	}
-	return "", fmt.Errorf("vertex video url not found")
-}
-
-func isTaskProxyContentURL(url string, taskID string) bool {
-	if strings.TrimSpace(url) == "" || strings.TrimSpace(taskID) == "" {
-		return false
-	}
-	return strings.Contains(url, "/v1/videos/"+taskID+"/content")
 }
 
 func getVertexTaskKey(channel *model.Channel, task *model.Task) string {
@@ -260,13 +166,6 @@ func getVertexTaskKey(channel *model.Channel, task *model.Task) string {
 		}
 	}
 	return strings.TrimSpace(channel.Key)
-}
-
-func extractVertexVideoURLFromTaskData(task *model.Task) string {
-	if task == nil || len(task.Data) == 0 {
-		return ""
-	}
-	return extractVertexVideoURLFromPayload(task.Data)
 }
 
 func extractVertexVideoURLFromPayload(body []byte) string {
@@ -316,17 +215,4 @@ func buildVideoDataURL(mimeType string, encoding string, base64Data string) stri
 		}
 	}
 	return "data:" + mime + ";base64," + base64Data
-}
-
-func ensureAPIKey(uri, key string) string {
-	if key == "" || uri == "" {
-		return uri
-	}
-	if strings.Contains(uri, "key=") {
-		return uri
-	}
-	if strings.Contains(uri, "?") {
-		return fmt.Sprintf("%s&key=%s", uri, key)
-	}
-	return fmt.Sprintf("%s?key=%s", uri, key)
 }

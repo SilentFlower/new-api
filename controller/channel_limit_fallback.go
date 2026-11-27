@@ -6,7 +6,6 @@ import (
 	"net/http"
 
 	"github.com/QuantumNous/new-api/common"
-	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/relay"
@@ -91,7 +90,7 @@ func prepareChannelLimitFallback(c *gin.Context, info *relaycommon.RelayInfo, so
 	if isResponsesCompact && selected.ChannelID != source.Id {
 		return source, apiErr
 	}
-	if _, pinned := common.GetContextKey(c, constant.ContextKeyTokenSpecificChannelId); pinned {
+	if _, pinned, _ := service.GetChannelConstraints(c).ResolvedPin(); pinned {
 		return source, apiErr
 	}
 	storage, err := common.GetBodyStorage(c)

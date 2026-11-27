@@ -101,6 +101,9 @@ func TestResponsesWebSocketChannelChangeRecovery(t *testing.T) {
 				primary := &model.Channel{Id: 9711, Type: constant.ChannelTypeOpenAI, Name: "原渠道", Status: common.ChannelStatusEnabled, Key: "test-primary-key", BaseURL: &primaryURL, Models: "ws-recovery-model", Group: "default"}
 				alternative := &model.Channel{Id: 9712, Type: constant.ChannelTypeOpenAI, Name: "替代渠道", Status: common.ChannelStatusEnabled, Key: "test-alternative-key", BaseURL: &alternativeURL, Models: "ws-recovery-model", Group: "replacement"}
 				for _, channel := range []*model.Channel{parent, primary, alternative} {
+					setting := channel.GetSetting()
+					setting.ResponsesWebSocketEnabled = true
+					channel.SetSetting(setting)
 					require.NoError(t, db.Create(channel).Error)
 				}
 				require.NoError(t, db.Create(&model.Ability{Group: parent.Group, Model: parent.Models, ChannelId: parent.Id, Enabled: true}).Error)
@@ -122,7 +125,7 @@ func TestResponsesWebSocketChannelChangeRecovery(t *testing.T) {
 					common.SetContextKey(c, constant.ContextKeyTokenGroup, "default")
 					common.SetContextKey(c, constant.ContextKeyTokenModelLimitEnabled, true)
 					common.SetContextKey(c, constant.ContextKeyTokenModelLimit, map[string]bool{"ws-recovery-model": true})
-					RelayResponsesWebSocket(c)
+					serveResponsesWSTestSession(c)
 				})
 				proxyServer := httptest.NewServer(engine)
 				t.Cleanup(proxyServer.Close)
@@ -214,7 +217,7 @@ func TestResponsesWebSocketChannelChangeRecovery(t *testing.T) {
 					assert.Equal(t, "后续输入", gjson.GetBytes(forwarded, "input.1.content").String())
 					usage, _, usageErr := service.GetChannelUserConcurrencyUsage(t.Context(), parent.Id, userID)
 					require.NoError(t, usageErr)
-					assert.Equal(t, 1, usage)
+					assert.Zero(t, usage)
 					expectedLogs++
 					_ = clientConn.Close()
 					clientConn = nil

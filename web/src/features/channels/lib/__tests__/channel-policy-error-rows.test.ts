@@ -23,10 +23,7 @@ import {
   matchChannelPolicyErrorRows,
 } from '../channel-policy-error-rows'
 
-const testModule = 'bun:test'
-const { test } = (await import(testModule)) as {
-  test: typeof import('node:test').test
-}
+import { test } from 'vitest'
 
 const rows = [
   { id: 'b1', name: '池子每日' },

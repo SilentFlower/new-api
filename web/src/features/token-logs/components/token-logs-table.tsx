@@ -217,7 +217,7 @@ export function TokenLogsTable(props: {
   onResetFilters: () => void
 }) {
   const { t } = useTranslation()
-  const baseColumns = useCommonLogsColumns(false)
+  const baseColumns = useCommonLogsColumns(false, false)
   const columns = useMemo<ColumnDef<UsageLog>[]>(
     () => [
       ...baseColumns,

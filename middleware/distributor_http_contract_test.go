@@ -2,6 +2,8 @@ package middleware
 
 import (
 	"fmt"
+	appdto "github.com/QuantumNous/new-api/dto"
+	"github.com/QuantumNous/new-api/service"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -147,6 +149,7 @@ func TestDistributePreservesHTTPErrorCodeContract(t *testing.T) {
 	}
 	require.NoError(t, db.Create(disabledChannel).Error)
 	require.NoError(t, db.Create(noEnabledKeyChannel).Error)
+	model.InitChannelCache()
 
 	tests := []struct {
 		name           string
@@ -176,7 +179,8 @@ func TestDistributePreservesHTTPErrorCodeContract(t *testing.T) {
 			path: "/v1/responses",
 			body: `{"model":"gpt-5","input":[]}`,
 			setupContext: func(c *gin.Context) {
-				common.SetContextKey(c, constant.ContextKeyTokenSpecificChannelId, disabledChannel.Id)
+				common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+				service.GetChannelConstraints(c).AddPin(appdto.ChannelPin{ChannelId: disabledChannel.Id, Source: appdto.PinSourceToken, Rank: appdto.PinRankToken})
 			},
 			expectedStatus: http.StatusForbidden,
 		},
@@ -195,7 +199,8 @@ func TestDistributePreservesHTTPErrorCodeContract(t *testing.T) {
 			path: "/v1/responses",
 			body: `{"model":"gpt-5","input":[]}`,
 			setupContext: func(c *gin.Context) {
-				common.SetContextKey(c, constant.ContextKeyTokenSpecificChannelId, noEnabledKeyChannel.Id)
+				common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
+				service.GetChannelConstraints(c).AddPin(appdto.ChannelPin{ChannelId: noEnabledKeyChannel.Id, Source: appdto.PinSourceToken, Rank: appdto.PinRankToken})
 			},
 			expectedStatus: http.StatusInternalServerError,
 		},

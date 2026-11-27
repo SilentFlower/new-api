@@ -24,10 +24,7 @@ import type {
 } from '../../period-types'
 import { resolveChannelScheduleStates } from '../channel-schedule-state'
 
-const testModule = 'bun:test'
-const { test } = (await import(testModule)) as {
-  test: typeof import('node:test').test
-}
+import { test } from 'vitest'
 
 /** 2030-03-18 01:46:40 Asia/Shanghai，周一。 */
 const NOW = 1900000000

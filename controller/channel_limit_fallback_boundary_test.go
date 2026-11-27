@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -174,7 +173,7 @@ func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
 			common.SetContextKey(c, constant.ContextKeyTokenKey, "test-token")
 			common.SetContextKey(c, constant.ContextKeyUserSetting, dto.UserSetting{BillingPreference: "wallet_only"})
 			if scenario.name == "pinned" {
-				common.SetContextKey(c, constant.ContextKeyTokenSpecificChannelId, fmt.Sprint(source.Id))
+				service.GetChannelConstraints(c).AddPin(appdto.ChannelPin{ChannelId: source.Id, Source: appdto.PinSourceToken, Rank: appdto.PinRankToken})
 			}
 			if scenario.name == "token_model_denied" {
 				common.SetContextKey(c, constant.ContextKeyTokenModelLimitEnabled, true)
@@ -186,15 +185,28 @@ func TestChannelLimitFallbackFullRelayBoundaries(t *testing.T) {
 			}
 			switch scenario.name {
 			case "websocket_no_fallback":
-				c.Request.Method = http.MethodGet
-				turn, apiErr := parseResponsesWebSocketTurn(c, websocket.TextMessage, []byte(body))
-				require.Nil(t, apiErr)
-				_, apiErr = prepareResponsesWebSocketTurnAttempt(c, turn)
-				require.NotNil(t, apiErr)
-				assert.Equal(t, types.ErrorCodeChannelPeriodQuotaExceeded, apiErr.GetErrorCode())
-				assert.Nil(t, turn.info.Billing)
-				assert.Nil(t, turn.info.LimitFallback)
-				c.Status(apiErr.StatusCode)
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+					engineCtx, _ := gin.CreateTestContext(w)
+					engineCtx.Request = req
+					for key, v := range c.Keys {
+						engineCtx.Set(key, v)
+					}
+					service.GetChannelConstraints(engineCtx).AddPin(appdto.ChannelPin{ChannelId: source.Id, Source: appdto.PinSourceToken})
+					serveResponsesWSTestSession(engineCtx)
+				}))
+				defer server.Close()
+				settings := source.GetSetting()
+				settings.ResponsesWebSocketEnabled = true
+				source.SetSetting(settings)
+				require.NoError(t, db.Model(source).Update("setting", source.Setting).Error)
+				ws, _, err := websocket.DefaultDialer.Dial(responsesWebSocketServerURL(server), http.Header{"X-Codex-Beta-Features": {"remote_compaction_v2"}})
+				require.NoError(t, err)
+				defer ws.Close()
+				require.NoError(t, ws.SetReadDeadline(time.Now().Add(5*time.Second)))
+				require.NoError(t, ws.WriteMessage(websocket.TextMessage, []byte(body)))
+				event := readResponsesWSTestEvent(t, ws)
+				assert.Equal(t, string(types.ErrorCodeChannelPeriodQuotaExceeded), event["error"].(map[string]any)["code"])
+				c.Status(int(event["status"].(float64)))
 				c.Writer.WriteHeaderNow()
 			case "task_no_fallback":
 				RelayTask(c)

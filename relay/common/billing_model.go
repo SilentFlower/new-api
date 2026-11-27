@@ -47,6 +47,7 @@ func (info *RelayInfo) ClearBillingModelName() {
 		return
 	}
 	info.ResolvedBillingModelName = ""
+	info.BillingModelName = ""
 }
 
 // FrozenBillingModelName 返回当前已经冻结的计费模型名，不执行动态回退解析。
@@ -56,17 +57,4 @@ func (info *RelayInfo) FrozenBillingModelName() string {
 		return ""
 	}
 	return info.ResolvedBillingModelName
-}
-
-// BillingModelName 返回本次请求用于计费和消费日志主模型的模型名。
-// 价格计算成功后优先返回冻结值，避免上游响应里的实际模型名污染结算。
-// @return 冻结的计费模型名；未冻结时返回当前动态解析结果。
-func (info *RelayInfo) BillingModelName() string {
-	if info == nil {
-		return ""
-	}
-	if strings.TrimSpace(info.ResolvedBillingModelName) != "" {
-		return info.ResolvedBillingModelName
-	}
-	return info.ResolveBillingModelName()
 }

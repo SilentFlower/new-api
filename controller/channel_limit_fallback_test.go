@@ -34,6 +34,9 @@ func TestChannelLimitFallbackUsesIndependentRequestAndTargetPrice(t *testing.T) 
 	require.NoError(t, err)
 	require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(`{"gpt-4o-mini":2,"gpt-4o":5}`))
 	t.Cleanup(func() { require.NoError(t, ratio_setting.UpdateModelRatioByJSONString(string(previous))) })
+	oldCount := constant.CountToken
+	constant.CountToken = true
+	t.Cleanup(func() { constant.CountToken = oldCount })
 	oldTimeout := constant.StreamingTimeout
 	constant.StreamingTimeout = 30
 	t.Cleanup(func() { constant.StreamingTimeout = oldTimeout })
@@ -124,7 +127,7 @@ func TestChannelLimitFallbackUsesIndependentRequestAndTargetPrice(t *testing.T) 
 				require.NoError(t, err)
 				assert.Contains(t, string(originalJSON), `"model":"gpt-4o-mini"`)
 				require.Nil(t, prepareMainRelayBilling(c, info))
-				assert.Equal(t, "gpt-4o", info.BillingModelName())
+				assert.Equal(t, "gpt-4o", info.GetBillingModelName())
 				require.NotNil(t, info.Billing)
 				assert.Positive(t, info.Billing.GetPreConsumedQuota())
 				switch format {

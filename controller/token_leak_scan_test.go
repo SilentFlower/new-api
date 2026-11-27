@@ -36,6 +36,7 @@ func setupTokenLeakControllerTestDB(t *testing.T) *gorm.DB {
 		&model.Token{},
 		&model.TokenLeakFinding{},
 		&model.TokenLeakNotification{},
+		&model.AuditLog{},
 		&model.Log{},
 	))
 	model.DB = db
@@ -104,13 +105,13 @@ func TestDisableTokenLeakFindingTokenReturnsSafeResponseAndRecordsAudit(t *testi
 	assert.Equal(t, token.Id, response.Data.TokenID)
 	assert.Equal(t, common.TokenStatusDisabled, response.Data.Status)
 
-	var logs []model.Log
+	var logs []model.AuditLog
 	require.NoError(t, db.Find(&logs).Error)
 	require.Len(t, logs, 1)
-	assert.Equal(t, model.LogTypeManage, logs[0].Type)
-	assert.NotContains(t, logs[0].Content+logs[0].Other, fullToken)
-	assert.NotContains(t, logs[0].Content+logs[0].Other, fingerprint)
-	other, err := common.StrToMap(logs[0].Other)
+	assert.Equal(t, model.AuditCategoryOperation, logs[0].Category)
+	assert.NotContains(t, logs[0].Content+common.GetJsonString(logs[0].Other), fullToken)
+	assert.NotContains(t, logs[0].Content+common.GetJsonString(logs[0].Other), fingerprint)
+	other, err := common.StrToMap(common.GetJsonString(logs[0].Other))
 	require.NoError(t, err)
 	op, ok := other["op"].(map[string]interface{})
 	require.True(t, ok)

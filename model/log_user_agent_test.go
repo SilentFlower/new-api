@@ -63,12 +63,12 @@ func TestRequestLogsPreserveOriginalUserAgent(t *testing.T) {
 	tests := []struct {
 		name     string
 		logType  int
-		recordFn func(c *gin.Context, other map[string]interface{})
+		recordFn func(c *gin.Context, other *LogOther)
 	}{
 		{
 			name:    "消费日志",
 			logType: LogTypeConsume,
-			recordFn: func(c *gin.Context, other map[string]interface{}) {
+			recordFn: func(c *gin.Context, other *LogOther) {
 				RecordConsumeLog(c, 1, RecordConsumeLogParams{
 					ChannelId: 2,
 					ModelName: "gpt-test",
@@ -80,7 +80,7 @@ func TestRequestLogsPreserveOriginalUserAgent(t *testing.T) {
 		{
 			name:    "错误日志",
 			logType: LogTypeError,
-			recordFn: func(c *gin.Context, other map[string]interface{}) {
+			recordFn: func(c *gin.Context, other *LogOther) {
 				RecordErrorLog(c, 1, 2, "gpt-test", "test-token", "upstream error", 3, 1, false, "default", other)
 			},
 		},
@@ -96,12 +96,9 @@ func TestRequestLogsPreserveOriginalUserAgent(t *testing.T) {
 			c.Set("username", "tester")
 			c.Set(common.RequestIdKey, "request-user-agent")
 
-			other := map[string]interface{}{
-				"admin_info": map[string]interface{}{
-					"existing":   "kept",
-					"user_agent": "untrusted-value",
-				},
-			}
+			other := NewLogOther()
+			other.SetAdmin("existing", "kept")
+			other.SetAdmin("user_agent", "untrusted-value")
 			tt.recordFn(c, other)
 
 			var log Log
@@ -124,14 +121,10 @@ func TestRecordConsumeLogOmitsEmptyUserAgent(t *testing.T) {
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil)
 	c.Set("username", "tester")
 
-	RecordConsumeLog(c, 1, RecordConsumeLogParams{
-		Other: map[string]interface{}{
-			"admin_info": map[string]interface{}{
-				"existing":   "kept",
-				"user_agent": "untrusted-value",
-			},
-		},
-	})
+	other := NewLogOther()
+	other.SetAdmin("existing", "kept")
+	other.SetAdmin("user_agent", "untrusted-value")
+	RecordConsumeLog(c, 1, RecordConsumeLogParams{Other: other})
 
 	var log Log
 	require.NoError(t, db.First(&log).Error)
@@ -155,14 +148,11 @@ func TestAppendRequestUserAgentHandlesMissingRequest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			other := map[string]interface{}{
-				"admin_info": map[string]interface{}{
-					"existing":   "kept",
-					"user_agent": "untrusted-value",
-				},
-			}
+			other := NewLogOther()
+			other.SetAdmin("existing", "kept")
+			other.SetAdmin("user_agent", "untrusted-value")
 
-			result := appendRequestUserAgent(tt.ctx, other)
+			result := requestLogOtherWithUserAgent(tt.ctx, other).Snapshot()
 
 			adminInfo, ok := result["admin_info"].(map[string]interface{})
 			require.True(t, ok)

@@ -17,42 +17,13 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
-import { after, test } from 'node:test'
+import { waitFor } from '@testing-library/react'
+import userEvent from '@testing-library/user-event'
+import { test } from 'vitest'
 
-import { Window } from 'happy-dom'
 
 import type { ChannelFormValues } from '../../../../lib'
 import type { ChannelModelOption } from '../../../../types'
-
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLButtonElement',
-  'HTMLInputElement',
-  'HTMLLabelElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'MouseEvent',
-  'PointerEvent',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
 
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
@@ -121,13 +92,13 @@ function Harness(props: HarnessProps) {
 
 function changeInputValue(input: HTMLInputElement, value: string) {
   const valueSetter = Object.getOwnPropertyDescriptor(
-    domWindow.HTMLInputElement.prototype,
+    window.HTMLInputElement.prototype,
     'value'
   )?.set
   assert.ok(valueSetter)
   valueSetter.call(input, value)
   input.dispatchEvent(
-    new domWindow.Event('input', { bubbles: true }) as unknown as Event
+    new window.Event('input', { bubbles: true }) as unknown as Event
   )
 }
 
@@ -146,9 +117,9 @@ function findInputByLabel(
   return input
 }
 
-function findOption(container: ParentNode, label: string): HTMLLIElement {
+function findOption(label: string): HTMLElement {
   const option = [
-    ...container.querySelectorAll<HTMLLIElement>('li[role="option"]'),
+    ...document.querySelectorAll<HTMLElement>('[role="option"]'),
   ].find((item) => item.textContent?.includes(label))
   assert.ok(option)
   return option
@@ -186,9 +157,6 @@ async function renderWithQueryClient(
   return { container, queryClient, root }
 }
 
-after(() => {
-  domWindow.close()
-})
 
 test('同名渠道显示各自 ID，按 ID 搜索后切换渠道会清空旧模型', async () => {
   const rendered = await renderHarness(
@@ -216,21 +184,16 @@ test('同名渠道显示各自 ID，按 ID 搜索后切换渠道会清空旧模�
 
   await act(async () => changeInputValue(channelInput, '34'))
   assert.equal(
-    findOption(rendered.container, '(#34)').textContent,
+    findOption( '(#34)').textContent,
     '同名渠道 (#34)'
   )
   assert.equal(
-    rendered.container.querySelectorAll('li[role="option"]').length,
+    document.querySelectorAll('[role="option"]').length,
     1
   )
 
-  await act(async () =>
-    findOption(rendered.container, '(#34)').dispatchEvent(
-      new domWindow.MouseEvent('mousedown', {
-        bubbles: true,
-      }) as unknown as MouseEvent
-    )
-  )
+  await userEvent.click(findOption('(#34)'))
+
   assert.equal(
     rendered.container.querySelector('[data-testid="channel-id"]')?.textContent,
     '34'
@@ -277,7 +240,7 @@ test('历史失效渠道和模型保持可见，未选择渠道时模型禁用',
   assert.equal(emptyModel.disabled, true)
   const emptyChannel = findInputByLabel(empty.container, 'Assist channel')
   await act(async () => emptyChannel.focus())
-  assert.ok(empty.container.textContent?.includes('No enabled channels'))
+  await waitFor(() => assert.ok(document.body.textContent?.includes('No enabled channels')))
   await act(async () => empty.root.unmount())
   empty.container.remove()
   empty.queryClient.clear()
@@ -313,7 +276,7 @@ test('渠道加载期间禁用选择，失败后保留历史值并提供重试�
     await new Promise((resolve) => setTimeout(resolve, 0))
   })
 
-  assert.equal(channelInput.disabled, false)
+  await waitFor(() => assert.equal(channelInput.disabled, false))
   assert.ok(
     rendered.container.textContent?.includes('Failed to load channel options')
   )

@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	appdto "github.com/QuantumNous/new-api/dto"
+
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/i18n"
@@ -54,7 +56,7 @@ func newResponsesWebSocketFirstFrameServer(t *testing.T, prepare gin.HandlerFunc
 		if prepare != nil {
 			prepare(c)
 		}
-		RelayResponsesWebSocket(c)
+		serveResponsesWSTestSession(c)
 	})
 	server := httptest.NewServer(engine)
 	t.Cleanup(server.Close)
@@ -199,6 +201,9 @@ func TestResponsesWebSocketFirstFrameReconnectRecovery(t *testing.T) {
 	upstream, frames, _ := newResponsesWebSocketRecoveryUpstream(t, "resp_first_frame_recovered")
 	baseURL := upstream.URL
 	channel := &model.Channel{Id: 9731, Type: constant.ChannelTypeOpenAI, Name: "首帧恢复测试", Status: common.ChannelStatusEnabled, Key: "test-key", BaseURL: &baseURL, Models: "ws-first-frame-model", Group: "default", UserConcurrencyLimit: common.GetPointer(1)}
+	setting := channel.GetSetting()
+	setting.ResponsesWebSocketEnabled = true
+	channel.SetSetting(setting)
 	require.NoError(t, db.Create(channel).Error)
 	const userID = 9732
 	require.NoError(t, db.Create(&model.User{Id: userID, Username: "ws-first-frame-user", Quota: 10000}).Error)
@@ -207,7 +212,7 @@ func TestResponsesWebSocketFirstFrameReconnectRecovery(t *testing.T) {
 		common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
 		common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
 		common.SetContextKey(c, constant.ContextKeyTokenGroup, "default")
-		common.SetContextKey(c, constant.ContextKeyTokenSpecificChannelId, channel.Id)
+		service.GetChannelConstraints(c).AddPin(appdto.ChannelPin{ChannelId: channel.Id, Source: appdto.PinSourceToken, Rank: appdto.PinRankToken})
 	})
 	first := dialResponsesWebSocketFirstFrame(t, server, done)
 	_, payload, err := first.ReadMessage()

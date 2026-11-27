@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"github.com/QuantumNous/new-api/tokenkit"
 	"strings"
 	"testing"
 	"time"
@@ -22,7 +23,7 @@ func TestSplitMessageAuditReviewMessagesKeepsEachToolChunkBounded(t *testing.T) 
 	for index, chunk := range chunks {
 		data, err := common.Marshal(chunk)
 		require.NoError(t, err)
-		assert.LessOrEqual(t, CountTextToken(string(data), "gpt-4o"), messageAuditReviewToolResultLimit)
+		assert.LessOrEqual(t, tokenkit.Count("gpt-4o", string(data)), messageAuditReviewToolResultLimit)
 		assert.Equal(t, 7, chunk.Sequence)
 		assert.Equal(t, index, chunk.PartIndex)
 		assert.Equal(t, len(chunks), chunk.PartCount)
@@ -249,7 +250,7 @@ func TestPrepareMessageAuditReviewTextToolRequestIncludesProtocol(t *testing.T) 
 	require.NoError(t, err)
 	fallbackPayload, err := common.Marshal(map[string]any{"messages": prepared.Messages, "tools": prepared.Tools})
 	require.NoError(t, err)
-	assert.Greater(t, CountTextToken(string(fallbackPayload), input.Model), CountTextToken(string(nativePayload), input.Model))
+	assert.Greater(t, tokenkit.Count(input.Model, string(fallbackPayload)), tokenkit.Count(input.Model, string(nativePayload)))
 }
 
 func TestExecuteMessageAuditReviewDefaultsToMergedContext(t *testing.T) {

@@ -18,7 +18,6 @@ For commercial licensing, please contact support@quantumnous.com
 */
 import assert from 'node:assert/strict'
 
-import { Window } from 'happy-dom'
 
 import type {
   ChannelBudgetPreview,
@@ -29,60 +28,7 @@ import type {
   ChannelPeriodView,
 } from '../../../period-types'
 
-const testModule = 'bun:test'
-const { test, afterEach } = (await import(testModule)) as {
-  test: typeof import('node:test').test
-  afterEach: typeof import('node:test').afterEach
-}
-const domWindow = new Window()
-const domGlobals = [
-  'window',
-  'document',
-  'navigator',
-  'HTMLElement',
-  'HTMLButtonElement',
-  'HTMLInputElement',
-  'HTMLLabelElement',
-  'HTMLSelectElement',
-  'HTMLDivElement',
-  'HTMLSpanElement',
-  'SVGElement',
-  'Node',
-  'Element',
-  'Event',
-  'KeyboardEvent',
-  'PointerEvent',
-  'MouseEvent',
-  'FocusEvent',
-  'CustomEvent',
-  'MutationObserver',
-  'ResizeObserver',
-  'IntersectionObserver',
-  'DOMRect',
-  'ShadowRoot',
-  'requestAnimationFrame',
-  'cancelAnimationFrame',
-  'getComputedStyle',
-  'localStorage',
-  'sessionStorage',
-] as const
-
-for (const key of domGlobals) {
-  Object.defineProperty(globalThis, key, {
-    configurable: true,
-    value: domWindow[key],
-  })
-}
-Object.defineProperty(globalThis, 'self', {
-  configurable: true,
-  value: domWindow,
-})
-
-Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', {
-  configurable: true,
-  value: true,
-  writable: true,
-})
+import { test, afterEach } from 'vitest'
 const { act } = await import('react')
 const { createRoot } = await import('react-dom/client')
 const { QueryClient, QueryClientProvider, notifyManager } =
@@ -230,13 +176,13 @@ async function type(input: HTMLInputElement | null | undefined, value: string) {
   assert.ok(input)
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(
-      domWindow.HTMLInputElement.prototype,
+      window.HTMLInputElement.prototype,
       'value'
     )?.set
     assert.ok(setter)
     setter.call(input, value)
     input.dispatchEvent(
-      new domWindow.Event('input', { bubbles: true }) as unknown as Event
+      new window.Event('input', { bubbles: true }) as unknown as Event
     )
   })
 }
@@ -248,13 +194,13 @@ async function choose(
   assert.ok(select)
   await act(async () => {
     const setter = Object.getOwnPropertyDescriptor(
-      domWindow.HTMLSelectElement.prototype,
+      window.HTMLSelectElement.prototype,
       'value'
     )?.set
     assert.ok(setter)
     setter.call(select, value)
     select.dispatchEvent(
-      new domWindow.Event('change', { bubbles: true }) as unknown as Event
+      new window.Event('change', { bubbles: true }) as unknown as Event
     )
   })
 }
@@ -623,7 +569,7 @@ test('预算表展示时段、状态徽标与聚合进度；抽屉关闭和 Esc 
       .querySelector<HTMLInputElement>('input[name="budgets.0.name"]')
       ?.focus()
     document.activeElement?.dispatchEvent(
-      new domWindow.KeyboardEvent('keydown', {
+      new window.KeyboardEvent('keydown', {
         key: 'Escape',
         bubbles: true,
       }) as unknown as Event

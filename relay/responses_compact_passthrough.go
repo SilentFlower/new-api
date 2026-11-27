@@ -14,9 +14,11 @@ import (
 	"github.com/QuantumNous/new-api/common"
 	appconstant "github.com/QuantumNous/new-api/constant"
 	"github.com/QuantumNous/new-api/logger"
+	"github.com/QuantumNous/new-api/relay/channel"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	relayconstant "github.com/QuantumNous/new-api/relay/constant"
 	"github.com/QuantumNous/new-api/relay/helper"
+	"github.com/QuantumNous/new-api/relay/requestplugin"
 	"github.com/QuantumNous/new-api/relaykit/dto"
 	"github.com/QuantumNous/new-api/relaykit/types"
 	"github.com/QuantumNous/new-api/service"
@@ -128,7 +130,7 @@ func ResponsesCompactPassthroughHelper(c *gin.Context, info *relaycommon.RelayIn
 	}
 
 	switch info.ApiType {
-	case appconstant.APITypeOpenAI, appconstant.APITypeCodex, appconstant.APITypeAdvancedCustom:
+	case appconstant.APITypeOpenAI, appconstant.APITypeCodex, appconstant.APITypeAdvancedCustom, appconstant.APITypeProviderPlugin:
 	default:
 		return types.NewErrorWithStatusCode(
 			fmt.Errorf("unsupported Responses Compact passthrough api type: %d", info.ApiType),
@@ -141,6 +143,10 @@ func ResponsesCompactPassthroughHelper(c *gin.Context, info *relaycommon.RelayIn
 	storage, err := common.GetBodyStorage(c)
 	if err != nil {
 		return types.NewError(err, types.ErrorCodeReadRequestBodyFailed, types.ErrOptionWithSkipRetry())
+	}
+
+	if apiErr := requestplugin.PassThrough(c, info, storage); apiErr != nil {
+		return apiErr
 	}
 
 	outboundInfo := responsesCompactPassthroughOutboundInfo(info)
@@ -192,7 +198,7 @@ func responsesCompactPassthroughOutboundRequestURLPath(requestURLPath string) st
 
 	query := parsedURL.Query()
 	for key := range query {
-		if isResponsesClientQueryCredentialKey(key) {
+		if channel.IsResponsesClientQueryCredentialKey(key) {
 			// 客户端查询凭证不能覆盖或旁路所选渠道的上游认证。
 			query.Del(key)
 		}

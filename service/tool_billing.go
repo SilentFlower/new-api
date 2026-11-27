@@ -1,17 +1,14 @@
 package service
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/logger"
 	"github.com/QuantumNous/new-api/model"
-	perfmetrics "github.com/QuantumNous/new-api/pkg/perf_metrics"
 	relaycommon "github.com/QuantumNous/new-api/relay/common"
 	"github.com/QuantumNous/new-api/setting/operation_setting"
 
-	"github.com/bytedance/gopkg/util/gopool"
 	"github.com/gin-gonic/gin"
 )
 
@@ -145,28 +142,25 @@ func PostToolCallConsumeQuota(ctx *gin.Context, relayInfo *relaycommon.RelayInfo
 		0,
 		relayInfo.PriceData.GroupRatioInfo.GroupSpecialRatio,
 	)
-	other["web_search"] = webSearchCalls > 0
-	other["web_search_call_count"] = webSearchCalls
-	other["web_search_price"] = webSearchPrice
-	other["tool_call_items"] = result.Items
+	other.SetPublic("web_search", webSearchCalls > 0)
+	other.SetPublic("web_search_call_count", webSearchCalls)
+	other.SetPublic("web_search_price", webSearchPrice)
+	other.SetPublic("tool_call_items", result.Items)
 	attachQuotaSaturation(ctx, relayInfo, other)
 
 	model.RecordConsumeLog(ctx, relayInfo.UserId, model.RecordConsumeLogParams{
 		ChannelId:        relayInfo.ChannelId,
 		PromptTokens:     0,
 		CompletionTokens: 0,
-		ModelName:        relayInfo.BillingModelName(),
+		ModelName:        relayInfo.GetBillingModelName(),
 		TokenName:        ctx.GetString("token_name"),
 		Quota:            result.TotalQuota,
-		Content:          fmt.Sprintf("Web Search 调用 %d 次，消耗额度 %s", webSearchCalls, logger.FormatQuota(result.TotalQuota)),
+		Content:          []*common.Message{common.NewMessage("Web Search 调用 {{count}} 次，消耗额度 {{quota}}", map[string]any{"count": webSearchCalls, "quota": logger.FormatQuota(result.TotalQuota)})},
 		TokenId:          relayInfo.TokenId,
 		UseTimeSeconds:   int(time.Since(relayInfo.StartTime).Seconds()),
 		IsStream:         false,
 		Group:            relayInfo.UsingGroup,
 		Other:            other,
-	})
-	gopool.Go(func() {
-		perfmetrics.RecordRelaySample(relayInfo, true, 0)
 	})
 }
 

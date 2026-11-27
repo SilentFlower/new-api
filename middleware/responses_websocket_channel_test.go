@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	appdto "github.com/QuantumNous/new-api/dto"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -67,7 +68,7 @@ func TestSelectResponsesWebSocketChannelValidatesModelBeforeSelection(t *testing
 		"allowed-model": true,
 	})
 
-	channel, apiErr := SelectResponsesWebSocketChannel(c, "forbidden-model")
+	channel, apiErr := SelectResponsesWebSocketChannel(c, "forbidden-model", &service.RetryParam{Ctx: c, TokenGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup), ModelName: "forbidden-model", RequestPath: "/v1/responses", Retry: common.GetPointer(0)})
 
 	require.Nil(t, channel)
 	require.NotNil(t, apiErr)
@@ -130,14 +131,17 @@ func TestSelectResponsesWebSocketChannelUsesSpecifiedChannelAndInitializesContex
 		Models: "gpt-5",
 		Group:  "default",
 	}
+	channel.SetSetting(dto.ChannelSettings{ResponsesWebSocketEnabled: true})
 	require.NoError(t, db.Create(channel).Error)
+	disabledChannel.SetSetting(dto.ChannelSettings{ResponsesWebSocketEnabled: true})
 	require.NoError(t, db.Create(disabledChannel).Error)
+	model.InitChannelCache()
 
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())
 	c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
-	common.SetContextKey(c, constant.ContextKeyTokenSpecificChannelId, channel.Id)
+	service.GetChannelConstraints(c).AddPin(appdto.ChannelPin{ChannelId: channel.Id, Source: appdto.PinSourceToken, Rank: appdto.PinRankToken})
 
-	selected, apiErr := SelectResponsesWebSocketChannel(c, "gpt-5")
+	selected, apiErr := SelectResponsesWebSocketChannel(c, "gpt-5", &service.RetryParam{Ctx: c, TokenGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup), ModelName: "gpt-5", RequestPath: "/v1/responses", Retry: common.GetPointer(0)})
 
 	require.Nil(t, apiErr)
 	require.NotNil(t, selected)
@@ -147,9 +151,9 @@ func TestSelectResponsesWebSocketChannelUsesSpecifiedChannelAndInitializesContex
 
 	disabledContext, _ := gin.CreateTestContext(httptest.NewRecorder())
 	disabledContext.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
-	common.SetContextKey(disabledContext, constant.ContextKeyTokenSpecificChannelId, disabledChannel.Id)
+	service.GetChannelConstraints(disabledContext).AddPin(appdto.ChannelPin{ChannelId: disabledChannel.Id, Source: appdto.PinSourceToken, Rank: appdto.PinRankToken})
 
-	selected, apiErr = SelectResponsesWebSocketChannel(disabledContext, "gpt-5")
+	selected, apiErr = SelectResponsesWebSocketChannel(disabledContext, "gpt-5", &service.RetryParam{Ctx: disabledContext, TokenGroup: common.GetContextKeyString(disabledContext, constant.ContextKeyUsingGroup), ModelName: "gpt-5", RequestPath: "/v1/responses", Retry: common.GetPointer(0)})
 
 	require.Nil(t, selected)
 	require.NotNil(t, apiErr)
@@ -187,7 +191,9 @@ func TestSelectResponsesWebSocketChannelClearsUnsupportedAffinityAndFiltersRando
 		Group:    "default",
 		Priority: common.GetPointer[int64](0),
 	}
+	invalidAdvancedChannel.SetSetting(dto.ChannelSettings{ResponsesWebSocketEnabled: true})
 	require.NoError(t, db.Create(invalidAdvancedChannel).Error)
+	validChannel.SetSetting(dto.ChannelSettings{ResponsesWebSocketEnabled: true})
 	require.NoError(t, db.Create(validChannel).Error)
 	require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "gpt-5", ChannelId: invalidAdvancedChannel.Id, Enabled: true, Priority: invalidAdvancedChannel.Priority}).Error)
 	require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "gpt-5", ChannelId: validChannel.Id, Enabled: true, Priority: validChannel.Priority}).Error)
@@ -227,7 +233,7 @@ func TestSelectResponsesWebSocketChannelClearsUnsupportedAffinityAndFiltersRando
 	common.SetContextKey(c, constant.ContextKeyUsingGroup, "default")
 	common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
 
-	selected, apiErr := SelectResponsesWebSocketChannel(c, "gpt-5")
+	selected, apiErr := SelectResponsesWebSocketChannel(c, "gpt-5", &service.RetryParam{Ctx: c, TokenGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup), ModelName: "gpt-5", RequestPath: "/v1/responses", Retry: common.GetPointer(0)})
 
 	require.Nil(t, apiErr)
 	require.NotNil(t, selected)
@@ -261,7 +267,9 @@ func TestSelectResponsesWebSocketChannelUsesAffinityWithAutoGroup(t *testing.T) 
 		Group:    "default",
 		Priority: common.GetPointer[int64](100),
 	}
+	preferredChannel.SetSetting(dto.ChannelSettings{ResponsesWebSocketEnabled: true})
 	require.NoError(t, db.Create(preferredChannel).Error)
+	fallbackChannel.SetSetting(dto.ChannelSettings{ResponsesWebSocketEnabled: true})
 	require.NoError(t, db.Create(fallbackChannel).Error)
 	require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "gpt-5", ChannelId: preferredChannel.Id, Enabled: true, Priority: preferredChannel.Priority}).Error)
 	require.NoError(t, db.Create(&model.Ability{Group: "default", Model: "gpt-5", ChannelId: fallbackChannel.Id, Enabled: true, Priority: fallbackChannel.Priority}).Error)
@@ -301,7 +309,7 @@ func TestSelectResponsesWebSocketChannelUsesAffinityWithAutoGroup(t *testing.T) 
 	common.SetContextKey(c, constant.ContextKeyUsingGroup, "auto")
 	common.SetContextKey(c, constant.ContextKeyUserGroup, "default")
 
-	selected, apiErr := SelectResponsesWebSocketChannel(c, "gpt-5")
+	selected, apiErr := SelectResponsesWebSocketChannel(c, "gpt-5", &service.RetryParam{Ctx: c, TokenGroup: common.GetContextKeyString(c, constant.ContextKeyUsingGroup), ModelName: "gpt-5", RequestPath: "/v1/responses", Retry: common.GetPointer(0)})
 
 	require.Nil(t, apiErr)
 	require.NotNil(t, selected)

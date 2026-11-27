@@ -2,7 +2,6 @@ package model
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/QuantumNous/new-api/common"
 	"gorm.io/gorm"
@@ -56,21 +55,22 @@ func IssueWorkflowReplacementToken(userID, oldTokenID int, workflowID string) (*
 			return nil
 		}
 		replacement = Token{
-			UserId:             userID,
-			Key:                key,
-			Name:               old.Name,
-			Status:             common.TokenStatusEnabled,
-			CreatedTime:        common.GetTimestamp(),
-			AccessedTime:       common.GetTimestamp(),
-			ExpiredTime:        old.ExpiredTime,
-			RemainQuota:        old.RemainQuota,
-			UnlimitedQuota:     true,
-			ModelLimitsEnabled: old.ModelLimitsEnabled,
-			ModelLimits:        old.ModelLimits,
-			AllowIps:           old.AllowIps,
-			Group:              old.Group,
-			CrossGroupRetry:    old.CrossGroupRetry,
-			AutoGroups:         old.AutoGroups,
+			UserId:              userID,
+			Key:                 key,
+			Name:                old.Name,
+			Status:              common.TokenStatusEnabled,
+			CreatedTime:         common.GetTimestamp(),
+			AccessedTime:        common.GetTimestamp(),
+			ExpiredTime:         old.ExpiredTime,
+			RemainQuota:         old.RemainQuota,
+			UnlimitedQuota:      true,
+			ModelLimitsEnabled:  old.ModelLimitsEnabled,
+			ModelLimits:         old.ModelLimits,
+			AllowIps:            old.AllowIps,
+			Group:               old.Group,
+			CrossGroupRetry:     old.CrossGroupRetry,
+			AutoGroups:          old.AutoGroups,
+			AllowUserQuotaQuery: old.AllowUserQuotaQuery,
 		}
 		return tx.Create(&replacement).Error
 	})
@@ -104,6 +104,9 @@ func RetireWorkflowToken(userID, oldTokenID, replacementTokenID int) error {
 		if old.Status == common.TokenStatusDisabled {
 			return nil
 		}
+		if err := invalidateTokenCacheForMutation(old.Key); err != nil {
+			return err
+		}
 		result := tx.Model(&Token{}).Where("id = ? AND user_id = ? AND status = ?", oldTokenID, userID, common.TokenStatusEnabled).
 			Update("status", common.TokenStatusDisabled)
 		if result.Error != nil {
@@ -118,15 +121,7 @@ func RetireWorkflowToken(userID, oldTokenID, replacementTokenID int) error {
 	if err != nil {
 		return err
 	}
-	if !common.RedisEnabled {
-		return nil
-	}
-	if err := cacheSetToken(old); err != nil {
-		if deleteErr := cacheDeleteToken(old.Key); deleteErr != nil {
-			return fmt.Errorf("旧令牌已停用但缓存刷新失败: %w", err)
-		}
-	}
-	return nil
+	return invalidateTokenCacheForMutation(old.Key)
 }
 
 func sameWorkflowTokenPolicy(old, replacement Token) bool {
@@ -135,7 +130,7 @@ func sameWorkflowTokenPolicy(old, replacement Token) bool {
 		old.Group == replacement.Group && old.ExpiredTime == replacement.ExpiredTime &&
 		old.ModelLimitsEnabled == replacement.ModelLimitsEnabled && old.ModelLimits == replacement.ModelLimits &&
 		sameOptionalString(old.AllowIps, replacement.AllowIps) && old.CrossGroupRetry == replacement.CrossGroupRetry &&
-		old.AutoGroups == replacement.AutoGroups
+		old.AutoGroups == replacement.AutoGroups && old.AllowUserQuotaQuery == replacement.AllowUserQuotaQuery
 }
 
 func sameOptionalString(left, right *string) bool {
