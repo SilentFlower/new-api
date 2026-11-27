@@ -1,0 +1,154 @@
+﻿冲突路径,Git 冲突类型,冲突块数（diff3）,复核方向
+.env.example,双方修改,1,核对变量默认值、生产覆盖、镜像和挂载
+.gitignore,双方修改,1,逐项复核双方文档、工程约定或忽略规则
+AGENTS.md,双方修改,1,逐项复核双方文档、工程约定或忽略规则
+CLAUDE.md,双方修改,1,逐项复核双方文档、工程约定或忽略规则
+README.zh_CN.md,双方修改,1,逐项复核双方文档、工程约定或忽略规则
+common/init.go,双方修改,1,对照调用链与两侧接口契约，验证相关业务入口
+common/quota_math.go,双方修改,1,比对计费模型、额度边界、任务重试、预扣、结算和退款
+controller/audit.go,双方修改,1,对照调用链与两侧接口契约，验证相关业务入口
+controller/channel-test.go,双方修改,2,对照调用链与两侧接口契约，验证相关业务入口
+controller/channel.go,双方修改,1,对照调用链与两侧接口契约，验证相关业务入口
+controller/log.go,双方修改,1,对照调用链与两侧接口契约，验证相关业务入口
+controller/relay.go,双方修改,18,对照调用链与两侧接口契约，验证相关业务入口
+controller/relay_error_log_test.go,双方新增同名文件,1,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+controller/responses_websocket.go,双方新增同名文件,1,整合新版插件与逐轮执行，保留本地超时、恢复、并发和结算
+controller/responses_websocket_test.go,双方新增同名文件,1,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+controller/subscription.go,双方修改,2,对照调用链与两侧接口契约，验证相关业务入口
+controller/system_task_handlers.go,双方修改,1,对照调用链与两侧接口契约，验证相关业务入口
+controller/token.go,双方修改,2,对照调用链与两侧接口契约，验证相关业务入口
+controller/token_test.go,双方修改,1,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+controller/usedata.go,双方修改,1,对照调用链与两侧接口契约，验证相关业务入口
+controller/video_proxy.go,双方修改,3,对照调用链与两侧接口契约，验证相关业务入口
+controller/video_proxy_gemini.go,定制侧修改，主线删除,0,将并发、取消及历史任务行为接到新版插件及代理宿主入口
+docker-compose.yml,双方修改,1,核对变量默认值、生产覆盖、镜像和挂载
+go.mod,双方修改,6,合并模块依赖，保留 Excel 导出与新版插件和 TokenKit，重新解析依赖
+go.sum,双方修改,2,合并模块依赖，保留 Excel 导出与新版插件和 TokenKit，重新解析依赖
+i18n/keys.go,双方修改,1,核对两侧新增或移动的文案与实际调用位置
+i18n/locales/en.yaml,双方修改,1,核对两侧新增或移动的文案与实际调用位置
+i18n/locales/zh-CN.yaml,双方修改,1,核对两侧新增或移动的文案与实际调用位置
+i18n/locales/zh-TW.yaml,双方修改,1,核对两侧新增或移动的文案与实际调用位置
+logger/logger.go,双方修改,1,对照调用链与两侧接口契约，验证相关业务入口
+middleware/auth_test.go,双方修改,2,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+middleware/distributor.go,双方修改,5,对照调用链与两侧接口契约，验证相关业务入口
+model/channel.go,双方修改,3,核对模型、历史数据、迁移及统计口径，使用数据库副本验证
+model/log.go,双方修改,4,核对模型、历史数据、迁移及统计口径，使用数据库副本验证
+model/main.go,双方修改,1,核对模型、历史数据、迁移及统计口径，使用数据库副本验证
+model/option.go,双方修改,4,核对模型、历史数据、迁移及统计口径，使用数据库副本验证
+model/system_task.go,双方修改,1,核对模型、历史数据、迁移及统计口径，使用数据库副本验证
+model/task.go,双方修改,3,核对模型、历史数据、迁移及统计口径，使用数据库副本验证
+model/task_cas_test.go,双方修改,2,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+model/usedata.go,双方修改,5,核对模型、历史数据、迁移及统计口径，使用数据库副本验证
+model/user.go,双方修改,1,核对模型、历史数据、迁移及统计口径，使用数据库副本验证
+relay/alpha_search_handler.go,双方修改,4,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/alpha_search_handler_test.go,双方修改,2,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+relay/channel/api_request.go,双方修改,8,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/channel/claude/relay-claude.go,双方修改,1,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/channel/openai/relay_responses.go,双方修改,2,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/channel/task/gemini/adaptor.go,定制侧修改，主线删除,0,将并发、取消及历史任务行为接到新版插件及代理宿主入口
+relay/channel/task/vertex/adaptor.go,定制侧修改，主线删除,0,将并发、取消及历史任务行为接到新版插件及代理宿主入口
+relay/channel/vertex/service_account.go,双方修改,7,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/claude_handler.go,双方修改,2,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/common/relay_info.go,双方修改,3,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/compatible_handler.go,双方修改,2,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/helper/model_mapped.go,双方修改,5,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/helper/price.go,双方修改,5,比对计费模型、额度边界、任务重试、预扣、结算和退款
+relay/helper/price_test.go,双方修改,3,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+relay/helper/stream_scanner.go,双方修改,2,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/helper/valid_request.go,双方修改,2,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/mjproxy_handler.go,双方修改,6,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/relay_task.go,双方修改,4,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/responses_handler.go,双方修改,3,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relay/responses_websocket.go,双方新增同名文件,1,整合新版插件与逐轮执行，保留本地超时、恢复、并发和结算
+relay/responses_websocket_test.go,双方新增同名文件,1,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+relaykit/dto/billing_usage.go,双方修改,1,比对计费模型、额度边界、任务重试、预扣、结算和退款
+relaykit/dto/channel_settings.go,双方修改,1,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relaykit/dto/claude.go,双方修改,2,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relaykit/dto/openai_request_zero_value_test.go,双方修改,1,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+relaykit/relayconvert/internal/oai_chat/to_claude_messages_req.go,双方修改,3,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relaykit/relayconvert/internal/oai_chat/to_claude_messages_req_test.go,双方新增同名文件,1,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+relaykit/relayconvert/internal/oai_chat/to_gemini_chat_req.go,双方修改,1,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relaykit/relayconvert/request_compat.go,双方修改,1,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relaykit/relayconvert/request_registry.go,双方修改,1,对照协议字段、工具调用与上游实际请求，保留两侧行为测试
+relaykit/relayconvert/testdata/golden/request/gemini_to_claude.golden.json,定制侧修改，主线删除,0,核对新版等价路径和测试语义，确认后处理旧文件
+router/relay-router.go,双方修改,1,逐个核对 Claude 计数、WebSocket、Compact、Alpha Search 与新版插件路由
+router/relay_router_test.go,双方新增同名文件,1,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+service/billing_session.go,双方修改,1,比对计费模型、额度边界、任务重试、预扣、结算和退款
+service/error.go,双方修改,1,对照调用链与两侧接口契约，验证相关业务入口
+service/http_client.go,双方修改,1,对照调用链与两侧接口契约，验证相关业务入口
+service/log_info_generate.go,双方修改,2,对照调用链与两侧接口契约，验证相关业务入口
+service/midjourney.go,双方修改,1,对照调用链与两侧接口契约，验证相关业务入口
+service/quota.go,双方修改,7,比对计费模型、额度边界、任务重试、预扣、结算和退款
+service/task_billing.go,双方修改,8,比对计费模型、额度边界、任务重试、预扣、结算和退款
+service/task_billing_test.go,双方修改,4,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+service/text_quota.go,双方修改,4,比对计费模型、额度边界、任务重试、预扣、结算和退款
+service/text_quota_test.go,双方修改,1,逐个保留两侧有意义的用例，核对旧断言和新版测试夹具
+web/src/components/command-menu.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/components/confirm-dialog.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/components/data-table/toolbar/bulk-actions.tsx,双方修改,2,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/components/dialog.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/components/layout/components/app-header.tsx,双方修改,2,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/components/layout/lib/sidebar-view-registry.ts,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/components/ui/combobox-input.tsx,双方修改,4,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/components/ui/combobox.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/auth/forgot-password/components/forgot-password-form.tsx,双方修改,1,定制侧相对祖先仅去掉 catch 的未使用参数，可沿用新版文件或其删除决定
+web/src/features/auth/hooks/use-email-verification.ts,双方修改,1,定制侧相对祖先仅去掉 catch 的未使用参数，可沿用新版文件或其删除决定
+web/src/features/auth/lib/oauth-callback-mode.ts,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/components/dialogs/edit-tag-dialog.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/components/dialogs/param-override-editor-dialog.tsx,双方修改,8,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/components/dialogs/upstream-update-dialog.tsx,双方修改,2,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/components/drawers/channel-mutate-drawer.tsx,双方修改,8,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/components/model-mapping-editor.tsx,双方修改,5,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/hooks/use-channel-upstream-updates.ts,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/lib/advanced-custom.ts,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/lib/channel-actions.ts,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/lib/channel-form-errors.ts,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/lib/channel-form.ts,双方修改,12,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/lib/model-categories.ts,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/channels/types.ts,双方修改,2,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/dashboard/components/users/user-charts.tsx,双方修改,2,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/dashboard/index.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/dashboard/lib/charts.ts,双方修改,3,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/keys/components/api-key-group-cell.tsx,双方修改,2,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/keys/components/api-keys-multi-delete-dialog.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/keys/components/dialogs/cc-switch-dialog.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/models/components/data-table-bulk-actions.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/models/components/dialogs/create-deployment-drawer.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/models/components/dialogs/upstream-conflict-dialog.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/models/components/dialogs/vendor-mutate-dialog.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/models/components/drawers/model-mutate-drawer.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/models/components/drawers/prefill-group-form-drawer.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/pricing/components/model-details-performance.tsx,双方修改,2,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/pricing/components/pricing-toolbar.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/profile/components/dialogs/change-password-dialog.tsx,定制侧修改，主线删除,0,定制侧相对祖先仅去掉 catch 的未使用参数，可沿用新版文件或其删除决定
+web/src/features/profile/components/dialogs/email-bind-dialog.tsx,定制侧修改，主线删除,0,定制侧相对祖先仅去掉 catch 的未使用参数，可沿用新版文件或其删除决定
+web/src/features/profile/components/dialogs/two-fa-backup-dialog.tsx,定制侧修改，主线删除,0,定制侧相对祖先仅去掉 catch 的未使用参数，可沿用新版文件或其删除决定
+web/src/features/profile/components/dialogs/two-fa-disable-dialog.tsx,定制侧修改，主线删除,0,定制侧相对祖先仅去掉 catch 的未使用参数，可沿用新版文件或其删除决定
+web/src/features/profile/components/tabs/notification-tab.tsx,双方修改,2,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/security/components/dialogs/two-fa-setup-dialog.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/subscriptions/components/dialogs/subscription-purchase-dialog.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/system-settings/maintenance/log-settings-section.tsx,双方修改,11,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/system-settings/models/model-ratio-visual-editor.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/system-settings/models/tiered-pricing-editor.tsx,双方修改,3,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/system-settings/operations/index.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/system-settings/operations/section-registry.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/system-settings/types.ts,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/usage-logs/components/dialogs/details-dialog.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/usage-logs/components/usage-logs-table.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/users/components/users-mutate-drawer.tsx,双方修改,4,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/features/wallet/hooks/use-affiliate.ts,双方修改,1,定制侧相对祖先仅去掉 catch 的未使用参数，可沿用新版文件或其删除决定
+web/src/features/wallet/hooks/use-creem-payment.ts,双方修改,1,定制侧相对祖先仅去掉 catch 的未使用参数，可沿用新版文件或其删除决定
+web/src/features/wallet/hooks/use-redemption.ts,双方修改,1,定制侧相对祖先仅去掉 catch 的未使用参数，可沿用新版文件或其删除决定
+web/src/features/wallet/hooks/use-waffo-pancake-payment.ts,双方修改,1,定制侧相对祖先仅去掉 catch 的未使用参数，可沿用新版文件或其删除决定
+web/src/features/wallet/lib/ui.tsx,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/hooks/use-notifications.ts,双方修改,1,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/hooks/use-sidebar-data.ts,双方修改,3,核对新版页面结构与定制入口，执行类型检查、页面与交互回归
+web/src/i18n/locales/en.json,双方修改,214,按父分支键合并，并复核翻译值及插值变量
+web/src/i18n/locales/fr.json,双方修改,219,按父分支键合并，并复核翻译值及插值变量
+web/src/i18n/locales/ja.json,双方修改,218,按父分支键合并，并复核翻译值及插值变量
+web/src/i18n/locales/ru.json,双方修改,219,按父分支键合并，并复核翻译值及插值变量
+web/src/i18n/locales/vi.json,双方修改,221,按父分支键合并，并复核翻译值及插值变量
+web/src/i18n/locales/zh-TW.json,双方修改,223,按父分支键合并，并复核翻译值及插值变量
+web/src/i18n/locales/zh.json,双方修改,220,按父分支键合并，并复核翻译值及插值变量
+web/src/i18n/static-keys.ts,双方修改,1,核对两侧新增或移动的文案与实际调用位置
+web/src/routeTree.gen.ts,双方修改,2,从已合并路由重新生成，核对公开日志、审计和告警入口

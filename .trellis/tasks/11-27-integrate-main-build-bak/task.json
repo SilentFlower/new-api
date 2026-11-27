@@ -1,0 +1,41 @@
+{
+  "id": "integrate-main-build-bak",
+  "name": "integrate-main-build-bak",
+  "title": "融合主线 81c1fd20e 并验证 build-bak 定制功能",
+  "description": "以 build-bak@accb26db3 为兼容基线，合入 main@81c1fd20e。保留计费、渠道预算与并发、工作流和 API Key 隔离、审计报表、协议转换及长连接，逐项复核 153 个冲突文件。复用 /mnt/data/new-api-main-integration-assessment.md 与 /mnt/data/new-api-main-conflicts.csv，并用数据库副本和跨层回归验收。",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P2",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-11-27",
+  "completedAt": "2026-11-27",
+  "closeout": {
+    "status": "closed",
+    "closedAt": "2026-11-27T10:17:48Z",
+    "blockers": []
+  },
+  "branch": "build-main",
+  "base_branch": "build-bak",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {},
+  "progress": {
+    "completedSteps": [
+      "合入固定主线并完成定制功能、数据库升级回退、前端和双架构验证",
+      "推送集成分支并核对 GHCR 固定版本与分支镜像的双架构清单"
+    ],
+    "partialStep": null,
+    "nextStep": "部署负责人按升级注意事项核对生产配置并安排切换。",
+    "notes": "候选版本及构建镜像已交付。生产价格、凭据、节点配置与切换由部署方签收。",
+    "updatedAt": "2026-11-27T10:17:48Z"
+  }
+}

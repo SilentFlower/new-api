@@ -1,0 +1,12 @@
+{"file":".trellis/spec/guides/build-upstream-friendly-customization.md","reason":"核对对应模块的主线接入和定制行为"}
+{"file":".trellis/spec/backend/channel-period-budget-fallback.md","reason":"核对对应模块的主线接入和定制行为"}
+{"file":".trellis/spec/backend/channel-user-concurrency.md","reason":"核对对应模块的主线接入和定制行为"}
+{"file":".trellis/spec/backend/relay-alpha-search-compact.md","reason":"核对对应模块的主线接入和定制行为"}
+{"file":".trellis/spec/backend/relay-billing-model.md","reason":"核对对应模块的主线接入和定制行为"}
+{"file":".trellis/spec/backend/relay-vision-assist.md","reason":"核对对应模块的主线接入和定制行为"}
+{"file":".trellis/spec/backend/relay-websearch-emulation.md","reason":"核对对应模块的主线接入和定制行为"}
+{"file":".trellis/spec/backend/workflow-account-tokens.md","reason":"核对对应模块的主线接入和定制行为"}
+{"file":".trellis/spec/backend/message-audit-control-plane.md","reason":"核对对应模块的主线接入和定制行为"}
+{"file":".trellis/spec/frontend/i18n-merge-guidelines.md","reason":"核对对应模块的主线接入和定制行为"}
+{"file":".trellis/tasks/11-27-integrate-main-build-bak/research/assessment.md","reason":"双方实现差异、试迁证据与验收依据"}
+{"file": ".trellis/tasks/11-27-integrate-main-build-bak/research/upstream-upgrade-notices.md", "reason": "约束跨版本数据迁移、旧凭据过渡、价格重配、多节点切换和回滚验收"}
