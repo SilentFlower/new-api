@@ -1,0 +1,480 @@
+{
+  "id": "ack-bailian-decision-model",
+  "name": "ack-bailian-decision-model",
+  "title": "接通 ACK 百炼 decision-model 决策插件渠道",
+  "description": "",
+  "status": "completed",
+  "dev_type": null,
+  "scope": null,
+  "package": null,
+  "priority": "P1",
+  "creator": "silentflower",
+  "assignee": "silentflower",
+  "createdAt": "2026-11-28",
+  "completedAt": "2026-11-28",
+  "closeout": {
+    "status": "closed",
+    "closedAt": "2026-11-28T09:26:53Z",
+    "blockers": []
+  },
+  "branch": null,
+  "base_branch": "main",
+  "worktree_path": null,
+  "commit": null,
+  "pr_url": null,
+  "subtasks": [],
+  "children": [],
+  "parent": null,
+  "relatedFiles": [],
+  "notes": "",
+  "meta": {
+    "intentRouting": {
+      "autoCreated": true,
+      "createdAt": "2026-11-28T08:39:37Z",
+      "contextKey": "codex_01a21be2-08e1-7913-bb8f-5e1c6babc3ff",
+      "implementationStarted": false,
+      "baseline": {
+        "head": "de755affe8a3106c178d577e372bcd6edf430aee",
+        "status": [
+          {
+            "status": "??",
+            "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc"
+          },
+          {
+            "status": "??",
+            "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/spec/backend/index.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/spec/backend/system-prompt-worker.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-15-system-prompt-worker/brief.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-15-system-prompt-worker/check.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-15-system-prompt-worker/design.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-15-system-prompt-worker/implement.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-15-system-prompt-worker/implement.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-15-system-prompt-worker/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-15-system-prompt-worker/task.json"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-21-advanced-responses-to-claude/brief.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-21-advanced-responses-to-claude/check.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-21-advanced-responses-to-claude/design.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-21-advanced-responses-to-claude/implement.jsonl"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-21-advanced-responses-to-claude/implement.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-21-advanced-responses-to-claude/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/11-21-advanced-responses-to-claude/task.json"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/brief.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/design.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/implement.md"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/prd.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/release.md"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/reasoning-effort-low.png"
+          },
+          {
+            "status": "??",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/release-evidence.json"
+          },
+          {
+            "status": " M",
+            "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/task.json"
+          },
+          {
+            "status": "??",
+            "path": "scripts/__pycache__/provision_workflow_accounts.cpython-312.pyc"
+          },
+          {
+            "status": "??",
+            "path": "scripts/__pycache__/test_provision_workflow_accounts.cpython-312.pyc"
+          },
+          {
+            "status": "??",
+            "path": "scripts/system-prompt-worker/.gitignore"
+          },
+          {
+            "status": "??",
+            "path": "scripts/system-prompt-worker/README.md"
+          },
+          {
+            "status": "??",
+            "path": "scripts/system-prompt-worker/bun.lock"
+          },
+          {
+            "status": "??",
+            "path": "scripts/system-prompt-worker/package.json"
+          },
+          {
+            "status": "??",
+            "path": "scripts/system-prompt-worker/src/gemini-stream.mjs"
+          },
+          {
+            "status": "??",
+            "path": "scripts/system-prompt-worker/src/index.mjs"
+          },
+          {
+            "status": "??",
+            "path": "scripts/system-prompt-worker/test/worker.test.mjs"
+          },
+          {
+            "status": "??",
+            "path": "scripts/system-prompt-worker/wrangler.jsonc"
+          }
+        ],
+        "repositories": [
+          {
+            "root": ".",
+            "head": "de755affe8a3106c178d577e372bcd6edf430aee",
+            "status": [
+              {
+                "status": "??",
+                "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc"
+              },
+              {
+                "status": "??",
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/spec/backend/index.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/spec/backend/system-prompt-worker.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-15-system-prompt-worker/brief.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-15-system-prompt-worker/check.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-15-system-prompt-worker/design.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-15-system-prompt-worker/implement.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-15-system-prompt-worker/implement.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-15-system-prompt-worker/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-15-system-prompt-worker/task.json"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/brief.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/check.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/design.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/implement.jsonl"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/implement.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/task.json"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/brief.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/design.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/implement.md"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/prd.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/release.md"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/reasoning-effort-low.png"
+              },
+              {
+                "status": "??",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/release-evidence.json"
+              },
+              {
+                "status": " M",
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/task.json"
+              },
+              {
+                "status": "??",
+                "path": "scripts/__pycache__/provision_workflow_accounts.cpython-312.pyc"
+              },
+              {
+                "status": "??",
+                "path": "scripts/__pycache__/test_provision_workflow_accounts.cpython-312.pyc"
+              },
+              {
+                "status": "??",
+                "path": "scripts/system-prompt-worker/.gitignore"
+              },
+              {
+                "status": "??",
+                "path": "scripts/system-prompt-worker/README.md"
+              },
+              {
+                "status": "??",
+                "path": "scripts/system-prompt-worker/bun.lock"
+              },
+              {
+                "status": "??",
+                "path": "scripts/system-prompt-worker/package.json"
+              },
+              {
+                "status": "??",
+                "path": "scripts/system-prompt-worker/src/gemini-stream.mjs"
+              },
+              {
+                "status": "??",
+                "path": "scripts/system-prompt-worker/src/index.mjs"
+              },
+              {
+                "status": "??",
+                "path": "scripts/system-prompt-worker/test/worker.test.mjs"
+              },
+              {
+                "status": "??",
+                "path": "scripts/system-prompt-worker/wrangler.jsonc"
+              }
+            ],
+            "worktreeDiffSha256": "d952d2c3bc74a27ad3757c393f92d2368f4ae808396d4f00b604fdb2914c2f9d",
+            "indexDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "untracked": [
+              {
+                "path": ".claude/hooks/__pycache__/session-start.cpython-312.pyc",
+                "sha256": "5b434c1f233e42c5db42aa2f50543cf78b17e0b3ee3532d478bb1990b398a730"
+              },
+              {
+                "path": ".codex/hooks/__pycache__/session-start.cpython-312.pyc",
+                "sha256": "d779da5b5fcf9868104be2df41c71bcfdfbc3a34619825efcbd920ffb21365fa"
+              },
+              {
+                "path": ".trellis/spec/backend/system-prompt-worker.md",
+                "sha256": "1935023f5406430a862c6b56fb7ee6a14d0f119472a2310edcc197e76cb4fdf4"
+              },
+              {
+                "path": ".trellis/tasks/11-15-system-prompt-worker/brief.md",
+                "sha256": "5b30dea1e6e4a42e5ea3987bcbeb08a6710f83546c0fc12429309093277be6cc"
+              },
+              {
+                "path": ".trellis/tasks/11-15-system-prompt-worker/check.jsonl",
+                "sha256": "40dabff4b3e0949c79f6dbbbec55ba4d8eb31ab989ba5c77786bf2c951c88b92"
+              },
+              {
+                "path": ".trellis/tasks/11-15-system-prompt-worker/design.md",
+                "sha256": "2839f47d10314b4b5800386f8009a11a54d011a4132ceb2e28c3a61379ae0f6a"
+              },
+              {
+                "path": ".trellis/tasks/11-15-system-prompt-worker/implement.jsonl",
+                "sha256": "40dabff4b3e0949c79f6dbbbec55ba4d8eb31ab989ba5c77786bf2c951c88b92"
+              },
+              {
+                "path": ".trellis/tasks/11-15-system-prompt-worker/implement.md",
+                "sha256": "d3ef2a3991f83b91e3a035116df1bfc92c419e0c4da155913ca3a7f7c40688a6"
+              },
+              {
+                "path": ".trellis/tasks/11-15-system-prompt-worker/prd.md",
+                "sha256": "a8ee74bb48433922802fd50acca237a43b4b5883b0fe76a6e42e26a665b734bd"
+              },
+              {
+                "path": ".trellis/tasks/11-15-system-prompt-worker/task.json",
+                "sha256": "a495372fc5b9fc2735e1eaacb4ef06ab08c922aac319640ca552dcc218a47cd2"
+              },
+              {
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/brief.md",
+                "sha256": "099ea786d47cc1cb186081ad4dd77e9f4c707968511445124bc5d0446feca701"
+              },
+              {
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/check.jsonl",
+                "sha256": "40dabff4b3e0949c79f6dbbbec55ba4d8eb31ab989ba5c77786bf2c951c88b92"
+              },
+              {
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/design.md",
+                "sha256": "b48c503e104ca9104b4a8b0c618dba26854490bf175b57ec70096b1c016e1ed9"
+              },
+              {
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/implement.jsonl",
+                "sha256": "40dabff4b3e0949c79f6dbbbec55ba4d8eb31ab989ba5c77786bf2c951c88b92"
+              },
+              {
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/implement.md",
+                "sha256": "65fd19bb3802f0b57aac287d3f5d0a08723e949aba6a65cf2ddf02d563389a0a"
+              },
+              {
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/prd.md",
+                "sha256": "94bf1e4e25fa35e29345d0c4c7d615847effa326991c051e5779a9d8448dddba"
+              },
+              {
+                "path": ".trellis/tasks/11-21-advanced-responses-to-claude/task.json",
+                "sha256": "8eb6d59d355b164b330cbe5c903d28d712733f427685cb6789e40ad210a5d208"
+              },
+              {
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/release.md",
+                "sha256": "ba1c7a1400ac9cd6aa9bab959da9f1803f8fcf49105a4021e2127ec1ddfb35c9"
+              },
+              {
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/reasoning-effort-low.png",
+                "sha256": "59b0a70d221b5e79066a105c97a54909f7ce3f797b40c0d984a1c7e045f298cc"
+              },
+              {
+                "path": ".trellis/tasks/archive/2026-10/10-10-advanced-channel-reasoning-effort/research/release-evidence.json",
+                "sha256": "3c3ca7768cb0987e3289fc2c22ff8c34837a7837de4ede5ffb53de2d0261e8ed"
+              },
+              {
+                "path": "scripts/__pycache__/provision_workflow_accounts.cpython-312.pyc",
+                "sha256": "67ebe9097d5d27b05818bbacf6539d8d6c1f074c87941ed6339346d3ad82bd88"
+              },
+              {
+                "path": "scripts/__pycache__/test_provision_workflow_accounts.cpython-312.pyc",
+                "sha256": "7b4e8cff9a155ac40682ebe5b0e5cf486267315d08760fdbbb2f5fa07aa28760"
+              },
+              {
+                "path": "scripts/system-prompt-worker/.gitignore",
+                "sha256": "462313e9cdf5217c7e729cfd60632a763ad1b8452774d4b736b90ab2e03a2c28"
+              },
+              {
+                "path": "scripts/system-prompt-worker/README.md",
+                "sha256": "bb1ea622deee9631f811a4b44a094e5d6766f3fac45076df6f90d7102852d200"
+              },
+              {
+                "path": "scripts/system-prompt-worker/bun.lock",
+                "sha256": "7d24eb590f1757a2e06e7ee1f7d88c1e230cc360d478d85d202e6d13e20b78aa"
+              },
+              {
+                "path": "scripts/system-prompt-worker/package.json",
+                "sha256": "13e8c953a6e52d856726abb57985181e6f0618148e4dc6acfc3b92086402b508"
+              },
+              {
+                "path": "scripts/system-prompt-worker/src/gemini-stream.mjs",
+                "sha256": "a05b38bf6076f40aa154a77db1423d270bca8849d0aa25eb9e2c336491e3433b"
+              },
+              {
+                "path": "scripts/system-prompt-worker/src/index.mjs",
+                "sha256": "e355897fdce91e295083f51c2bd639bdeb391362dec8ab2c9ea4641f254b028e"
+              },
+              {
+                "path": "scripts/system-prompt-worker/test/worker.test.mjs",
+                "sha256": "fbf9f355ef9f0808c8ff1a7f91b713e7e0a638b8bc68d1d023e3c7285164fea2"
+              },
+              {
+                "path": "scripts/system-prompt-worker/wrangler.jsonc",
+                "sha256": "ad5055664806488f1995a5b50f97e7fe0f5580670f4c25a5ba96c8086dafea98"
+              }
+            ],
+            "conflicts": [],
+            "integration": [],
+            "fingerprint": "f17668bc5e434ee1683287e962c7f8dfe6c094eb7c08294483fa8eee21f1d656"
+          }
+        ],
+        "fingerprint": "aff45dc3fe35d5df8177e1c9287addad61b1bf22864ef7d194131cde82d06000"
+      }
+    }
+  },
+  "progress": {
+    "completedSteps": [
+      "完成百炼决策插件与集中回归",
+      "ACK 渠道 23 上线并完成生产计费验收",
+      "精确清理原渠道重复模型及临时资源",
+      "Check-All 通过并更新可执行规范",
+      "插件源码与计费规范已推送"
+    ],
+    "partialStep": null,
+    "nextStep": "任务完成",
+    "notes": "客户端通过原生 /v1/systemone 调用；交付与回退见 release.md。",
+    "updatedAt": "2026-11-28T09:26:53.257892Z"
+  }
+}
