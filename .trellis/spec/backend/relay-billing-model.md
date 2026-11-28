@@ -346,3 +346,53 @@ if shouldSkipClientGoneLocalUsageBilling(ctx, relayInfo, originUsage) {
 ### 回归断言
 
 `TestModelPriceHelperTieredInputPreConsumeMultiplier` 比较显式与缺省输出上限、免费组和预扣倍率。`TestResponsesStreamOutcomesPreserveAccounting` 分传输方式核对消费日志、用户余额及 Key 余额。`TestResponsesWebSocketRetryBeforeDelivery` 验证首帧失败换渠和已交付后失败退款。
+
+## 场景：百炼决策插件同步输入用量结算
+
+### 1. Scope / Trigger
+
+- 修改 `scripts/task-plugins/bailian-decision.js` 的原生协议、同步完成或用量钩子，以及配置其插件专用计费表达式时适用。
+- 使用任务插件 API v1，独立 key 为 `bailian-decision`；源码通过原生管理接口安装。升级后核对宿主的 `json-order@1`、`retainResult` 和同步完成用量契约。
+
+### 2. Signatures
+
+```text
+POST /v1/systemone
+POST /bailian-decision/v1/systemone
+buildSubmitRequest(ctx) -> {url, method, headers, body}
+parseSubmitResponse(ctx, response) -> {taskId, taskData, immediate}
+extractUsage(ctx) -> {input_tokens: 268288} | null
+extractUsageOnComplete(ctx, result, body) -> {input_tokens: number}
+```
+
+### 3. Contracts
+
+- 模型为 `decision-model`。请求字段为 `model`、`state`、`questions` 及可选 `image`、`images`。状态支持文本、对象、数组，使用 `json-order@1` 保留成员顺序。问题支持 `choice`、`noul`、`score`，上限 16 个；choice 选项为 1–255 项，score 等级为 2–255 项，图像总数最多 16 张。
+- 模型 Key、用户分组、模型白名单和额度限制由宿主原生分发链执行。插件使用渠道地址和凭据，将渠道映射后的模型及原生参数发送至 `/v1/systemone`。
+- 成功响应要求匹配模型和逐问题答案类型。返回 `immediate.status=SUCCESS`，`taskId` 使用 `ctx.publicTaskId`，原生 presenter 返回完整百炼响应。`retainResult=false`，宿主保留记账任务行并在提交时交付结果。
+- `usageSchema.input_tokens` 的描述为“输入 Token 单价”，单位为 `token`。表达式使用 `tier("base", u("input_tokens") * P / 1000000)`，`P` 为管理员设置的每百万输入 Token 美元价。配置绑定 `bailian-decision::decision-model`，价格快照及组倍率由宿主冻结。
+- 按正式版最大输入 268288 Token 预留；完成时只接受 `[0, 268288]` 内的整数 `usage.input_tokens`。用量校验留在完成钩子，由宿主在单次 BillingSession 结算前调整预扣。旧倍率查询 `usagePurpose=billing_ratios` 返回 `null`。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 结果 |
+| --- | --- |
+| 合法同步响应及实际输入用量 | 原生返回答案，按真实用量及冻结价格、组倍率结算一次 |
+| 实际输入用量为 0 | 明确零额结算并归还预扣 |
+| 已返回有效答案，用量缺失、负数、非整数、字符串或超过上限 | 完成钩子抛错，宿主保留预扣并记录 `completion usage failed; retaining reserved quota` 警告 |
+| 请求参数非法 | 发往上游前拒绝 |
+| 上游返回 HTTP 错误 | 沿宿主失败退款链处理，保留原生错误语义 |
+| 响应模型或问题答案类型不匹配 | 拒绝解析为成功任务 |
+
+### 5. Scenarios and Examples
+
+- 正常：`{"model":"decision-model","state":"申请退款","questions":{"refund":{"type":"noul","instructions":"是否申请退款"}}}` 使用原生 System One 接口取得 `answers`、`usage` 和 `request_id`。
+- 基准：`P=1`、组倍率 1、每美元 500000 内部额度时，预留 134144 额度，实际 83 Token 结算 42 额度；组倍率 2 时结算 83 额度。价格和组倍率取自当次快照。
+- 误用：在 `parseSubmitResponse` 中因为缺失 usage 拒绝已完成答案，会将已交付的成功决策带入普通失败退款。正确处理是先确认答案，再由完成用量钩子报错，保留预扣并留诊断。
+- 对账：开启 `BATCH_UPDATE_ENABLED` 的环境按实际 `BATCH_UPDATE_INTERVAL` 等待回写，逐笔比较钱包、Key、任务及消费日志。等待期间复用原请求 ID，保持单次业务调用。
+
+### 6. Tests Required
+
+- `node --test scripts/task-plugins/bailian-decision.test.mjs`：覆盖三类问题、状态顺序、渠道映射、文本与图像、合法边界、参数拒绝、同步返回、零用量及异常用量。
+- 固定目标镜像的隔离宿主验证原生安装、两个入口、模型 Key 权限、分组倍率、预扣与实际结算、上游失败退款、异常用量保留预扣及真实 WARN 日志，断言每笔消费只结算一次。
+- 生产验收以受控合成请求核对真实模型、渠道、Token 和扣费。模型列表检查与真实决策调用分别记录。渠道切换后核对原配置差异，并清理临时账号、Key、会话和隔离资源。
